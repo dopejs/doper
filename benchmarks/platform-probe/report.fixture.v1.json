@@ -11,6 +11,8 @@
     "composing": false,
     "droppedRecords": 0,
     "events": ["20.0ms · compositionend", "10.0ms · textupdate 0:0"],
+    "initialText": "",
+    "initialVisualViewportHeight": 800,
     "mode": "edit-context",
     "recordingVersion": 1,
     "records": [

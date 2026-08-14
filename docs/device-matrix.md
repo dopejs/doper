@@ -51,4 +51,10 @@
 - emoji、ZWJ、combining mark 和 surrogate pair 的移动与删除；
 - EditContext 路径以及强制 textarea proxy 路径。
 
+每个组合都必须从全新页面会话导出符合 `ime-recording-v2` schema 的文件，填写真实
+输入法名称和版本，并以默认正式模式通过 `pnpm ime:replay -- <recording.json>`。
+移动端证据必须包含 `softKeyboardObserved: true`；EditContext 证据必须包含实际的
+`characterboundsupdate`。fixture、自动化键盘、事件溢出或本地占位 build/device id
+均不能替代正式矩阵证据。
+
 矩阵中任何“待分配”资产都会阻止 P0/M0 对相应平台宣布完成。

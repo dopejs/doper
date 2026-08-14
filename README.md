@@ -17,7 +17,8 @@ doper 是一套从零设计的 Web Canvas 渲染引擎，目标是提供高性�
 - 主线程阻塞 200ms 时 Worker 自驱情况；
 - 主线程与 Worker Canvas2D / scroll-copy 吞吐；
 - 最小 Rust/WASM 与代表性文本包络的体积、加载和首次调用；
-- EditContext 优先、集中式 textarea proxy 降级的 Canvas 编辑输入路径。
+- EditContext 优先、集中式 textarea proxy 降级的 Canvas 编辑输入路径；
+- 带环境、几何和原始事件的 IME v2 录制，以及确定性回放校验。
 
 ## 本地运行
 

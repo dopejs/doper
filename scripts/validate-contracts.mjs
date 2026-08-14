@@ -5,11 +5,14 @@ import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 
+import { replayImeRecording } from "./replay-ime.mjs";
+
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const schemaDirectory = path.join(repositoryRoot, "docs/schemas");
 const schemaFiles = [
   "benchmark-run.schema.json",
   "benchmark-suite.schema.json",
+  "ime-recording.schema.json",
   "ime-sequence.schema.json",
   "platform-probe-report.schema.json",
 ];
@@ -66,6 +69,15 @@ for (let index = 1; index < sequence.events.length; index += 1) {
     throw new Error("IME sequence event timestamps must be monotonic");
   }
 }
+
+const recordingPath = path.join(repositoryRoot, "benchmarks/ime/recording.fixture.v2.json");
+const recording = await readJson(recordingPath);
+validate(
+  ajv.getSchema("https://dopejs.dev/schemas/ime-recording-v2.json"),
+  recording,
+  "recording.fixture.v2.json",
+);
+await replayImeRecording(recording, { allowFixture: true, allowLocal: true });
 
 const platformReportPath = path.join(
   repositoryRoot,

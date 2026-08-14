@@ -106,6 +106,24 @@
           tabindex="0"
           aria-label="Editable canvas"
         ></canvas>
+        <div class="actions">
+          <label>
+            Evidence category
+            <select id="ime-language">
+              <option value="zh">Chinese</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="complex">Complex composition</option>
+              <option value="unicode">Emoji / Unicode</option>
+            </select>
+          </label>
+          <label>
+            Input method and version
+            <input id="ime-input-method" type="text" autocomplete="off" />
+          </label>
+          <button id="export-ime" type="button" disabled>Export IME recording</button>
+          <span id="ime-export-state" role="status"></span>
+        </div>
         <pre id="editor-log" class="event-log">No editing events</pre>
       </section>
 
@@ -113,6 +131,9 @@
       <canvas id="continuity-benchmark" width="320" height="180" hidden></canvas>
     </main>
     <script id="probe-report" type="application/json">
+      {}
+    </script>
+    <script id="ime-recording" type="application/json">
       {}
     </script>
     <script type="module" src="/src/main.ts"></script>

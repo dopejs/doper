@@ -80,14 +80,21 @@ const batchState = element<HTMLElement>("batch-state");
 const runState = element<HTMLElement>("run-state");
 const editorMode = element<HTMLElement>("editor-mode");
 const editorLog = element<HTMLElement>("editor-log");
+const imeLanguage = element<HTMLSelectElement>("ime-language");
+const imeInputMethod = element<HTMLInputElement>("ime-input-method");
+const imeExportButton = element<HTMLButtonElement>("export-ime");
+const imeExportState = element<HTMLElement>("ime-export-state");
 const forceInputProxy = searchParameters.get("editing") === "proxy";
 const collectorEnabled = searchParameters.get("collector") === "1";
 collectorAuth.hidden = !collectorEnabled;
 batchControls.hidden = !collectorEnabled;
 let batchRunning = false;
 let initialized = false;
+let imeExported = false;
 let probeRunning = false;
 let uploadRunning = false;
+const editingRecordingId = crypto.randomUUID();
+const editingRecordedAt = new Date().toISOString();
 const editingProbe = new EditingProbe(
   element<HTMLCanvasElement>("editor"),
   (snapshot) => {
@@ -95,6 +102,8 @@ const editingProbe = new EditingProbe(
     editorMode.textContent = snapshot.mode === "edit-context" ? "EditContext" : "Input proxy";
     editorLog.textContent =
       snapshot.events.length > 0 ? snapshot.events.join("\n") : "No editing events";
+    imeExportButton.disabled = snapshot.records.length === 0 || imeExported;
+    syncImeRecording(snapshot);
     syncReportSnapshot();
   },
   { forceInputProxy },
@@ -111,6 +120,9 @@ archiveButton.addEventListener("click", () => {
 batchButton.addEventListener("click", () => {
   void runBatch();
 });
+imeInputMethod.addEventListener("input", () => syncImeRecording(editingProbe.snapshot()));
+imeLanguage.addEventListener("change", () => syncImeRecording(editingProbe.snapshot()));
+imeExportButton.addEventListener("click", exportImeRecording);
 window.addEventListener("beforeunload", () => {
   editingProbe.dispose();
   runner.dispose();
@@ -431,11 +443,93 @@ function renderError(targetId: string, error: unknown): void {
 function exportReport(): void {
   report.editing = editingProbe.snapshot();
   syncReportSnapshot();
-  const blob = new Blob([`${JSON.stringify(report, null, 2)}\n`], {
+  downloadJson(
+    report,
+    `doper-platform-probe-${new Date().toISOString().replaceAll(":", "-")}.json`,
+  );
+}
+
+function exportImeRecording(): void {
+  const snapshot = editingProbe.snapshot();
+  if (imeInputMethod.value.trim().length === 0) {
+    imeExportState.textContent = "Input method and version are required";
+    return;
+  }
+  if (snapshot.records.length === 0) {
+    imeExportState.textContent = "Record at least one editing event";
+    return;
+  }
+  if (snapshot.droppedRecords > 0) {
+    imeExportState.textContent = "Recording overflowed; start a fresh session";
+    return;
+  }
+  if (snapshot.composing) {
+    imeExportState.textContent = "Finish the active composition before export";
+    return;
+  }
+  const recording = buildImeRecording(snapshot);
+  syncImeRecording(snapshot);
+  downloadJson(recording, `doper-ime-${recording.recordingId}.json`);
+  imeExported = true;
+  imeExportButton.disabled = true;
+  imeExportState.textContent = `Exported recording ${recording.recordingId}; reload for a new session`;
+}
+
+function buildImeRecording(snapshot: EditingProbeSnapshot) {
+  const navigatorWithUserAgentData = navigator as Navigator & {
+    readonly userAgentData?: { readonly platform?: string };
+  };
+  const softKeyboardObserved = snapshot.records.some((record) => {
+    const height = record.data.visualViewportHeight;
+    return typeof height === "number" && height < snapshot.initialVisualViewportHeight * 0.8;
+  });
+  const detectedPlatform =
+    navigatorWithUserAgentData.userAgentData?.platform?.trim() ||
+    navigator.platform.trim() ||
+    "unknown";
+  return {
+    $schema: "https://dopejs.dev/schemas/ime-recording-v2.json",
+    characterBoundsObserved: snapshot.records.some(
+      (record) => record.event === "characterboundsupdate",
+    ),
+    description: `${imeLanguage.value} ${imeInputMethod.value.trim() || "unspecified input method"} via ${snapshot.mode}`,
+    droppedRecords: snapshot.droppedRecords,
+    environment: {
+      browser: navigator.userAgent,
+      buildId: report.build.id,
+      deviceId: report.deviceId,
+      inputMethod: imeInputMethod.value.trim(),
+      language: imeLanguage.value,
+      locale: navigator.language,
+      mode: snapshot.mode,
+      os: detectedPlatform,
+      userAgent: navigator.userAgent,
+    },
+    events: snapshot.records,
+    finalComposing: snapshot.composing,
+    finalSelection: { end: snapshot.selectionEnd, start: snapshot.selectionStart },
+    finalText: snapshot.text,
+    initialText: snapshot.initialText,
+    initialVisualViewportHeight: snapshot.initialVisualViewportHeight,
+    provenance: "recorded",
+    recordedAt: editingRecordedAt,
+    recordingId: editingRecordingId,
+    softKeyboardObserved,
+    version: 2,
+  } as const;
+}
+
+function syncImeRecording(snapshot: EditingProbeSnapshot): void {
+  element<HTMLScriptElement>("ime-recording").textContent =
+    `${JSON.stringify(buildImeRecording(snapshot), null, 2)}\n`;
+}
+
+function downloadJson(value: unknown, filename: string): void {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], {
     type: "application/json",
   });
   const link = document.createElement("a");
-  link.download = `doper-platform-probe-${new Date().toISOString().replaceAll(":", "-")}.json`;
+  link.download = filename;
   link.href = URL.createObjectURL(blob);
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 0);

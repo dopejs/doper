@@ -13,6 +13,7 @@
     "contracts:check": "node scripts/validate-contracts.mjs",
     "format": "prettier --write . && cargo fmt --all",
     "format:check": "prettier --check . && cargo fmt --all -- --check",
+    "ime:replay": "node scripts/replay-ime.mjs",
     "lint": "eslint .",
     "probe:dev": "pnpm wasm:build && pnpm --filter @dopejs/platform-probe dev",
     "probe:dev:no-isolation": "pnpm wasm:build && pnpm --filter @dopejs/platform-probe dev:no-isolation",

@@ -48,6 +48,8 @@ export interface EditingProbeSnapshot {
   readonly composing: boolean;
   readonly droppedRecords: number;
   readonly events: readonly string[];
+  readonly initialText: string;
+  readonly initialVisualViewportHeight: number;
   readonly mode: EditingProbeMode;
   readonly recordingVersion: 1;
   readonly records: readonly EditingEventRecord[];
@@ -62,6 +64,7 @@ export interface EditingProbeOptions {
 
 const canvasPadding = 28;
 const font = "28px ui-monospace, SFMono-Regular, Menlo, monospace";
+const initialText = "点击这里，测试中文输入法 / IME";
 
 export class EditingProbe {
   readonly #canvas: HTMLCanvasElement;
@@ -69,6 +72,7 @@ export class EditingProbe {
   readonly #events: string[] = [];
   readonly #records: EditingEventRecord[] = [];
   readonly #recordingStartedAt = performance.now();
+  readonly #initialVisualViewportHeight = window.visualViewport?.height ?? window.innerHeight;
   readonly #onUpdate: (snapshot: EditingProbeSnapshot) => void;
   readonly #proxy: HTMLTextAreaElement | null;
   readonly #editContext: EditContextLike | null;
@@ -78,7 +82,7 @@ export class EditingProbe {
   #droppedRecords = 0;
   #selectionEnd = 0;
   #selectionStart = 0;
-  #text = "点击这里，测试中文输入法 / IME";
+  #text = initialText;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -118,6 +122,8 @@ export class EditingProbe {
     this.#canvas.addEventListener("pointerdown", this.#handlePointerDown);
     this.#canvas.addEventListener("keydown", this.#handleKeyDown);
     window.addEventListener("resize", this.#handleGeometryChange);
+    window.visualViewport?.addEventListener("resize", this.#handleGeometryChange);
+    window.visualViewport?.addEventListener("scroll", this.#handleGeometryChange);
     this.#draw();
   }
 
@@ -125,6 +131,8 @@ export class EditingProbe {
     this.#canvas.removeEventListener("pointerdown", this.#handlePointerDown);
     this.#canvas.removeEventListener("keydown", this.#handleKeyDown);
     window.removeEventListener("resize", this.#handleGeometryChange);
+    window.visualViewport?.removeEventListener("resize", this.#handleGeometryChange);
+    window.visualViewport?.removeEventListener("scroll", this.#handleGeometryChange);
     this.#proxy?.remove();
     if (this.#editContext !== null) {
       Reflect.set(this.#canvas, "editContext", null);
@@ -136,6 +144,8 @@ export class EditingProbe {
       composing: this.#composing,
       droppedRecords: this.#droppedRecords,
       events: [...this.#events],
+      initialText,
+      initialVisualViewportHeight: this.#initialVisualViewportHeight,
       mode: this.mode,
       recordingVersion: 1,
       records: this.#records.map((record) => ({ ...record, data: { ...record.data } })),
@@ -187,10 +197,19 @@ export class EditingProbe {
         bounds.push(this.#characterBounds(index));
       }
       editContext.updateCharacterBounds(request.rangeStart, bounds);
+      const first = bounds[0];
+      const last = bounds.at(-1);
       this.#record(
         `characterbounds ${String(request.rangeStart)}:${String(request.rangeEnd)}`,
         "characterboundsupdate",
-        { rangeEnd: request.rangeEnd, rangeStart: request.rangeStart },
+        {
+          firstCharacterLeft: first?.left ?? null,
+          firstCharacterTop: first?.top ?? null,
+          lastCharacterRight: last?.right ?? null,
+          lastCharacterTop: last?.top ?? null,
+          rangeEnd: request.rangeEnd,
+          rangeStart: request.rangeStart,
+        },
       );
     });
   }
@@ -291,6 +310,7 @@ export class EditingProbe {
   };
 
   readonly #handleGeometryChange = (): void => {
+    this.#record("geometrychange", "geometrychange");
     this.#draw();
   };
 
@@ -379,12 +399,29 @@ export class EditingProbe {
     data: Readonly<Record<string, boolean | number | string | null>> = {},
   ): void {
     const atMs = Number((performance.now() - this.#recordingStartedAt).toFixed(3));
+    const controlBounds = this.#canvas.getBoundingClientRect();
+    const selectionBounds = this.#characterBounds(this.#selectionEnd);
+    const visualViewport = window.visualViewport;
     this.#events.unshift(`${atMs.toFixed(1)}ms · ${message}`);
     this.#events.length = Math.min(this.#events.length, 12);
     this.#records.push({
       atMs,
       composing: this.#composing,
-      data: { ...data },
+      data: {
+        ...data,
+        controlHeight: roundGeometry(controlBounds.height),
+        controlLeft: roundGeometry(controlBounds.left),
+        controlTop: roundGeometry(controlBounds.top),
+        controlWidth: roundGeometry(controlBounds.width),
+        selectionHeight: roundGeometry(selectionBounds.height),
+        selectionLeft: roundGeometry(selectionBounds.left),
+        selectionTop: roundGeometry(selectionBounds.top),
+        selectionWidth: roundGeometry(selectionBounds.width),
+        visualViewportHeight: roundGeometry(visualViewport?.height ?? window.innerHeight),
+        visualViewportOffsetLeft: roundGeometry(visualViewport?.offsetLeft ?? 0),
+        visualViewportOffsetTop: roundGeometry(visualViewport?.offsetTop ?? 0),
+        visualViewportWidth: roundGeometry(visualViewport?.width ?? window.innerWidth),
+      },
       event,
       message,
       selectionEnd: this.#selectionEnd,
@@ -396,6 +433,10 @@ export class EditingProbe {
       this.#droppedRecords += 1;
     }
   }
+}
+
+function roundGeometry(value: number): number {
+  return Number(value.toFixed(3));
 }
 
 function navigateSelection(key: string, current: number, text: string): number | null {

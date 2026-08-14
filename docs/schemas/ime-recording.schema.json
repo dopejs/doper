@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dopejs.dev/schemas/ime-recording-v2.json",
+  "title": "doper recorded IME session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "recordingId",
+    "provenance",
+    "recordedAt",
+    "description",
+    "environment",
+    "initialText",
+    "finalText",
+    "finalSelection",
+    "finalComposing",
+    "initialVisualViewportHeight",
+    "softKeyboardObserved",
+    "characterBoundsObserved",
+    "droppedRecords",
+    "events"
+  ],
+  "properties": {
+    "$schema": { "const": "https://dopejs.dev/schemas/ime-recording-v2.json" },
+    "version": { "const": 2 },
+    "recordingId": { "type": "string", "format": "uuid" },
+    "provenance": { "enum": ["fixture", "recorded"] },
+    "recordedAt": { "type": "string", "format": "date-time" },
+    "description": { "type": "string", "minLength": 1 },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "browser",
+        "buildId",
+        "deviceId",
+        "inputMethod",
+        "language",
+        "locale",
+        "mode",
+        "os",
+        "userAgent"
+      ],
+      "properties": {
+        "browser": { "type": "string", "minLength": 1 },
+        "buildId": { "type": "string", "minLength": 1 },
+        "deviceId": { "type": "string", "minLength": 1 },
+        "inputMethod": { "type": "string", "minLength": 1 },
+        "language": { "enum": ["complex", "ja", "ko", "unicode", "zh"] },
+        "locale": { "type": "string", "minLength": 1 },
+        "mode": { "enum": ["edit-context", "textarea-proxy"] },
+        "os": { "type": "string", "minLength": 1 },
+        "userAgent": { "type": "string", "minLength": 1 }
+      }
+    },
+    "initialText": { "type": "string" },
+    "finalText": { "type": "string" },
+    "finalSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["end", "start"],
+      "properties": {
+        "end": { "type": "integer", "minimum": 0 },
+        "start": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "finalComposing": { "type": "boolean" },
+    "initialVisualViewportHeight": { "type": "number", "exclusiveMinimum": 0 },
+    "softKeyboardObserved": { "type": "boolean" },
+    "characterBoundsObserved": { "type": "boolean" },
+    "droppedRecords": { "type": "integer", "minimum": 0 },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "atMs",
+        "composing",
+        "data",
+        "event",
+        "message",
+        "selectionEnd",
+        "selectionStart",
+        "text"
+      ],
+      "properties": {
+        "atMs": { "type": "number", "minimum": 0 },
+        "composing": { "type": "boolean" },
+        "data": { "$ref": "#/$defs/eventData" },
+        "event": {
+          "enum": [
+            "beforeinput",
+            "characterboundsupdate",
+            "compositionend",
+            "compositionstart",
+            "compositionupdate",
+            "geometrychange",
+            "input",
+            "keydown",
+            "pointerselection",
+            "selectionchange",
+            "textupdate"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "selectionEnd": { "type": "integer", "minimum": 0 },
+        "selectionStart": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" }
+      }
+    },
+    "eventData": {
+      "type": "object",
+      "required": [
+        "controlHeight",
+        "controlLeft",
+        "controlTop",
+        "controlWidth",
+        "selectionHeight",
+        "selectionLeft",
+        "selectionTop",
+        "selectionWidth",
+        "visualViewportHeight",
+        "visualViewportOffsetLeft",
+        "visualViewportOffsetTop",
+        "visualViewportWidth"
+      ],
+      "properties": {
+        "controlHeight": { "type": "number" },
+        "controlLeft": { "type": "number" },
+        "controlTop": { "type": "number" },
+        "controlWidth": { "type": "number" },
+        "selectionHeight": { "type": "number" },
+        "selectionLeft": { "type": "number" },
+        "selectionTop": { "type": "number" },
+        "selectionWidth": { "type": "number" },
+        "visualViewportHeight": { "type": "number", "minimum": 0 },
+        "visualViewportOffsetLeft": { "type": "number" },
+        "visualViewportOffsetTop": { "type": "number" },
+        "visualViewportWidth": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": {
+        "anyOf": [
+          { "type": "boolean" },
+          { "type": "number" },
+          { "type": "string" },
+          { "type": "null" }
+        ]
+      }
+    }
+  }
+}

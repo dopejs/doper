@@ -24,6 +24,34 @@ pnpm probe:dev
 事件。每条记录包含相对时间、事件类型、事件数据、composition 状态、文本和 UTF-16
 selection；单次最多保留 512 条，溢出必须显式计数，不能静默丢失。
 
+### 正式 IME 录制与回放
+
+编辑区下方选择证据类别，并填写输入法名称及完整版本。每条正式场景从一次全新页面
+加载开始，完成输入和 composition commit 后点击 **Export IME recording**。页面生成
+独立的 v2 录制，而不是把整份平台报告当作输入法证据；契约位于
+[`schemas/ime-recording.schema.json`](schemas/ime-recording.schema.json)。每条事件除文本、
+UTF-16 selection 和 composition 状态外，还记录 control/selection bounds、
+`visualViewport` 高度与偏移。EditContext 的 `characterboundsupdate` 同时记录请求范围和
+首尾 character bounds，用于复核候选窗几何。
+
+正式录制执行：
+
+```bash
+pnpm ime:replay -- doper-ime-<recording-id>.json
+```
+
+回放器会重新应用 EditContext `textupdate`，校验 textarea proxy 的状态快照，并拒绝
+时间倒退、非法 composition 转移、越界 selection/range、拆分 surrogate pair 或
+非 composition 状态下拆分 grapheme、错误最终文本/selection、软键盘或 character
+bounds 标记不一致、事件溢出和未结束的 composition。默认也拒绝 fixture 与
+`local-uncommitted` / `local-dev`，避免把开发自检误作正式设备证据。本地链路自检可
+显式使用 `--allow-local`，仓库 fixture 还需同时使用 `--allow-fixture`。
+
+每个目标 OS/浏览器/输入法组合必须单独导出，不得把自动化键盘输入描述为 IME
+兼容证据。移动设备录制必须观察软键盘；EditContext 场景必须保留实际
+`characterboundsupdate`。每次录制后先通过 replay，再与平台报告一起归档，且保持
+`recordingId` 不可覆盖。
+
 Vite 开发与预览服务器发送：
 
 ```text
@@ -155,6 +183,10 @@ Canvas 编辑能收到 `textupdate` 并执行 grapheme 级光标移动。隔离�
 production build 的同源采集器也已完成本地 E2E：服务端 schema 校验、201 写入、
 重复 run 409、防匿名写入 401、汇总 API、趋势页以及双样本 batch 自动归档均可
 工作。该结果证明采集链路，不替代物理目标设备数据或外部存储保留策略。
+同一环境还通过页面实际走通了 EditContext 的 `pointerselection → textupdate` 与强制
+textarea proxy 的 `pointerselection → beforeinput → input`；两份页面生成的 v2 录制
+均通过 schema 和确定性 replay。输入来自浏览器自动化键盘，因此只证明录制/回放
+链路，不证明任何真实输入法或软键盘兼容性。
 
 尚未验证且阻止 M0 关闭的项目包括：
 
@@ -162,7 +194,7 @@ production build 的同源采集器也已完成本地 E2E：服务端 schema 校
 - 使用审计工具并结合真实登录态浏览器验证形成的 COOP/COEP 业务影响结论；
 - 中文、日文、韩文与复杂 composition 的录制回放；
 - 候选窗 bounds、软键盘和 textarea proxy 的跨浏览器/OS 验证；
-- 数据上传与趋势展示。
+- 采集归档的外部持久化、备份与保留策略。
 
 ## 失败与回滚
 

@@ -105,6 +105,8 @@
         "composing",
         "droppedRecords",
         "events",
+        "initialText",
+        "initialVisualViewportHeight",
         "mode",
         "recordingVersion",
         "records",
@@ -116,6 +118,8 @@
         "composing": { "type": "boolean" },
         "droppedRecords": { "type": "integer", "minimum": 0 },
         "events": { "type": "array", "items": { "type": "string" } },
+        "initialText": { "type": "string" },
+        "initialVisualViewportHeight": { "type": "number", "minimum": 0 },
         "mode": { "enum": ["edit-context", "textarea-proxy"] },
         "recordingVersion": { "const": 1 },
         "records": {
