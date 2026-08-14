@@ -18,7 +18,7 @@
 
 | 要求                                                 | 状态       | 当前证据                                                                 | 缺口                                     |
 | ---------------------------------------------------- | ---------- | ------------------------------------------------------------------------ | ---------------------------------------- |
-| Rust workspace、TS monorepo、格式/lint/test/build/CI | 完成       | 本地 `pnpm check`；GitHub CI run `31796925527` 在基准提交通过            | 新变更推送后仍须保持绿色                 |
+| Rust workspace、TS monorepo、格式/lint/test/build/CI | 完成       | 本地 `pnpm check`；GitHub CI run `31813679304` 在 `365a0b5` 通过         | 后续变更仍须保持绿色                     |
 | ADR、benchmark fixture 规范、性能数据格式            | 完成       | `docs/adr/`、versioned suite/schemas、`pnpm contracts:check`             | 后续契约变更必须版本化                   |
 | 六类代表性场景                                       | 完成       | `benchmarks/suite.v1.json` 固定场景、seed、viewport、workload 与 metrics | runner 随可执行引擎纵向切片实现          |
 | 固定设备矩阵与采样口径                               | 进行中     | 文档、role/device 分离契约、`m0:evidence` 七角色登记门禁                 | 为必需角色分配具体物理资产               |
