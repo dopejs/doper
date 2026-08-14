@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dopejs.dev/schemas/platform-probe-report-v1.json",
+  "title": "doper platform probe report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["build", "version"],
+  "properties": {
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "mode"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "mode": { "type": "string", "minLength": 1 }
+      }
+    },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mainThread": { "$ref": "#/$defs/canvasResult" },
+        "worker": { "$ref": "#/$defs/canvasResult" }
+      }
+    },
+    "editing": { "$ref": "#/$defs/editingSnapshot" },
+    "environment": { "$ref": "#/$defs/environment" },
+    "errors": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "finishedAt": { "type": "string", "format": "date-time" },
+    "sabLatency": { "$ref": "#/$defs/timingResult" },
+    "selfDrive": { "$ref": "#/$defs/timingResult" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "version": { "const": 1 },
+    "wasm": { "$ref": "#/$defs/wasmResult" },
+    "workerRaf": { "$ref": "#/$defs/timingResult" }
+  },
+  "$defs": {
+    "canvasResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "durationMs",
+        "operations",
+        "operationsPerSecond",
+        "scrollCopyOperations",
+        "scrollCopyOperationsPerSecond"
+      ],
+      "properties": {
+        "durationMs": { "type": "number", "minimum": 0 },
+        "operations": { "type": "integer", "minimum": 0 },
+        "operationsPerSecond": { "type": "number", "minimum": 0 },
+        "scrollCopyOperations": { "type": "integer", "minimum": 0 },
+        "scrollCopyOperationsPerSecond": { "type": "number", "minimum": 0 }
+      }
+    },
+    "editingSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["composing", "events", "mode", "selectionEnd", "selectionStart", "text"],
+      "properties": {
+        "composing": { "type": "boolean" },
+        "events": { "type": "array", "items": { "type": "string" } },
+        "mode": { "enum": ["edit-context", "textarea-proxy"] },
+        "selectionEnd": { "type": "integer", "minimum": 0 },
+        "selectionStart": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "crossOriginIsolated",
+        "deviceMemoryGiB",
+        "devicePixelRatio",
+        "editContext",
+        "hardwareConcurrency",
+        "offscreenCanvas",
+        "sharedArrayBuffer",
+        "timeOrigin",
+        "userAgent",
+        "viewport",
+        "worker"
+      ],
+      "properties": {
+        "crossOriginIsolated": { "type": "boolean" },
+        "deviceMemoryGiB": { "type": ["number", "null"], "minimum": 0 },
+        "devicePixelRatio": { "type": "number", "exclusiveMinimum": 0 },
+        "editContext": { "type": "boolean" },
+        "hardwareConcurrency": { "type": "integer", "minimum": 1 },
+        "offscreenCanvas": { "type": "boolean" },
+        "sharedArrayBuffer": { "type": "boolean" },
+        "timeOrigin": { "type": "number", "minimum": 0 },
+        "userAgent": { "type": "string" },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["height", "width"],
+          "properties": {
+            "height": { "type": "integer", "minimum": 0 },
+            "width": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "worker": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["offscreenCanvas", "requestAnimationFrame", "sharedArrayBuffer"],
+          "properties": {
+            "offscreenCanvas": { "type": "boolean" },
+            "requestAnimationFrame": { "type": "boolean" },
+            "sharedArrayBuffer": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "sampleSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "max", "mean", "min", "p50", "p95", "p99"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 1 },
+        "max": { "type": "number" },
+        "mean": { "type": "number" },
+        "min": { "type": "number" },
+        "p50": { "type": "number" },
+        "p95": { "type": "number" },
+        "p99": { "type": "number" }
+      }
+    },
+    "timingResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["durationMs", "samples", "summary"],
+      "properties": {
+        "durationMs": { "type": "number", "minimum": 0 },
+        "samples": { "type": "array", "minItems": 1, "items": { "type": "number" } },
+        "summary": { "$ref": "#/$defs/sampleSummary" }
+      }
+    },
+    "wasmResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "abiVersion",
+        "compileAndInstantiateMs",
+        "fetchMs",
+        "firstCallMs",
+        "gzipBytes",
+        "mixedValue",
+        "rawBytes"
+      ],
+      "properties": {
+        "abiVersion": { "type": "integer", "minimum": 0 },
+        "compileAndInstantiateMs": { "type": "number", "minimum": 0 },
+        "fetchMs": { "type": "number", "minimum": 0 },
+        "firstCallMs": { "type": "number", "minimum": 0 },
+        "gzipBytes": { "type": "integer", "minimum": 0 },
+        "mixedValue": { "type": "integer" },
+        "rawBytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

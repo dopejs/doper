@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>doper · M0 Platform Probe</title>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">doper · M0</p>
+          <h1>Platform capability probe</h1>
+          <p class="lede">
+            Collects raw timing samples for Worker clocks, shared timestamps, canvas throughput,
+            WASM startup, and canvas-native text input.
+          </p>
+        </div>
+        <div class="actions">
+          <button id="run-all" class="primary" type="button">Run full probe</button>
+          <button id="export" type="button" disabled>Export JSON</button>
+        </div>
+      </header>
+
+      <section class="status-card" aria-labelledby="capability-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Environment</p>
+            <h2 id="capability-title">Capability matrix</h2>
+          </div>
+          <span id="run-state" class="pill">Idle</span>
+        </div>
+        <dl id="capabilities" class="capability-grid"></dl>
+      </section>
+
+      <section class="probe-grid" aria-label="Probe results">
+        <article class="probe-card">
+          <p class="eyebrow">Clock</p>
+          <h2>Worker frame driver</h2>
+          <pre id="worker-raf-result">Not run</pre>
+        </article>
+        <article class="probe-card">
+          <p class="eyebrow">Transport</p>
+          <h2>SAB timestamp latency</h2>
+          <pre id="sab-result">Not run</pre>
+        </article>
+        <article class="probe-card">
+          <p class="eyebrow">Isolation</p>
+          <h2>Main-thread stall</h2>
+          <pre id="stall-result">Not run</pre>
+        </article>
+        <article class="probe-card">
+          <p class="eyebrow">Raster</p>
+          <h2>Canvas2D throughput</h2>
+          <pre id="canvas-result">Not run</pre>
+        </article>
+        <article class="probe-card">
+          <p class="eyebrow">Startup</p>
+          <h2>Rust/WASM cold start</h2>
+          <pre id="wasm-result">Not run</pre>
+        </article>
+      </section>
+
+      <section class="editor-card" aria-labelledby="editor-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Editing</p>
+            <h2 id="editor-title">Canvas IME probe</h2>
+          </div>
+          <span id="editor-mode" class="pill">Initializing</span>
+        </div>
+        <p class="editor-help">
+          Click the canvas and type with an IME. The canvas owns the visible text and caret; a
+          centralized native input proxy is used only when EditContext is unavailable.
+        </p>
+        <canvas
+          id="editor"
+          width="1000"
+          height="180"
+          tabindex="0"
+          aria-label="Editable canvas"
+        ></canvas>
+        <pre id="editor-log" class="event-log">No editing events</pre>
+      </section>
+
+      <canvas id="main-benchmark" width="1024" height="1024" hidden></canvas>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

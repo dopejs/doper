@@ -1,0 +1,13 @@
+.DS_Store
+.idea/
+.vscode/
+
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+target/
+
+apps/platform-probe/public/wasm/*.wasm
+apps/platform-probe/public/wasm/manifest.json

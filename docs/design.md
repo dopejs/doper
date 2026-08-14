@@ -1,0 +1,723 @@
+# doper 渲染引擎 · 技术设计
+
+> 状态：草案 v0.2
+> 定位：Web canvas 渲染引擎，替代 Faster（字节 `@faster/*`）
+> 技术栈：Rust → WASM core / TypeScript shell / Canvas2D 优先可插拔后端
+> 资源假设：3-5 人，一年以上
+
+---
+
+## 1. 目标与非目标
+
+### 目标
+
+1. **彻底解决滚动过程中的 FPS 下降**，尤其是移动端 P95/P99 长尾。
+2. 维持 TSX 编写方式，且支持 **function component + hooks/state**。
+3. 虚拟滚动与多级缓存能力不弱于 Faster，并下沉为引擎原生能力。
+4. PC 端性能不低于 Faster（以 benchmark 卡点强制保证）。
+5. 后端可插拔，为 WebGPU 留出演进路径。
+6. 提供引擎原生的光标、选择与文本编辑能力，不要求业务通过 EmbedDOM 创建
+   HTML 输入控件。
+
+### 非目标（本期明确不做）
+
+- 不做 SSR / 首屏 HTML 输出。
+- 不做通用 CSS 兼容（不实现 CSS 盒模型、层叠、选择器）。
+- 不做小程序 / 原生端适配（架构上不阻断，但本期不投入）。
+- 不内置业务级富文本文档模型、协同编辑、公式或 Markdown 语义；引擎负责
+  可编辑文本基础设施，上层编辑器产品能力仍属于业务层。
+
+---
+
+## 2. 关键指标（验收基线）
+
+所有指标以真机矩阵采集，**先建基线再动手**。
+
+| 指标                                        | 目标                                      |
+| ------------------------------------------- | ----------------------------------------- |
+| 滚动帧时间 P95（低端安卓，骁龙 6 系或同级） | ≤ 16.7ms                                  |
+| 滚动帧时间 P99                              | ≤ 33ms                                    |
+| 连续滚动 10s 掉帧率                         | < 1%                                      |
+| 输入延迟（touchmove → 呈现）                | ≤ 2 帧                                    |
+| 编辑延迟（文本输入 → glyph/caret 呈现）     | ≤ 2 帧                                    |
+| 主线程人为阻塞 200ms 期间滚动               | 不掉帧、不停顿                            |
+| PC 端同场景 benchmark 对比 Faster           | 不回归（CI 卡点，回归即拦截合入）         |
+| WASM 体积（gzip）                           | < 400KB                                   |
+| WASM 冷启对首帧的额外延迟                   | < 50ms（streaming compile + JS 降级兜底） |
+
+---
+
+## 3. 总体架构
+
+```
+┌── Shell (TypeScript, 主线程) ─────────────────────────────┐
+│  TSX runtime · Function Component · Hooks · Signals       │
+│  Reconciler → Mutation Stream（扁平二进制 patch）          │
+│  DOM 事件监听 · EditContext/IME bridge → 只写输入流       │
+│  a11y 影子 DOM 树                                          │
+└──────── ring buffer over SharedArrayBuffer ───────────────┘
+                    ↓ 单向 · 批量 · 无对象代理
+┌── Core (Rust → WASM, Worker) ─────────────────────────────┐
+│  Scene(SoA) · Layout · Text · Edit · HitTest(BVH)         │
+│  Scroller · Animator · Picture Cache · Compositor         │
+│  产出：DisplayList（扁平二进制）                           │
+└───────────────────────────────────────────────────────────┘
+                    ↓ DisplayList
+┌── Backend ────────────────────────────────────────────────┐
+│  M1: Canvas2D Replayer (TS, Worker, OffscreenCanvas)      │
+│  M3+: wgpu / WebGPU (Rust 内直出)                          │
+│  兜底: 主线程 Canvas2D（无 Worker/SAB 环境）               │
+└───────────────────────────────────────────────────────────┘
+```
+
+### 3.1 为什么后端要经过 DisplayList
+
+Rust core 若通过 `web-sys` 直接调用 Canvas2D，每个 draw call 都是一次 WASM→JS 边界穿越，且字符串、渐变对象等参数需要 marshalling。在万级 draw call 的表格场景下这是不可接受的。
+
+因此 core 的输出是一段**扁平二进制 DisplayList**（见 §7），由 Worker 内一个薄 TS 回放器执行。回放器是单态化的 typed array 循环，V8 能很好优化；资源（字体、颜色、图片、渐变）预先 intern 成整型 id，回放时查表，避免任何逐帧字符串处理。
+
+WebGPU 后端则由 Rust 内的 `wgpu` 直接消费 DisplayList，不经过 JS。**同一份 DisplayList 喂两个后端**，这也是后端可插拔的实现基础。
+
+---
+
+## 4. 模块划分
+
+### Rust workspace（`core/`）
+
+| crate          | 职责                                                             |
+| -------------- | ---------------------------------------------------------------- |
+| `doper-scene`  | SoA scene 数据结构、拓扑维护、脏标记位图                         |
+| `doper-layout` | 约束布局求解（BoxConstraints 单趟）、布局缓存                    |
+| `doper-text`   | 文本布局、shaping（web 字体路径）、测量缓存、glyph atlas         |
+| `doper-edit`   | 编辑会话、selection/caret、IME composition、编辑事务与 undo/redo |
+| `doper-hit`    | BVH 空间索引、命中测试、事件路径构建                             |
+| `doper-scroll` | 滚动物理、前缀和树、可见区间求解、预热调度                       |
+| `doper-paint`  | DisplayList 构建、Picture cache、tile 划分与失效                 |
+| `doper-anim`   | 时间轴、插值、animation driver                                   |
+| `doper-abi`    | Mutation Stream / DisplayList 的编解码，版本协商                 |
+| `doper-core`   | 顶层编排、帧循环、commit 协议、wasm-bindgen 入口                 |
+| `doper-gpu`    | （M3+）wgpu 后端                                                 |
+
+### TypeScript packages（`packages/`）
+
+| package                          | 职责                                                         |
+| -------------------------------- | ------------------------------------------------------------ |
+| `@dopejs/doper`                  | **门面包**。业务唯一直接依赖项，re-export 下列各包的公开 API |
+| `@dopejs/doper-runtime`          | signals、hooks、function component、生命周期                 |
+| `@dopejs/doper-jsx`              | JSX runtime、编译期优化（静态提升、props 常量折叠）          |
+| `@dopejs/doper-reconciler`       | 组件树 → Mutation Stream 编码                                |
+| `@dopejs/doper-host`             | Worker 生命周期、SAB 通道、能力探测与降级                    |
+| `@dopejs/doper-editing`          | EditContext/IME/剪贴板桥接、editing controller 与编辑事件    |
+| `@dopejs/doper-backend-canvas2d` | DisplayList 回放器                                           |
+| `@dopejs/doper-widgets`          | 内置组件（Flex/Stack/Text/Image/VirtualList/Table…）         |
+| `@dopejs/doper-a11y`             | 语义树 → DOM 影子树                                          |
+| `@dopejs/doper-devtools`         | 帧瀑布、cache 命中率、tile 可视化、scene 检查器              |
+
+#### 门面包 `@dopejs/doper`
+
+业务侧只依赖这一个包，内部子包对业务不可见，便于后续重构而不破坏调用方。
+
+```jsonc
+// 业务 tsconfig.json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@dopejs/doper",
+  },
+}
+```
+
+```tsx
+import { createRoot, useState, useSelector, VirtualList, Text } from "@dopejs/doper";
+```
+
+约束：
+
+- 门面包必须提供 `@dopejs/doper/jsx-runtime` 与 `@dopejs/doper/jsx-dev-runtime` 两个子路径导出，转发到 `@dopejs/doper-jsx`，否则 `jsxImportSource` 无法工作。
+- **只做 re-export，不含任何实现逻辑**，避免成为绕不开的耦合点。
+- 后端与 devtools 通过子路径按需引入（`@dopejs/doper/devtools`、`@dopejs/doper/backend-webgpu`），不进主入口，保证 tree-shaking 后不带入生产包。
+- 门面包的导出面即公开 API 契约，纳入 api-extractor 卡点；子包之间的相互依赖不受此约束。
+
+---
+
+## 5. Scene 数据结构（SoA）
+
+```rust
+pub struct Scene {
+    // 拓扑：节点按拓扑序（父永远在子之前）紧凑存放
+    parent:       Vec<NodeId>,
+    first_child:  Vec<NodeId>,
+    next_sibling: Vec<NodeId>,
+    depth:        Vec<u16>,
+
+    // 几何
+    transform: Vec<Affine>,     // 局部变换
+    size:      Vec<Size>,
+    offset:    Vec<Point>,      // 相对父的位置（布局产出）
+    world_aabb: Vec<Rect>,      // 缓存的世界包围盒，供剔除与 BVH
+
+    // 外观
+    paint: Vec<PaintRef>,       // 指向 paint arena
+    flags: Vec<NodeFlags>,      // clip / opacity / layer / static / hittable
+
+    // 脏标记（位图，扫描即可）
+    dirty_layout: BitSet,
+    dirty_paint:  BitSet,
+
+    // 空洞回收
+    free_list: Vec<NodeId>,
+    generation: Vec<u32>,       // NodeId = (index, generation)，防悬垂
+}
+```
+
+设计要点：
+
+- **拓扑序存放**：父先于子。布局、剔除、绘制都退化为顺序扫描，无指针追逐。Faster 每帧要 `SortedArray(depthComparator)` 排序脏节点，这里不需要。
+- **脏节点遍历 = 位图扫描**：`dirty_layout.iter_ones()`，天然按拓扑序，天然去重。
+- **NodeId 带 generation**：节点回收后 id 复用不会造成悬垂引用，跨线程传递安全。
+- **拓扑序维护**：结构变更（插入/移动）可能破坏拓扑序。策略是**延迟重排**——变更时只标记 `topology_dirty`，在 commit 阶段做一次紧凑化（compaction），把变更代价从 O(n) per mutation 摊平成 O(n) per frame，且只在结构真变时发生。稳态（只改 props）零开销。
+
+---
+
+## 5.1 增量渲染与失效模型
+
+这是引擎性能的决定性设计，单列一节。
+
+### Faster 的做法与问题
+
+Faster 是「Flutter 自动边界 + 手工 `@Static`/`forceUpdate` 逃生舱」的混合。三个实测到的缺陷：
+
+1. **三个失效域硬耦合**。`base.ts:266-280` 的 `markNeedsBuild()` 无条件连带 `markNeedsLayout()` + `markNeedsPaint()`。改一个 `onClick` 回调也要走完 build→layout→paint，业务无法规避。
+2. **失效传播的正确性靠补丁维持**。`repaint_widgets.ts:44-58` 的注释自认 `RepaintWidgets` 阻断了上层 build 对子树的 paint 传播，需要额外挂 `AfterBuild` 监听补漏。模型有洞才需要补丁。
+3. **布局变化检测每帧分配闭包**。`base.ts:230` 用 `addOnceListener(AfterSelfLayout, closure)` 延迟判断位置是否变化，每个布局变化的节点每帧一个闭包 + 一次监听器注册/注销。滚动场景下是纯浪费。
+
+根因不是「手动」，而是**失效关系从未被显式建模**。手动标注只是把建模责任推给业务，而业务无法掌握全局依赖，必然要么标少（bug）要么标多（性能）。`forceUpdate` 被标 `@deprecated` 却仍被广泛使用，就是这个必然结果。
+
+`relayoutBoundary` 的判定规则（`base.ts:188`：`!parentUsesSize || sizedByParent || cst.isTight()`）Faster 是对的，**本设计直接沿用，不重新发明**。
+
+### doper 的五层模型
+
+**L1 · 依赖自动捕获，业务零标注**
+
+signal 读取时自动记录 `(signal → 组件)` 依赖边，写入时精确标脏对应组件。业务不写任何 `markNeedsX`。
+
+**不提供 `forceUpdate`。** 若业务需要它，说明依赖追踪漏了——那是引擎 bug，应修引擎而非发放逃生舱。外部数据源变更用显式 signal（`useSelector` 订阅外部 store）表达。
+
+**L2 · 失效域由 prop 的静态元数据决定（核心）**
+
+Mutation Stream 是失效的唯一来源。reconciler 只为真正变化的 prop 发送指令；Core 收到后查编译期生成的元数据表决定标哪些域：
+
+```rust
+// 由 schema 单源生成，Rust / TS 两侧共享
+Prop::Width     => LAYOUT | PAINT,
+Prop::Color     => PAINT,
+Prop::Opacity   => PAINT_SELF,   // 不波及子树布局
+Prop::Transform => PAINT | HIT,  // 不影响布局
+Prop::OnTap     => NONE,         // 纯回调，什么都不脏
+```
+
+失效域由 prop 的语义决定，而不是由调用者决定。改颜色不触发 layout，改回调不触发任何重绘。
+
+##### 默认策略：激进最窄 + 属性测试兜底
+
+元数据表由人工维护，写错的后果不对称：标多了只是慢，**标少了是不刷新的显示 bug，且极难排查**。两种默认值策略：
+
+| 策略             | 未标注 prop 的默认值 | 权衡                                               |
+| ---------------- | -------------------- | -------------------------------------------------- |
+| 保守             | `LAYOUT \| PAINT`    | 安全，但性能等价 Faster，收益要逐个 prop 慢慢释放  |
+| **激进（采用）** | 最窄（`NONE`）       | 收益立刻拿到，但漏标即 bug，**强依赖属性测试兜底** |
+
+**采用激进默认**。前提是配套的属性测试必须在 M1 就位，不可推后。
+
+##### 失效正确性属性测试
+
+核心不变式：
+
+> 对任意 scene 与任意 prop 变更序列，**增量渲染的产出必须与全量重绘的产出逐像素一致**。
+
+实现：
+
+```
+1. 随机生成 scene（组件类型、嵌套深度、布局组合）
+2. 随机生成 N 步 prop 变更序列
+3. 路径 A：逐步施加变更，走增量失效管线 → 最终帧
+   路径 B：每步后强制全量重建 scene 并重绘 → 最终帧
+4. 逐像素比对 A 与 B；不一致即判定失效标注有漏
+5. 失败时对变更序列做 shrink，缩到最小复现用例并输出漏标的 prop
+```
+
+工程要点：
+
+- 用 `proptest`（Rust 侧）驱动，headless 后端渲染到内存 buffer，不依赖浏览器，可在 CI 每次提交跑。
+- **每新增一个 prop 必须同时进入元数据表和测试的 prop 生成器**，由 schema 生成器强制校验两者一致，缺一即编译失败。这是防漏标的第一道闸门。
+- shrink 能力是刚需——没有最小复现，漏标问题的排查成本会高到让人放弃这套机制。
+- 该测试与 L5 的过度失效率统计共用同一套 headless 渲染与 picture hash 基建，**一次投入两处收益**，这也是它值得在 M1 就做的原因。
+
+残余风险：属性测试只能覆盖生成器能构造出的 scene 空间，无法证明完备。因此保留一个**全局开关**，可在运行时把所有 prop 强制降级为 `LAYOUT | PAINT`——线上若出现疑似漏标的显示 bug，先开开关止血（退化为 Faster 级性能，功能正确），再定位修复。
+
+**L3 · 布局变化检测改为双缓冲批量对比**
+
+布局产出写入 SoA 的 `offset` / `size` 数组；commit 阶段与上一帧数组做一次顺序扫描对比，批量得出位置/尺寸变化的节点集合。零闭包、零监听器，直接消除 Faster 的 `AfterSelfLayout` 热点。
+
+**L4 · repaint boundary 自动提升**
+
+Core 按启发式自动决定哪些子树独立成 layer：滚动容器内容、带 transform 动画的节点、被频繁标脏但 picture hash 稳定的子树。业务不标注。
+
+配合 `DrawPicture`：子树内容未变时，父节点只需重组一条引用指令，不重建子指令流。对比 Faster——尺寸一变就重绘整个 repaintBoundary 子树。
+
+**L5 · 过度失效必须可观测**
+
+devtools 逐帧统计「被标脏但 picture hash 与上一帧一致」的节点数，该比率即**过度失效率**，纳入 CI 卡点与线上监控。
+
+Faster 完全没有这个观测面，因此无人知晓 `forceUpdate` 究竟浪费了多少。**没有度量就没有优化**——这条的长期价值高于前四条之和。
+
+---
+
+## 6. Mutation Stream（Shell → Core ABI）
+
+单向、批量、二进制。写入 SAB ring buffer，Core 每帧开始时一次性消费。
+
+### 编码
+
+小端序，4 字节对齐。每条指令：`[u8 opcode][u8 flags][u16 _pad][payload...]`
+
+| opcode | 指令             | payload                                                     |
+| ------ | ---------------- | ----------------------------------------------------------- |
+| `0x01` | `CreateNode`     | `node_id: u32, kind: u16, parent: u32, before_sibling: u32` |
+| `0x02` | `RemoveNode`     | `node_id: u32`                                              |
+| `0x03` | `Reparent`       | `node_id: u32, new_parent: u32, before_sibling: u32`        |
+| `0x10` | `SetF32`         | `node_id: u32, prop: u16, value: f32`                       |
+| `0x11` | `SetVec4`        | `node_id: u32, prop: u16, v: [f32;4]`                       |
+| `0x12` | `SetRef`         | `node_id: u32, prop: u16, resource_id: u32`                 |
+| `0x13` | `SetFlags`       | `node_id: u32, set: u32, clear: u32`                        |
+| `0x20` | `SetTextRun`     | `node_id: u32, str_id: u32, style_id: u32`                  |
+| `0x30` | `DefineResource` | `resource_id: u32, kind: u16, len: u32, bytes[]`            |
+| `0x40` | `ScrollTo`       | `node_id: u32, x: f32, y: f32, behavior: u16`               |
+| `0xF0` | `Commit`         | `frame_seq: u32`                                            |
+
+### 约定
+
+- `node_id` 由 Shell 侧分配（单调递增 + free list 复用），Core 不回传 id，**通道保持严格单向**。
+- 字符串与图片等资源通过 `DefineResource` 一次性传入并 intern，之后只传 `resource_id`。字符串按内容 hash 去重——表格场景下大量重复文本因此零成本。
+- `prop` 是编译期生成的常量表，Rust 与 TS 两侧由同一份 schema 文件生成，杜绝漂移。
+- ABI 版本号在 Worker 握手时协商，不匹配直接拒绝启动并降级到兜底路径。
+
+### 为什么不用 SharedArrayBuffer 直接共享 Scene
+
+共享可变状态需要跨线程锁，且 JS 侧无法安全地维护 Rust 的不变式。单向 patch 流是更强的隔离：Core 完全拥有 Scene，Shell 完全拥有组件树，两者不共享任何可变对象。这也让 Core 能在 Shell 卡死时继续独立跑帧。
+
+---
+
+## 7. DisplayList（Core → Backend ABI）
+
+同样是扁平二进制。每帧产出，或从 Picture Cache 拼接。
+
+| opcode                                            | 指令                              |
+| ------------------------------------------------- | --------------------------------- |
+| `Save` / `Restore`                                | 状态栈                            |
+| `Transform(Affine)`                               | 变换                              |
+| `ClipRect(Rect)` / `ClipPath(path_id)`            | 裁剪                              |
+| `Alpha(f32)`                                      | 透明度                            |
+| `FillRect(Rect, paint_id)`                        | 矩形                              |
+| `FillRRect(RRect, paint_id)`                      | 圆角矩形                          |
+| `FillPath(path_id, paint_id)`                     | 路径                              |
+| `DrawGlyphRun(font_id, size, origin, glyph_span)` | 字形序列（web 字体路径）          |
+| `DrawTextFallback(str_id, font_desc_id, origin)`  | 系统字体路径，回放器调 `fillText` |
+| `DrawImage(image_id, src, dst)`                   | 图片                              |
+| `DrawPicture(picture_id, offset)`                 | 引用缓存的子指令流                |
+
+`DrawPicture` 是缓存复用的关键：item 内容不变时，滚动只需改变 `DrawPicture` 的 offset，指令流本身零重建。
+
+---
+
+## 8. 帧循环与 commit 协议（双时钟）
+
+### 两个时钟
+
+- **UI 帧**（主线程）：由 signal 变更触发，无变更则不跑。产出 Mutation Stream。
+- **渲染帧**（Worker）：稳定驱动，负责动画、滚动、布局、绘制、合成。
+
+两者通过 SAB 上的 `frame_seq` 与双缓冲 ring buffer 同步。渲染帧读取"当前已 commit 的最新一批 mutation"，Shell 写入下一批。**Shell 慢或卡住时，渲染帧继续用上一批 scene 跑**——这正是滚动不受主线程影响的机制。
+
+### Worker 帧驱动（M0 必须实测）
+
+`DedicatedWorkerGlobalScope` 上的 `requestAnimationFrame` 并非各平台稳定可用，这是本方案最大的能力不确定性。候选方案按优先级：
+
+1. **Worker rAF**（若目标平台可用）——最优，相位天然对齐 vsync。
+2. **主线程 rAF 打时间戳到 SAB**，Worker 用短周期 `setTimeout`/`MessageChannel` 轮询读取。缺点：主线程完全阻塞时 rAF 不触发，时间戳会停。
+3. **Worker 内自驱**：`setTimeout(0)` + `performance.now()` 相位锁，配合方案 2 的时间戳做漂移校正；主线程阻塞时降级为自驱，恢复后重新锁相。
+
+**必须实现 2+3 的组合**，否则"主线程阻塞 200ms 滚动不掉帧"这条验收指标无法成立。M0 探针的首要任务就是把这三条在真机矩阵上测清楚。
+
+### 无 SAB / 无 Worker 的兜底
+
+`SharedArrayBuffer` 需要 COOP/COEP 跨源隔离响应头，这是**业务侧的外部依赖，可能一票否决**。降级链：
+
+1. SAB 不可用 → `postMessage` 传 mutation（多一次拷贝，延迟略增，仍在 Worker 内合成）。
+2. Worker/OffscreenCanvas 不可用 → 全部退回主线程单线程模式（行为等价 Faster，性能同级，功能不缺失）。
+
+降级在 `@dopejs/doper-host` 的能力探测中自动完成，业务无感知。
+
+---
+
+## 9. 滚动子系统
+
+滚动是 Core 的一等公民，不是组件。
+
+### 组成
+
+- **物理**：`doper-scroll` 内实现惯性、回弹、边界，与平台手感对齐（iOS/Android 参数分离）。
+- **区间求解**：不定高 item 用前缀和树（Fenwick / 分段平衡树），`offset → index` 与 `index → offset` 均 O(log n)，支持百万级 item。
+- **测量修正**：item 实际高度与估算不符时，增量修正前缀和树并触发一次局部布局，不引发全量重排。
+- **预热**：按滚动方向与速度预测落点，在空闲时预构建/预光栅化 buffer 区。目标是把 cache miss 率压到接近 0。
+
+### 滚动帧的闭环
+
+```
+读 SAB 输入 delta → 物理积分 → 求可见区间 →
+  命中 cache: 平移 tile + 拼接 DrawPicture
+  未命中:    Core 内布局+构建 picture（不回 Shell）
+  Shell 侧缺数据: 发请求，本帧用占位，下帧补
+→ 提交 DisplayList → 后端光栅化
+```
+
+**滚动帧内不产生任何 Shell 调用**。只有当某个 item 的组件从未构建过（真 cache miss）时才需要 Shell 补建，这条路径被预热机制覆盖到极低频。
+
+---
+
+## 10. 缓存体系
+
+| 级别                   | 内容                                     | 失效条件                         | 位置    |
+| ---------------------- | ---------------------------------------- | -------------------------------- | ------- |
+| **Layout Cache**       | 节点在给定约束下的 size                  | 约束变化或自身 dirty_layout      | Core    |
+| **Picture Cache**      | 子树的 DisplayList 片段（不可变）        | 子树 dirty_paint                 | Core    |
+| **Raster Cache**       | tile / picture 的位图                    | picture 变更、DPR 变更、内存压力 | Backend |
+| **Text Shape Cache**   | (str, font, size) → advance + glyph 序列 | 字体加载完成                     | Core    |
+| **Text Metrics Cache** | 系统字体 `measureText` 结果              | 字体或 DPR 变更                  | Backend |
+
+内存治理：Raster Cache 按 LRU + 总预算（默认按屏幕面积的 N 倍）淘汰；移动端预算更紧。所有 cache 暴露命中率指标给 devtools 与线上监控。
+
+---
+
+## 11. 文本子系统
+
+### 硬约束（必须提前认清）
+
+浏览器不暴露系统字体的字形数据，**无法自行 shape 系统字体**。因此文本必须双轨：
+
+| 路径             | 条件                                   | 能力                                                    | 后端指令           |
+| ---------------- | -------------------------------------- | ------------------------------------------------------- | ------------------ |
+| **自研 shaping** | 业务显式声明并加载的 web 字体（woff2） | 完整排版控制、glyph atlas、GPU 友好、可精确缓存         | `DrawGlyphRun`     |
+| **宿主回退**     | 系统字体 / 未声明字体                  | 只能 `measureText` + `fillText`，无字距控制，缓存粒度粗 | `DrawTextFallback` |
+
+**这条约束反向影响 API 设计**：字体必须显式声明。越早定越好，后期改代价极大。
+
+### 组成
+
+- shaping / 栅格：`swash`
+- 段落布局：`parley`（或按需自研简化版）
+- 换行：UAX #14 line breaking；CJK 需要额外的标点避头尾规则
+- bidi：`unicode-bidi`
+- glyph atlas：Core 维护，Canvas2D 后端以 `ImageBitmap` 贴图，WebGPU 后端直接采样纹理
+
+### 风险
+
+文本是本项目工程量与风险最大的单一模块，也是最容易低估的。建议 M1 只做「web 字体 + LTR + 简单换行」，把 bidi、复杂脚本、避头尾放到 M3。
+
+---
+
+## 11.1 编辑子系统
+
+编辑是 Core 的一等能力，不再通过业务侧 EmbedDOM 临时覆盖一个 HTML 输入框。
+引擎负责的是**编辑基础设施**，不是完整的富文本产品：
+
+- 单行与多行可编辑文本。
+- caret、范围选择、拖选、双击选词、键盘与指针导航。
+- IME composition、候选窗口定位、软键盘与语言输入法。
+- 插入、替换、按 grapheme/word 删除、换行、剪切、复制、粘贴。
+- undo/redo 事务、只读、密码、最大长度与输入过滤钩子。
+- selection/caret 绘制、自动滚动到可见区、无障碍 textbox 语义。
+
+表格公式、富文本 schema、协同冲突解决、Markdown 命令和业务校验属于上层，
+但它们必须能建立在同一套编辑事务与 selection API 上。
+
+### 输入桥接与降级
+
+主线程负责连接浏览器/操作系统文本输入服务，按优先级使用：
+
+1. **EditContext**：绑定 canvas，接收文本、selection、composition 与字符边界
+   查询，向输入法提供 control/selection/character bounds。
+2. **引擎托管输入代理**：EditContext 不可用时，由 `@dopejs/doper-editing`
+   维护一个全局、不可见的 `textarea`/`input` 代理，统一处理
+   `beforeinput`、composition、软键盘和剪贴板。
+
+第二条是平台降级实现，不是 EmbedDOM 组件模型：业务不创建、不定位、不同步
+HTML 输入控件，Scene 中也不存在与每个编辑节点一一对应的 DOM。能力探测必须
+逐浏览器和输入法验证，不能把 EditContext 的存在当作完整可用的充分条件。
+
+### 状态所有权与双时钟
+
+- Shell 拥有业务数据模型；Core 拥有当前激活编辑会话的瞬时文本、selection、
+  composition 和 caret 状态，双方不共享可变对象。
+- 主线程输入桥把编辑意图写入独立的低延迟 Input Stream，不要求先触发组件
+  render 或 reconciler diff。
+- Core 校验 `base_revision` 后立即应用编辑事务、重新布局受影响段落并绘制，
+  再通过反向通道向 Shell 发出版本化 `EditTransaction`。
+- Shell 可确认事务或发送带新 revision 的校正值；过期事务不得覆盖新状态。
+- composition 更新是临时状态，commit 后合并为一个 undo 单元；失焦、取消、
+  Worker 重启和外部 value 更新都必须有明确的 composition 终止规则。
+
+这样避免把每次按键变成一次完整 TSX build，同时保留受控数据和业务校验能力。
+
+### 文本位置模型
+
+Web 输入 API 使用 UTF-16 offset，而 Rust 字符串、Unicode grapheme、shaping
+cluster 和视觉 glyph 的边界并不相同。编辑子系统必须维护显式映射：
+
+```
+UTF-16 offset ↔ Unicode scalar ↔ grapheme ↔ shaping cluster ↔ glyph/line
+```
+
+协议边界使用 UTF-16 offset 以对齐 EditContext/InputEvent；Core 内部可以使用
+UTF-8，但转换表必须随文本 revision 缓存。删除、移动和 selection 不得拆开
+grapheme、combining sequence、emoji ZWJ 或 shaping cluster。Bidi 文本还需要
+保存 logical/visual position、caret affinity 与垂直导航的 desired-x。
+
+### 渲染与坐标反馈
+
+- caret 闪烁由 Worker 渲染时钟驱动，不依赖 Shell setState。
+- selection、composition underline 和 caret 由 Core 生成 DisplayList 指令，
+  与文本使用同一坐标和裁剪体系。
+- Core 将最新 control bounds、selection bounds 和按需 character bounds 回传
+  主线程；滚动、缩放、DPR 或布局变化时更新，供 IME 候选窗口定位。
+- active editor 必须能请求祖先滚动容器最小幅度 scroll-into-view，不能通过
+  DOM `scrollIntoView()` 绕过 Core 的滚动模型。
+
+### API 草案
+
+```tsx
+const editor = useTextEditingController({ value: cell.value });
+
+<EditableText
+  controller={editor}
+  multiline={false}
+  inputMode="text"
+  onTransaction={(tx) => cell.apply(tx)}
+  onSubmit={() => moveToNextCell()}
+/>;
+```
+
+`EditableText` 是无装饰的引擎原语；`TextField` / `TextArea` 由 widgets 在其上
+组合边框、placeholder、错误状态和交互样式。公开 API 同时提供本地 controller
+模式和外部受控同步，但不得要求业务逐按键重建 host node。
+
+### 安全与隐私
+
+- 密码文本不得进入录制回放、日志、devtools 明文或 a11y value。
+- 粘贴与拖放数据经过大小和类型限制；富内容默认转纯文本。
+- 字符数限制按 grapheme 定义，内存预算按实际字节和布局产物定义。
+- 输入过滤不得破坏正在进行的 composition；校验失败必须通过版本化校正事务
+  处理，不能静默丢弃输入法中间态。
+
+---
+
+## 12. 事件与命中测试
+
+- **采集**：主线程 `{passive: true}` 监听 pointer/wheel/touch/key。滚动相关事件只把 delta 与时间戳写入 SAB，**不做命中测试、不触发 setState**。
+- **编辑输入**：文本意图、composition、selection 与 clipboard 走专用编辑输入
+  协议，不伪装成普通 key event；快捷键和 `beforeinput` 的优先级由编辑会话决定。
+- **命中测试**：Core 内用 BVH（基于 `world_aabb`，随 scene 增量维护）。找到目标后构建事件路径。
+- **事件模型**：对齐 DOM，支持 capture / target / bubble 三阶段（Faster 只有冒泡，这是明确的能力升级）。
+- **回传**：命中结果与事件路径通过反向 ring buffer 回传 Shell，由 Shell 执行业务回调。
+- **`preventDefault` 的时序问题**：passive 监听器不能 `preventDefault`。需要阻止默认行为的区域（如内部可滚动区）由 Core 预先计算并把「非 passive 区域矩形」同步回主线程，主线程据此对这些区域使用非 passive 监听。这是必须显式处理的正确性点。
+
+---
+
+## 13. 反应式层（TypeScript）
+
+### 选型：signals，不用 VDOM diff
+
+```tsx
+function Cell({ row, col }: CellProps) {
+  const [editing, setEditing] = useState(false);
+  const value = useSelector(() => sheet.get(row, col)); // 细粒度订阅
+  return <Text value={value} bold={editing} onTap={() => setEditing(true)} />;
+}
+```
+
+理由：signal 更新精确定位到单个组件，不需要从根 diff。Faster 的 Static/Dynamic Node 标注本质是在手工模拟这件事；signals 让它自动化，且百万 cell 场景下才具备可扩展性。
+
+### 编译期优化（`@dopejs/doper-jsx`）
+
+- 静态子树提升：结构不变的子树只发一次 `CreateNode`，之后完全跳过。
+- props 常量折叠：编译期能确定的值直接编入初始 mutation。
+- 事件回调稳定化：避免每次渲染都产生新 `SetRef`。
+
+### Hooks 范围
+
+本期提供：`useState` `useMemo` `useCallback` `useRef` `useEffect`（在 commit 后执行）`useSelector` `useSignal`。
+**不提供** `useLayoutEffect` 的同步语义——布局在 Worker 里，同步读布局结果会破坏双时钟。改为 `useLayoutValue(nodeRef, selector)`，异步一帧返回。这是与 React 的一个明确差异，需在文档中显著说明。
+
+---
+
+## 14. 无障碍与可测试性
+
+从第一天进架构，不后补。
+
+- Core 维护语义树（role / label / value / bounds / focusable）。
+- `@dopejs/doper-a11y` 把语义树映射为 canvas 旁的绝对定位 DOM 影子树，供屏幕阅读器与自动化工具消费。
+- E2E 因此可以按语义选择元素，而不是像 Faster 那样只能靠像素录制回放。
+- 保留像素回归测试作为渲染正确性的补充手段（`@napi-rs/canvas` 或 headless 真实浏览器）。
+
+---
+
+## 15. 测试策略
+
+渲染引擎的测试有一个特殊难点：**正确性没有唯一 oracle**。「这一帧画得对不对」没有标准答案可比对，只能靠差分测试构造 oracle。本章的组织即围绕这一点展开。
+
+### 15.0 前置架构约束：确定性
+
+**引擎必须支持确定性回放，否则本章大部分测试都会退化为 flaky 源头。** 这是架构约束，M1 必须满足，不可后补：
+
+- **时间可注入**：帧循环不直接读 `performance.now()`，时间源作为依赖注入。测试中可逐帧步进。
+- **随机数可注入**：引擎内部任何随机（如 cache 淘汰的抽样、预热调度的抖动）走可播种的 RNG。
+- **输入可录制回放**：Mutation Stream 与输入事件流可完整录制为二进制，脱离浏览器在 headless 环境逐帧重放。
+- **无隐式并发**：Core 内部的并行（若引入）必须是确定性调度或结果不依赖调度顺序。
+
+录制回放同时是**线上问题的排查手段**：用户复现一次异常，导出 mutation + 输入流，开发在本地精确重放。Faster 的 `shadow/shelter` 录制回放是同类思路，但因为没有语义层，只能做像素级对比。
+
+### 15.1 测试分层
+
+| 层          | 对象                                             | 手段                                   | 运行时机                           |
+| ----------- | ------------------------------------------------ | -------------------------------------- | ---------------------------------- |
+| L1 单元     | 各 crate / package 内部逻辑                      | `cargo test` / vitest                  | 每次提交                           |
+| L2 属性     | 不变式（见 §15.2）                               | `proptest` + shrink                    | 每次提交                           |
+| L3 契约     | Mutation Stream / Input Stream / DisplayList ABI | golden 二进制 fixture + 双侧 roundtrip | 每次提交                           |
+| L4 差分     | 渲染正确性（见 §15.3）                           | 多 oracle 交叉比对                     | 每次提交（快集）/ 每晚（全集）     |
+| L5 并发     | SAB ring buffer、双时钟同步                      | `loom` 模型检查 + 压力测试             | 每晚                               |
+| L6 模糊     | ABI 解码器                                       | `cargo-fuzz`                           | 每晚 + 发布前                      |
+| L7 集成/E2E | 完整应用行为                                     | 语义树驱动 + 真实浏览器                | 每次提交（核心用例）/ 每晚（全量） |
+| L8 性能     | 帧时间、过度失效率、内存                         | benchmark + 真机 P95                   | 每次提交（PC 卡点）/ 每晚（真机）  |
+| L9 耐久     | 长时间运行稳定性                                 | soak test（连续滚动 30 分钟）          | 每晚                               |
+
+### 15.2 属性测试（不变式清单）
+
+除 §5.1 的失效正确性外，以下不变式必须被属性测试覆盖：
+
+| 模块           | 不变式                                                                                                                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `doper-scene`  | 任意 mutation 序列后，拓扑序成立（父 index < 子 index）；无悬垂 NodeId；free list 与 generation 自洽                                 |
+| `doper-layout` | 布局结果满足传入约束；相同约束 + 相同输入 → 相同输出（幂等）；relayoutBoundary 内的变更不影响边界外的布局结果                        |
+| `doper-scroll` | 前缀和树：`offset(index(o)) ≤ o < offset(index(o)+1)`；任意增删改后与朴素线性实现结果一致                                            |
+| `doper-hit`    | BVH 命中结果与朴素逐节点遍历一致（**这是典型的差分 oracle**）                                                                        |
+| `doper-abi`    | 任意指令流 `encode(decode(x)) == x`；截断/损坏输入不 panic、不越界                                                                   |
+| `doper-text`   | 换行结果不超出给定宽度；相同输入 → 相同 glyph 序列                                                                                   |
+| `doper-edit`   | 任意编辑序列不产生非法 offset 或拆分 grapheme；undo/redo 可逆；过期 revision 不覆盖新状态；composition commit 等价于一个原子 replace |
+
+原则：**凡是有"朴素但显然正确"的参考实现的模块，都必须做差分测试**。朴素实现作为测试专用代码保留在仓库中，不参与生产构建。
+
+### 15.3 差分测试（构造 oracle）
+
+四组交叉比对，每组都在制造一个独立的正确性 oracle：
+
+| #   | 比对双方                                                            | 捕获的缺陷类型                          |
+| --- | ------------------------------------------------------------------- | --------------------------------------- |
+| D1  | 增量渲染 ↔ 全量重绘                                                 | 失效标注漏标（§5.1 L2 的核心保障）      |
+| D2  | Canvas2D 后端 ↔ WebGPU 后端                                         | 后端实现分歧、DisplayList 语义歧义      |
+| D3  | 优化路径 ↔ 朴素路径（BVH↔线性、前缀和树↔线性、picture cache 开↔关） | 优化引入的正确性回归                    |
+| D4  | wasm 构建 ↔ native 构建                                             | 目标相关缺陷（浮点、对齐、size_t 宽度） |
+
+D2 有个前置决策：**两个后端的输出不可能逐像素完全一致**（抗锯齿与栅格化算法不同）。因此 D2 采用**感知阈值比对**（如 SSIM 或有界的逐像素差），阈值随场景类型分级并记录在案；D1/D3/D4 则要求**逐像素严格一致**，任何差异都是 bug。
+
+### 15.4 契约测试（ABI）
+
+ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编解码，一旦漂移就是内存级错误而非逻辑错误。
+
+- `prop` 常量表、opcode 表、结构体布局**全部由单一 schema 文件生成**，两侧代码不可手写。
+- 保留 **golden 二进制 fixture**：固定输入 → 固定字节序列。ABI 变更导致 fixture 失配时必须显式更新并同步 bump ABI 版本号，防止无意破坏兼容。
+- 双向 roundtrip：TS 编码 → Rust 解码 → Rust 重编码 → 与原字节比对。
+- 解码器必须对**任意字节输入**保持内存安全（由 L6 fuzz 保证），不得依赖"输入总是自家产生的"这一假设。
+
+### 15.5 并发测试
+
+双时钟 + SAB ring buffer 是本架构最容易出现难复现缺陷的地方。
+
+- 用 `loom` 对 ring buffer 的读写协议做穷举式模型检查（生产者/消费者交错的全部可能）。
+- 压力测试：Shell 侧以远高于渲染帧率的速度写入，验证背压、丢帧合并、`frame_seq` 单调性。
+- 故障注入：模拟 Shell 卡死 / Worker 卡死 / 消息乱序，验证降级链正确触发且不产生视觉错误。
+
+### 15.6 性能测试与门禁
+
+- **PC benchmark 每次提交卡点**：回归即拦截合入。沿用 Faster 的做法（对比 source 与 target 分支），但**不设置 `ignore_branch.json` 式的无条件豁免**——豁免必须逐次评审并记录理由。
+- **真机 P95 每晚采集**：机型矩阵覆盖低端安卓与主流 iOS，数据入库并做趋势告警。
+- **过度失效率**（§5.1 L5）作为一等指标进卡点，与帧时间同等对待。
+- **WASM 体积**进卡点（§2 目标 < 400KB gzip）。
+- 内存：Raster Cache 预算遵守、长时间运行无泄漏（L9 soak）。
+
+### 15.7 覆盖率与门禁策略
+
+- Rust core 行覆盖率 ≥ 85%，`doper-abi` / `doper-scene` / `doper-scroll` 等核心 crate ≥ 95%。
+- TS 侧 ≥ 80%。
+- **覆盖率是下限而非目标**：不允许通过无断言测试刷指标，评审时关注不变式覆盖而非行覆盖。
+- 合入门禁 = L1 + L2 + L3 + L4(快集) + L7(核心) + L8(PC benchmark) 全绿。
+- 发布门禁 = 全部层级 + 真机 P95 达标 + soak 通过。
+
+### 15.8 测试基建投入说明
+
+本章的 headless 渲染、录制回放、差分框架、真机采集链路是**共享基建**，服务于 §5.1 的失效正确性、§15.3 的差分测试、§15.6 的过度失效率统计三处。因此必须在 M1 一次性建成，不可分散到各里程碑逐步补齐——分散建设的结果通常是永远建不完整。
+
+---
+
+## 16. 里程碑
+
+| 里程碑                             | 内容                                                                                                                                                                                                                                                           | 出口标准                                                                                              |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **M0 探针**（3-4 周）              | Worker 帧驱动三方案真机实测；SAB/COOP-COEP 可行性；OffscreenCanvas 2D 性能基线；EditContext/IME 与输入代理能力矩阵；wasm 体积与冷启；建立真机 P95 采集与 benchmark 基础设施                                                                                    | 能力矩阵与降级链确定；拿到可用于争取资源的滚动与 canvas 编辑 demo 数据                                |
+| **M1 单线程内核**（~3 月）         | Scene(SoA)、约束布局、Mutation/Input Stream、DisplayList、Canvas2D 回放器、signals + hooks + TSX；建立 editing revision、selection 与 offset 映射模型。先跑主线程，不引入 Worker。**含失效正确性属性测试 + headless 渲染基建**（§5.1 L2 的前置条件，不可推后） | 静态页面与 Faster 像素对齐；编辑事务可确定性回放；PC benchmark 不劣化；属性测试在 CI 常态运行且零失败 |
+| **M2 双时钟 + 缓存**（~3 月）      | Worker 化、SAB 通道、Picture/Raster Cache、tile 合成、降级链                                                                                                                                                                                                   | 主线程人为阻塞 200ms，滚动不掉帧                                                                      |
+| **M3 滚动 + 文本**（~3 月）        | 原生虚拟滚动、前缀和树、预热；web 字体 shaping、glyph atlas；输出 grapheme/cluster/glyph/line 映射与 caret geometry                                                                                                                                            | 百万行表格滚动 P95 达标；文本布局能稳定驱动 selection/caret                                           |
+| **M4 编辑、事件与无障碍**（~2 月） | EditContext 与输入代理、IME、caret/selection、剪贴板、undo/redo、自动滚动；BVH 命中测试、三阶段事件、非 passive 区域协议、语义树与影子 DOM                                                                                                                     | canvas 内文本可直接编辑且无需业务 EmbedDOM；主流输入法与屏幕阅读器可用                                |
+| **M5 迁移与 WebGPU 验证**（~3 月） | Faster 兼容 shim、devtools、迁移文档；wgpu 后端并行验证并用真机数据决定是否切默认                                                                                                                                                                              | 存量业务可增量迁移；后端选型有数据支撑                                                                |
+
+关键排序原则：**M2 之前不碰 WebGPU，M3 之前不碰复杂文本**。收益主要来自双时钟与 Core 内闭环滚动，先把这条主线拿下。
+
+---
+
+## 17. 风险与应对
+
+| 风险                                       | 影响                             | 应对                                                                                                        |
+| ------------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **COOP/COEP 无法在业务页面启用**           | SAB 不可用，双时钟降级           | M0 必须先与业务确认；降级到 postMessage 通道仍能拿到大部分收益                                              |
+| **Worker 帧驱动在部分平台不稳**            | "主线程阻塞不掉帧"无法成立       | M0 三方案实测 + 自驱相位锁兜底                                                                              |
+| **文本模块被低估**                         | 进度失控                         | M1 只做最小子集；bidi/复杂脚本明确推迟到 M3；预留专人                                                       |
+| **EditContext 支持不完整或输入法行为分裂** | canvas 无法稳定输入、候选窗错位  | M0 建立浏览器/OS/输入法矩阵；引擎托管输入代理兜底；所有 composition 流可录制回放                            |
+| **编辑状态跨线程失序**                     | 丢字、回滚新输入、selection 跳动 | revisioned transaction、单一 active composition、过期更新拒绝、故障注入与确定性重放                         |
+| **WASM 体积与冷启**                        | 移动端弱网首屏劣化               | streaming compile；核心路径保留 JS 兜底实现，wasm 就绪后热切换；体积进 CI 卡点                              |
+| **Rust 人力不足**                          | 核心开发瓶颈                     | Core 内部按 crate 边界切分，`doper-scroll`/`doper-text` 可独立并行；TS 侧工作量占比不小，可容纳非 Rust 成员 |
+| **跨 Worker + WASM 调试困难**              | 排障成本高，长期拖慢迭代         | devtools 在 M1 就作为一等公民；Core 支持 headless 回放（录制 mutation 流，脱离浏览器复现）                  |
+| **低端安卓上 WebGPU 反而更慢**             | 后端选型判断错误                 | 后端可插拔；用 M0/M5 的真机 benchmark 决定默认值，不拍脑袋                                                  |
+
+### 回滚路径
+
+每个里程碑都保持「可退回上一状态且业务可用」：
+
+- M2 的 Worker 化通过 feature flag 控制，线上可一键切回主线程模式。
+- M5 的 WebGPU 后端默认关闭，按机型灰度。
+- Faster 兼容 shim 保证业务可以按页面粒度回退到 Faster。
+
+---
+
+## 18. M0 探针清单（可立即执行）
+
+1. `DedicatedWorkerGlobalScope.requestAnimationFrame` 在目标机型矩阵上的可用性与相位稳定性。
+2. 主线程 rAF → SAB 时间戳 → Worker 轮询的端到端延迟分布。
+3. Worker 自驱 `setTimeout` + 相位锁的漂移量，以及主线程完全阻塞下的表现。
+4. OffscreenCanvas 2D 在 Worker 中的光栅化吞吐 vs 主线程 Canvas2D。
+5. `drawImage` 自拷贝（scroll-copy）在低端安卓上的真实成本——这决定 tile 平移策略。
+6. 一个最小 Rust wasm 模块的体积、streaming compile 耗时、首次调用延迟。
+7. COOP/COEP 在目标业务页面启用的可行性（含第三方资源影响面盘点）。
+8. 真机 P95 采集链路搭建（Long Animation Frame API / `requestAnimationFrame` 打点 + 上报）。
+9. EditContext 在目标浏览器/OS/输入法矩阵上的 text/selection/composition/bounds
+   行为，以及引擎托管输入代理的等价性。
+
+探针 1-3 是本方案成立的前提，**优先级最高**。
