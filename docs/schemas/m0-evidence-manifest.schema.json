@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dopejs.dev/schemas/m0-evidence-manifest-v1.json",
+  "title": "doper P0/M0 exit evidence manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "buildId", "businessAudit", "decision", "devices", "storage"],
+  "properties": {
+    "$schema": { "const": "https://dopejs.dev/schemas/m0-evidence-manifest-v1.json" },
+    "version": { "const": 1 },
+    "buildId": { "$ref": "#/$defs/identifier" },
+    "businessAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact",
+        "authenticatedSessionVerified",
+        "dynamicResourcesVerified",
+        "owner",
+        "reviewedAt",
+        "targetOrigin",
+        "transportDecision"
+      ],
+      "properties": {
+        "artifact": { "$ref": "#/$defs/artifact" },
+        "authenticatedSessionVerified": { "const": true },
+        "dynamicResourcesVerified": { "const": true },
+        "owner": { "type": "string", "minLength": 1 },
+        "reviewedAt": { "type": "string", "format": "date-time" },
+        "targetOrigin": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "transportDecision": { "enum": ["main-thread", "post-message", "sab"] }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adr", "decidedAt", "reviewers", "status"],
+      "properties": {
+        "adr": { "$ref": "#/$defs/artifact" },
+        "decidedAt": { "type": "string", "format": "date-time" },
+        "reviewers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "status": { "enum": ["go", "pivot", "stop"] }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": { "$ref": "#/$defs/device" }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact",
+        "backend",
+        "backupVerifiedAt",
+        "immutable",
+        "offDevice",
+        "owner",
+        "restoreVerifiedAt",
+        "retentionDays"
+      ],
+      "properties": {
+        "artifact": { "$ref": "#/$defs/artifact" },
+        "backend": { "type": "string", "minLength": 1 },
+        "backupVerifiedAt": { "type": "string", "format": "date-time" },
+        "immutable": { "const": true },
+        "offDevice": { "const": true },
+        "owner": { "type": "string", "minLength": 1 },
+        "restoreVerifiedAt": { "type": "string", "format": "date-time" },
+        "retentionDays": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$"
+        },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "crossOriginIsolated",
+        "editContext",
+        "sharedArrayBuffer",
+        "workerOffscreenCanvas",
+        "workerRaf"
+      ],
+      "properties": {
+        "crossOriginIsolated": { "type": "boolean" },
+        "editContext": { "type": "boolean" },
+        "sharedArrayBuffer": { "type": "boolean" },
+        "workerOffscreenCanvas": { "type": "boolean" },
+        "workerRaf": { "type": "boolean" }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "batchIds",
+        "browserVersion",
+        "capabilities",
+        "deviceId",
+        "devicePixelRatio",
+        "displayScale",
+        "fontScale",
+        "inputMethods",
+        "manufacturerModel",
+        "memoryGiB",
+        "osBuild",
+        "owner",
+        "physical",
+        "powerProfile",
+        "refreshRateHz",
+        "roleId",
+        "soc",
+        "storageFreeGiB",
+        "temperatureRangeC",
+        "viewport"
+      ],
+      "properties": {
+        "batchIds": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string", "format": "uuid" }
+        },
+        "browserVersion": { "type": "string", "minLength": 1 },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "deviceId": { "$ref": "#/$defs/identifier" },
+        "devicePixelRatio": { "type": "number", "exclusiveMinimum": 0 },
+        "displayScale": { "type": "number", "exclusiveMinimum": 0 },
+        "fontScale": { "type": "number", "exclusiveMinimum": 0 },
+        "inputMethods": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "manufacturerModel": { "type": "string", "minLength": 1 },
+        "memoryGiB": { "type": "number", "exclusiveMinimum": 0 },
+        "osBuild": { "type": "string", "minLength": 1 },
+        "owner": { "type": "string", "minLength": 1 },
+        "physical": { "const": true },
+        "powerProfile": { "type": "string", "minLength": 1 },
+        "refreshRateHz": { "type": "number", "exclusiveMinimum": 0 },
+        "roleId": { "$ref": "#/$defs/platformRoleId" },
+        "soc": { "type": "string", "minLength": 1 },
+        "storageFreeGiB": { "type": "number", "minimum": 0 },
+        "temperatureRangeC": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["maximum", "minimum"],
+          "properties": {
+            "maximum": { "type": "number" },
+            "minimum": { "type": "number" }
+          }
+        },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["height", "width"],
+          "properties": {
+            "height": { "type": "integer", "minimum": 1 },
+            "width": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "platformRoleId": {
+      "enum": [
+        "android-low",
+        "android-mid",
+        "desktop-chromium",
+        "desktop-firefox",
+        "desktop-safari",
+        "ios-baseline",
+        "ios-current"
+      ]
+    }
+  }
+}

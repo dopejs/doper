@@ -14,6 +14,7 @@
     "locale": "zh-CN",
     "mode": "edit-context",
     "os": "fixture-os 1.0",
+    "roleId": "desktop-chromium",
     "userAgent": "doper-ime-fixture/1.0"
   },
   "initialText": "A😀",

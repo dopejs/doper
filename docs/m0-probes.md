@@ -15,6 +15,9 @@ pnpm probe:dev
 正式采集时通过 `VITE_DOPER_BUILD_ID` 注入 commit 或构建标识，并通过
 `VITE_DOPER_DEVICE_ID` 注入 `device-matrix.md` 中登记的物理设备资产 ID；未设置时
 分别使用 `local-uncommitted` 与 `local-dev`，不得把该结果上传为正式基线。
+每次正式采集还必须通过 `VITE_DOPER_ROLE_ID` 或 URL 的 `roleId` 指定七个矩阵角色
+之一。物理资产 ID 与角色分离，同一设备切换浏览器时使用相同 `deviceId`、不同
+`roleId`。
 报告 v1 的机器可读契约位于
 [`schemas/platform-probe-report.schema.json`](schemas/platform-probe-report.schema.json)。
 
@@ -83,8 +86,8 @@ pnpm probe:dev:no-isolation
 pnpm probe:summary -- report-a.json report-b.json
 ```
 
-汇总格式带 `version: 2`，保留每次运行的完成状态和错误，并分别输出同设备趋势、
-batch 完整性与同设备/同 build 的 batch 重复性判定。重复性只比较完整 sample batch：
+汇总格式带 `version: 2`，保留每次运行的完成状态和错误，并分别输出同角色/设备趋势、
+batch 完整性与同 role/device/build 的 batch 重复性判定。重复性只比较完整 sample batch：
 合并原始 Worker frame samples 计算 P95，并使用每轮 Canvas 吞吐中位数；帧 P95
 差异上限为 10%，吞吐差异上限为 5%，能力与 transport signature 必须一致。单次
 运行不会被误标成正式重复性。正式汇总默认拒绝 `local-uncommitted` 和
@@ -105,15 +108,16 @@ DOPER_PROBE_COLLECTOR_TOKEN=<at-least-24-random-characters> \
   --output /mounted/immutable-probe-artifacts
 ```
 
-目标设备打开采集器输出的 URL，把 `<asset-id>` 替换为 `device-matrix.md` 中登记的
-设备 ID；可追加 `&autorun=1` 自动开始。完成后在页面的 **Collector token** 输入框
+目标设备打开采集器输出的 URL，把 `<asset-id>` 和 `<role-id>` 分别替换为登记的
+设备 ID 与矩阵角色；可追加 `&autorun=1` 自动开始。完成后在页面的 **Collector token** 输入框
 输入令牌并点击 **Archive report**。令牌只通过 Authorization header 发送，不进入
 URL、报告或归档文件。
 
 正式重复采集使用页面的 **Run batch**：默认严格执行 5 次预热和 15 次正式样本。
-成功预热不归档；正式样本各自使用新 runId 并带同一 batchId、序号和总数。预热若
-失败会先保留失败报告再停止，正式样本无论探针是否有错误都归档，summary v2 只把
-序号完整、没有错误且能力签名一致的 batch 标记为 complete。
+预热和正式样本都各自使用新 runId、同一 batchId、类别、序号和总数并不可覆盖归档；
+预热不进入性能统计，但必须保留以证明 5 次预热确实执行。预热失败会保留失败报告并
+停止；正式样本无论探针是否有错误都归档。summary v2 只统计 sample，并只把序号
+完整、没有错误且能力签名一致的 batch 标记为 complete。
 
 平台报告接口会再次执行 v1 schema 与正式标识校验，并用 `wx` 语义写入
 `v1/<device>/<build>/<runId>.json`；相同 run id 返回 409，不覆盖原始证据。
@@ -122,6 +126,29 @@ HTTP Basic 登录，用户名为 `doper`、密码为同一令牌。
 
 IME 归档位于独立的 `ime/v2` namespace，不会被平台报告 summary 当作 v1 报告读取。
 两个写接口与趋势接口使用同一鉴权和 10 MiB 请求上限。
+
+### P0/M0 可执行出口门禁
+
+最终证据 manifest 符合
+[`schemas/m0-evidence-manifest.schema.json`](schemas/m0-evidence-manifest.schema.json)。
+[`../benchmarks/m0/evidence-manifest.fixture.v1.json`](../benchmarks/m0/evidence-manifest.fixture.v1.json)
+只展示结构，不是正式证据。manifest 登记七个角色的固定资产和两组 batch ID，并记录
+真实业务 COOP/COEP 审计、外部不可变存储/备份恢复演练以及 Go/Pivot/Stop ADR；三份
+人工证据文件必须放在 manifest 相对路径内并登记 SHA-256。
+
+```bash
+pnpm m0:evidence -- \
+  --archive /mounted/immutable-probe-artifacts \
+  --manifest /mounted/immutable-probe-artifacts/m0-evidence.v1.json \
+  --output /mounted/immutable-probe-artifacts/m0-gate-result.v1.json
+```
+
+门禁不提供 `--allow-local`。它重新校验正式报告与 IME schema/不变式，要求每个角色
+指定的两组 batch 各有 5 个完整 warmup 和 15 个完整 sample，复算 10% 帧 P95 与
+5% 吞吐重复性，按能力检查 SAB/postMessage/主线程路径、WASM 包络和低端 Android
+Worker 连续性。IME 覆盖逐角色检查中/日/韩/复杂/Unicode、textarea proxy，以及能力
+可用时的 EditContext；移动录制必须有软键盘，EditContext 必须有 character bounds。
+任何文件缺失、digest 不符、角色串组或自报布尔值与原始证据不符都会返回非零状态。
 
 默认只监听 `127.0.0.1`。绑定非 loopback 地址时，工具强制要求 TLS 证书/私钥和
 至少 24 字符令牌；证书必须被目标设备信任，否则不能把 SAB/安全上下文结果作为

@@ -5,6 +5,7 @@ import type {
   CanvasProbeResult,
   MessageBackpressureResult,
   MessageCopyCostResult,
+  PlatformRoleId,
   SabBackpressureResult,
   TimingProbeResult,
   TransportMatrixResult,
@@ -40,6 +41,7 @@ interface ProbeReport {
   finishedAt?: string;
   messageBackpressure?: MessageBackpressureResult;
   messageCopyCost?: MessageCopyCostResult;
+  roleId?: PlatformRoleId;
   runId: string;
   sabBackpressure?: SabBackpressureResult;
   sabLatency?: TimingProbeResult;
@@ -56,13 +58,16 @@ const runner = new PlatformProbeRunner();
 const searchParameters = new URLSearchParams(location.search);
 const configuredBuildId: unknown = Reflect.get(import.meta.env, "VITE_DOPER_BUILD_ID");
 const configuredDeviceId: unknown = Reflect.get(import.meta.env, "VITE_DOPER_DEVICE_ID");
+const configuredRoleId: unknown = Reflect.get(import.meta.env, "VITE_DOPER_ROLE_ID");
 const requestedDeviceId = searchParameters.get("deviceId");
+const requestedRoleId = searchParameters.get("roleId");
 const deviceId =
   requestedDeviceId !== null && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(requestedDeviceId)
     ? requestedDeviceId
     : typeof configuredDeviceId === "string" && configuredDeviceId.length > 0
       ? configuredDeviceId
       : "local-dev";
+const roleId = readPlatformRole(requestedRoleId ?? configuredRoleId);
 const report: ProbeReport = {
   build: {
     id:
@@ -72,6 +77,7 @@ const report: ProbeReport = {
     mode: import.meta.env.MODE,
   },
   deviceId,
+  ...(roleId === undefined ? {} : { roleId }),
   runId: crypto.randomUUID(),
   version: 1,
 };
@@ -191,30 +197,41 @@ async function runAll(): Promise<void> {
     report.environment = await runner.environment();
     renderCapabilities(report.environment);
 
-    const workerRaf = await runProbe(
-      "worker-raf",
-      "worker-raf-result",
-      () => runner.workerRaf(),
-      compactTimingResult,
-    );
+    const workerRaf = report.environment.worker.requestAnimationFrame
+      ? await runProbe(
+          "worker-raf",
+          "worker-raf-result",
+          () => runner.workerRaf(),
+          compactTimingResult,
+        )
+      : renderUnsupported("worker-raf-result", "Worker requestAnimationFrame is unavailable");
     if (workerRaf !== undefined) {
       report.workerRaf = workerRaf;
     }
-    const sabLatency = await runProbe(
-      "sab-latency",
-      "sab-result",
-      () => runner.sabLatency(),
-      compactTimingResult,
-    );
+    const sabAvailable =
+      report.environment.crossOriginIsolated &&
+      report.environment.sharedArrayBuffer &&
+      report.environment.worker.sharedArrayBuffer;
+    const sabLatency = sabAvailable
+      ? await runProbe("sab-latency", "sab-result", () => runner.sabLatency(), compactTimingResult)
+      : renderUnsupported(
+          "sab-result",
+          "Cross-origin isolation or SharedArrayBuffer is unavailable",
+        );
     if (sabLatency !== undefined) {
       report.sabLatency = sabLatency;
     }
-    const sabBackpressure = await runProbe(
-      "sab-backpressure",
-      "backpressure-result",
-      () => runner.sabBackpressure(),
-      compactSabBackpressure,
-    );
+    const sabBackpressure = sabAvailable
+      ? await runProbe(
+          "sab-backpressure",
+          "backpressure-result",
+          () => runner.sabBackpressure(),
+          compactSabBackpressure,
+        )
+      : renderUnsupported(
+          "backpressure-result",
+          "Cross-origin isolation or SharedArrayBuffer is unavailable",
+        );
     if (sabBackpressure !== undefined) {
       report.sabBackpressure = sabBackpressure;
       if (!sabBackpressure.backpressureHandled && report.errors !== undefined) {
@@ -266,9 +283,9 @@ async function runAll(): Promise<void> {
     if (transport !== undefined) {
       report.transport = transport;
     }
-    const workerCanvas = await runProbe("worker-canvas", "canvas-result", () =>
-      runner.offscreenCanvas(),
-    );
+    const workerCanvas = report.environment.worker.offscreenCanvas
+      ? await runProbe("worker-canvas", "canvas-result", () => runner.offscreenCanvas())
+      : renderUnsupported("canvas-result", "Worker OffscreenCanvas is unavailable");
     const mainCanvas = await runProbe("main-canvas", "canvas-result", () =>
       Promise.resolve(runner.mainThreadCanvas(element<HTMLCanvasElement>("main-benchmark"))),
     );
@@ -367,6 +384,9 @@ async function runBatch(): Promise<void> {
         await archiveReport();
         throw new Error("warmup probe failed; resolve the environment before collecting samples");
       }
+      if (!(await archiveReport())) {
+        throw new Error(`warmup ${String(index + 1)} could not be archived`);
+      }
     }
     for (let index = 0; index < samples; index += 1) {
       batchState.textContent = `Sample ${String(index + 1)}/${String(samples)}`;
@@ -434,6 +454,11 @@ async function runProbe<Result>(
     }
     return undefined;
   }
+}
+
+function renderUnsupported(targetId: string, reason: string): undefined {
+  renderJson(targetId, { reason, status: "unsupported" });
+  return undefined;
 }
 
 function compactTimingResult(result: TimingProbeResult): unknown {
@@ -638,6 +663,7 @@ function buildImeRecording(snapshot: EditingProbeSnapshot) {
       locale: navigator.language,
       mode: snapshot.mode,
       os: detectedPlatform,
+      ...(report.roleId === undefined ? {} : { roleId: report.roleId }),
       userAgent: navigator.userAgent,
     },
     events: snapshot.records,
@@ -652,6 +678,22 @@ function buildImeRecording(snapshot: EditingProbeSnapshot) {
     softKeyboardObserved,
     version: 2,
   } as const;
+}
+
+function readPlatformRole(value: unknown): PlatformRoleId | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  if (
+    value === "android-low" ||
+    value === "android-mid" ||
+    value === "desktop-chromium" ||
+    value === "desktop-firefox" ||
+    value === "desktop-safari" ||
+    value === "ios-baseline" ||
+    value === "ios-current"
+  ) {
+    return value;
+  }
+  throw new Error(`Unknown platform role configuration (${typeof value})`);
 }
 
 function syncImeRecording(snapshot: EditingProbeSnapshot): void {

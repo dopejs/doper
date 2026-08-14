@@ -53,6 +53,56 @@ describe("summarizeReports", () => {
     });
   });
 
+  it("keeps archived warmups visible without using them as trend samples", () => {
+    const batchId = "50000000-0000-4000-8000-000000000000";
+    const warmup = report({
+      collection: { batchId, kind: "warmup", sequence: 1, total: 1 },
+      roleId: "desktop-chromium",
+      runId: "50000000-0000-4000-8000-000000000001",
+    });
+    const sample = report({
+      collection: { batchId, kind: "sample", sequence: 1, total: 1 },
+      roleId: "desktop-chromium",
+      runId: "50000000-0000-4000-8000-000000000002",
+    });
+    const summary = summarizeReports([warmup, sample], "2026-08-14T00:10:00.000Z");
+
+    expect(summary.runs).toHaveLength(2);
+    expect(summary.trends).toEqual([]);
+  });
+
+  it("does not compare different platform roles on the same physical device", () => {
+    const chromiumBatch = "30000000-0000-4000-8000-000000000000";
+    const safariBatch = "40000000-0000-4000-8000-000000000000";
+    const summary = summarizeReports(
+      [
+        {
+          ...batchReport(chromiumBatch, 1, 16, 17, 1000, "30000000-0000-4000-8000-000000000001"),
+          roleId: "desktop-chromium",
+        },
+        {
+          ...batchReport(chromiumBatch, 2, 16, 17, 1000, "30000000-0000-4000-8000-000000000002"),
+          roleId: "desktop-chromium",
+        },
+        {
+          ...batchReport(safariBatch, 1, 16, 17, 1000, "40000000-0000-4000-8000-000000000001"),
+          roleId: "desktop-safari",
+        },
+        {
+          ...batchReport(safariBatch, 2, 16, 17, 1000, "40000000-0000-4000-8000-000000000002"),
+          roleId: "desktop-safari",
+        },
+      ],
+      "2026-08-14T00:10:00.000Z",
+    );
+
+    expect(summary.batches.map((batch) => batch.roleId)).toEqual([
+      "desktop-chromium",
+      "desktop-safari",
+    ]);
+    expect(summary.reproducibility).toEqual([]);
+  });
+
   it("reports SAB backpressure throughput and rejects inconsistent claimed evidence", async () => {
     const backpressure = {
       acceptedCount: 3,

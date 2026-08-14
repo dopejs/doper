@@ -727,4 +727,9 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 9. EditContext 在目标浏览器/OS/输入法矩阵上的 text/selection/composition/bounds
    行为，以及引擎托管输入代理的等价性。
 
+正式 M0 证据必须把物理 `deviceId` 与矩阵 `roleId` 分开，逐角色保存两组 5 次预热 +
+15 次样本、真实 IME 录制和原始报告。出口通过 `m0-evidence-manifest-v1` 与
+`pnpm m0:evidence` 复算；业务 COOP/COEP、外部存储/恢复演练和 Go/Pivot/Stop ADR
+使用带 SHA-256 的证据文件，不能只在表格中手工标绿。
+
 探针 1-3 是本方案成立的前提，**优先级最高**。

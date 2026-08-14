@@ -3,6 +3,11 @@
 设备矩阵采用“固定资产 + 角色”管理。正式报告中的 `deviceId` 必须指向不可歧义的
 物理设备；只写“低端安卓”或 User-Agent 不构成证据。
 
+`deviceId` 标识物理资产，`roleId` 标识该次采集承担的矩阵角色，两者不得混用。同一
+台物理 Mac 可以分别承担 `desktop-chromium`、`desktop-safari` 和
+`desktop-firefox`；报告与 IME 录制必须保留各自 `roleId`，汇总按
+role/device/build 分组，不能跨浏览器比较 batch。
+
 ## 必需角色
 
 | 角色 ID            | 用途                                      | 最低覆盖                             | 当前资产     | 状态       |
@@ -25,7 +30,8 @@
 - 电源模式、是否充电、初始电量与允许的温度区间；
 - viewport、DPR、系统字体缩放、显示缩放；
 - 可用输入法及版本；
-- cross-origin isolation、OffscreenCanvas、Worker rAF、EditContext 能力快照。
+- cross-origin isolation、双端 SharedArrayBuffer、Worker OffscreenCanvas、Worker rAF、
+  EditContext 能力快照。
 
 设备或浏览器升级会产生新的矩阵版本，不能覆盖旧报告中的环境信息。
 
@@ -57,4 +63,6 @@
 `characterboundsupdate`。fixture、自动化键盘、事件溢出或本地占位 build/device id
 均不能替代正式矩阵证据。
 
-矩阵中任何“待分配”资产都会阻止 P0/M0 对相应平台宣布完成。
+矩阵中任何“待分配”资产都会阻止 P0/M0 对相应平台宣布完成。最终机器可读登记写入
+`m0-evidence-manifest-v1`；除角色和资产 ID 外，还必须固定上述硬件、环境、输入法、
+能力快照以及两组正式 batch ID。

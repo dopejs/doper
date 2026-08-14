@@ -1,5 +1,14 @@
 import type { SampleSummary } from "./metrics";
 
+export type PlatformRoleId =
+  | "android-low"
+  | "android-mid"
+  | "desktop-chromium"
+  | "desktop-firefox"
+  | "desktop-safari"
+  | "ios-baseline"
+  | "ios-current";
+
 export type WorkerMethod =
   | "capabilities"
   | "message-backpressure"

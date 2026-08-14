@@ -112,9 +112,11 @@ export function summarizeReports(reports, generatedAt = new Date().toISOString()
     finishedAt: report.finishedAt ?? null,
     metrics: readMetrics(report),
     recommendedTransport: report.transport?.recommendedMode ?? null,
+    roleId: report.roleId ?? null,
     runId: report.runId,
   }));
   const batches = summarizeBatches(orderedReports);
+  const trendRuns = runs.filter((run) => run.collection.kind !== "warmup");
 
   return {
     batches,
@@ -122,7 +124,7 @@ export function summarizeReports(reports, generatedAt = new Date().toISOString()
     reportCount: runs.length,
     reproducibility: compareBatches(batches),
     runs,
-    trends: compareAdjacent(runs, (run) => run.deviceId),
+    trends: compareAdjacent(trendRuns, (run) => `${run.roleId ?? "unassigned"}\0${run.deviceId}`),
     version: 2,
   };
 }
@@ -373,7 +375,7 @@ function summarizeBatches(reports) {
   for (const report of reports) {
     const collection = report.collection;
     if (collection?.kind !== "sample") continue;
-    const key = `${report.deviceId}\0${report.build.id}\0${collection.batchId}`;
+    const key = `${report.roleId ?? "unassigned"}\0${report.deviceId}\0${report.build.id}\0${collection.batchId}`;
     const group = groups.get(key) ?? [];
     group.push(report);
     groups.set(key, group);
@@ -405,6 +407,7 @@ function summarizeBatches(reports) {
       finishedAt: entries.at(-1)?.finishedAt ?? null,
       metrics: readBatchMetrics(entries),
       receivedSamples: entries.length,
+      roleId: first.roleId ?? null,
       sequences,
       signatureConsistent: signatures.size === 1,
     };
@@ -413,6 +416,7 @@ function summarizeBatches(reports) {
 
 function readBatchMetrics(reports) {
   const frameSamples = reports.flatMap((report) => report.workerRaf?.samples ?? []);
+  const selfDriveSamples = reports.flatMap((report) => report.selfDrive?.samples ?? []);
   const workerThroughput = reports.flatMap((report) =>
     finiteValues([report.canvas?.worker?.operationsPerSecond]),
   );
@@ -426,6 +430,14 @@ function readBatchMetrics(reports) {
       sampleCount: frameSamples.length,
       unit: "ms",
       value: percentile(frameSamples, 0.95),
+    };
+  }
+  if (selfDriveSamples.length > 0) {
+    metrics.selfDriveP95Ms = {
+      better: "lower",
+      sampleCount: selfDriveSamples.length,
+      unit: "ms",
+      value: percentile(selfDriveSamples, 0.95),
     };
   }
   if (workerThroughput.length > 0) {
@@ -450,7 +462,7 @@ function readBatchMetrics(reports) {
 function compareBatches(batches) {
   const groups = new Map();
   for (const batch of batches) {
-    const key = `${batch.deviceId}\0${batch.buildId}`;
+    const key = `${batch.roleId ?? "unassigned"}\0${batch.deviceId}\0${batch.buildId}`;
     const group = groups.get(key) ?? [];
     group.push(batch);
     groups.set(key, group);
@@ -467,8 +479,13 @@ function compareBatches(batches) {
       if (previous.capabilitySignature !== current.capabilitySignature) {
         reasons.push("capability/transport signature differs between batches");
       }
-      checkDelta(metrics, "workerRafP95Ms", 10, reasons);
-      checkDelta(metrics, "workerCanvasOperationsPerSecondMedian", 5, reasons);
+      checkFirstAvailableDelta(metrics, ["workerRafP95Ms", "selfDriveP95Ms"], 10, reasons);
+      checkFirstAvailableDelta(
+        metrics,
+        ["workerCanvasOperationsPerSecondMedian", "mainCanvasOperationsPerSecondMedian"],
+        5,
+        reasons,
+      );
       return {
         currentBatchId: current.batchId,
         group,
@@ -479,6 +496,15 @@ function compareBatches(batches) {
       };
     }),
   );
+}
+
+function checkFirstAvailableDelta(metrics, names, maximumPercent, reasons) {
+  const name = names.find((candidate) => metrics[candidate] !== undefined);
+  if (name === undefined) {
+    reasons.push(`${names.join(" or ")} is missing`);
+    return;
+  }
+  checkDelta(metrics, name, maximumPercent, reasons);
 }
 
 function checkDelta(metrics, name, maximumPercent, reasons) {

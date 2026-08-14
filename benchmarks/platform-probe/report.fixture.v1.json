@@ -7,6 +7,7 @@
     "kind": "single"
   },
   "deviceId": "local-dev",
+  "roleId": "desktop-chromium",
   "editing": {
     "composing": false,
     "droppedRecords": 0,

@@ -15,6 +15,7 @@
     "format:check": "prettier --check . && cargo fmt --all -- --check",
     "ime:replay": "node scripts/replay-ime.mjs",
     "lint": "eslint .",
+    "m0:evidence": "node scripts/audit-m0-evidence.mjs",
     "probe:dev": "pnpm wasm:build && pnpm --filter @dopejs/platform-probe dev",
     "probe:dev:no-isolation": "pnpm wasm:build && pnpm --filter @dopejs/platform-probe dev:no-isolation",
     "probe:collect": "node scripts/collect-probes.mjs",

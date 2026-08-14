@@ -14,6 +14,7 @@ const schemaFiles = [
   "benchmark-suite.schema.json",
   "ime-recording.schema.json",
   "ime-sequence.schema.json",
+  "m0-evidence-manifest.schema.json",
   "platform-probe-report.schema.json",
 ];
 
@@ -100,6 +101,14 @@ if (platformReport.editing !== undefined) {
     }
   }
 }
+
+const m0ManifestPath = path.join(repositoryRoot, "benchmarks/m0/evidence-manifest.fixture.v1.json");
+const m0Manifest = await readJson(m0ManifestPath);
+validate(
+  ajv.getSchema("https://dopejs.dev/schemas/m0-evidence-manifest-v1.json"),
+  m0Manifest,
+  "evidence-manifest.fixture.v1.json",
+);
 
 process.stdout.write("contract fixtures valid\n");
 

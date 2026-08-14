@@ -2,7 +2,8 @@
 
 > 审计日期：2026-08-14
 >
-> 基准提交：`9813e32f85287564f30fac027312d92aed28a9da`
+> 审计范围：当前分支 HEAD；初始平台探针基准为
+> `9813e32f85287564f30fac027312d92aed28a9da`。
 >
 > 规则：只有可复现的当前证据才能标记完成；实现存在但未在要求的平台验证，仍为未完成。
 
@@ -20,9 +21,9 @@
 | Rust workspace、TS monorepo、格式/lint/test/build/CI | 完成       | 本地 `pnpm check`；GitHub CI run `31796925527` 在基准提交通过            | 新变更推送后仍须保持绿色                 |
 | ADR、benchmark fixture 规范、性能数据格式            | 完成       | `docs/adr/`、versioned suite/schemas、`pnpm contracts:check`             | 后续契约变更必须版本化                   |
 | 六类代表性场景                                       | 完成       | `benchmarks/suite.v1.json` 固定场景、seed、viewport、workload 与 metrics | runner 随可执行引擎纵向切片实现          |
-| 固定设备矩阵与采样口径                               | 进行中     | `docs/device-matrix.md`、`docs/benchmark-protocol.md`                    | 为必需角色分配具体物理资产               |
+| 固定设备矩阵与采样口径                               | 进行中     | 文档、role/device 分离契约、`m0:evidence` 七角色登记门禁                 | 为必需角色分配具体物理资产               |
 | 外部依赖、试点业务与 M0 输入                         | 外部待验证 | 风险与决策项已列入计划                                                   | 业务 owner、COOP/COEP 影响盘点、试点场景 |
-| 同设备可复现                                         | 进行中     | 5+15 batch runner、完整性与 10%/5% 自动判定；双样本本地 E2E 通过         | 正式设备仍需两组各 15 次采集             |
+| 同设备可复现                                         | 进行中     | warmup/sample 均归档；两组 5+15 完整性与 10%/5% 可执行门禁               | 正式设备仍需两组 5+15 采集               |
 | 报告包含环境、build/device/run id、原始样本          | 完成       | 报告 schema、JSON 导出、CI schema/fixture 校验与真实报告验证             | 正式基线禁止本地占位标识                 |
 
 ## M0
@@ -38,7 +39,7 @@
 | COOP/COEP 业务可行性               | 外部待验证 | 本地 Vite 隔离头、响应头/跨域子资源审计工具                       | 真实业务 URL、登录态、动态资源与业务结论 |
 | EditContext/输入代理能力矩阵       | 进行中     | v2 schema/导出/replay/认证归档；Chrome 两路径通过本地 E2E         | 真实多 OS/IME、软键盘和候选窗证据        |
 | 真机采集、上传与趋势               | 进行中     | 认证/TLS 采集器、5+15 batch、不可覆盖归档、summary v2/趋势页 E2E  | 物理设备采集与外部持久存储保留策略       |
-| Go / Pivot / Stop ADR              | 未开始     | ADR 模板                                                          | 上述证据齐备后的正式决策                 |
+| Go / Pivot / Stop ADR              | 未开始     | manifest + ADR digest/决策时序门禁                                | 上述证据齐备后的正式决策                 |
 
 ## 当前结论
 

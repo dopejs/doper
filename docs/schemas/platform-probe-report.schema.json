@@ -34,6 +34,7 @@
     "finishedAt": { "type": "string", "format": "date-time" },
     "messageBackpressure": { "$ref": "#/$defs/messageBackpressureResult" },
     "messageCopyCost": { "$ref": "#/$defs/messageCopyCostResult" },
+    "roleId": { "$ref": "#/$defs/platformRoleId" },
     "runId": { "type": "string", "format": "uuid" },
     "sabBackpressure": { "$ref": "#/$defs/sabBackpressureResult" },
     "sabLatency": { "$ref": "#/$defs/timingResult" },
@@ -335,6 +336,17 @@
           "items": { "$ref": "#/$defs/messageCopyCostCase" }
         }
       }
+    },
+    "platformRoleId": {
+      "enum": [
+        "android-low",
+        "android-mid",
+        "desktop-chromium",
+        "desktop-firefox",
+        "desktop-safari",
+        "ios-baseline",
+        "ios-current"
+      ]
     },
     "sabBackpressureResult": {
       "type": "object",

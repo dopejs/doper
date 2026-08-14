@@ -390,7 +390,7 @@ async function main() {
   });
   const protocol = options.cert === undefined ? "http" : "https";
   process.stdout.write(
-    `doper probe collector: ${protocol}://${options.host}:${String(options.port)}/?collector=1&deviceId=<asset-id>\narchive: ${path.resolve(options.output)}\n`,
+    `doper probe collector: ${protocol}://${options.host}:${String(options.port)}/?collector=1&deviceId=<asset-id>&roleId=<role-id>\narchive: ${path.resolve(options.output)}\n`,
   );
 }
 
