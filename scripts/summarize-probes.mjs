@@ -16,6 +16,20 @@ const metricDefinitions = {
     read: (report) => report.messageBackpressure?.acceptedPerSecond,
     unit: "items/s",
   },
+  messageCopy1MiBEffectiveMiBPerSecond: {
+    better: "higher",
+    read: (report) =>
+      report.messageCopyCost?.cases.find((result) => result.payloadBytes === 1_048_576)
+        ?.effectiveMiBPerSecond,
+    unit: "MiB/s",
+  },
+  messageCopy1MiBP95Ms: {
+    better: "lower",
+    read: (report) =>
+      report.messageCopyCost?.cases.find((result) => result.payloadBytes === 1_048_576)?.summary
+        .p95,
+    unit: "ms",
+  },
   recommendedTransportMaxFrameGapMs: {
     better: "lower",
     read: (report) => {
@@ -141,7 +155,38 @@ export async function validateProbeReport(
   if (report.messageBackpressure !== undefined) {
     validateMessageBackpressureEvidence(report.messageBackpressure, label);
   }
+  if (report.messageCopyCost !== undefined) {
+    validateMessageCopyCostEvidence(report.messageCopyCost, label);
+  }
   return report;
+}
+
+function validateMessageCopyCostEvidence(result, label) {
+  let previousPayloadBytes = 0;
+  for (const entry of result.cases) {
+    const totalBytes = entry.payloadBytes * entry.iterations;
+    const totalDurationMs = entry.roundTripMs.reduce((total, sample) => total + sample, 0);
+    const effectiveMiBPerSecond =
+      totalDurationMs === 0
+        ? 0
+        : roundMetric(totalBytes / (1024 * 1024) / (totalDurationMs / 1000));
+    const summary = summarizeMetricSamples(entry.roundTripMs);
+    const summaryMatches = Object.entries(summary).every(
+      ([name, value]) => entry.summary[name] === value,
+    );
+    if (
+      entry.payloadBytes <= previousPayloadBytes ||
+      entry.receivedCount !== entry.iterations ||
+      entry.roundTripMs.length !== entry.iterations ||
+      entry.totalBytes !== totalBytes ||
+      entry.effectiveMiBPerSecond !== effectiveMiBPerSecond ||
+      !entry.verified ||
+      !summaryMatches
+    ) {
+      throw new Error(`${label} has inconsistent postMessage payload cost evidence`);
+    }
+    previousPayloadBytes = entry.payloadBytes;
+  }
 }
 
 function validateMessageBackpressureEvidence(result, label) {
@@ -195,6 +240,29 @@ function validateMessageBackpressureEvidence(result, label) {
 function roundMetric(value, digits = 3) {
   const scale = 10 ** digits;
   return Math.round(value * scale) / scale;
+}
+
+function summarizeMetricSamples(samples) {
+  const sorted = samples.toSorted((left, right) => left - right);
+  const total = sorted.reduce((sum, sample) => sum + sample, 0);
+  return {
+    count: sorted.length,
+    max: sorted.at(-1),
+    mean: total / sorted.length,
+    min: sorted[0],
+    p50: metricPercentile(sorted, 0.5),
+    p95: metricPercentile(sorted, 0.95),
+    p99: metricPercentile(sorted, 0.99),
+  };
+}
+
+function metricPercentile(sorted, quantile) {
+  const index = (sorted.length - 1) * quantile;
+  const lowerIndex = Math.floor(index);
+  const upperIndex = Math.ceil(index);
+  const lower = sorted[lowerIndex];
+  const upper = sorted[upperIndex] ?? lower;
+  return lower + (upper - lower) * (index - lowerIndex);
 }
 
 function validateBackpressureEvidence(result, label) {
@@ -431,6 +499,8 @@ function capabilitySignature(report) {
     editContext: report.environment?.editContext ?? null,
     hardwareConcurrency: report.environment?.hardwareConcurrency ?? null,
     messageBackpressureHandled: report.messageBackpressure?.backpressureHandled ?? null,
+    messageCopyCostPayloadBytes:
+      report.messageCopyCost?.cases.map((result) => result.payloadBytes) ?? null,
     offscreenCanvas: report.environment?.offscreenCanvas ?? null,
     recommendedTransport: report.transport?.recommendedMode ?? null,
     sabBackpressureHandled: report.sabBackpressure?.backpressureHandled ?? null,

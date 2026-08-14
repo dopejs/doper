@@ -145,6 +145,36 @@ describe("summarizeReports", () => {
       /inconsistent postMessage backpressure/u,
     );
   });
+
+  it("recomputes postMessage payload samples, summaries, and throughput", async () => {
+    const messageCopyCost = {
+      cases: [
+        {
+          effectiveMiBPerSecond: 0.488,
+          iterations: 2,
+          payloadBytes: 1024,
+          receivedCount: 2,
+          roundTripMs: [1, 3],
+          summary: { count: 2, max: 3, mean: 2, min: 1, p50: 2, p95: 2.9, p99: 2.98 },
+          totalBytes: 2048,
+          verified: true,
+        },
+      ],
+    };
+    const validReport = report({ messageCopyCost });
+    await expect(validateProbeReport(validReport)).resolves.toBe(validReport);
+
+    const forgedSummary = report({
+      messageCopyCost: {
+        cases: [
+          { ...messageCopyCost.cases[0], summary: { ...messageCopyCost.cases[0].summary, p95: 0 } },
+        ],
+      },
+    });
+    await expect(validateProbeReport(forgedSummary)).rejects.toThrow(
+      /inconsistent postMessage payload cost/u,
+    );
+  });
 });
 
 function batchReport(batchId, sequence, low, high, throughput, runId) {

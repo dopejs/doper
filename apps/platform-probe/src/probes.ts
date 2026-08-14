@@ -7,6 +7,7 @@ import {
   ringOccupancy,
   tryPublishSequence,
 } from "./backpressure";
+import { analyzeMessageCopyCost, payloadChecksum } from "./message-copy-cost";
 import type {
   CanvasProbeResult,
   FrameContinuityResult,
@@ -15,6 +16,12 @@ import type {
   MessageBackpressurePortMessage,
   MessageBackpressureResult,
   MessageBackpressureWorkerResult,
+  MessageCopyCostAck,
+  MessageCopyCostCaseResult,
+  MessageCopyCostPayload,
+  MessageCopyCostPortMessage,
+  MessageCopyCostResult,
+  MessageCopyCostWorkerResult,
   RenderContinuityPayload,
   SabBackpressurePayload,
   SabBackpressureResult,
@@ -310,6 +317,114 @@ export class PlatformProbeRunner {
         },
         consumed,
       );
+    } finally {
+      channel.port1.removeEventListener("message", handleAcknowledgement);
+      channel.port1.close();
+    }
+  }
+
+  async messageCopyCost(): Promise<MessageCopyCostResult> {
+    const configurations = [
+      { iterations: 128, payloadBytes: 256 },
+      { iterations: 64, payloadBytes: 4096 },
+      { iterations: 32, payloadBytes: 65_536 },
+      { iterations: 8, payloadBytes: 1_048_576 },
+    ] as const;
+    const cases: MessageCopyCostCaseResult[] = [];
+    for (const configuration of configurations) {
+      cases.push(
+        await this.#messageCopyCostCase(configuration.payloadBytes, configuration.iterations),
+      );
+    }
+    return { cases };
+  }
+
+  async #messageCopyCostCase(
+    payloadBytes: number,
+    iterations: number,
+  ): Promise<MessageCopyCostCaseResult> {
+    const source = new Uint8Array(payloadBytes);
+    for (let index = 0; index < source.length; index += 1) {
+      source[index] = (index * 31 + 17) & 0xff;
+    }
+    const expectedChecksum = payloadChecksum(source);
+    const channel = new MessageChannel();
+    let acknowledgementError: Error | null = null;
+    let acknowledgedSequence = 0;
+    let pendingAcknowledgement: {
+      readonly reject: (error: Error) => void;
+      readonly resolve: () => void;
+      readonly sequence: number;
+      readonly timeout: ReturnType<typeof setTimeout>;
+    } | null = null;
+    const handleAcknowledgement = (event: MessageEvent<MessageCopyCostAck>): void => {
+      const acknowledgement = event.data;
+      const pending = pendingAcknowledgement;
+      if (
+        pending === null ||
+        acknowledgement.kind !== "ack" ||
+        acknowledgement.sequence !== pending.sequence ||
+        acknowledgement.checksum !== expectedChecksum
+      ) {
+        acknowledgementError = new Error("message copy cost received an invalid acknowledgement");
+        if (pending !== null) {
+          clearTimeout(pending.timeout);
+          pendingAcknowledgement = null;
+          pending.reject(acknowledgementError);
+        }
+        return;
+      }
+      clearTimeout(pending.timeout);
+      pendingAcknowledgement = null;
+      acknowledgedSequence = acknowledgement.sequence;
+      pending.resolve();
+    };
+    channel.port1.addEventListener("message", handleAcknowledgement);
+    channel.port1.start();
+    const payload: MessageCopyCostPayload = {
+      expectedChecksum,
+      iterations,
+      payloadBytes,
+      port: channel.port2,
+    };
+    const workerResult = this.#worker.call<MessageCopyCostWorkerResult>(
+      "message-copy-cost",
+      payload,
+      15_000,
+      [channel.port2],
+    );
+    const roundTripMs: number[] = [];
+    try {
+      for (let sequence = 1; sequence <= iterations; sequence += 1) {
+        throwIfError(acknowledgementError);
+        const startedAt = performance.now();
+        const message: MessageCopyCostPortMessage = {
+          data: source.buffer,
+          kind: "payload",
+          sequence,
+        };
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            pendingAcknowledgement = null;
+            reject(new Error(`message copy acknowledgement ${sequence} timed out`));
+          }, 5000);
+          pendingAcknowledgement = { reject, resolve, sequence, timeout };
+          try {
+            channel.port1.postMessage(message);
+          } catch (error) {
+            clearTimeout(timeout);
+            pendingAcknowledgement = null;
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+        if (acknowledgedSequence !== sequence) {
+          throw new Error(`message copy acknowledgement ${sequence} was not observed`);
+        }
+        roundTripMs.push(round(performance.now() - startedAt));
+      }
+      const done: MessageCopyCostPortMessage = { kind: "done" };
+      channel.port1.postMessage(done);
+      return analyzeMessageCopyCost(payloadBytes, iterations, roundTripMs, await workerResult);
     } finally {
       channel.port1.removeEventListener("message", handleAcknowledgement);
       channel.port1.close();

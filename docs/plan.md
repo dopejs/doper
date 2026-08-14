@@ -168,7 +168,8 @@ W5 不是收尾工作。每个功能必须把对应测试和观测能力作为�
 > 重复性判定已完成本地 E2E；IME recording v2 的 schema、页面导出、确定性 replay
 > 与认证不可覆盖归档已完成，Chrome 两条输入路径也已完成本地验证；bounded SAB ring
 > 的溢出记账、序列单调性与最终排空，以及 bounded postMessage 的 in-flight/ACK
-> 上限、序列一致性与排空，均已通过浏览器和服务端回读；
+> 上限、序列一致性与排空，均已通过浏览器和服务端回读；postMessage 从 256B 到
+> 1MiB 的 structured-clone/送达/全量校验/ACK 成本曲线也已完成本地验证；
 > 真机矩阵、业务 COOP/COEP 结论、移动端冷启动与多输入法录制回放尚未完成。
 
 目标：验证双时钟方案是否成立，确定平台能力矩阵和降级策略。

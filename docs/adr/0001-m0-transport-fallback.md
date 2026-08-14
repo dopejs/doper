@@ -55,7 +55,13 @@ high-watermark 为 32，最终 read/write cursor 均为 1032。服务端从原�
 最终 in-flight 为 0；1024 个 ACK 与 Worker 消费序列逐项相等，最后
 accepted/consumed/acknowledged sequence 均为 4072。服务端从原始消费和 ACK 序列
 重新计算全部不变式。该结果证明应用层可限制 in-flight 并可靠排空，不代表浏览器
-内部消息队列天然有界，也没有覆盖不同 payload 大小的复制成本。
+内部消息队列天然有界。
+
+同一环境的 payload 成本探针串行发送并结构化克隆相同 payload，Worker 逐字节校验
+后 ACK。256B、4KiB、64KiB、1MiB 的 P95 round-trip 分别为 0.165ms、0.363ms、
+1.367ms、28.986ms，1MiB 有效吞吐为 67.923MiB/s。服务端从原始样本复算 summary、
+总字节数和吞吐。结果包含消息调度和校验成本，不声称是纯内存复制带宽；单次开发机
+数据仅验证探针，目标设备分布仍是接受本 ADR 的前置证据。
 
 仍需目标低端 Android、iOS、Safari、Firefox 与业务 COOP/COEP 结论后才能把本 ADR
 改为 Accepted。
@@ -64,7 +70,7 @@ accepted/consumed/acknowledged sequence 均为 4072。服务端从原始消费�
 
 - Host 必须维护三档能力探测和行为等价测试。
 - postMessage 是正式降级路径，不是临时调试代码；采用有界 in-flight/ack 背压，
-  并继续记录不同 payload 大小的复制成本。
+  并持续记录不同 payload 大小的端到端成本。
 - main-thread 保证功能，不承诺主线程阻塞时继续呈现，遥测必须区分该模式。
 - frame/anchor 原始样本、选择原因与错误必须进入报告，便于线上解释降级比例。
 

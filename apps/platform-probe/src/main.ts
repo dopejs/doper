@@ -4,6 +4,7 @@ import { EditingProbe, type EditingProbeSnapshot } from "./editing-probe";
 import type {
   CanvasProbeResult,
   MessageBackpressureResult,
+  MessageCopyCostResult,
   SabBackpressureResult,
   TimingProbeResult,
   TransportMatrixResult,
@@ -38,6 +39,7 @@ interface ProbeReport {
   errors?: Record<string, string>;
   finishedAt?: string;
   messageBackpressure?: MessageBackpressureResult;
+  messageCopyCost?: MessageCopyCostResult;
   runId: string;
   sabBackpressure?: SabBackpressureResult;
   sabLatency?: TimingProbeResult;
@@ -175,6 +177,7 @@ async function runAll(): Promise<void> {
   delete report.finishedAt;
   delete report.canvas;
   delete report.messageBackpressure;
+  delete report.messageCopyCost;
   delete report.sabBackpressure;
   delete report.sabLatency;
   delete report.selfDrive;
@@ -230,6 +233,19 @@ async function runAll(): Promise<void> {
       if (!messageBackpressure.backpressureHandled && report.errors !== undefined) {
         report.errors["message-backpressure"] =
           "bounded postMessage failed credit, acknowledgement, ordering, or drain invariants";
+      }
+    }
+    const messageCopyCost = await runProbe(
+      "message-copy-cost",
+      "message-copy-cost-result",
+      () => runner.messageCopyCost(),
+      compactMessageCopyCost,
+    );
+    if (messageCopyCost !== undefined) {
+      report.messageCopyCost = messageCopyCost;
+      if (messageCopyCost.cases.some((result) => !result.verified) && report.errors !== undefined) {
+        report.errors["message-copy-cost"] =
+          "postMessage payload copy or worker verification failed";
       }
     }
     const selfDrive = await runProbe(
@@ -432,6 +448,12 @@ function compactSabBackpressure(result: SabBackpressureResult): unknown {
 function compactMessageBackpressure(result: MessageBackpressureResult): unknown {
   const { acknowledgedSequences: _, consumedSequences: __, ...summary } = result;
   return summary;
+}
+
+function compactMessageCopyCost(result: MessageCopyCostResult): unknown {
+  return {
+    cases: result.cases.map(({ roundTripMs: _, ...summary }) => summary),
+  };
 }
 
 function compactTransportMatrix(result: TransportMatrixResult): unknown {

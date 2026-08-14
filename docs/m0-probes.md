@@ -152,6 +152,7 @@ script、style、image、media、font preload 与 iframe，并检查跨域资源
 | SAB timestamp latency | 60 个主线程 rAF 发布时间到 Worker 观测时间            | 评估共享传输延迟                  |
 | Bounded SAB ring      | 容量 32，生产 4096 项并故意预填充溢出                 | 验证背压、丢弃记账、顺序与排空    |
 | Bounded postMessage   | 容量 32，生产 4096 项，以逐项 ACK 归还发送额度        | 验证 in-flight 上限、顺序与排空   |
+| postMessage payload   | 256B/4KiB/64KiB/1MiB 串行往返，Worker 全量 checksum   | 测量克隆、送达、校验和 ACK 成本   |
 | Main-thread stall     | Worker 自驱 450ms，主线程延迟 50ms 后阻塞 200ms       | 验证 Worker 时钟是否继续推进      |
 | Transport continuity  | 三档各执行 500ms Canvas2D 绘制，中间阻塞主线程 200ms  | 验证自动选择、实际 paint 和帧序列 |
 | Canvas2D throughput   | 主线程与 Worker 各执行 250ms fill、250ms scroll-copy  | 形成相同实现的粗粒度对照          |
@@ -188,6 +189,10 @@ shaping 路径，并将结果与
   `accepted + dropped == produced`、high-watermark 等于容量、最终 in-flight 为 0、
   消费严格递增且每个 ACK 与消费序列逐项相等时才标记 `backpressureHandled`。服务端
   同样从原始序列复算，不信任客户端结论。
+- postMessage payload cost 保存每次 round-trip 原始样本、payload 大小、迭代数、
+  全量 checksum 结果与有效 MiB/s。服务端重新计算 summary、总字节数和吞吐，并要求
+  payload case 严格递增。该指标包含 structured clone、消息调度、Worker 全量读取和
+  ACK，不解释为纯内存复制带宽。
 - 本地桌面结果只用于校验探针自身，不能替代低端 Android、iOS 与目标 PC
   的重复采样。
 
@@ -210,6 +215,11 @@ Canvas 编辑能收到 `textupdate` 并执行 grapheme 级光标移动。隔离�
 sequence 均为 4072。完整页面报告通过 schema 和服务端不变式回读。该结果证明
 发送方主动限制 in-flight 并按 ACK 归还额度的原型，不代表浏览器内部消息队列天然
 有界，也不替代不同 payload 大小的复制成本测量。
+同一环境进一步完成 payload 成本曲线：256B、4KiB、64KiB、1MiB 的 P95 round-trip
+分别为 0.165ms、0.363ms、1.367ms、28.986ms，1MiB 串行有效吞吐为
+67.923MiB/s；全部 payload 在 Worker 逐字节 checksum 后 ACK，原始样本、summary、
+总字节数和吞吐均通过服务端复算。单次开发机数据只证明测量链路，不进入产品性能
+基线，也不能替代目标设备重复采样。
 production build 的同源采集器也已完成本地 E2E：服务端 schema 校验、201 写入、
 重复 run 409、防匿名写入 401、汇总 API、趋势页以及双样本 batch 自动归档均可
 工作。该结果证明采集链路，不替代物理目标设备数据或外部存储保留策略。

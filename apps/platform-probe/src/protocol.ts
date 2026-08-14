@@ -3,6 +3,7 @@ import type { SampleSummary } from "./metrics";
 export type WorkerMethod =
   | "capabilities"
   | "message-backpressure"
+  | "message-copy-cost"
   | "offscreen-canvas"
   | "render-continuity"
   | "sab-backpressure"
@@ -132,6 +133,41 @@ export interface MessageBackpressureResult extends MessageBackpressureWorkerResu
   readonly latestConsumedSequence: number;
   readonly producedCount: number;
   readonly sequenceMonotonic: boolean;
+}
+
+export interface MessageCopyCostPayload {
+  readonly expectedChecksum: number;
+  readonly iterations: number;
+  readonly payloadBytes: number;
+  readonly port: MessagePort;
+}
+
+export type MessageCopyCostPortMessage =
+  | { readonly kind: "done" }
+  | { readonly data: ArrayBuffer; readonly kind: "payload"; readonly sequence: number };
+
+export interface MessageCopyCostAck {
+  readonly checksum: number;
+  readonly kind: "ack";
+  readonly sequence: number;
+}
+
+export interface MessageCopyCostWorkerResult {
+  readonly receivedCount: number;
+  readonly verified: boolean;
+}
+
+export interface MessageCopyCostCaseResult extends MessageCopyCostWorkerResult {
+  readonly effectiveMiBPerSecond: number;
+  readonly iterations: number;
+  readonly payloadBytes: number;
+  readonly roundTripMs: readonly number[];
+  readonly summary: SampleSummary;
+  readonly totalBytes: number;
+}
+
+export interface MessageCopyCostResult {
+  readonly cases: readonly MessageCopyCostCaseResult[];
 }
 
 export interface RenderContinuityPayload {

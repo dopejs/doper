@@ -33,6 +33,7 @@
     },
     "finishedAt": { "type": "string", "format": "date-time" },
     "messageBackpressure": { "$ref": "#/$defs/messageBackpressureResult" },
+    "messageCopyCost": { "$ref": "#/$defs/messageCopyCostResult" },
     "runId": { "type": "string", "format": "uuid" },
     "sabBackpressure": { "$ref": "#/$defs/sabBackpressureResult" },
     "sabLatency": { "$ref": "#/$defs/timingResult" },
@@ -291,6 +292,48 @@
         "latestConsumedSequence": { "type": "integer", "minimum": 0 },
         "producedCount": { "type": "integer", "minimum": 1 },
         "sequenceMonotonic": { "type": "boolean" }
+      }
+    },
+    "messageCopyCostCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "effectiveMiBPerSecond",
+        "iterations",
+        "payloadBytes",
+        "receivedCount",
+        "roundTripMs",
+        "summary",
+        "totalBytes",
+        "verified"
+      ],
+      "properties": {
+        "effectiveMiBPerSecond": { "type": "number", "minimum": 0 },
+        "iterations": { "type": "integer", "minimum": 1, "maximum": 256 },
+        "payloadBytes": { "type": "integer", "minimum": 1, "maximum": 4194304 },
+        "receivedCount": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "roundTripMs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "type": "number", "minimum": 0 }
+        },
+        "summary": { "$ref": "#/$defs/sampleSummary" },
+        "totalBytes": { "type": "integer", "minimum": 1, "maximum": 1073741824 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "messageCopyCostResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cases"],
+      "properties": {
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/messageCopyCostCase" }
+        }
       }
     },
     "sabBackpressureResult": {

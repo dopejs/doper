@@ -16,6 +16,10 @@ import type {
   MessageBackpressurePayload,
   MessageBackpressurePortMessage,
   MessageBackpressureWorkerResult,
+  MessageCopyCostAck,
+  MessageCopyCostPayload,
+  MessageCopyCostPortMessage,
+  MessageCopyCostWorkerResult,
   RenderContinuityPayload,
   SabBackpressurePayload,
   SabBackpressureWorkerResult,
@@ -29,6 +33,7 @@ import type {
   WorkerResponse,
 } from "./protocol";
 import { analyzeContinuity, clampPhaseCorrection, nextAlignedFrame } from "./transport";
+import { payloadChecksum } from "./message-copy-cost";
 
 const scope = self as DedicatedWorkerGlobalScope;
 let latestMessageAnchor: ClockAnchorMessage | null = null;
@@ -59,6 +64,8 @@ function run(request: WorkerRequest): unknown {
       return capabilities();
     case "message-backpressure":
       return messageBackpressureProbe(request.payload as MessageBackpressurePayload);
+    case "message-copy-cost":
+      return messageCopyCostProbe(request.payload as MessageCopyCostPayload);
     case "offscreen-canvas":
       return offscreenCanvasProbe();
     case "render-continuity":
@@ -72,6 +79,79 @@ function run(request: WorkerRequest): unknown {
     case "worker-raf":
       return workerRafProbe(request.payload as WorkerRafPayload);
   }
+}
+
+async function messageCopyCostProbe(
+  payload: MessageCopyCostPayload,
+): Promise<MessageCopyCostWorkerResult> {
+  if (!(payload.port instanceof MessagePort)) {
+    throw new TypeError("message copy cost probe requires a transferred MessagePort");
+  }
+  if (
+    !Number.isInteger(payload.payloadBytes) ||
+    payload.payloadBytes < 1 ||
+    payload.payloadBytes > 4_194_304
+  ) {
+    throw new RangeError("message copy payloadBytes must be from 1 to 4194304");
+  }
+  if (!Number.isInteger(payload.iterations) || payload.iterations < 1 || payload.iterations > 256) {
+    throw new RangeError("message copy iterations must be from 1 to 256");
+  }
+  if (
+    !Number.isInteger(payload.expectedChecksum) ||
+    payload.expectedChecksum < 0 ||
+    payload.expectedChecksum > 0xffffffff
+  ) {
+    throw new RangeError("message copy expectedChecksum must be a uint32");
+  }
+
+  return new Promise<MessageCopyCostWorkerResult>((resolve, reject) => {
+    let receivedCount = 0;
+    const cleanup = (): void => {
+      payload.port.removeEventListener("message", handleMessage);
+      payload.port.close();
+    };
+    const fail = (error: unknown): void => {
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    const handleMessage = (event: MessageEvent<MessageCopyCostPortMessage>): void => {
+      try {
+        const message = event.data;
+        if (message.kind === "done") {
+          if (receivedCount !== payload.iterations) {
+            throw new Error("message copy stream ended before every payload was received");
+          }
+          cleanup();
+          resolve({ receivedCount, verified: true });
+          return;
+        }
+        if (
+          message.kind !== "payload" ||
+          message.sequence !== receivedCount + 1 ||
+          !(message.data instanceof ArrayBuffer) ||
+          message.data.byteLength !== payload.payloadBytes
+        ) {
+          throw new Error("message copy stream contains an invalid payload");
+        }
+        const checksum = payloadChecksum(new Uint8Array(message.data));
+        if (checksum !== payload.expectedChecksum) {
+          throw new Error("message copy payload checksum mismatch");
+        }
+        receivedCount += 1;
+        const acknowledgement: MessageCopyCostAck = {
+          checksum,
+          kind: "ack",
+          sequence: message.sequence,
+        };
+        payload.port.postMessage(acknowledgement);
+      } catch (error) {
+        fail(error);
+      }
+    };
+    payload.port.addEventListener("message", handleMessage);
+    payload.port.start();
+  });
 }
 
 async function messageBackpressureProbe(
