@@ -17,7 +17,8 @@ Existing engines are migration inputs, not implementation blueprints or
 performance baselines. Redesign the architecture from first principles. Do not
 copy source, reproduce internal abstractions by default, or carry forward
 compatibility quirks without a measured product need. Performance gates use
-doper's absolute targets and target-branch regression data.
+doper's absolute targets. Target-branch and historical data are diagnostic
+signals only; they must not become a substitute for the absolute targets.
 
 Do not present planned packages, crates, APIs, benchmarks, or platform support
 as implemented until they exist in the repository and have been verified.
@@ -156,8 +157,10 @@ Optimize only against representative benchmarks or profiles. For hot paths:
   evict under memory pressure.
 - Record cache hit rate, over-invalidation rate, frame phases, frame-time
   percentiles, and memory usage.
-- Benchmark changes against the target branch; do not hide regressions with a
-  permanent allowlist.
+- Track changes against comparable doper history when it exists and investigate
+  material regressions, but decide acceptance from the absolute product targets.
+  External-engine comparisons are optional research, never a merge or release
+  prerequisite.
 
 Performance work must preserve the unoptimized/reference path when it is used
 as a differential oracle.
