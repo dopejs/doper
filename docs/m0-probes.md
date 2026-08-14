@@ -48,13 +48,47 @@ pnpm probe:dev:no-isolation
 pnpm probe:summary -- report-a.json report-b.json
 ```
 
-汇总格式带 `version: 1`，保留每次运行的完成状态和错误，并分别输出同设备趋势与
-同设备、同 build 的重复性差异。正式汇总默认拒绝 `local-uncommitted` 和
+汇总格式带 `version: 2`，保留每次运行的完成状态和错误，并分别输出同设备趋势、
+batch 完整性与同设备/同 build 的 batch 重复性判定。重复性只比较完整 sample batch：
+合并原始 Worker frame samples 计算 P95，并使用每轮 Canvas 吞吐中位数；帧 P95
+差异上限为 10%，吞吐差异上限为 5%，能力与 transport signature 必须一致。单次
+运行不会被误标成正式重复性。正式汇总默认拒绝 `local-uncommitted` 和
 `local-dev`；只做探针开发自检时可显式添加 `--allow-local`。使用
 `--output new-summary.json` 可创建新文件；为防止误覆盖，目标已存在时命令失败。
 
-该工具只负责验证、汇总和生成可归档 JSON，不冒充外部持久化服务。真机原始报告
-仍需上传到项目选定的不可变 artifact/指标存储，存储地址和保留策略是 M0 外部决策。
+### 真机采集服务
+
+先把 commit 固化进 production build，再启动同源采集器：
+
+```bash
+VITE_DOPER_BUILD_ID=<full-commit> pnpm build
+DOPER_PROBE_COLLECTOR_TOKEN=<at-least-24-random-characters> \
+  pnpm probe:collect -- \
+  --host 0.0.0.0 \
+  --cert /secure/server.crt \
+  --key /secure/server.key \
+  --output /mounted/immutable-probe-artifacts
+```
+
+目标设备打开采集器输出的 URL，把 `<asset-id>` 替换为 `device-matrix.md` 中登记的
+设备 ID；可追加 `&autorun=1` 自动开始。完成后在页面的 **Collector token** 输入框
+输入令牌并点击 **Archive report**。令牌只通过 Authorization header 发送，不进入
+URL、报告或归档文件。
+
+正式重复采集使用页面的 **Run batch**：默认严格执行 5 次预热和 15 次正式样本。
+成功预热不归档；正式样本各自使用新 runId 并带同一 batchId、序号和总数。预热若
+失败会先保留失败报告再停止，正式样本无论探针是否有错误都归档，summary v2 只把
+序号完整、没有错误且能力签名一致的 batch 标记为 complete。
+
+采集器会再次执行 v1 schema 与正式标识校验，并用 `wx` 语义写入
+`v1/<device>/<build>/<runId>.json`；相同 run id 返回 409，不覆盖原始证据。
+`/api/summary` 提供机器可读趋势，`/trends` 提供只读页面。启用令牌时趋势页使用
+HTTP Basic 登录，用户名为 `doper`、密码为同一令牌。
+
+默认只监听 `127.0.0.1`。绑定非 loopback 地址时，工具强制要求 TLS 证书/私钥和
+至少 24 字符令牌；证书必须被目标设备信任，否则不能把 SAB/安全上下文结果作为
+证据。输出目录仍应挂载到项目选定的持久化、备份或对象存储；本地文件系统的
+“同 run 不覆盖”不等于运维层面的不可变保留策略。
 
 ## 业务 COOP/COEP 审计
 
@@ -74,18 +108,30 @@ script、style、image、media、font preload 与 iframe，并检查跨域资源
 
 ## 采集内容
 
-| 探针                  | 当前口径                                             | 主要用途                          |
-| --------------------- | ---------------------------------------------------- | --------------------------------- |
-| Worker frame driver   | 60 个 Worker rAF 帧间隔                              | 检查可用性和帧间隔长尾            |
-| SAB timestamp latency | 60 个主线程 rAF 发布时间到 Worker 观测时间           | 评估共享传输延迟                  |
-| Main-thread stall     | Worker 自驱 450ms，主线程延迟 50ms 后阻塞 200ms      | 验证 Worker 时钟是否继续推进      |
-| Transport continuity  | 三档各执行 500ms Canvas2D 绘制，中间阻塞主线程 200ms | 验证自动选择、实际 paint 和帧序列 |
-| Canvas2D throughput   | 主线程与 Worker 各执行 250ms fill、250ms scroll-copy | 形成相同实现的粗粒度对照          |
-| Rust/WASM cold start  | no-store fetch、instantiate、首次导出调用            | 跟踪最小基线和预算余量            |
-| Canvas IME            | EditContext；不可用时使用唯一的隐藏 textarea proxy   | 验证 caret/selection/IME 基础路径 |
+| 探针                  | 当前口径                                              | 主要用途                          |
+| --------------------- | ----------------------------------------------------- | --------------------------------- |
+| Worker frame driver   | 60 个 Worker rAF 帧间隔                               | 检查可用性和帧间隔长尾            |
+| SAB timestamp latency | 60 个主线程 rAF 发布时间到 Worker 观测时间            | 评估共享传输延迟                  |
+| Main-thread stall     | Worker 自驱 450ms，主线程延迟 50ms 后阻塞 200ms       | 验证 Worker 时钟是否继续推进      |
+| Transport continuity  | 三档各执行 500ms Canvas2D 绘制，中间阻塞主线程 200ms  | 验证自动选择、实际 paint 和帧序列 |
+| Canvas2D throughput   | 主线程与 Worker 各执行 250ms fill、250ms scroll-copy  | 形成相同实现的粗粒度对照          |
+| Rust/WASM cold start  | 最小模块与代表性文本包络的 fetch/instantiate/首次调用 | 跟踪启动下界与可信预算余量        |
+| Canvas IME            | EditContext；不可用时使用唯一的隐藏 textarea proxy    | 验证 caret/selection/IME 基础路径 |
 
 SAB 延迟必须将各全局上下文的 `performance.timeOrigin + performance.now()`
 统一后再比较；直接相减两个上下文的 `performance.now()` 会得到无效结果。
+
+### WASM 预算包络
+
+`pnpm wasm:budget` 使用固定 Rust 1.96.0 release 配置链接实际 grapheme 分段和字体
+shaping 路径，并将结果与
+[`evidence/wasm-budget.v1.json`](evidence/wasm-budget.v1.json) 精确比较。当前结果为
+591,662B raw / 236,368B gzip，低于 300KB 内部包络门禁，距 400KB 产品预算剩余
+173,232B。本地 Chrome `instantiateStreaming` 的一次链路自检总计 5.405ms。
+
+该包络是保守的风险探针，不是最终 Core 大小，也不确认最终文本依赖；选择 shaping
+方案或实现实际 Core 后必须重新测真实产物。桌面启动数据不能替代目标移动设备样本。
+详见 [`adr/0002-m0-wasm-budget-envelope.md`](adr/0002-m0-wasm-budget-envelope.md)。
 
 ## 报告语义
 
@@ -106,6 +152,9 @@ Canvas 编辑能收到 `textupdate` 并执行 grapheme 级光标移动。隔离�
 无隔离环境自动选择 postMessage。两种 Worker 模式在 200ms 主线程阻塞窗口内均持续
 实际 Canvas 绘制，主线程对照出现约 200ms 帧空洞。数据见
 [`adr/0001-m0-transport-fallback.md`](adr/0001-m0-transport-fallback.md)，不进入产品性能基线。
+production build 的同源采集器也已完成本地 E2E：服务端 schema 校验、201 写入、
+重复 run 409、防匿名写入 401、汇总 API、趋势页以及双样本 batch 自动归档均可
+工作。该结果证明采集链路，不替代物理目标设备数据或外部存储保留策略。
 
 尚未验证且阻止 M0 关闭的项目包括：
 

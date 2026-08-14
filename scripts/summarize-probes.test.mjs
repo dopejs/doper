@@ -20,22 +20,20 @@ function report(overrides) {
 }
 
 describe("summarizeReports", () => {
-  it("sorts runs and computes same-build reproducibility deltas", () => {
-    const second = report({
-      finishedAt: "2026-08-14T00:01:00.000Z",
-      runId: "00000000-0000-4000-8000-000000000002",
-      workerRaf: {
-        durationMs: 1000,
-        samples: [17, 18],
-        summary: { count: 2, max: 18, mean: 17.5, min: 17, p50: 17.5, p95: 17.7975, p99: 17.9595 },
-      },
-    });
-    const summary = summarizeReports([second, report({})], "2026-08-14T00:02:00.000Z");
+  it("assesses reproducibility between complete sample batches", () => {
+    const batchA = "10000000-0000-4000-8000-000000000000";
+    const batchB = "20000000-0000-4000-8000-000000000000";
+    const reports = [
+      batchReport(batchA, 1, 16, 17, 1000, "00000000-0000-4000-8000-000000000001"),
+      batchReport(batchA, 2, 16, 17, 1020, "00000000-0000-4000-8000-000000000002"),
+      batchReport(batchB, 1, 16.8, 17.85, 1030, "00000000-0000-4000-8000-000000000003"),
+      batchReport(batchB, 2, 16.8, 17.85, 1040, "00000000-0000-4000-8000-000000000004"),
+    ];
+    const summary = summarizeReports(reports, "2026-08-14T00:10:00.000Z");
 
-    expect(summary.runs.map((run) => run.runId)).toEqual([
-      "00000000-0000-4000-8000-000000000001",
-      "00000000-0000-4000-8000-000000000002",
-    ]);
+    expect(summary.version).toBe(2);
+    expect(summary.batches).toHaveLength(2);
+    expect(summary.reproducibility[0].pass).toBe(true);
     expect(summary.reproducibility[0].metrics.workerRafP95Ms.relativeChangePercent).toBeCloseTo(
       5,
       4,
@@ -55,3 +53,34 @@ describe("summarizeReports", () => {
     });
   });
 });
+
+function batchReport(batchId, sequence, low, high, throughput, runId) {
+  return report({
+    canvas: {
+      worker: {
+        durationMs: 500,
+        operations: 500,
+        operationsPerSecond: throughput,
+        scrollCopyOperations: 100,
+        scrollCopyOperationsPerSecond: 200,
+        tileSizes: [],
+      },
+    },
+    collection: { batchId, kind: "sample", sequence, total: 2 },
+    finishedAt: `2026-08-14T00:0${String(sequence)}:00.000Z`,
+    runId,
+    workerRaf: {
+      durationMs: 1000,
+      samples: [low, high],
+      summary: {
+        count: 2,
+        max: high,
+        mean: (low + high) / 2,
+        min: low,
+        p50: (low + high) / 2,
+        p95: high,
+        p99: high,
+      },
+    },
+  });
+}

@@ -3,6 +3,9 @@
     "id": "local-uncommitted",
     "mode": "production"
   },
+  "collection": {
+    "kind": "single"
+  },
   "deviceId": "local-dev",
   "editing": {
     "composing": false,

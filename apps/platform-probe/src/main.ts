@@ -2,7 +2,12 @@ import "./style.css";
 
 import { EditingProbe, type EditingProbeSnapshot } from "./editing-probe";
 import type { CanvasProbeResult, TimingProbeResult, TransportMatrixResult } from "./protocol";
-import { PlatformProbeRunner, type EnvironmentSnapshot, type WasmProbeResult } from "./probes";
+import {
+  PlatformProbeRunner,
+  type EnvironmentSnapshot,
+  type WasmBudgetProbeResult,
+  type WasmProbeResult,
+} from "./probes";
 
 interface ProbeReport {
   build: {
@@ -13,6 +18,14 @@ interface ProbeReport {
     readonly mainThread?: CanvasProbeResult;
     readonly worker?: CanvasProbeResult;
   };
+  collection?:
+    | { readonly kind: "single" }
+    | {
+        readonly batchId: string;
+        readonly kind: "sample" | "warmup";
+        readonly sequence: number;
+        readonly total: number;
+      };
   deviceId: string;
   editing?: EditingProbeSnapshot;
   environment?: EnvironmentSnapshot;
@@ -25,12 +38,21 @@ interface ProbeReport {
   transport?: TransportMatrixResult;
   version: 1;
   wasm?: WasmProbeResult;
+  wasmBudget?: WasmBudgetProbeResult;
   workerRaf?: TimingProbeResult;
 }
 
 const runner = new PlatformProbeRunner();
+const searchParameters = new URLSearchParams(location.search);
 const configuredBuildId: unknown = Reflect.get(import.meta.env, "VITE_DOPER_BUILD_ID");
 const configuredDeviceId: unknown = Reflect.get(import.meta.env, "VITE_DOPER_DEVICE_ID");
+const requestedDeviceId = searchParameters.get("deviceId");
+const deviceId =
+  requestedDeviceId !== null && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(requestedDeviceId)
+    ? requestedDeviceId
+    : typeof configuredDeviceId === "string" && configuredDeviceId.length > 0
+      ? configuredDeviceId
+      : "local-dev";
 const report: ProbeReport = {
   build: {
     id:
@@ -39,20 +61,33 @@ const report: ProbeReport = {
         : "local-uncommitted",
     mode: import.meta.env.MODE,
   },
-  deviceId:
-    typeof configuredDeviceId === "string" && configuredDeviceId.length > 0
-      ? configuredDeviceId
-      : "local-dev",
+  deviceId,
   runId: crypto.randomUUID(),
   version: 1,
 };
 Reflect.set(window, "__DOPER_PLATFORM_PROBE_REPORT__", report);
 const runButton = element<HTMLButtonElement>("run-all");
 const exportButton = element<HTMLButtonElement>("export");
+const archiveButton = element<HTMLButtonElement>("archive");
+const archiveState = element<HTMLElement>("archive-state");
+const collectorAuth = element<HTMLLabelElement>("collector-auth");
+const collectorToken = element<HTMLInputElement>("collector-token");
+const batchControls = element<HTMLElement>("batch-controls");
+const batchWarmups = element<HTMLInputElement>("batch-warmups");
+const batchSamples = element<HTMLInputElement>("batch-samples");
+const batchButton = element<HTMLButtonElement>("run-batch");
+const batchState = element<HTMLElement>("batch-state");
 const runState = element<HTMLElement>("run-state");
 const editorMode = element<HTMLElement>("editor-mode");
 const editorLog = element<HTMLElement>("editor-log");
-const forceInputProxy = new URLSearchParams(location.search).get("editing") === "proxy";
+const forceInputProxy = searchParameters.get("editing") === "proxy";
+const collectorEnabled = searchParameters.get("collector") === "1";
+collectorAuth.hidden = !collectorEnabled;
+batchControls.hidden = !collectorEnabled;
+let batchRunning = false;
+let initialized = false;
+let probeRunning = false;
+let uploadRunning = false;
 const editingProbe = new EditingProbe(
   element<HTMLCanvasElement>("editor"),
   (snapshot) => {
@@ -66,21 +101,35 @@ const editingProbe = new EditingProbe(
 );
 
 runButton.addEventListener("click", () => {
+  report.collection = { kind: "single" };
   void runAll();
 });
 exportButton.addEventListener("click", exportReport);
+archiveButton.addEventListener("click", () => {
+  void archiveReport();
+});
+batchButton.addEventListener("click", () => {
+  void runBatch();
+});
 window.addEventListener("beforeunload", () => {
   editingProbe.dispose();
   runner.dispose();
 });
 
 void initialize();
+updateControls();
 
 async function initialize(): Promise<void> {
   try {
     report.environment = await runner.environment();
     renderCapabilities(report.environment);
     syncReportSnapshot();
+    initialized = true;
+    updateControls();
+    if (searchParameters.get("autorun") === "1") {
+      report.collection = { kind: "single" };
+      await runAll();
+    }
   } catch (error) {
     runState.textContent = "Initialization failed";
     renderError("capabilities", error);
@@ -88,8 +137,12 @@ async function initialize(): Promise<void> {
 }
 
 async function runAll(): Promise<void> {
-  runButton.disabled = true;
-  exportButton.disabled = true;
+  if (probeRunning || !initialized) {
+    return;
+  }
+  probeRunning = true;
+  updateControls();
+  archiveState.textContent = "";
   runState.textContent = "Running";
   report.runId = crypto.randomUUID();
   report.startedAt = new Date().toISOString();
@@ -99,6 +152,7 @@ async function runAll(): Promise<void> {
   delete report.selfDrive;
   delete report.transport;
   delete report.wasm;
+  delete report.wasmBudget;
   delete report.workerRaf;
   report.errors = {};
 
@@ -159,20 +213,135 @@ async function runAll(): Promise<void> {
     if (wasm !== undefined) {
       report.wasm = wasm;
     }
+    const wasmBudget = await runProbe("wasm-budget", "wasm-budget-result", () =>
+      runner.wasmBudgetColdStart(),
+    );
+    if (wasmBudget !== undefined) {
+      report.wasmBudget = wasmBudget;
+    }
     report.editing = editingProbe.snapshot();
     report.finishedAt = new Date().toISOString();
     runState.textContent =
       Object.keys(report.errors).length === 0 ? "Complete" : "Complete with gaps";
     syncReportSnapshot();
-    exportButton.disabled = false;
   } catch (error) {
+    report.errors ??= {};
+    report.errors.run = error instanceof Error ? error.message : String(error);
+    report.finishedAt = new Date().toISOString();
     runState.textContent = "Failed";
     console.error(error);
     syncReportSnapshot();
-    exportButton.disabled = false;
   } finally {
-    runButton.disabled = false;
+    probeRunning = false;
+    updateControls();
   }
+}
+
+async function archiveReport(): Promise<boolean> {
+  if (uploadRunning || report.finishedAt === undefined) {
+    return false;
+  }
+  uploadRunning = true;
+  updateControls();
+  archiveState.textContent = "Uploading…";
+  report.editing = editingProbe.snapshot();
+  syncReportSnapshot();
+  try {
+    const response = await fetch("/api/reports", {
+      body: JSON.stringify(report),
+      headers: {
+        ...(collectorToken.value.length === 0
+          ? {}
+          : { Authorization: `Bearer ${collectorToken.value}` }),
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+    const result = (await response.json()) as {
+      readonly archivedPath?: string;
+      readonly error?: string;
+    };
+    if (!response.ok)
+      throw new Error(result.error ?? `collector returned ${String(response.status)}`);
+    archiveState.textContent = `Archived: ${result.archivedPath ?? report.runId}`;
+    return true;
+  } catch (error) {
+    archiveState.textContent = `Archive failed: ${error instanceof Error ? error.message : String(error)}`;
+    return false;
+  } finally {
+    uploadRunning = false;
+    updateControls();
+  }
+}
+
+async function runBatch(): Promise<void> {
+  if (batchRunning || probeRunning || !collectorEnabled) {
+    return;
+  }
+  try {
+    const warmups = boundedInteger(batchWarmups, 0, 10, "warmups");
+    const samples = boundedInteger(batchSamples, 1, 50, "samples");
+    const batchId = crypto.randomUUID();
+    batchRunning = true;
+    updateControls();
+    for (let index = 0; index < warmups; index += 1) {
+      batchState.textContent = `Warmup ${String(index + 1)}/${String(warmups)}`;
+      report.collection = {
+        batchId,
+        kind: "warmup",
+        sequence: index + 1,
+        total: warmups,
+      };
+      await runAll();
+      if (report.finishedAt === undefined || Object.keys(report.errors ?? {}).length > 0) {
+        await archiveReport();
+        throw new Error("warmup probe failed; resolve the environment before collecting samples");
+      }
+    }
+    for (let index = 0; index < samples; index += 1) {
+      batchState.textContent = `Sample ${String(index + 1)}/${String(samples)}`;
+      report.collection = {
+        batchId,
+        kind: "sample",
+        sequence: index + 1,
+        total: samples,
+      };
+      await runAll();
+      if (!(await archiveReport())) {
+        throw new Error(`sample ${String(index + 1)} could not be archived`);
+      }
+    }
+    batchState.textContent = `Batch complete: ${String(warmups)} warmups + ${String(samples)} archived samples`;
+  } catch (error) {
+    batchState.textContent = `Batch failed: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    batchRunning = false;
+    updateControls();
+  }
+}
+
+function boundedInteger(
+  input: HTMLInputElement,
+  minimum: number,
+  maximum: number,
+  label: string,
+): number {
+  const value = input.valueAsNumber;
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${label} must be an integer from ${String(minimum)} to ${String(maximum)}`);
+  }
+  return value;
+}
+
+function updateControls(): void {
+  runButton.disabled = !initialized || probeRunning || batchRunning;
+  exportButton.disabled = probeRunning || report.finishedAt === undefined;
+  archiveButton.disabled =
+    !collectorEnabled || probeRunning || uploadRunning || report.finishedAt === undefined;
+  batchButton.disabled =
+    !initialized || !collectorEnabled || batchRunning || probeRunning || uploadRunning;
+  batchWarmups.disabled = batchRunning || probeRunning;
+  batchSamples.disabled = batchRunning || probeRunning;
 }
 
 async function runProbe<Result>(

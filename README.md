@@ -16,12 +16,12 @@ doper 是一套从零设计的 Web Canvas 渲染引擎，目标是提供高性�
 - 主线程时间戳经 SharedArrayBuffer 到 Worker 的观测延迟；
 - 主线程阻塞 200ms 时 Worker 自驱情况；
 - 主线程与 Worker Canvas2D / scroll-copy 吞吐；
-- 最小 Rust/WASM 模块的体积、加载和首次调用；
+- 最小 Rust/WASM 与代表性文本包络的体积、加载和首次调用；
 - EditContext 优先、集中式 textarea proxy 降级的 Canvas 编辑输入路径。
 
 ## 本地运行
 
-前置要求：Node.js 22.12+、pnpm 10.33.2、Rust 1.96+，并安装
+前置要求：Node.js 22.12+、pnpm 10.33.2、Rust 1.96.0，并安装
 `wasm32-unknown-unknown` target。
 
 ```bash

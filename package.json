@@ -16,12 +16,14 @@
     "lint": "eslint .",
     "probe:dev": "pnpm wasm:build && pnpm --filter @dopejs/platform-probe dev",
     "probe:dev:no-isolation": "pnpm wasm:build && pnpm --filter @dopejs/platform-probe dev:no-isolation",
+    "probe:collect": "node scripts/collect-probes.mjs",
     "probe:preview": "pnpm --filter @dopejs/platform-probe preview",
     "probe:summary": "node scripts/summarize-probes.mjs",
     "rust:check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
     "test": "vitest run",
     "typecheck": "pnpm -r typecheck",
-    "wasm:build": "node scripts/build-wasm.mjs"
+    "wasm:build": "node scripts/build-wasm.mjs && node scripts/measure-wasm-budget.mjs",
+    "wasm:budget": "node scripts/measure-wasm-budget.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -40,6 +40,19 @@ export interface WasmProbeResult {
   readonly strategy: "instantiate" | "instantiateStreaming";
 }
 
+export interface WasmBudgetProbeResult {
+  readonly compileAndInstantiateMs: number;
+  readonly fetchMs: number;
+  readonly firstCallMs: number;
+  readonly graphemeCount: number;
+  readonly gzipBytes: number;
+  readonly headroomBytes: number;
+  readonly maximumGzipBytes: number;
+  readonly productBudgetBytes: number;
+  readonly rawBytes: number;
+  readonly strategy: "instantiate" | "instantiateStreaming";
+}
+
 interface ProbeWasmExports extends WebAssembly.Exports {
   doper_probe_abi_version(): number;
   doper_probe_mix(value: number): number;
@@ -48,6 +61,16 @@ interface ProbeWasmExports extends WebAssembly.Exports {
 interface WasmManifest {
   readonly gzipBytes: number;
   readonly rawBytes: number;
+}
+
+interface WasmBudgetExports extends WebAssembly.Exports {
+  doper_budget_grapheme_count(): number;
+}
+
+interface WasmBudgetManifest extends WasmManifest {
+  readonly headroomBytes: number;
+  readonly maximumGzipBytes: number;
+  readonly productBudgetBytes: number;
 }
 
 export class PlatformProbeRunner {
@@ -189,6 +212,43 @@ export class PlatformProbeRunner {
       firstCallMs: round(firstCallMs),
       gzipBytes: manifest.gzipBytes,
       mixedValue,
+      rawBytes: manifest.rawBytes,
+      strategy: supportsStreaming ? "instantiateStreaming" : "instantiate",
+    };
+  }
+
+  async wasmBudgetColdStart(): Promise<WasmBudgetProbeResult> {
+    const fetchStartedAt = performance.now();
+    const [response, manifestResponse] = await Promise.all([
+      fetch("/wasm/doper_budget.wasm", { cache: "no-store" }),
+      fetch("/wasm/budget-manifest.json", { cache: "no-store" }),
+    ]);
+    const fetchMs = performance.now() - fetchStartedAt;
+    if (!response.ok || !manifestResponse.ok) {
+      throw new Error(`WASM budget assets unavailable (${String(response.status)})`);
+    }
+
+    const manifest = (await manifestResponse.json()) as WasmBudgetManifest;
+    const compileStartedAt = performance.now();
+    const supportsStreaming = typeof WebAssembly.instantiateStreaming === "function";
+    const instance = supportsStreaming
+      ? await WebAssembly.instantiateStreaming(response, {})
+      : await WebAssembly.instantiate(await response.arrayBuffer(), {});
+    const compileAndInstantiateMs = performance.now() - compileStartedAt;
+    const exports = instance.instance.exports as WasmBudgetExports;
+    const callStartedAt = performance.now();
+    const graphemeCount = exports.doper_budget_grapheme_count();
+    const firstCallMs = performance.now() - callStartedAt;
+
+    return {
+      compileAndInstantiateMs: round(compileAndInstantiateMs),
+      fetchMs: round(fetchMs),
+      firstCallMs: round(firstCallMs),
+      graphemeCount,
+      gzipBytes: manifest.gzipBytes,
+      headroomBytes: manifest.headroomBytes,
+      maximumGzipBytes: manifest.maximumGzipBytes,
+      productBudgetBytes: manifest.productBudgetBytes,
       rawBytes: manifest.rawBytes,
       strategy: supportsStreaming ? "instantiateStreaming" : "instantiate",
     };

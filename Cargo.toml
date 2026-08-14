@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["probes/wasm-cold-start"]
+members = ["probes/wasm-budget", "probes/wasm-cold-start"]
 
 [workspace.package]
 edition = "2024"

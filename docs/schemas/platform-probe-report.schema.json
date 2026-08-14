@@ -23,6 +23,7 @@
         "worker": { "$ref": "#/$defs/canvasResult" }
       }
     },
+    "collection": { "$ref": "#/$defs/collection" },
     "deviceId": { "type": "string", "minLength": 1 },
     "editing": { "$ref": "#/$defs/editingSnapshot" },
     "environment": { "$ref": "#/$defs/environment" },
@@ -38,9 +39,31 @@
     "transport": { "$ref": "#/$defs/transportMatrix" },
     "version": { "const": 1 },
     "wasm": { "$ref": "#/$defs/wasmResult" },
+    "wasmBudget": { "$ref": "#/$defs/wasmBudgetResult" },
     "workerRaf": { "$ref": "#/$defs/timingResult" }
   },
   "$defs": {
+    "collection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "single" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["batchId", "kind", "sequence", "total"],
+          "properties": {
+            "batchId": { "type": "string", "format": "uuid" },
+            "kind": { "enum": ["sample", "warmup"] },
+            "sequence": { "type": "integer", "minimum": 1 },
+            "total": { "type": "integer", "minimum": 1 }
+          }
+        }
+      ]
+    },
     "canvasResult": {
       "type": "object",
       "additionalProperties": false,
@@ -315,6 +338,34 @@
         "firstCallMs": { "type": "number", "minimum": 0 },
         "gzipBytes": { "type": "integer", "minimum": 0 },
         "mixedValue": { "type": "integer" },
+        "rawBytes": { "type": "integer", "minimum": 0 },
+        "strategy": { "enum": ["instantiate", "instantiateStreaming"] }
+      }
+    },
+    "wasmBudgetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "compileAndInstantiateMs",
+        "fetchMs",
+        "firstCallMs",
+        "graphemeCount",
+        "gzipBytes",
+        "headroomBytes",
+        "maximumGzipBytes",
+        "productBudgetBytes",
+        "rawBytes",
+        "strategy"
+      ],
+      "properties": {
+        "compileAndInstantiateMs": { "type": "number", "minimum": 0 },
+        "fetchMs": { "type": "number", "minimum": 0 },
+        "firstCallMs": { "type": "number", "minimum": 0 },
+        "graphemeCount": { "type": "integer", "minimum": 0 },
+        "gzipBytes": { "type": "integer", "minimum": 0 },
+        "headroomBytes": { "type": "integer" },
+        "maximumGzipBytes": { "type": "integer", "minimum": 1 },
+        "productBudgetBytes": { "type": "integer", "minimum": 1 },
         "rawBytes": { "type": "integer", "minimum": 0 },
         "strategy": { "enum": ["instantiate", "instantiateStreaming"] }
       }

@@ -46,6 +46,21 @@ const metricDefinitions = {
     read: (report) => report.wasm?.gzipBytes,
     unit: "bytes",
   },
+  wasmBudgetColdStartMs: {
+    better: "lower",
+    read: (report) => {
+      const wasm = report.wasmBudget;
+      return wasm === undefined
+        ? undefined
+        : wasm.fetchMs + wasm.compileAndInstantiateMs + wasm.firstCallMs;
+    },
+    unit: "ms",
+  },
+  wasmBudgetGzipBytes: {
+    better: "lower",
+    read: (report) => report.wasmBudget?.gzipBytes,
+    unit: "bytes",
+  },
   workerCanvasOperationsPerSecond: {
     better: "higher",
     read: (report) => report.canvas?.worker?.operationsPerSecond,
@@ -58,54 +73,73 @@ const metricDefinitions = {
   },
 };
 
+let validatorPromise;
+
 export function summarizeReports(reports, generatedAt = new Date().toISOString()) {
-  const runs = [...reports]
-    .sort((left, right) => reportTime(left).localeCompare(reportTime(right)))
-    .map((report) => ({
-      buildId: report.build.id,
-      complete: report.finishedAt !== undefined && Object.keys(report.errors ?? {}).length === 0,
-      deviceId: report.deviceId,
-      errors: report.errors ?? {},
-      finishedAt: report.finishedAt ?? null,
-      metrics: readMetrics(report),
-      recommendedTransport: report.transport?.recommendedMode ?? null,
-      runId: report.runId,
-    }));
+  const orderedReports = [...reports].sort((left, right) =>
+    reportTime(left).localeCompare(reportTime(right)),
+  );
+  const runs = orderedReports.map((report) => ({
+    buildId: report.build.id,
+    collection: report.collection ?? { kind: "single" },
+    complete: report.finishedAt !== undefined && Object.keys(report.errors ?? {}).length === 0,
+    deviceId: report.deviceId,
+    errors: report.errors ?? {},
+    finishedAt: report.finishedAt ?? null,
+    metrics: readMetrics(report),
+    recommendedTransport: report.transport?.recommendedMode ?? null,
+    runId: report.runId,
+  }));
+  const batches = summarizeBatches(orderedReports);
 
   return {
+    batches,
     generatedAt,
     reportCount: runs.length,
-    reproducibility: compareAdjacent(runs, (run) => `${run.deviceId}\0${run.buildId}`),
+    reproducibility: compareBatches(batches),
     runs,
     trends: compareAdjacent(runs, (run) => run.deviceId),
-    version: 1,
+    version: 2,
   };
 }
 
 export async function loadProbeReports(filenames, { allowLocal = false } = {}) {
-  const schemaPath = new URL("../docs/schemas/platform-probe-report.schema.json", import.meta.url);
-  const schema = JSON.parse(await readFile(schemaPath, "utf8"));
-  const ajv = new Ajv2020({ allErrors: true, strict: true });
-  addFormats(ajv);
-  const validate = ajv.compile(schema);
-
   return Promise.all(
     filenames.map(async (filename) => {
       const report = JSON.parse(await readFile(filename, "utf8"));
-      if (!validate(report)) {
-        throw new Error(`${filename} failed validation: ${ajv.errorsText(validate.errors)}`);
-      }
-      if (
-        !allowLocal &&
-        (report.build.id === "local-uncommitted" || report.deviceId === "local-dev")
-      ) {
-        throw new Error(
-          `${filename} is local-only; provide VITE_DOPER_BUILD_ID and VITE_DOPER_DEVICE_ID or pass --allow-local`,
-        );
-      }
-      return report;
+      return validateProbeReport(report, { allowLocal, label: filename });
     }),
   );
+}
+
+export async function validateProbeReport(
+  report,
+  { allowLocal = false, label = "probe report" } = {},
+) {
+  const { ajv, validate } = await getValidator();
+  if (!validate(report)) {
+    throw new Error(`${label} failed validation: ${ajv.errorsText(validate.errors)}`);
+  }
+  if (!allowLocal && (report.build.id === "local-uncommitted" || report.deviceId === "local-dev")) {
+    throw new Error(
+      `${label} is local-only; provide VITE_DOPER_BUILD_ID and VITE_DOPER_DEVICE_ID or allow local reports explicitly`,
+    );
+  }
+  return report;
+}
+
+async function getValidator() {
+  validatorPromise ??= (async () => {
+    const schemaPath = new URL(
+      "../docs/schemas/platform-probe-report.schema.json",
+      import.meta.url,
+    );
+    const schema = JSON.parse(await readFile(schemaPath, "utf8"));
+    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    addFormats(ajv);
+    return { ajv, validate: ajv.compile(schema) };
+  })();
+  return validatorPromise;
 }
 
 function readMetrics(report) {
@@ -160,6 +194,165 @@ function compareMetrics(previous, current) {
       ];
     }),
   );
+}
+
+function summarizeBatches(reports) {
+  const groups = new Map();
+  for (const report of reports) {
+    const collection = report.collection;
+    if (collection?.kind !== "sample") continue;
+    const key = `${report.deviceId}\0${report.build.id}\0${collection.batchId}`;
+    const group = groups.get(key) ?? [];
+    group.push(report);
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].map((entries) => {
+    const first = entries[0];
+    const batchId = first.collection.batchId;
+    const expectedTotals = new Set(entries.map((report) => report.collection.total));
+    const sequences = entries.map((report) => report.collection.sequence).sort((a, b) => a - b);
+    const expectedSamples = expectedTotals.size === 1 ? entries[0].collection.total : null;
+    const sequenceComplete =
+      expectedSamples !== null &&
+      sequences.length === expectedSamples &&
+      sequences.every((sequence, index) => sequence === index + 1);
+    const signatures = new Set(entries.map(capabilitySignature));
+    return {
+      batchId,
+      buildId: first.build.id,
+      capabilitySignature: signatures.size === 1 ? [...signatures][0] : null,
+      complete:
+        sequenceComplete &&
+        entries.every(
+          (report) =>
+            report.finishedAt !== undefined && Object.keys(report.errors ?? {}).length === 0,
+        ),
+      deviceId: first.deviceId,
+      expectedSamples,
+      finishedAt: entries.at(-1)?.finishedAt ?? null,
+      metrics: readBatchMetrics(entries),
+      receivedSamples: entries.length,
+      sequences,
+      signatureConsistent: signatures.size === 1,
+    };
+  });
+}
+
+function readBatchMetrics(reports) {
+  const frameSamples = reports.flatMap((report) => report.workerRaf?.samples ?? []);
+  const workerThroughput = reports.flatMap((report) =>
+    finiteValues([report.canvas?.worker?.operationsPerSecond]),
+  );
+  const mainThroughput = reports.flatMap((report) =>
+    finiteValues([report.canvas?.mainThread?.operationsPerSecond]),
+  );
+  const metrics = {};
+  if (frameSamples.length > 0) {
+    metrics.workerRafP95Ms = {
+      better: "lower",
+      sampleCount: frameSamples.length,
+      unit: "ms",
+      value: percentile(frameSamples, 0.95),
+    };
+  }
+  if (workerThroughput.length > 0) {
+    metrics.workerCanvasOperationsPerSecondMedian = {
+      better: "higher",
+      sampleCount: workerThroughput.length,
+      unit: "operations/s",
+      value: percentile(workerThroughput, 0.5),
+    };
+  }
+  if (mainThroughput.length > 0) {
+    metrics.mainCanvasOperationsPerSecondMedian = {
+      better: "higher",
+      sampleCount: mainThroughput.length,
+      unit: "operations/s",
+      value: percentile(mainThroughput, 0.5),
+    };
+  }
+  return metrics;
+}
+
+function compareBatches(batches) {
+  const groups = new Map();
+  for (const batch of batches) {
+    const key = `${batch.deviceId}\0${batch.buildId}`;
+    const group = groups.get(key) ?? [];
+    group.push(batch);
+    groups.set(key, group);
+  }
+  return [...groups.entries()].flatMap(([group, entries]) =>
+    entries.slice(1).map((current, index) => {
+      const previous = entries[index];
+      const metrics = compareMetrics(previous.metrics, current.metrics);
+      const reasons = [];
+      if (!previous.complete || !current.complete) reasons.push("both batches must be complete");
+      if (!previous.signatureConsistent || !current.signatureConsistent) {
+        reasons.push("capability/transport signature changed within a batch");
+      }
+      if (previous.capabilitySignature !== current.capabilitySignature) {
+        reasons.push("capability/transport signature differs between batches");
+      }
+      checkDelta(metrics, "workerRafP95Ms", 10, reasons);
+      checkDelta(metrics, "workerCanvasOperationsPerSecondMedian", 5, reasons);
+      return {
+        currentBatchId: current.batchId,
+        group,
+        metrics,
+        pass: reasons.length === 0,
+        previousBatchId: previous.batchId,
+        reasons,
+      };
+    }),
+  );
+}
+
+function checkDelta(metrics, name, maximumPercent, reasons) {
+  const metric = metrics[name];
+  if (metric === undefined || metric.relativeChangePercent === null) {
+    reasons.push(`${name} is missing or has a zero baseline`);
+  } else if (Math.abs(metric.relativeChangePercent) > maximumPercent) {
+    reasons.push(`${name} differs by more than ${String(maximumPercent)}%`);
+  }
+}
+
+function capabilitySignature(report) {
+  return JSON.stringify({
+    buildMode: report.build.mode,
+    crossOriginIsolated: report.environment?.crossOriginIsolated ?? null,
+    deviceMemoryGiB: report.environment?.deviceMemoryGiB ?? null,
+    devicePixelRatio: report.environment?.devicePixelRatio ?? null,
+    editContext: report.environment?.editContext ?? null,
+    hardwareConcurrency: report.environment?.hardwareConcurrency ?? null,
+    offscreenCanvas: report.environment?.offscreenCanvas ?? null,
+    recommendedTransport: report.transport?.recommendedMode ?? null,
+    sharedArrayBuffer: report.environment?.sharedArrayBuffer ?? null,
+    transportStatuses:
+      report.transport === undefined
+        ? null
+        : Object.fromEntries(
+            Object.entries(report.transport.modes).map(([mode, outcome]) => [mode, outcome.status]),
+          ),
+    worker: report.environment?.worker ?? null,
+    userAgent: report.environment?.userAgent ?? null,
+    viewport: report.environment?.viewport ?? null,
+  });
+}
+
+function percentile(values, quantile) {
+  const sorted = finiteValues(values).sort((left, right) => left - right);
+  if (sorted.length === 0) return Number.NaN;
+  const index = (sorted.length - 1) * quantile;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+}
+
+function finiteValues(values) {
+  return values.filter((value) => typeof value === "number" && Number.isFinite(value));
 }
 
 function reportTime(report) {

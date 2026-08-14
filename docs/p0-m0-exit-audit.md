@@ -22,7 +22,7 @@
 | 六类代表性场景                                       | 完成       | `benchmarks/suite.v1.json` 固定场景、seed、viewport、workload 与 metrics | runner 随可执行引擎纵向切片实现          |
 | 固定设备矩阵与采样口径                               | 进行中     | `docs/device-matrix.md`、`docs/benchmark-protocol.md`                    | 为必需角色分配具体物理资产               |
 | 外部依赖、试点业务与 M0 输入                         | 外部待验证 | 风险与决策项已列入计划                                                   | 业务 owner、COOP/COEP 影响盘点、试点场景 |
-| 同设备可复现                                         | 进行中     | 两次本地探针 Worker rAF/SAB P95 差异约 4%                                | 正式 suite 仍需两组各 15 次采集          |
+| 同设备可复现                                         | 进行中     | 5+15 batch runner、完整性与 10%/5% 自动判定；双样本本地 E2E 通过         | 正式设备仍需两组各 15 次采集             |
 | 报告包含环境、build/device/run id、原始样本          | 完成       | 报告 schema、JSON 导出、CI schema/fixture 校验与真实报告验证             | 正式基线禁止本地占位标识                 |
 
 ## M0
@@ -33,11 +33,11 @@
 | 主线程 rAF → SAB → Worker 延迟     | 进行中     | 修复跨 global 时间原点后，本地采样有效                            | 真机分布与长期样本                        |
 | Worker 自驱与相位锁，含 200ms 阻塞 | 进行中     | 本地 Chrome 的 SAB/postMessage 在阻塞窗口持续实际 paint；ADR-0001 | 目标低端设备重复采样                      |
 | Worker/主线程 Canvas2D 对照        | 进行中     | 桌面 fill、scroll-copy 与 128/256/512/1024 tile 扫描              | 低端 Android 成本                         |
-| 最小 Rust/WASM 预算                | 进行中     | 196B raw / 180B gzip，streaming instantiate 与首次调用可采集      | 代表性代码规模投影和真机数据              |
+| Rust/WASM 体积与冷启动预算         | 进行中     | 最小 180B；文本包络 236,368B gzip，余量 173,232B；ADR-0002        | 目标移动设备重复冷启动数据                |
 | SAB/postMessage/主线程三档原型     | 进行中     | 隔离/无隔离自动选择；三档同 paint；报告通过 schema                | Worker/OffscreenCanvas 缺失真机验证、背压 |
 | COOP/COEP 业务可行性               | 外部待验证 | 本地 Vite 隔离头、响应头/跨域子资源审计工具                       | 真实业务 URL、登录态、动态资源与业务结论  |
 | EditContext/输入代理能力矩阵       | 进行中     | 桌面 Chrome 基础路径；v1 结构化事件与溢出计数导出                 | 真实多 OS/IME 录制、回放和软键盘/候选窗   |
-| 真机采集、上传与趋势               | 进行中     | 唯一 run/device id、schema 校验、失败保留、重复性/趋势汇总工具    | 物理设备采集、外部持久存储与趋势展示      |
+| 真机采集、上传与趋势               | 进行中     | 认证/TLS 采集器、5+15 batch、不可覆盖归档、summary v2/趋势页 E2E  | 物理设备采集与外部持久存储保留策略        |
 | Go / Pivot / Stop ADR              | 未开始     | ADR 模板                                                          | 上述证据齐备后的正式决策                  |
 
 ## 当前结论
@@ -47,7 +47,7 @@ P0 和 M0 均未通过出口门禁。最近关键路径是：
 1. 为 Android、iOS、Safari、Firefox 角色分配物理设备并重复采集。
 2. 在目标业务页面完成 COOP/COEP 与第三方资源影响盘点。
 3. 录制中文、日文、韩文和复杂 composition，验证 EditContext 与输入代理。
-4. 建立真机报告上传/趋势链路，并完成代表性 WASM 规模投影。
+4. 将采集器输出接入持久化存储，并在目标移动设备重复测量 WASM 包络冷启动。
 
 P0/M0 的性能完成条件只看 doper 自身绝对指标和目标分支回归，不依赖任何外部
 引擎的性能数据。

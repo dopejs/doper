@@ -20,6 +20,24 @@
         <div class="actions">
           <button id="run-all" class="primary" type="button">Run full probe</button>
           <button id="export" type="button" disabled>Export JSON</button>
+          <button id="archive" type="button" disabled>Archive report</button>
+          <label id="collector-auth">
+            Collector token
+            <input id="collector-token" type="password" autocomplete="off" />
+          </label>
+          <span id="batch-controls">
+            <label>
+              Warmups
+              <input id="batch-warmups" type="number" min="0" max="10" value="5" />
+            </label>
+            <label>
+              Samples
+              <input id="batch-samples" type="number" min="1" max="50" value="15" />
+            </label>
+            <button id="run-batch" type="button">Run batch</button>
+          </span>
+          <span id="archive-state" role="status"></span>
+          <span id="batch-state" role="status"></span>
         </div>
       </header>
 
@@ -64,6 +82,8 @@
           <p class="eyebrow">Startup</p>
           <h2>Rust/WASM cold start</h2>
           <pre id="wasm-result">Not run</pre>
+          <h3>Representative text envelope</h3>
+          <pre id="wasm-budget-result">Not run</pre>
         </article>
       </section>
 

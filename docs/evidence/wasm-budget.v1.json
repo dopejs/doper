@@ -1,0 +1,12 @@
+{
+  "crate": "doper-probe-wasm-budget",
+  "gzipBytes": 236368,
+  "headroomBytes": 173232,
+  "maximumGzipBytes": 307200,
+  "productBudgetBytes": 409600,
+  "profile": "release-opt-z-lto",
+  "rawBytes": 591662,
+  "rustToolchain": "1.96.0",
+  "target": "wasm32-unknown-unknown",
+  "version": 1
+}
