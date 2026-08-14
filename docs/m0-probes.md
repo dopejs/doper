@@ -52,6 +52,13 @@ bounds 标记不一致、事件溢出和未结束的 composition。默认也拒�
 `characterboundsupdate`。每次录制后先通过 replay，再与平台报告一起归档，且保持
 `recordingId` 不可覆盖。
 
+通过采集器打开页面时还会显示 **Archive IME recording**。它把同一份 v2 JSON 以
+`POST /api/ime-recordings` 上传；服务端再次执行 schema、provenance/local placeholder
+和确定性 replay 校验，通过后用 `wx` 语义写入
+`ime/v2/<device>/<build>/<recordingId>.json`。接口沿用平台报告的 Bearer token，重复
+recording id 返回 409，非法事件流返回 400。导出或归档任一成功后页面锁定该会话，
+必须重新加载才能开始下一条，避免同一 recording id 指向变化中的事件流。
+
 Vite 开发与预览服务器发送：
 
 ```text
@@ -108,10 +115,13 @@ URL、报告或归档文件。
 失败会先保留失败报告再停止，正式样本无论探针是否有错误都归档，summary v2 只把
 序号完整、没有错误且能力签名一致的 batch 标记为 complete。
 
-采集器会再次执行 v1 schema 与正式标识校验，并用 `wx` 语义写入
+平台报告接口会再次执行 v1 schema 与正式标识校验，并用 `wx` 语义写入
 `v1/<device>/<build>/<runId>.json`；相同 run id 返回 409，不覆盖原始证据。
 `/api/summary` 提供机器可读趋势，`/trends` 提供只读页面。启用令牌时趋势页使用
 HTTP Basic 登录，用户名为 `doper`、密码为同一令牌。
+
+IME 归档位于独立的 `ime/v2` namespace，不会被平台报告 summary 当作 v1 报告读取。
+两个写接口与趋势接口使用同一鉴权和 10 MiB 请求上限。
 
 默认只监听 `127.0.0.1`。绑定非 loopback 地址时，工具强制要求 TLS 证书/私钥和
 至少 24 字符令牌；证书必须被目标设备信任，否则不能把 SAB/安全上下文结果作为
@@ -187,6 +197,8 @@ production build 的同源采集器也已完成本地 E2E：服务端 schema 校
 textarea proxy 的 `pointerselection → beforeinput → input`；两份页面生成的 v2 录制
 均通过 schema 和确定性 replay。输入来自浏览器自动化键盘，因此只证明录制/回放
 链路，不证明任何真实输入法或软键盘兼容性。
+production collector 页面也已完成本地 E2E：生成的 textarea proxy v2 录制经服务端
+校验后写入独立 archive，回读文件再次 replay 通过，成功后页面锁定录制控件。
 
 尚未验证且阻止 M0 关闭的项目包括：
 
@@ -198,6 +210,7 @@ textarea proxy 的 `pointerselection → beforeinput → input`；两份页面�
 
 ## 失败与回滚
 
-探针不写入业务数据。关闭开发服务器即可停止；导出的 JSON 是唯一持久产物。
+探针不写入业务数据。关闭开发服务器即可停止；导出的 JSON 或采集器 archive 是
+唯一持久产物。
 若 COOP/COEP 使目标页面不可运行，应保留失败报告并切换到无隔离部署验证
 postMessage 路径，而不是伪造 SAB 可用性。

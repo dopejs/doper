@@ -36,7 +36,7 @@
 | Rust/WASM 体积与冷启动预算         | 进行中     | 最小 180B；文本包络 236,368B gzip，余量 173,232B；ADR-0002        | 目标移动设备重复冷启动数据                |
 | SAB/postMessage/主线程三档原型     | 进行中     | 隔离/无隔离自动选择；三档同 paint；报告通过 schema                | Worker/OffscreenCanvas 缺失真机验证、背压 |
 | COOP/COEP 业务可行性               | 外部待验证 | 本地 Vite 隔离头、响应头/跨域子资源审计工具                       | 真实业务 URL、登录态、动态资源与业务结论  |
-| EditContext/输入代理能力矩阵       | 进行中     | v2 schema/导出/replay；本地 Chrome 两条输入路径通过确定性回放     | 真实多 OS/IME、软键盘和候选窗证据         |
+| EditContext/输入代理能力矩阵       | 进行中     | v2 schema/导出/replay/认证归档；Chrome 两路径通过本地 E2E         | 真实多 OS/IME、软键盘和候选窗证据         |
 | 真机采集、上传与趋势               | 进行中     | 认证/TLS 采集器、5+15 batch、不可覆盖归档、summary v2/趋势页 E2E  | 物理设备采集与外部持久存储保留策略        |
 | Go / Pivot / Stop ADR              | 未开始     | ADR 模板                                                          | 上述证据齐备后的正式决策                  |
 

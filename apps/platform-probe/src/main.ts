@@ -83,14 +83,17 @@ const editorLog = element<HTMLElement>("editor-log");
 const imeLanguage = element<HTMLSelectElement>("ime-language");
 const imeInputMethod = element<HTMLInputElement>("ime-input-method");
 const imeExportButton = element<HTMLButtonElement>("export-ime");
+const imeArchiveButton = element<HTMLButtonElement>("archive-ime");
 const imeExportState = element<HTMLElement>("ime-export-state");
 const forceInputProxy = searchParameters.get("editing") === "proxy";
 const collectorEnabled = searchParameters.get("collector") === "1";
 collectorAuth.hidden = !collectorEnabled;
 batchControls.hidden = !collectorEnabled;
+imeArchiveButton.hidden = !collectorEnabled;
 let batchRunning = false;
 let initialized = false;
-let imeExported = false;
+let imeFinalized = false;
+let imeUploadRunning = false;
 let probeRunning = false;
 let uploadRunning = false;
 const editingRecordingId = crypto.randomUUID();
@@ -102,7 +105,7 @@ const editingProbe = new EditingProbe(
     editorMode.textContent = snapshot.mode === "edit-context" ? "EditContext" : "Input proxy";
     editorLog.textContent =
       snapshot.events.length > 0 ? snapshot.events.join("\n") : "No editing events";
-    imeExportButton.disabled = snapshot.records.length === 0 || imeExported;
+    updateImeControls(snapshot);
     syncImeRecording(snapshot);
     syncReportSnapshot();
   },
@@ -120,9 +123,12 @@ archiveButton.addEventListener("click", () => {
 batchButton.addEventListener("click", () => {
   void runBatch();
 });
-imeInputMethod.addEventListener("input", () => syncImeRecording(editingProbe.snapshot()));
-imeLanguage.addEventListener("change", () => syncImeRecording(editingProbe.snapshot()));
+imeInputMethod.addEventListener("input", syncImeControls);
+imeLanguage.addEventListener("change", syncImeControls);
 imeExportButton.addEventListener("click", exportImeRecording);
+imeArchiveButton.addEventListener("click", () => {
+  void archiveImeRecording();
+});
 window.addEventListener("beforeunload", () => {
   editingProbe.dispose();
   runner.dispose();
@@ -354,6 +360,7 @@ function updateControls(): void {
     !initialized || !collectorEnabled || batchRunning || probeRunning || uploadRunning;
   batchWarmups.disabled = batchRunning || probeRunning;
   batchSamples.disabled = batchRunning || probeRunning;
+  updateImeControls(editingProbe.snapshot());
 }
 
 async function runProbe<Result>(
@@ -451,28 +458,88 @@ function exportReport(): void {
 
 function exportImeRecording(): void {
   const snapshot = editingProbe.snapshot();
-  if (imeInputMethod.value.trim().length === 0) {
-    imeExportState.textContent = "Input method and version are required";
-    return;
-  }
-  if (snapshot.records.length === 0) {
-    imeExportState.textContent = "Record at least one editing event";
-    return;
-  }
-  if (snapshot.droppedRecords > 0) {
-    imeExportState.textContent = "Recording overflowed; start a fresh session";
-    return;
-  }
-  if (snapshot.composing) {
-    imeExportState.textContent = "Finish the active composition before export";
+  const problem = imeRecordingProblem(snapshot);
+  if (problem !== null) {
+    imeExportState.textContent = problem;
     return;
   }
   const recording = buildImeRecording(snapshot);
   syncImeRecording(snapshot);
   downloadJson(recording, `doper-ime-${recording.recordingId}.json`);
-  imeExported = true;
-  imeExportButton.disabled = true;
+  imeFinalized = true;
+  editingProbe.setInputEnabled(false);
+  updateImeControls(snapshot);
   imeExportState.textContent = `Exported recording ${recording.recordingId}; reload for a new session`;
+}
+
+async function archiveImeRecording(): Promise<void> {
+  const snapshot = editingProbe.snapshot();
+  const problem = imeRecordingProblem(snapshot);
+  if (problem !== null) {
+    imeExportState.textContent = problem;
+    return;
+  }
+  if (!collectorEnabled) {
+    imeExportState.textContent = "Open this page through the collector to archive evidence";
+    return;
+  }
+  imeUploadRunning = true;
+  editingProbe.setInputEnabled(false);
+  updateImeControls(snapshot);
+  imeExportState.textContent = "Archiving IME recording…";
+  const recording = buildImeRecording(snapshot);
+  try {
+    const response = await fetch("/api/ime-recordings", {
+      body: JSON.stringify(recording),
+      headers: {
+        ...(collectorToken.value.length === 0
+          ? {}
+          : { Authorization: `Bearer ${collectorToken.value}` }),
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+    const result = (await response.json()) as {
+      readonly archivedPath?: string;
+      readonly error?: string;
+    };
+    if (!response.ok) {
+      throw new Error(result.error ?? `collector returned ${String(response.status)}`);
+    }
+    imeFinalized = true;
+    imeExportState.textContent = `Archived: ${result.archivedPath ?? recording.recordingId}; reload for a new session`;
+  } catch (error) {
+    editingProbe.setInputEnabled(true);
+    imeExportState.textContent = `IME archive failed: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    imeUploadRunning = false;
+    updateImeControls(snapshot);
+  }
+}
+
+function syncImeControls(): void {
+  const snapshot = editingProbe.snapshot();
+  syncImeRecording(snapshot);
+  updateImeControls(snapshot);
+}
+
+function updateImeControls(snapshot: EditingProbeSnapshot): void {
+  const ready = imeRecordingProblem(snapshot) === null && !imeUploadRunning;
+  imeExportButton.disabled = !ready;
+  imeArchiveButton.disabled = !collectorEnabled || !ready;
+  imeInputMethod.disabled = imeFinalized || imeUploadRunning;
+  imeLanguage.disabled = imeFinalized || imeUploadRunning;
+}
+
+function imeRecordingProblem(snapshot: EditingProbeSnapshot): string | null {
+  if (imeFinalized) return "Recording already finalized; reload for a new session";
+  if (imeInputMethod.value.trim().length === 0) {
+    return "Input method and version are required";
+  }
+  if (snapshot.records.length === 0) return "Record at least one editing event";
+  if (snapshot.droppedRecords > 0) return "Recording overflowed; reload for a new session";
+  if (snapshot.composing) return "Finish the active composition before export or archive";
+  return null;
 }
 
 function buildImeRecording(snapshot: EditingProbeSnapshot) {

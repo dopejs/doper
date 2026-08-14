@@ -139,6 +139,16 @@ export class EditingProbe {
     }
   }
 
+  setInputEnabled(enabled: boolean): void {
+    this.#canvas.inert = !enabled;
+    this.#canvas.tabIndex = enabled ? 0 : -1;
+    if (!enabled) this.#canvas.blur();
+    if (this.#proxy !== null) {
+      this.#proxy.disabled = !enabled;
+      if (!enabled) this.#proxy.blur();
+    }
+  }
+
   snapshot(): EditingProbeSnapshot {
     return {
       composing: this.#composing,

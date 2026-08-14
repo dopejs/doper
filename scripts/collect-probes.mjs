@@ -5,6 +5,7 @@ import { mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/pro
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { replayImeRecording } from "./replay-ime.mjs";
 import { loadProbeReports, summarizeReports, validateProbeReport } from "./summarize-probes.mjs";
 
 const maximumBodyBytes = 10 * 1024 * 1024;
@@ -55,6 +56,32 @@ export async function archiveProbeReport(report, archiveRoot) {
   return path.relative(resolvedRoot, filename);
 }
 
+export async function archiveImeRecording(recording, archiveRoot) {
+  const root = path.resolve(archiveRoot);
+  await mkdir(root, { recursive: true });
+  const resolvedRoot = await realpath(root);
+  const deviceId = safeArchiveSegment(recording.environment.deviceId, "environment.deviceId");
+  const buildId = safeArchiveSegment(recording.environment.buildId, "environment.buildId");
+  const recordingId = safeArchiveSegment(recording.recordingId, "recordingId");
+  const directory = path.join(resolvedRoot, "ime", "v2", deviceId, buildId);
+  await mkdir(directory, { recursive: true });
+  const resolvedDirectory = await realpath(directory);
+  assertWithin(resolvedRoot, resolvedDirectory, "IME archive directory");
+  const filename = path.join(resolvedDirectory, `${recordingId}.json`);
+  try {
+    await writeFile(filename, `${JSON.stringify(recording, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+    });
+  } catch (error) {
+    if (error !== null && typeof error === "object" && error.code === "EEXIST") {
+      throw new HttpError(409, `recordingId ${recordingId} is already archived`);
+    }
+    throw error;
+  }
+  return path.relative(resolvedRoot, filename);
+}
+
 export async function createProbeCollector(options) {
   const distributionRoot = await realpath(path.resolve(options.dist));
   const archiveRoot = path.resolve(options.output);
@@ -88,6 +115,7 @@ async function handleRequest(request, response, context) {
   const url = new URL(request.url ?? "/", "http://collector.invalid");
   if (
     (url.pathname === "/api/reports" ||
+      url.pathname === "/api/ime-recordings" ||
       url.pathname === "/api/summary" ||
       url.pathname === "/trends") &&
     !isAuthorized(request, context.token)
@@ -112,6 +140,29 @@ async function handleRequest(request, response, context) {
     sendJson(response, 201, { archivedPath, runId: report.runId, trends: "/trends" });
     return;
   }
+  if (url.pathname === "/api/ime-recordings" && request.method === "POST") {
+    const body = await readBody(request, maximumBodyBytes);
+    let recording;
+    try {
+      recording = JSON.parse(body);
+    } catch {
+      throw new HttpError(400, "request body is not valid JSON");
+    }
+    try {
+      await replayImeRecording(recording, { allowLocal: context.allowLocal });
+    } catch (error) {
+      throw new HttpError(
+        400,
+        `uploaded IME recording is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const archivedPath = await archiveImeRecording(recording, context.archiveRoot);
+    sendJson(response, 201, {
+      archivedPath,
+      recordingId: recording.recordingId,
+    });
+    return;
+  }
   if (url.pathname === "/api/summary" && request.method === "GET") {
     sendJson(response, 200, await archiveSummary(context.archiveRoot, context.allowLocal));
     return;
@@ -128,7 +179,7 @@ async function handleRequest(request, response, context) {
 }
 
 async function archiveSummary(archiveRoot, allowLocal) {
-  const filenames = await listJsonFiles(archiveRoot);
+  const filenames = await listJsonFiles(path.join(archiveRoot, "v1"));
   const reports = await loadProbeReports(filenames, { allowLocal });
   return summarizeReports(reports);
 }
@@ -136,7 +187,14 @@ async function archiveSummary(archiveRoot, allowLocal) {
 async function listJsonFiles(root) {
   const filenames = [];
   async function visit(directory) {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (error !== null && typeof error === "object" && error.code === "ENOENT") return;
+      throw error;
+    }
+    for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
       const filename = path.join(directory, entry.name);
       if (entry.isDirectory()) await visit(filename);
@@ -181,7 +239,7 @@ async function readBody(request, limit) {
   let bytes = 0;
   for await (const chunk of request) {
     bytes += chunk.length;
-    if (bytes > limit) throw new HttpError(413, "probe report exceeds 10 MiB");
+    if (bytes > limit) throw new HttpError(413, "request body exceeds 10 MiB");
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString("utf8");
