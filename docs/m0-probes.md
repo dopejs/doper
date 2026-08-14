@@ -119,8 +119,12 @@ URL、报告或归档文件。
 停止；正式样本无论探针是否有错误都归档。summary v2 只统计 sample，并只把序号
 完整、没有错误且能力签名一致的 batch 标记为 complete。
 
-平台报告接口会再次执行 v1 schema 与正式标识校验，并用 `wx` 语义写入
-`v1/<device>/<build>/<runId>.json`；相同 run id 返回 409，不覆盖原始证据。
+平台报告接口会再次执行 v1 schema、派生指标重算与正式标识校验。归档先在同一文件
+系统写入并 `fsync` 只读临时文件，再通过不可覆盖的原子 hard-link 提交
+`v1/<device>/<build>/<runId>.json` 及对应 `.json.sha256`；相同 run id 返回 409。
+IME 归档使用相同协议。采集 staging 文件系统必须支持 exclusive create、hard-link 和
+`fsync`；不支持时采集器失败关闭，应改用受支持的本地 staging 后再复制到外部 WORM
+存储，不能降级为可覆盖写入。
 `/api/summary` 提供机器可读趋势，`/trends` 提供只读页面。启用令牌时趋势页使用
 HTTP Basic 登录，用户名为 `doper`、密码为同一令牌。
 
@@ -133,8 +137,10 @@ IME 归档位于独立的 `ime/v2` namespace，不会被平台报告 summary 当
 [`schemas/m0-evidence-manifest.schema.json`](schemas/m0-evidence-manifest.schema.json)。
 [`../benchmarks/m0/evidence-manifest.fixture.v1.json`](../benchmarks/m0/evidence-manifest.fixture.v1.json)
 只展示结构，不是正式证据。manifest 登记七个角色的固定资产和两组 batch ID，并记录
-真实业务 COOP/COEP 审计、外部不可变存储/备份恢复演练以及 Go/Pivot/Stop ADR；三份
-人工证据文件必须放在 manifest 相对路径内并登记 SHA-256。
+真实业务 COOP/COEP 审计、外部不可变存储/备份恢复演练以及 Go/Pivot/Stop 决策；三份
+证据分别符合 `m0-business-audit-v1`、`m0-storage-verification-v1` 和
+`m0-decision-v1`，放在 manifest 相对路径内并登记 SHA-256。决策记录必须引用前两份
+证据的 digest，恢复结果必须与备份的字节数和 digest 相同。
 
 ```bash
 pnpm m0:evidence -- \
@@ -148,7 +154,11 @@ pnpm m0:evidence -- \
 5% 吞吐重复性，按能力检查 SAB/postMessage/主线程路径、WASM 包络和低端 Android
 Worker 连续性。IME 覆盖逐角色检查中/日/韩/复杂/Unicode、textarea proxy，以及能力
 可用时的 EditContext；移动录制必须有软键盘，EditContext 必须有 character bounds。
-任何文件缺失、digest 不符、角色串组或自报布尔值与原始证据不符都会返回非零状态。
+门禁还会验证每份报告/IME sidecar，从原始 samples 复算 summary、transport 最大帧隙
+和背压不变式，并要求代表性 WASM 包络保持 300KiB 内部预算、400KiB 产品预算以及
+冷启动额外延迟 `< 50ms`。任何文件缺失、digest 不符、结构化人工证据不完整、角色
+串组或派生值与原始证据不符都会返回非零状态。旧的无 sidecar 本地归档不是正式
+证据；应重新采集，不能事后补造 digest 冒充原始归档。
 
 默认只监听 `127.0.0.1`。绑定非 loopback 地址时，工具强制要求 TLS 证书/私钥和
 至少 24 字符令牌；证书必须被目标设备信任，否则不能把 SAB/安全上下文结果作为

@@ -7,6 +7,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 
 import { replayImeRecording } from "./replay-ime.mjs";
+import { maximumEvidenceBytes, verifyEvidenceDigest } from "./evidence-integrity.mjs";
 import { loadProbeReports, summarizeReports } from "./summarize-probes.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -27,6 +28,7 @@ const requiredImeLanguages = ["complex", "ja", "ko", "unicode", "zh"];
 const compositionLanguages = new Set(["complex", "ja", "ko", "zh"]);
 const mobileRoles = new Set(["android-low", "android-mid", "ios-baseline", "ios-current"]);
 let manifestValidatorPromise;
+let artifactValidatorsPromise;
 
 export async function auditM0Evidence({ archiveRoot, manifestPath }) {
   const resolvedArchiveRoot = await realpath(path.resolve(archiveRoot));
@@ -46,6 +48,7 @@ export async function auditM0Evidence({ archiveRoot, manifestPath }) {
   );
   const reportFiles = await listJsonFiles([...reportDirectories], resolvedArchiveRoot);
   const imeFiles = await listJsonFiles([...imeDirectories], resolvedArchiveRoot);
+  const archiveIntegrityIssues = await verifyArchiveIntegrity([...reportFiles, ...imeFiles]);
   const reports = await loadProbeReports(reportFiles);
   const imeEvidence = await loadImeEvidence(imeFiles);
   const artifactResults = await Promise.all(
@@ -53,13 +56,27 @@ export async function auditM0Evidence({ archiveRoot, manifestPath }) {
       ["business-audit-artifact", manifest.businessAudit.artifact],
       ["storage-artifact", manifest.storage.artifact],
       ["decision-adr-artifact", manifest.decision.adr],
-    ].map(([id, artifact]) => verifyArtifact(path.dirname(resolvedManifestPath), id, artifact)),
+    ].map(([id, artifact]) =>
+      verifyArtifact(path.dirname(resolvedManifestPath), id, artifact, manifest),
+    ),
   );
 
-  return evaluateM0Evidence({ artifactResults, imeEvidence, manifest, reports });
+  return evaluateM0Evidence({
+    archiveIntegrityIssues,
+    artifactResults,
+    imeEvidence,
+    manifest,
+    reports,
+  });
 }
 
-export function evaluateM0Evidence({ artifactResults, imeEvidence, manifest, reports }) {
+export function evaluateM0Evidence({
+  archiveIntegrityIssues,
+  artifactResults,
+  imeEvidence,
+  manifest,
+  reports,
+}) {
   const checks = [];
   const addCheck = (id, issues, evidence = {}) => {
     checks.push({ evidence, id, issues, pass: issues.length === 0 });
@@ -69,6 +86,9 @@ export function evaluateM0Evidence({ artifactResults, imeEvidence, manifest, rep
   addCheck("manifest", manifestIssues, {
     buildId: manifest.buildId,
     deviceCount: manifest.devices.length,
+  });
+  addCheck("archive-integrity", archiveIntegrityIssues, {
+    fileCount: reports.length + imeEvidence.length,
   });
 
   for (const result of artifactResults) {
@@ -267,9 +287,32 @@ function validatePlatformReport(device, report, issues) {
   if (
     wasm === undefined ||
     wasm.gzipBytes > wasm.maximumGzipBytes ||
-    wasm.maximumGzipBytes > wasm.productBudgetBytes
+    wasm.maximumGzipBytes !== 307_200 ||
+    wasm.productBudgetBytes !== 409_600
   ) {
     issues.push(`${label} violates the representative WASM budget envelope`);
+  } else if (wasm.fetchMs + wasm.compileAndInstantiateMs + wasm.firstCallMs >= 50) {
+    issues.push(`${label} exceeds the 50ms representative WASM cold-start budget`);
+  }
+  validateContinuity(report.transport, expectedTransport, label, issues);
+}
+
+function validateContinuity(transport, expectedTransport, label, issues) {
+  const outcome = transport?.modes[expectedTransport];
+  if (outcome?.status !== "ok") return;
+  const result = outcome.result;
+  const maximum = Math.max(...result.frameIntervals);
+  if (Math.abs(maximum - result.maxFrameGapMs) > 0.001) {
+    issues.push(`${label} transport maxFrameGapMs does not match its raw samples`);
+  }
+  if (result.renderedFrames !== result.frameIntervals.length + 1) {
+    issues.push(`${label} transport renderedFrames does not match its raw samples`);
+  }
+  if (
+    result.continuousDuringStall &&
+    (result.framesDuringStall < 1 || result.paintOperations < 1)
+  ) {
+    issues.push(`${label} transport continuity claim has no paint during the stall`);
   }
 }
 
@@ -324,7 +367,7 @@ async function loadImeEvidence(filenames) {
   );
 }
 
-async function verifyArtifact(root, id, artifact) {
+async function verifyArtifact(root, id, artifact, manifest) {
   const rootPath = await realpath(root);
   const candidate = path.resolve(rootPath, artifact.path);
   assertWithin(rootPath, candidate, `${id} path`);
@@ -340,23 +383,117 @@ async function verifyArtifact(root, id, artifact) {
   if (!metadata.isFile() || metadata.isSymbolicLink()) {
     return { id, issue: "artifact is not a regular file", pass: false, path: artifact.path };
   }
+  if (metadata.size > maximumEvidenceBytes) {
+    return { id, issue: "artifact exceeds 10 MiB", pass: false, path: artifact.path };
+  }
   const resolved = await realpath(candidate);
   assertWithin(rootPath, resolved, `${id} resolved path`);
   const bytes = await readFile(resolved);
   const actualSha256 = createHash("sha256").update(bytes).digest("hex");
+  let issue = null;
+  if (bytes.byteLength === 0) issue = "artifact is empty";
+  else if (actualSha256 !== artifact.sha256) issue = "artifact SHA-256 does not match";
+  else if (path.extname(resolved) !== ".json") issue = "artifact must be versioned JSON evidence";
+  else {
+    try {
+      const document = JSON.parse(bytes.toString("utf8"));
+      await validateEvidenceArtifactContent(id, document, manifest);
+    } catch (error) {
+      issue = error instanceof Error ? error.message : String(error);
+    }
+  }
   return {
     actualSha256,
     bytes: bytes.byteLength,
     id,
-    issue:
-      bytes.byteLength === 0
-        ? "artifact is empty"
-        : actualSha256 === artifact.sha256
-          ? null
-          : "artifact SHA-256 does not match",
-    pass: actualSha256 === artifact.sha256 && bytes.byteLength > 0,
+    issue,
+    pass: issue === null,
     path: artifact.path,
   };
+}
+
+export async function validateEvidenceArtifactContent(id, document, manifest) {
+  const validators = await artifactValidators();
+  const validator = validators.get(id);
+  if (validator === undefined) throw new Error(`unsupported evidence artifact ${id}`);
+  if (!validator.validate(document)) {
+    throw new Error(
+      `${id} failed schema validation: ${validator.ajv.errorsText(validator.validate.errors)}`,
+    );
+  }
+
+  if (id === "business-audit-artifact") {
+    if (
+      new URL(manifest.businessAudit.targetOrigin).origin !== manifest.businessAudit.targetOrigin
+    ) {
+      throw new Error("business audit targetOrigin must be an HTTPS origin without a path");
+    }
+    for (const name of [
+      "authenticatedSessionVerified",
+      "dynamicResourcesVerified",
+      "owner",
+      "reviewedAt",
+      "targetOrigin",
+      "transportDecision",
+    ]) {
+      if (document[name] !== manifest.businessAudit[name]) {
+        throw new Error(`business audit ${name} does not match the manifest`);
+      }
+    }
+    if (
+      document.automatedAudits.some(
+        (audit) => new URL(audit.url).origin !== manifest.businessAudit.targetOrigin,
+      )
+    ) {
+      throw new Error("business audit contains a different target origin");
+    }
+    if (
+      Date.parse(document.sessionEvidence.capturedAt) > Date.parse(document.reviewedAt) ||
+      document.automatedAudits.some(
+        (audit) => Date.parse(audit.capturedAt) > Date.parse(document.reviewedAt),
+      )
+    ) {
+      throw new Error("business audit review predates its captured evidence");
+    }
+  } else if (id === "storage-artifact") {
+    const expected = manifest.storage;
+    if (
+      document.backend !== expected.backend ||
+      document.owner !== expected.owner ||
+      document.immutable !== expected.immutable ||
+      document.offDevice !== expected.offDevice ||
+      document.retentionDays !== expected.retentionDays ||
+      document.backup.completedAt !== expected.backupVerifiedAt ||
+      document.restore.completedAt !== expected.restoreVerifiedAt
+    ) {
+      throw new Error("storage verification does not match the manifest");
+    }
+    if (
+      document.backup.sha256 !== document.restore.sha256 ||
+      document.backup.bytes !== document.restore.bytes
+    ) {
+      throw new Error("restored evidence does not match the backed-up evidence");
+    }
+    if (Date.parse(document.restore.completedAt) < Date.parse(document.backup.completedAt)) {
+      throw new Error("storage restore predates its backup");
+    }
+  } else {
+    if (
+      document.buildId !== manifest.buildId ||
+      document.decidedAt !== manifest.decision.decidedAt ||
+      document.status !== manifest.decision.status ||
+      JSON.stringify([...document.reviewers].sort()) !==
+        JSON.stringify([...manifest.decision.reviewers].sort())
+    ) {
+      throw new Error("M0 decision does not match the manifest");
+    }
+    if (
+      document.evidence.businessAuditSha256 !== manifest.businessAudit.artifact.sha256 ||
+      document.evidence.storageVerificationSha256 !== manifest.storage.artifact.sha256
+    ) {
+      throw new Error("M0 decision does not reference the accepted evidence digests");
+    }
+  }
 }
 
 async function listJsonFiles(roots, evidenceRoot) {
@@ -393,6 +530,20 @@ async function listJsonFiles(roots, evidenceRoot) {
   return [...new Set(filenames)];
 }
 
+async function verifyArchiveIntegrity(filenames) {
+  const issues = [];
+  for (const filename of filenames) {
+    try {
+      await verifyEvidenceDigest(filename);
+    } catch (error) {
+      issues.push(
+        `${path.basename(filename)}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return issues;
+}
+
 function assertWithin(root, candidate, label) {
   const relative = path.relative(root, candidate);
   if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) return;
@@ -414,6 +565,29 @@ async function manifestValidator() {
     return { ajv, validate: ajv.compile(schema) };
   })();
   return manifestValidatorPromise;
+}
+
+async function artifactValidators() {
+  artifactValidatorsPromise ??= (async () => {
+    const definitions = [
+      ["business-audit-artifact", "m0-business-audit.schema.json"],
+      ["storage-artifact", "m0-storage-verification.schema.json"],
+      ["decision-adr-artifact", "m0-decision.schema.json"],
+    ];
+    return new Map(
+      await Promise.all(
+        definitions.map(async ([id, filename]) => {
+          const schema = JSON.parse(
+            await readFile(path.join(repositoryRoot, "docs/schemas", filename), "utf8"),
+          );
+          const ajv = new Ajv2020({ allErrors: true, strict: true });
+          addFormats(ajv);
+          return [id, { ajv, validate: ajv.compile(schema) }];
+        }),
+      ),
+    );
+  })();
+  return artifactValidatorsPromise;
 }
 
 function parseArguments(arguments_) {

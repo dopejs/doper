@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dopejs.dev/schemas/m0-storage-verification-v1.json",
+  "title": "doper M0 immutable storage and restore evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "version",
+    "backend",
+    "backup",
+    "immutable",
+    "offDevice",
+    "owner",
+    "restore",
+    "retentionDays"
+  ],
+  "properties": {
+    "$schema": { "const": "https://dopejs.dev/schemas/m0-storage-verification-v1.json" },
+    "version": { "const": 1 },
+    "backend": { "type": "string", "minLength": 1 },
+    "backup": { "$ref": "#/$defs/storageOperation" },
+    "immutable": { "const": true },
+    "offDevice": { "const": true },
+    "owner": { "type": "string", "minLength": 1 },
+    "restore": { "$ref": "#/$defs/storageOperation" },
+    "retentionDays": { "type": "integer", "minimum": 1 }
+  },
+  "$defs": {
+    "storageOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactId", "bytes", "completedAt", "sha256"],
+      "properties": {
+        "artifactId": { "type": "string", "minLength": 1 },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

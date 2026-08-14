@@ -225,7 +225,52 @@ describe("summarizeReports", () => {
       /inconsistent postMessage payload cost/u,
     );
   });
+
+  it("recomputes timing and transport summaries from raw samples", async () => {
+    const validReport = report({ transport: validTransport() });
+    await expect(validateProbeReport(validReport)).resolves.toBe(validReport);
+
+    const forgedTiming = structuredClone(validReport);
+    forgedTiming.workerRaf.summary.p95 = 0;
+    await expect(validateProbeReport(forgedTiming)).rejects.toThrow(/summary that does not match/u);
+
+    const forgedTransport = structuredClone(validReport);
+    const recommended = forgedTransport.transport.recommendedMode;
+    forgedTransport.transport.modes[recommended].result.maxFrameGapMs = 0;
+    await expect(validateProbeReport(forgedTransport)).rejects.toThrow(
+      /inconsistent transport frame evidence/u,
+    );
+  });
 });
+
+function validTransport() {
+  const summary = { count: 1, max: 16, mean: 16, min: 16, p50: 16, p95: 16, p99: 16 };
+  return {
+    modes: {
+      "main-thread": {
+        result: {
+          anchorLatencySamples: [],
+          continuousDuringStall: false,
+          durationMs: 16,
+          finalPixelRgba: [1, 2, 3, 255],
+          frameIntervals: [16],
+          frameSummary: summary,
+          framesDuringStall: 0,
+          maxFrameGapMs: 16,
+          missedFrameBudget: 0,
+          mode: "main-thread",
+          paintOperations: 2,
+          phaseErrorSamples: [],
+          renderedFrames: 2,
+        },
+        status: "ok",
+      },
+      "post-message": { reason: "not selected", status: "unsupported" },
+      "sab": { reason: "not selected", status: "unsupported" },
+    },
+    recommendedMode: "main-thread",
+  };
+}
 
 function batchReport(batchId, sequence, low, high, throughput, runId) {
   return report({

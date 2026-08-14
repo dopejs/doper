@@ -4,22 +4,22 @@
   "buildId": "formal-build-abc123",
   "businessAudit": {
     "artifact": {
-      "path": "evidence/business-audit.md",
+      "path": "evidence/business-audit.v1.json",
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "authenticatedSessionVerified": true,
     "dynamicResourcesVerified": true,
     "owner": "fixture-owner",
-    "reviewedAt": "2026-08-14T00:00:00.000Z",
+    "reviewedAt": "2026-08-14T00:10:00.000Z",
     "targetOrigin": "https://example.invalid",
     "transportDecision": "post-message"
   },
   "decision": {
     "adr": {
-      "path": "evidence/m0-decision.md",
+      "path": "evidence/m0-decision.v1.json",
       "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     },
-    "decidedAt": "2026-08-14T00:00:00.000Z",
+    "decidedAt": "2026-08-14T00:20:00.000Z",
     "reviewers": ["fixture-reviewer"],
     "status": "go"
   },
@@ -223,7 +223,7 @@
   ],
   "storage": {
     "artifact": {
-      "path": "evidence/storage-retention.md",
+      "path": "evidence/storage-verification.v1.json",
       "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     },
     "backend": "fixture immutable object storage",
@@ -231,7 +231,7 @@
     "immutable": true,
     "offDevice": true,
     "owner": "fixture-owner",
-    "restoreVerifiedAt": "2026-08-14T00:00:00.000Z",
+    "restoreVerifiedAt": "2026-08-14T00:10:00.000Z",
     "retentionDays": 90
   }
 }

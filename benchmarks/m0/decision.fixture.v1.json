@@ -1,0 +1,17 @@
+{
+  "$schema": "https://dopejs.dev/schemas/m0-decision-v1.json",
+  "version": 1,
+  "buildId": "formal-build-abc123",
+  "contingency": {
+    "action": "Revert to the main-thread transport and reopen M0.",
+    "trigger": "The selected Worker transport fails a required target platform."
+  },
+  "decidedAt": "2026-08-14T00:20:00.000Z",
+  "evidence": {
+    "businessAuditSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "storageVerificationSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "rationale": "Fixture decision used only to validate the contract.",
+  "reviewers": ["fixture-reviewer"],
+  "status": "go"
+}

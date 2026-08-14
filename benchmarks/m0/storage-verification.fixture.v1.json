@@ -1,0 +1,21 @@
+{
+  "$schema": "https://dopejs.dev/schemas/m0-storage-verification-v1.json",
+  "version": 1,
+  "backend": "fixture immutable object storage",
+  "backup": {
+    "artifactId": "fixture-backup",
+    "bytes": 1024,
+    "completedAt": "2026-08-14T00:00:00.000Z",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "immutable": true,
+  "offDevice": true,
+  "owner": "fixture-owner",
+  "restore": {
+    "artifactId": "fixture-restore",
+    "bytes": 1024,
+    "completedAt": "2026-08-14T00:10:00.000Z",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "retentionDays": 90
+}

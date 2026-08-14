@@ -14,7 +14,10 @@ const schemaFiles = [
   "benchmark-suite.schema.json",
   "ime-recording.schema.json",
   "ime-sequence.schema.json",
+  "m0-business-audit.schema.json",
+  "m0-decision.schema.json",
   "m0-evidence-manifest.schema.json",
+  "m0-storage-verification.schema.json",
   "platform-probe-report.schema.json",
 ];
 
@@ -109,6 +112,21 @@ validate(
   m0Manifest,
   "evidence-manifest.fixture.v1.json",
 );
+
+for (const [filename, schemaId] of [
+  ["business-audit.fixture.v1.json", "https://dopejs.dev/schemas/m0-business-audit-v1.json"],
+  ["decision.fixture.v1.json", "https://dopejs.dev/schemas/m0-decision-v1.json"],
+  [
+    "storage-verification.fixture.v1.json",
+    "https://dopejs.dev/schemas/m0-storage-verification-v1.json",
+  ],
+]) {
+  validate(
+    ajv.getSchema(schemaId),
+    await readJson(path.join(repositoryRoot, "benchmarks/m0", filename)),
+    filename,
+  );
+}
 
 process.stdout.write("contract fixtures valid\n");
 

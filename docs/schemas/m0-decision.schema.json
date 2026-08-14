@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dopejs.dev/schemas/m0-decision-v1.json",
+  "title": "doper M0 Go/Pivot/Stop decision evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "version",
+    "buildId",
+    "contingency",
+    "decidedAt",
+    "evidence",
+    "rationale",
+    "reviewers",
+    "status"
+  ],
+  "properties": {
+    "$schema": { "const": "https://dopejs.dev/schemas/m0-decision-v1.json" },
+    "version": { "const": 1 },
+    "buildId": { "$ref": "#/$defs/identifier" },
+    "contingency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "trigger"],
+      "properties": {
+        "action": { "type": "string", "minLength": 1 },
+        "trigger": { "type": "string", "minLength": 1 }
+      }
+    },
+    "decidedAt": { "type": "string", "format": "date-time" },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["businessAuditSha256", "storageVerificationSha256"],
+      "properties": {
+        "businessAuditSha256": { "$ref": "#/$defs/sha256" },
+        "storageVerificationSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "rationale": { "type": "string", "minLength": 1 },
+    "reviewers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "status": { "enum": ["go", "pivot", "stop"] }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

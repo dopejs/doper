@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,6 +10,7 @@ import {
   createProbeCollector,
   safeArchiveSegment,
 } from "./collect-probes.mjs";
+import { verifyEvidenceDigest } from "./evidence-integrity.mjs";
 
 const temporaryDirectories = [];
 const servers = [];
@@ -52,7 +53,14 @@ describe("probe collector archive", () => {
 
     const archived = await archiveProbeReport(report, directory);
     expect(archived).toBe("v1/dev-mac-01/abc123/00000000-0000-4000-8000-000000000001.json");
-    expect(JSON.parse(await readFile(path.join(directory, archived), "utf8"))).toEqual(report);
+    const filename = path.join(directory, archived);
+    expect(JSON.parse(await readFile(filename, "utf8"))).toEqual(report);
+    await expect(verifyEvidenceDigest(filename)).resolves.toMatchObject({
+      bytes: expect.any(Number),
+    });
+    await expect(readFile(`${filename}.sha256`, "utf8")).resolves.toMatch(
+      /^[a-f0-9]{64} {2}00000000-0000-4000-8000-000000000001\.json\n$/u,
+    );
     await expect(archiveProbeReport(report, directory)).rejects.toThrow(/already archived/u);
   });
 
@@ -62,8 +70,45 @@ describe("probe collector archive", () => {
 
     const archived = await archiveImeRecording(recording, directory);
     expect(archived).toBe(`ime/v2/dev-mac-01/abc123/${recording.recordingId}.json`);
-    expect(JSON.parse(await readFile(path.join(directory, archived), "utf8"))).toEqual(recording);
+    const filename = path.join(directory, archived);
+    expect(JSON.parse(await readFile(filename, "utf8"))).toEqual(recording);
+    await expect(verifyEvidenceDigest(filename)).resolves.toMatchObject({
+      digest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
     await expect(archiveImeRecording(recording, directory)).rejects.toThrow(/already archived/u);
+  });
+
+  it("detects archived evidence changed after collection", async () => {
+    const directory = await temporaryDirectory();
+    const report = {
+      build: { id: "abc123", mode: "production" },
+      deviceId: "dev-mac-01",
+      runId: "00000000-0000-4000-8000-000000000003",
+      version: 1,
+    };
+    const archived = await archiveProbeReport(report, directory);
+    const filename = path.join(directory, archived);
+    await chmod(filename, 0o600);
+    await writeFile(filename, "{}\n", "utf8");
+
+    await expect(verifyEvidenceDigest(filename)).rejects.toThrow(/SHA-256 does not match/u);
+  });
+
+  it("fails closed when a prior archive commit is incomplete", async () => {
+    const directory = await temporaryDirectory();
+    const report = {
+      build: { id: "abc123", mode: "production" },
+      deviceId: "dev-mac-01",
+      runId: "00000000-0000-4000-8000-000000000004",
+      version: 1,
+    };
+    const destination = path.join(directory, "v1", "dev-mac-01", "abc123");
+    await mkdir(destination, { recursive: true });
+    await writeFile(path.join(destination, `${report.runId}.json`), "{}\n", "utf8");
+
+    await expect(archiveProbeReport(report, directory)).rejects.toThrow(
+      /incomplete or corrupt evidence conflict/u,
+    );
   });
 
   it("authenticates, validates, and archives IME uploads without polluting probe summaries", async () => {

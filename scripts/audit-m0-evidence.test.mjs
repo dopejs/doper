@@ -2,13 +2,28 @@ import { readFile } from "node:fs/promises";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { evaluateM0Evidence } from "./audit-m0-evidence.mjs";
+import { evaluateM0Evidence, validateEvidenceArtifactContent } from "./audit-m0-evidence.mjs";
 
 let fixtureManifest;
+let fixtureArtifacts;
 
 beforeAll(async () => {
   fixtureManifest = JSON.parse(
     await readFile(new URL("../benchmarks/m0/evidence-manifest.fixture.v1.json", import.meta.url)),
+  );
+  fixtureArtifacts = Object.fromEntries(
+    await Promise.all(
+      [
+        ["business-audit-artifact", "business-audit.fixture.v1.json"],
+        ["storage-artifact", "storage-verification.fixture.v1.json"],
+        ["decision-adr-artifact", "decision.fixture.v1.json"],
+      ].map(async ([id, filename]) => [
+        id,
+        JSON.parse(
+          await readFile(new URL(`../benchmarks/m0/${filename}`, import.meta.url), "utf8"),
+        ),
+      ]),
+    ),
   );
 });
 
@@ -16,6 +31,7 @@ describe("P0/M0 evidence gate", () => {
   it("passes only with registered roles, two 5+15 batches, and complete IME coverage", () => {
     const manifest = structuredClone(fixtureManifest);
     const result = evaluateM0Evidence({
+      archiveIntegrityIssues: [],
       artifactResults: passingArtifacts(),
       imeEvidence: imeEvidence(manifest),
       manifest,
@@ -24,7 +40,7 @@ describe("P0/M0 evidence gate", () => {
 
     expect(result.status).toBe("pass");
     expect(result.issueCount).toBe(0);
-    expect(result.checks).toHaveLength(18);
+    expect(result.checks).toHaveLength(19);
   });
 
   it("reports missing warmups, cross-role duplication, IME gaps, and artifact tampering", () => {
@@ -39,6 +55,9 @@ describe("P0/M0 evidence gate", () => {
           report.collection.sequence === 5
         ),
     );
+    reports[0].wasmBudget.fetchMs = 50;
+    const secondTransport = reports[1].transport;
+    secondTransport.modes[secondTransport.recommendedMode].result.maxFrameGapMs = 1;
     const evidence = imeEvidence(fixtureManifest).filter(
       ({ recording }) =>
         !(
@@ -51,6 +70,7 @@ describe("P0/M0 evidence gate", () => {
     artifacts[0] = { ...artifacts[0], issue: "artifact SHA-256 does not match", pass: false };
 
     const result = evaluateM0Evidence({
+      archiveIntegrityIssues: ["tampered.json: evidence SHA-256 does not match"],
       artifactResults: artifacts,
       imeEvidence: evidence,
       manifest,
@@ -62,6 +82,28 @@ describe("P0/M0 evidence gate", () => {
     expect(result.issues.join("\n")).toMatch(/5 ordered warmup reports/u);
     expect(result.issues.join("\n")).toMatch(/textarea-proxy\/ja recording is missing/u);
     expect(result.issues.join("\n")).toMatch(/SHA-256/u);
+    expect(result.issues.join("\n")).toMatch(/50ms representative WASM cold-start budget/u);
+    expect(result.issues.join("\n")).toMatch(/maxFrameGapMs does not match/u);
+  });
+
+  it("validates structured external evidence and its manifest links", async () => {
+    for (const [id, document] of Object.entries(fixtureArtifacts)) {
+      await expect(
+        validateEvidenceArtifactContent(id, document, fixtureManifest),
+      ).resolves.toBeUndefined();
+    }
+
+    const corruptedRestore = structuredClone(fixtureArtifacts["storage-artifact"]);
+    corruptedRestore.restore.sha256 = "d".repeat(64);
+    await expect(
+      validateEvidenceArtifactContent("storage-artifact", corruptedRestore, fixtureManifest),
+    ).rejects.toThrow(/does not match the backed-up evidence/u);
+
+    const staleDecision = structuredClone(fixtureArtifacts["decision-adr-artifact"]);
+    staleDecision.evidence.businessAuditSha256 = "e".repeat(64);
+    await expect(
+      validateEvidenceArtifactContent("decision-adr-artifact", staleDecision, fixtureManifest),
+    ).rejects.toThrow(/accepted evidence digests/u);
   });
 });
 
@@ -110,7 +152,11 @@ function platformReport(buildId, device, batchId, kind, sequence, total, run) {
   const outcome = {
     result: {
       continuousDuringStall: recommendedMode !== "main-thread",
+      frameIntervals: [recommendedMode === "main-thread" ? 210 : 20],
+      framesDuringStall: recommendedMode === "main-thread" ? 0 : 10,
       maxFrameGapMs: recommendedMode === "main-thread" ? 210 : 20,
+      paintOperations: 12,
+      renderedFrames: 2,
     },
     status: "ok",
   };

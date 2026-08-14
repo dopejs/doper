@@ -160,7 +160,61 @@ export async function validateProbeReport(
   if (report.messageCopyCost !== undefined) {
     validateMessageCopyCostEvidence(report.messageCopyCost, label);
   }
+  for (const name of ["sabLatency", "selfDrive", "workerRaf"]) {
+    if (report[name] !== undefined) validateTimingEvidence(report[name], `${label} ${name}`);
+  }
+  if (report.transport !== undefined) validateTransportEvidence(report.transport, label);
+  if (
+    report.wasmBudget !== undefined &&
+    report.wasmBudget.headroomBytes !==
+      report.wasmBudget.productBudgetBytes - report.wasmBudget.gzipBytes
+  ) {
+    throw new Error(`${label} has inconsistent WASM budget headroom`);
+  }
   return report;
+}
+
+function validateTimingEvidence(result, label) {
+  if (!summaryMatchesSamples(result.summary, result.samples)) {
+    throw new Error(`${label} has a summary that does not match its raw samples`);
+  }
+}
+
+function validateTransportEvidence(transport, label) {
+  for (const [mode, outcome] of Object.entries(transport.modes)) {
+    if (outcome.status !== "ok") continue;
+    const result = outcome.result;
+    if (result.mode !== mode) {
+      throw new Error(`${label} transport result is filed under the wrong mode`);
+    }
+    if (!summaryMatchesSamples(result.frameSummary, result.frameIntervals)) {
+      throw new Error(`${label} transport frame summary does not match its raw samples`);
+    }
+    if (
+      result.maxFrameGapMs !== Math.max(...result.frameIntervals) ||
+      result.renderedFrames !== result.frameIntervals.length + 1
+    ) {
+      throw new Error(`${label} has inconsistent transport frame evidence`);
+    }
+    for (const [samplesName, summaryName] of [
+      ["anchorLatencySamples", "anchorLatencySummary"],
+      ["phaseErrorSamples", "phaseErrorSummary"],
+    ]) {
+      const samples = result[samplesName];
+      const summary = result[summaryName];
+      if ((samples.length === 0) !== (summary === undefined)) {
+        throw new Error(`${label} transport ${summaryName} presence is inconsistent`);
+      }
+      if (summary !== undefined && !summaryMatchesSamples(summary, samples)) {
+        throw new Error(`${label} transport ${summaryName} does not match its raw samples`);
+      }
+    }
+  }
+}
+
+function summaryMatchesSamples(summary, samples) {
+  const expected = summarizeMetricSamples(samples);
+  return Object.entries(expected).every(([name, value]) => summary[name] === value);
 }
 
 function validateMessageCopyCostEvidence(result, label) {

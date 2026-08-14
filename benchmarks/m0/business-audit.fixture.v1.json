@@ -1,0 +1,24 @@
+{
+  "$schema": "https://dopejs.dev/schemas/m0-business-audit-v1.json",
+  "version": 1,
+  "authenticatedSessionVerified": true,
+  "automatedAudits": [
+    {
+      "artifactSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "capturedAt": "2026-08-14T00:00:00.000Z",
+      "status": "manual-review",
+      "url": "https://example.invalid/app"
+    }
+  ],
+  "dynamicResourcesVerified": true,
+  "findings": ["Fixture only; not formal evidence."],
+  "owner": "fixture-owner",
+  "reviewedAt": "2026-08-14T00:10:00.000Z",
+  "sessionEvidence": {
+    "artifactSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "capturedAt": "2026-08-14T00:05:00.000Z",
+    "method": "authenticated browser network capture"
+  },
+  "targetOrigin": "https://example.invalid",
+  "transportDecision": "post-message"
+}

@@ -1,14 +1,19 @@
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { replayImeRecording } from "./replay-ime.mjs";
+import {
+  maximumEvidenceBytes,
+  verifyEvidenceDigest,
+  writeImmutableJsonEvidence,
+} from "./evidence-integrity.mjs";
 import { loadProbeReports, summarizeReports, validateProbeReport } from "./summarize-probes.mjs";
 
-const maximumBodyBytes = 10 * 1024 * 1024;
+const maximumBodyBytes = maximumEvidenceBytes;
 const mimeTypes = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -43,13 +48,11 @@ export async function archiveProbeReport(report, archiveRoot) {
   assertWithin(resolvedRoot, resolvedDirectory, "archive directory");
   const filename = path.join(resolvedDirectory, `${runId}.json`);
   try {
-    await writeFile(filename, `${JSON.stringify(report, null, 2)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-    });
+    await writeImmutableJsonEvidence(filename, report);
   } catch (error) {
     if (error !== null && typeof error === "object" && error.code === "EEXIST") {
-      throw new HttpError(409, `runId ${runId} is already archived`);
+      await rejectIncompleteConflict(filename);
+      throw new HttpError(409, `runId ${runId} is already archived`, { cause: error });
     }
     throw error;
   }
@@ -69,13 +72,11 @@ export async function archiveImeRecording(recording, archiveRoot) {
   assertWithin(resolvedRoot, resolvedDirectory, "IME archive directory");
   const filename = path.join(resolvedDirectory, `${recordingId}.json`);
   try {
-    await writeFile(filename, `${JSON.stringify(recording, null, 2)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-    });
+    await writeImmutableJsonEvidence(filename, recording);
   } catch (error) {
     if (error !== null && typeof error === "object" && error.code === "EEXIST") {
-      throw new HttpError(409, `recordingId ${recordingId} is already archived`);
+      await rejectIncompleteConflict(filename);
+      throw new HttpError(409, `recordingId ${recordingId} is already archived`, { cause: error });
     }
     throw error;
   }
@@ -180,8 +181,19 @@ async function handleRequest(request, response, context) {
 
 async function archiveSummary(archiveRoot, allowLocal) {
   const filenames = await listJsonFiles(path.join(archiveRoot, "v1"));
+  await Promise.all(filenames.map((filename) => verifyEvidenceDigest(filename)));
   const reports = await loadProbeReports(filenames, { allowLocal });
   return summarizeReports(reports);
+}
+
+async function rejectIncompleteConflict(filename) {
+  try {
+    await verifyEvidenceDigest(filename);
+  } catch (error) {
+    throw new Error("archive contains an incomplete or corrupt evidence conflict", {
+      cause: error,
+    });
+  }
 }
 
 async function listJsonFiles(root) {
@@ -331,8 +343,8 @@ function escapeHtml(value) {
 }
 
 class HttpError extends Error {
-  constructor(status, message) {
-    super(message);
+  constructor(status, message, options) {
+    super(message, options);
     this.status = status;
   }
 }
