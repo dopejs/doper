@@ -1,0 +1,19 @@
+{
+  "crate": "doper-probe-wasm-budget",
+  "baselines": {
+    "aarch64-apple-darwin": {
+      "gzipBytes": 236368,
+      "rawBytes": 591662
+    },
+    "x86_64-unknown-linux-gnu": {
+      "gzipBytes": 236247,
+      "rawBytes": 591477
+    }
+  },
+  "maximumGzipBytes": 307200,
+  "productBudgetBytes": 409600,
+  "profile": "release-opt-z-lto",
+  "rustToolchain": "1.96.0",
+  "target": "wasm32-unknown-unknown",
+  "version": 2
+}

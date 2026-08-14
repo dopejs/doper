@@ -14,11 +14,15 @@ const wasmPath = path.join(
 );
 const outputDirectory = path.join(repositoryRoot, "target/probe-artifacts");
 const publicDirectory = path.join(repositoryRoot, "apps/platform-probe/public/wasm");
-const evidencePath = path.join(repositoryRoot, "docs/evidence/wasm-budget.v1.json");
+const evidencePath = path.join(repositoryRoot, "docs/evidence/wasm-budget.v2.json");
 
-const rustcVersion = (await runCapture("rustc", ["--version"])).trim();
-if (!rustcVersion.startsWith("rustc 1.96.0 ")) {
-  throw new Error(`WASM budget evidence requires rustc 1.96.0; received ${rustcVersion}`);
+const rustcInformation = await runCapture("rustc", ["-Vv"]);
+const rustcVersion = /^release: (.+)$/mu.exec(rustcInformation)?.[1];
+const rustcHost = /^host: (.+)$/mu.exec(rustcInformation)?.[1];
+if (rustcVersion !== "1.96.0" || rustcHost === undefined) {
+  throw new Error(
+    `WASM budget evidence requires a recognized Rust 1.96.0 host; received ${rustcInformation.trim()}`,
+  );
 }
 
 await run("cargo", [
@@ -45,10 +49,38 @@ const report = {
   version: 1,
 };
 
-const expected = JSON.parse(await readFile(evidencePath, "utf8"));
-if (JSON.stringify(report) !== JSON.stringify(expected)) {
+const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+const expectedBaseline = evidence.baselines[rustcHost];
+const expectedEnvelope = {
+  crate: report.crate,
+  maximumGzipBytes: report.maximumGzipBytes,
+  productBudgetBytes: report.productBudgetBytes,
+  profile: report.profile,
+  rustToolchain: report.rustToolchain,
+  target: report.target,
+  version: 2,
+};
+const actualEnvelope = {
+  crate: evidence.crate,
+  maximumGzipBytes: evidence.maximumGzipBytes,
+  productBudgetBytes: evidence.productBudgetBytes,
+  profile: evidence.profile,
+  rustToolchain: evidence.rustToolchain,
+  target: evidence.target,
+  version: evidence.version,
+};
+if (JSON.stringify(actualEnvelope) !== JSON.stringify(expectedEnvelope)) {
+  throw new Error(`WASM budget evidence envelope is inconsistent: ${JSON.stringify(evidence)}`);
+}
+if (expectedBaseline === undefined) {
+  throw new Error(`WASM budget evidence has no reviewed baseline for host ${rustcHost}`);
+}
+if (
+  expectedBaseline.gzipBytes !== report.gzipBytes ||
+  expectedBaseline.rawBytes !== report.rawBytes
+) {
   throw new Error(
-    `WASM budget evidence changed. Review the size/toolchain impact and update ${path.relative(repositoryRoot, evidencePath)} explicitly.\nExpected: ${JSON.stringify(expected)}\nActual:   ${JSON.stringify(report)}`,
+    `WASM budget evidence changed for ${rustcHost}. Review the size/toolchain impact and update ${path.relative(repositoryRoot, evidencePath)} explicitly.\nExpected: ${JSON.stringify(expectedBaseline)}\nActual:   ${JSON.stringify({ gzipBytes: report.gzipBytes, rawBytes: report.rawBytes })}`,
   );
 }
 

@@ -34,10 +34,14 @@
 
 ## Evidence
 
-- 固定证据：[`../evidence/wasm-budget.v1.json`](../evidence/wasm-budget.v1.json)
+- 固定证据：[`../evidence/wasm-budget.v2.json`](../evidence/wasm-budget.v2.json)
 - 复现命令：`pnpm wasm:budget`
 - Rust 单元测试验证 grapheme、非法字节和无裸指针输入路径；`pnpm check` 对 evidence
   做精确回读，工具链或二进制大小漂移会失败。
+- v2 evidence 按 rustc host 保存精确 golden，避免把 host 相关链接差异误判为体积
+  回退；当前 `aarch64-apple-darwin` 为 591,662B raw / 236,368B gzip，
+  `x86_64-unknown-linux-gnu` 为 591,477B raw / 236,247B gzip。工具链、target、profile
+  与 300/400KiB 门禁仍全局固定，未知 host 失败关闭。
 - 2026-08-14 `dev-mac-01` Chrome 本地自检：591,662B raw / 236,368B gzip，距
   400KB 产品预算剩余 173,232B；`instantiateStreaming` 的 fetch、compile +
   instantiate、首次调用分别为 2.735ms、2.445ms、0.225ms，总计 5.405ms。
@@ -46,7 +50,8 @@
 
 ## Consequences
 
-- CI 增加一个约 236KB gzip 的代表性包络构建和精确 evidence 检查。
+- CI 增加一个约 236KB gzip 的代表性包络构建，并对当前 rustc host 执行精确
+  evidence 检查。
 - 目前对产品预算有 173KB 的实测静态余量，但这不是最终 Core 体积保证；每个里程碑
   仍必须对真实产物执行 400KB 门禁。
 - `rustybuzz`/`unicode-segmentation` 只存在于 disposable probe，Core 不得依赖它们

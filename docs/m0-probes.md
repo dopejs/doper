@@ -203,9 +203,10 @@ SAB 延迟必须将各全局上下文的 `performance.timeOrigin + performance.n
 
 `pnpm wasm:budget` 使用固定 Rust 1.96.0 release 配置链接实际 grapheme 分段和字体
 shaping 路径，并将结果与
-[`evidence/wasm-budget.v1.json`](evidence/wasm-budget.v1.json) 精确比较。当前结果为
-591,662B raw / 236,368B gzip，低于 300KB 内部包络门禁，距 400KB 产品预算剩余
-173,232B。本地 Chrome `instantiateStreaming` 的一次链路自检总计 5.405ms。
+[`evidence/wasm-budget.v2.json`](evidence/wasm-budget.v2.json) 中当前 rustc host 的
+golden 精确比较。macOS 为 591,662B raw / 236,368B gzip，Linux CI 为 591,477B raw /
+236,247B gzip；较大值仍低于 300KB 内部包络门禁，距 400KB 产品预算剩余 173,232B。
+本地 Chrome `instantiateStreaming` 的一次链路自检总计 5.405ms。
 
 该包络是保守的风险探针，不是最终 Core 大小，也不确认最终文本依赖；选择 shaping
 方案或实现实际 Core 后必须重新测真实产物。桌面启动数据不能替代目标移动设备样本。
