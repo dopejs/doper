@@ -21,6 +21,11 @@ const metricDefinitions = {
     },
     unit: "ms",
   },
+  sabBackpressureAcceptedPerSecond: {
+    better: "higher",
+    read: (report) => report.sabBackpressure?.acceptedPerSecond,
+    unit: "items/s",
+  },
   sabLatencyP95Ms: {
     better: "lower",
     read: (report) => report.sabLatency?.summary.p95,
@@ -125,7 +130,45 @@ export async function validateProbeReport(
       `${label} is local-only; provide VITE_DOPER_BUILD_ID and VITE_DOPER_DEVICE_ID or allow local reports explicitly`,
     );
   }
+  if (report.sabBackpressure !== undefined) {
+    validateBackpressureEvidence(report.sabBackpressure, label);
+  }
   return report;
+}
+
+function validateBackpressureEvidence(result, label) {
+  const sequenceMonotonic = result.consumedSequences.every(
+    (sequence, index, values) => index === 0 || sequence > values[index - 1],
+  );
+  const sequencesWithinProducedRange = result.consumedSequences.every(
+    (sequence) => sequence >= 1 && sequence <= result.producedCount,
+  );
+  const consumedCount = result.consumedSequences.length;
+  const latestConsumedSequence = result.consumedSequences.at(-1) ?? 0;
+  const cursorsMatchCounts =
+    result.finalReadCursor === consumedCount && result.finalWriteCursor === result.acceptedCount;
+  const drained =
+    result.finalReadCursor === result.finalWriteCursor &&
+    consumedCount === result.acceptedCount &&
+    cursorsMatchCounts;
+  const backpressureHandled =
+    result.droppedCount > 0 &&
+    result.acceptedCount > 0 &&
+    result.highWatermark === result.capacity &&
+    result.acceptedCount + result.droppedCount === result.producedCount &&
+    drained &&
+    sequenceMonotonic &&
+    sequencesWithinProducedRange &&
+    latestConsumedSequence === result.latestAcceptedSequence;
+  if (
+    result.consumedCount !== consumedCount ||
+    result.latestConsumedSequence !== latestConsumedSequence ||
+    result.sequenceMonotonic !== sequenceMonotonic ||
+    result.drained !== drained ||
+    result.backpressureHandled !== backpressureHandled
+  ) {
+    throw new Error(`${label} has inconsistent SAB backpressure evidence`);
+  }
 }
 
 async function getValidator() {
@@ -328,6 +371,7 @@ function capabilitySignature(report) {
     hardwareConcurrency: report.environment?.hardwareConcurrency ?? null,
     offscreenCanvas: report.environment?.offscreenCanvas ?? null,
     recommendedTransport: report.transport?.recommendedMode ?? null,
+    sabBackpressureHandled: report.sabBackpressure?.backpressureHandled ?? null,
     sharedArrayBuffer: report.environment?.sharedArrayBuffer ?? null,
     transportStatuses:
       report.transport === undefined
@@ -399,6 +443,11 @@ function parseArguments(arguments_) {
   return { allowLocal, filenames, output };
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+const runtimeProcess = Reflect.get(globalThis, "process");
+if (
+  runtimeProcess !== undefined &&
+  runtimeProcess.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(runtimeProcess.argv[1]).href
+) {
   await main();
 }

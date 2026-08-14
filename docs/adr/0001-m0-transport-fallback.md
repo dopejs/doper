@@ -45,13 +45,20 @@ paint 次数、最终像素和 anchor 延迟。
 实际 Canvas2D 操作，而不只是 Worker timer。两份运行时报告均通过
 `platform-probe-report.schema.json`，控制台无 error/warning。
 
+同一 Chrome 环境新增 bounded SAB ring 压力自检：容量 32，生产 4096 项，其中
+1032 项进入 ring、3064 项在满载时显式拒绝；Worker 严格递增消费全部 accepted，
+high-watermark 为 32，最终 read/write cursor 均为 1032。服务端从原始 sequence
+重新计算记账、顺序与排空不变式。该结果只证明 SAB 有界传输原型，postMessage 的
+in-flight/ack 背压仍需单独验证。
+
 仍需目标低端 Android、iOS、Safari、Firefox 与业务 COOP/COEP 结论后才能把本 ADR
 改为 Accepted。
 
 ## Consequences
 
 - Host 必须维护三档能力探测和行为等价测试。
-- postMessage 是正式降级路径，不是临时调试代码；需要记录复制成本和背压。
+- postMessage 是正式降级路径，不是临时调试代码；仍需记录复制成本并验证有界
+  in-flight/ack 背压。
 - main-thread 保证功能，不承诺主线程阻塞时继续呈现，遥测必须区分该模式。
 - frame/anchor 原始样本、选择原因与错误必须进入报告，便于线上解释降级比例。
 

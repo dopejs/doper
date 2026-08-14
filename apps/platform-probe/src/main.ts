@@ -1,7 +1,12 @@
 import "./style.css";
 
 import { EditingProbe, type EditingProbeSnapshot } from "./editing-probe";
-import type { CanvasProbeResult, TimingProbeResult, TransportMatrixResult } from "./protocol";
+import type {
+  CanvasProbeResult,
+  SabBackpressureResult,
+  TimingProbeResult,
+  TransportMatrixResult,
+} from "./protocol";
 import {
   PlatformProbeRunner,
   type EnvironmentSnapshot,
@@ -32,6 +37,7 @@ interface ProbeReport {
   errors?: Record<string, string>;
   finishedAt?: string;
   runId: string;
+  sabBackpressure?: SabBackpressureResult;
   sabLatency?: TimingProbeResult;
   selfDrive?: TimingProbeResult;
   startedAt?: string;
@@ -166,6 +172,7 @@ async function runAll(): Promise<void> {
   report.startedAt = new Date().toISOString();
   delete report.finishedAt;
   delete report.canvas;
+  delete report.sabBackpressure;
   delete report.sabLatency;
   delete report.selfDrive;
   delete report.transport;
@@ -195,6 +202,19 @@ async function runAll(): Promise<void> {
     );
     if (sabLatency !== undefined) {
       report.sabLatency = sabLatency;
+    }
+    const sabBackpressure = await runProbe(
+      "sab-backpressure",
+      "backpressure-result",
+      () => runner.sabBackpressure(),
+      compactSabBackpressure,
+    );
+    if (sabBackpressure !== undefined) {
+      report.sabBackpressure = sabBackpressure;
+      if (!sabBackpressure.backpressureHandled && report.errors !== undefined) {
+        report.errors["sab-backpressure"] =
+          "bounded SAB ring failed loss accounting, ordering, capacity, or drain invariants";
+      }
     }
     const selfDrive = await runProbe(
       "self-drive",
@@ -386,6 +406,11 @@ async function runProbe<Result>(
 
 function compactTimingResult(result: TimingProbeResult): unknown {
   return { durationMs: result.durationMs, summary: result.summary };
+}
+
+function compactSabBackpressure(result: SabBackpressureResult): unknown {
+  const { consumedSequences: _, ...summary } = result;
+  return summary;
 }
 
 function compactTransportMatrix(result: TransportMatrixResult): unknown {

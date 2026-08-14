@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { summarizeReports } from "./summarize-probes.mjs";
+import { summarizeReports, validateProbeReport } from "./summarize-probes.mjs";
 
 function report(overrides) {
   return {
@@ -51,6 +51,49 @@ describe("summarizeReports", () => {
       errors: { wasm: "fetch failed" },
       finishedAt: null,
     });
+  });
+
+  it("reports SAB backpressure throughput and rejects inconsistent claimed evidence", async () => {
+    const backpressure = {
+      acceptedCount: 3,
+      acceptedPerSecond: 300,
+      backpressureHandled: true,
+      capacity: 2,
+      consumedCount: 3,
+      consumedSequences: [1, 2, 4],
+      drained: true,
+      droppedCount: 1,
+      durationMs: 10,
+      finalReadCursor: 3,
+      finalWriteCursor: 3,
+      highWatermark: 2,
+      latestAcceptedSequence: 4,
+      latestConsumedSequence: 4,
+      producedCount: 4,
+      sequenceMonotonic: true,
+    };
+    const validReport = report({ sabBackpressure: backpressure });
+    expect(
+      summarizeReports([validReport], "2026-08-14T00:10:00.000Z").runs[0].metrics
+        .sabBackpressureAcceptedPerSecond.value,
+    ).toBe(300);
+    await expect(validateProbeReport(validReport)).resolves.toBe(validReport);
+
+    const corrupted = report({
+      sabBackpressure: { ...backpressure, consumedSequences: [1, 4, 2] },
+    });
+    await expect(validateProbeReport(corrupted)).rejects.toThrow(/inconsistent SAB backpressure/u);
+
+    const forgedCursors = report({
+      sabBackpressure: {
+        ...backpressure,
+        finalReadCursor: 99,
+        finalWriteCursor: 99,
+      },
+    });
+    await expect(validateProbeReport(forgedCursors)).rejects.toThrow(
+      /inconsistent SAB backpressure/u,
+    );
   });
 });
 

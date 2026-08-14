@@ -1,11 +1,20 @@
 /// <reference lib="webworker" />
 
 import { absoluteHighResolutionTime, round, summarize } from "./metrics";
+import {
+  attachSabSequenceRing,
+  ringCursors,
+  sequenceRingFinished,
+  takeSequence,
+  waitForSequence,
+} from "./backpressure";
 import type {
   CanvasProbeResult,
   ClockAnchorMessage,
   FrameContinuityResult,
   RenderContinuityPayload,
+  SabBackpressurePayload,
+  SabBackpressureWorkerResult,
   SabLatencyPayload,
   SelfDrivePayload,
   TimingProbeResult,
@@ -48,6 +57,8 @@ function run(request: WorkerRequest): unknown {
       return offscreenCanvasProbe();
     case "render-continuity":
       return renderContinuityProbe(request.payload as RenderContinuityPayload);
+    case "sab-backpressure":
+      return sabBackpressureProbe(request.payload as SabBackpressurePayload);
     case "sab-latency":
       return sabLatencyProbe(request.payload as SabLatencyPayload);
     case "self-drive":
@@ -55,6 +66,45 @@ function run(request: WorkerRequest): unknown {
     case "worker-raf":
       return workerRafProbe(request.payload as WorkerRafPayload);
   }
+}
+
+async function sabBackpressureProbe(
+  payload: SabBackpressurePayload,
+): Promise<SabBackpressureWorkerResult> {
+  if (!Number.isInteger(payload.consumerDelayEvery) || payload.consumerDelayEvery < 1) {
+    throw new RangeError("consumerDelayEvery must be a positive integer");
+  }
+  if (
+    !Number.isFinite(payload.consumerDelayMs) ||
+    payload.consumerDelayMs < 0 ||
+    payload.consumerDelayMs > 100
+  ) {
+    throw new RangeError("consumerDelayMs must be from 0 to 100");
+  }
+  const ring = attachSabSequenceRing(payload.buffer, payload.capacity);
+  const consumedSequences: number[] = [];
+  const startedAt = performance.now();
+  while (!sequenceRingFinished(ring)) {
+    const sequence = takeSequence(ring);
+    if (sequence === null) {
+      waitForSequence(ring, 100);
+      continue;
+    }
+    consumedSequences.push(sequence);
+    if (consumedSequences.length > 1_000_000) {
+      throw new Error("SAB backpressure probe exceeded its consumer safety bound");
+    }
+    if (consumedSequences.length % payload.consumerDelayEvery === 0) {
+      await delay(payload.consumerDelayMs);
+    }
+  }
+  const cursors = ringCursors(ring);
+  return {
+    consumedSequences,
+    durationMs: round(performance.now() - startedAt),
+    finalReadCursor: cursors.read,
+    finalWriteCursor: cursors.write,
+  };
 }
 
 async function renderContinuityProbe(

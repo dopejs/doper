@@ -4,6 +4,7 @@ export type WorkerMethod =
   | "capabilities"
   | "offscreen-canvas"
   | "render-continuity"
+  | "sab-backpressure"
   | "sab-latency"
   | "self-drive"
   | "worker-raf";
@@ -62,6 +63,35 @@ export interface TileSizeProbeResult {
 export interface SabLatencyPayload {
   readonly buffer: SharedArrayBuffer;
   readonly sampleCount: number;
+}
+
+export interface SabBackpressurePayload {
+  readonly buffer: SharedArrayBuffer;
+  readonly capacity: number;
+  readonly consumerDelayEvery: number;
+  readonly consumerDelayMs: number;
+}
+
+export interface SabBackpressureWorkerResult {
+  readonly consumedSequences: readonly number[];
+  readonly durationMs: number;
+  readonly finalReadCursor: number;
+  readonly finalWriteCursor: number;
+}
+
+export interface SabBackpressureResult extends SabBackpressureWorkerResult {
+  readonly acceptedCount: number;
+  readonly acceptedPerSecond: number;
+  readonly backpressureHandled: boolean;
+  readonly capacity: number;
+  readonly consumedCount: number;
+  readonly drained: boolean;
+  readonly droppedCount: number;
+  readonly highWatermark: number;
+  readonly latestAcceptedSequence: number;
+  readonly latestConsumedSequence: number;
+  readonly producedCount: number;
+  readonly sequenceMonotonic: boolean;
 }
 
 export interface RenderContinuityPayload {

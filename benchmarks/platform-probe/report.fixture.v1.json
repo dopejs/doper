@@ -48,6 +48,24 @@
   "errors": {},
   "finishedAt": "2026-08-14T00:00:01.000Z",
   "runId": "00000000-0000-4000-8000-000000000001",
+  "sabBackpressure": {
+    "acceptedCount": 3,
+    "acceptedPerSecond": 300,
+    "backpressureHandled": true,
+    "capacity": 2,
+    "consumedCount": 3,
+    "consumedSequences": [1, 2, 4],
+    "drained": true,
+    "droppedCount": 1,
+    "durationMs": 10,
+    "finalReadCursor": 3,
+    "finalWriteCursor": 3,
+    "highWatermark": 2,
+    "latestAcceptedSequence": 4,
+    "latestConsumedSequence": 4,
+    "producedCount": 4,
+    "sequenceMonotonic": true
+  },
   "startedAt": "2026-08-14T00:00:00.000Z",
   "version": 1
 }

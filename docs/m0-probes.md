@@ -150,6 +150,7 @@ script、style、image、media、font preload 与 iframe，并检查跨域资源
 | --------------------- | ----------------------------------------------------- | --------------------------------- |
 | Worker frame driver   | 60 个 Worker rAF 帧间隔                               | 检查可用性和帧间隔长尾            |
 | SAB timestamp latency | 60 个主线程 rAF 发布时间到 Worker 观测时间            | 评估共享传输延迟                  |
+| Bounded SAB ring      | 容量 32，生产 4096 项并故意预填充溢出                 | 验证背压、丢弃记账、顺序与排空    |
 | Main-thread stall     | Worker 自驱 450ms，主线程延迟 50ms 后阻塞 200ms       | 验证 Worker 时钟是否继续推进      |
 | Transport continuity  | 三档各执行 500ms Canvas2D 绘制，中间阻塞主线程 200ms  | 验证自动选择、实际 paint 和帧序列 |
 | Canvas2D throughput   | 主线程与 Worker 各执行 250ms fill、250ms scroll-copy  | 形成相同实现的粗粒度对照          |
@@ -179,6 +180,9 @@ shaping 路径，并将结果与
 - 页面只展示时序样本的汇总，完整时序与结构化编辑事件以导出的 JSON 为准。
 - continuity 同时检查阻塞窗口帧数、最大帧隙、paint 次数和最终像素；timer tick
   本身不算绘制证据。
+- SAB backpressure 保存全部 accepted sequence；`accepted + dropped == produced`、
+  high-watermark 不超过容量、严格递增消费、最终 cursor 相等且最后 accepted 已消费时才
+  标记 `backpressureHandled`。服务端会重新计算这些不变式，不信任客户端布尔值。
 - 本地桌面结果只用于校验探针自身，不能替代低端 Android、iOS 与目标 PC
   的重复采样。
 
@@ -190,6 +194,11 @@ Canvas 编辑能收到 `textupdate` 并执行 grapheme 级光标移动。隔离�
 无隔离环境自动选择 postMessage。两种 Worker 模式在 200ms 主线程阻塞窗口内均持续
 实际 Canvas 绘制，主线程对照出现约 200ms 帧空洞。数据见
 [`adr/0001-m0-transport-fallback.md`](adr/0001-m0-transport-fallback.md)，不进入产品性能基线。
+同一 Chrome 环境的 bounded SAB ring 实测生产 4096 项、接受并消费 1032 项、显式
+拒绝 3064 项，high-watermark 为容量 32；读写 cursor 最终均为 1032，完整 sequence
+严格递增且最后 accepted sequence 已消费。完整页面报告通过 schema 和服务端不变式
+回读。该“满时拒绝新项”仅为 M0 压力策略，不预先决定 M2 Mutation Stream 的合并或
+背压语义。
 production build 的同源采集器也已完成本地 E2E：服务端 schema 校验、201 写入、
 重复 run 409、防匿名写入 401、汇总 API、趋势页以及双样本 batch 自动归档均可
 工作。该结果证明采集链路，不替代物理目标设备数据或外部存储保留策略。

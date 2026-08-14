@@ -1,8 +1,18 @@
 import { absoluteHighResolutionTime, round } from "./metrics";
+import {
+  analyzeSabBackpressure,
+  createSabSequenceRing,
+  finishSequenceRing,
+  ringOccupancy,
+  tryPublishSequence,
+} from "./backpressure";
 import type {
   CanvasProbeResult,
   FrameContinuityResult,
   RenderContinuityPayload,
+  SabBackpressurePayload,
+  SabBackpressureResult,
+  SabBackpressureWorkerResult,
   SabLatencyPayload,
   SelfDrivePayload,
   TimingProbeResult,
@@ -122,6 +132,76 @@ export class PlatformProbeRunner {
     requestAnimationFrame(publish);
 
     return result;
+  }
+
+  async sabBackpressure(producedCount = 4096, capacity = 32): Promise<SabBackpressureResult> {
+    if (typeof SharedArrayBuffer !== "function") {
+      throw new Error("SharedArrayBuffer is unavailable");
+    }
+    if (
+      !Number.isInteger(producedCount) ||
+      producedCount < capacity * 2 ||
+      producedCount > 100_000
+    ) {
+      throw new RangeError("producedCount must be an integer from capacity * 2 to 100000");
+    }
+    const { buffer, ring } = createSabSequenceRing(capacity);
+    let acceptedCount = 0;
+    let droppedCount = 0;
+    let highWatermark = 0;
+    let latestAcceptedSequence = 0;
+    const publish = (sequence: number): void => {
+      if (tryPublishSequence(ring, sequence)) {
+        acceptedCount += 1;
+        latestAcceptedSequence = sequence;
+        highWatermark = Math.max(highWatermark, ringOccupancy(ring));
+      } else {
+        droppedCount += 1;
+      }
+    };
+
+    const deterministicOverflowCount = capacity * 2;
+    for (let sequence = 1; sequence <= deterministicOverflowCount; sequence += 1) {
+      publish(sequence);
+    }
+    const payload: SabBackpressurePayload = {
+      buffer,
+      capacity,
+      consumerDelayEvery: 8,
+      consumerDelayMs: 1,
+    };
+    const workerResult = this.#worker.call<SabBackpressureWorkerResult>(
+      "sab-backpressure",
+      payload,
+      10_000,
+    );
+    try {
+      for (
+        let firstSequence = deterministicOverflowCount + 1;
+        firstSequence <= producedCount;
+        firstSequence += capacity
+      ) {
+        const lastSequence = Math.min(producedCount, firstSequence + capacity - 1);
+        for (let sequence = firstSequence; sequence <= lastSequence; sequence += 1) {
+          publish(sequence);
+        }
+        await delay(0);
+      }
+    } finally {
+      finishSequenceRing(ring);
+    }
+
+    return analyzeSabBackpressure(
+      capacity,
+      {
+        acceptedCount,
+        droppedCount,
+        highWatermark,
+        latestAcceptedSequence,
+        producedCount,
+      },
+      await workerResult,
+    );
   }
 
   async selfDriveDuringMainThreadStall(stallMs = 200): Promise<TimingProbeResult> {
