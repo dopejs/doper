@@ -1,0 +1,48 @@
+{
+  "build": {
+    "id": "local-uncommitted",
+    "mode": "production"
+  },
+  "deviceId": "local-dev",
+  "editing": {
+    "composing": false,
+    "droppedRecords": 0,
+    "events": ["20.0ms · compositionend", "10.0ms · textupdate 0:0"],
+    "mode": "edit-context",
+    "recordingVersion": 1,
+    "records": [
+      {
+        "atMs": 10,
+        "composing": true,
+        "data": {
+          "insertedText": "测试",
+          "rangeEnd": 0,
+          "rangeStart": 0
+        },
+        "event": "textupdate",
+        "message": "textupdate 0:0",
+        "selectionEnd": 2,
+        "selectionStart": 2,
+        "text": "测试"
+      },
+      {
+        "atMs": 20,
+        "composing": false,
+        "data": {},
+        "event": "compositionend",
+        "message": "compositionend",
+        "selectionEnd": 2,
+        "selectionStart": 2,
+        "text": "测试"
+      }
+    ],
+    "selectionEnd": 2,
+    "selectionStart": 2,
+    "text": "测试"
+  },
+  "errors": {},
+  "finishedAt": "2026-08-14T00:00:01.000Z",
+  "runId": "00000000-0000-4000-8000-000000000001",
+  "startedAt": "2026-08-14T00:00:00.000Z",
+  "version": 1
+}

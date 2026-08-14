@@ -23,7 +23,7 @@
 | 固定设备矩阵与采样口径                               | 进行中     | `docs/device-matrix.md`、`docs/benchmark-protocol.md`                    | 为必需角色分配具体物理资产               |
 | 外部依赖、试点业务与 M0 输入                         | 外部待验证 | 风险与决策项已列入计划                                                   | 业务 owner、COOP/COEP 影响盘点、试点场景 |
 | 同设备可复现                                         | 进行中     | 两次本地探针 Worker rAF/SAB P95 差异约 4%                                | 正式 suite 仍需两组各 15 次采集          |
-| 报告包含环境、build id、原始样本                     | 完成       | 报告 schema、JSON 导出、CI schema/fixture 校验与真实报告验证             | 正式基线禁止 `local-uncommitted`         |
+| 报告包含环境、build/device/run id、原始样本          | 完成       | 报告 schema、JSON 导出、CI schema/fixture 校验与真实报告验证             | 正式基线禁止本地占位标识                 |
 
 ## M0
 
@@ -35,9 +35,9 @@
 | Worker/主线程 Canvas2D 对照        | 进行中     | 桌面 fill、scroll-copy 与 128/256/512/1024 tile 扫描              | 低端 Android 成本                         |
 | 最小 Rust/WASM 预算                | 进行中     | 196B raw / 180B gzip，streaming instantiate 与首次调用可采集      | 代表性代码规模投影和真机数据              |
 | SAB/postMessage/主线程三档原型     | 进行中     | 隔离/无隔离自动选择；三档同 paint；报告通过 schema                | Worker/OffscreenCanvas 缺失真机验证、背压 |
-| COOP/COEP 业务可行性               | 外部待验证 | 本地 Vite 隔离头可用                                              | 第三方资源、iframe、跳转、监控与业务结论  |
-| EditContext/输入代理能力矩阵       | 进行中     | 桌面 Chrome `textupdate`、grapheme 光标及强制 proxy 输入成功      | 软键盘、候选窗、多 OS/IME 与录制回放      |
-| 真机采集、上传与趋势               | 未开始     | 本地 JSON 导出                                                    | 设备采集、持久存储、趋势对比              |
+| COOP/COEP 业务可行性               | 外部待验证 | 本地 Vite 隔离头、响应头/跨域子资源审计工具                       | 真实业务 URL、登录态、动态资源与业务结论  |
+| EditContext/输入代理能力矩阵       | 进行中     | 桌面 Chrome 基础路径；v1 结构化事件与溢出计数导出                 | 真实多 OS/IME 录制、回放和软键盘/候选窗   |
+| 真机采集、上传与趋势               | 进行中     | 唯一 run/device id、schema 校验、失败保留、重复性/趋势汇总工具    | 物理设备采集、外部持久存储与趋势展示      |
 | Go / Pivot / Stop ADR              | 未开始     | ADR 模板                                                          | 上述证据齐备后的正式决策                  |
 
 ## 当前结论

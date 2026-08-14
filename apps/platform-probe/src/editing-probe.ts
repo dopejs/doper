@@ -33,10 +33,24 @@ interface CharacterBoundsUpdateEventLike extends Event {
 
 export type EditingProbeMode = "edit-context" | "textarea-proxy";
 
+export interface EditingEventRecord {
+  readonly atMs: number;
+  readonly composing: boolean;
+  readonly data: Readonly<Record<string, boolean | number | string | null>>;
+  readonly event: string;
+  readonly message: string;
+  readonly selectionEnd: number;
+  readonly selectionStart: number;
+  readonly text: string;
+}
+
 export interface EditingProbeSnapshot {
   readonly composing: boolean;
+  readonly droppedRecords: number;
   readonly events: readonly string[];
   readonly mode: EditingProbeMode;
+  readonly recordingVersion: 1;
+  readonly records: readonly EditingEventRecord[];
   readonly selectionEnd: number;
   readonly selectionStart: number;
   readonly text: string;
@@ -53,12 +67,15 @@ export class EditingProbe {
   readonly #canvas: HTMLCanvasElement;
   readonly #context: CanvasRenderingContext2D;
   readonly #events: string[] = [];
+  readonly #records: EditingEventRecord[] = [];
+  readonly #recordingStartedAt = performance.now();
   readonly #onUpdate: (snapshot: EditingProbeSnapshot) => void;
   readonly #proxy: HTMLTextAreaElement | null;
   readonly #editContext: EditContextLike | null;
   readonly mode: EditingProbeMode;
 
   #composing = false;
+  #droppedRecords = 0;
   #selectionEnd = 0;
   #selectionStart = 0;
   #text = "点击这里，测试中文输入法 / IME";
@@ -117,8 +134,11 @@ export class EditingProbe {
   snapshot(): EditingProbeSnapshot {
     return {
       composing: this.#composing,
+      droppedRecords: this.#droppedRecords,
       events: [...this.#events],
       mode: this.mode,
+      recordingVersion: 1,
+      records: this.#records.map((record) => ({ ...record, data: { ...record.data } })),
       selectionEnd: this.#selectionEnd,
       selectionStart: this.#selectionStart,
       text: this.#text,
@@ -141,17 +161,23 @@ export class EditingProbe {
       this.#selectionEnd = update.selectionEnd;
       this.#record(
         `textupdate ${String(update.updateRangeStart)}:${String(update.updateRangeEnd)}`,
+        "textupdate",
+        {
+          insertedText: update.text,
+          rangeEnd: update.updateRangeEnd,
+          rangeStart: update.updateRangeStart,
+        },
       );
       this.#draw();
     });
     editContext.addEventListener("compositionstart", () => {
       this.#composing = true;
-      this.#record("compositionstart");
+      this.#record("compositionstart", "compositionstart");
       this.#draw();
     });
     editContext.addEventListener("compositionend", () => {
       this.#composing = false;
-      this.#record("compositionend");
+      this.#record("compositionend", "compositionend");
       this.#draw();
     });
     editContext.addEventListener("characterboundsupdate", (event) => {
@@ -161,7 +187,11 @@ export class EditingProbe {
         bounds.push(this.#characterBounds(index));
       }
       editContext.updateCharacterBounds(request.rangeStart, bounds);
-      this.#record(`characterbounds ${String(request.rangeStart)}:${String(request.rangeEnd)}`);
+      this.#record(
+        `characterbounds ${String(request.rangeStart)}:${String(request.rangeEnd)}`,
+        "characterboundsupdate",
+        { rangeEnd: request.rangeEnd, rangeStart: request.rangeStart },
+      );
     });
   }
 
@@ -184,25 +214,28 @@ export class EditingProbe {
     document.body.append(proxy);
 
     proxy.addEventListener("beforeinput", (event) => {
-      this.#record(`beforeinput ${event.inputType}`);
+      this.#record(`beforeinput ${event.inputType}`, "beforeinput", {
+        inputType: event.inputType,
+        insertedText: event.data,
+      });
     });
     proxy.addEventListener("input", () => {
       this.#text = proxy.value;
       this.#selectionStart = proxy.selectionStart;
       this.#selectionEnd = proxy.selectionEnd;
-      this.#record("input");
+      this.#record("input", "input");
       this.#draw();
     });
     proxy.addEventListener("compositionstart", () => {
       this.#composing = true;
-      this.#record("compositionstart");
+      this.#record("compositionstart", "compositionstart");
       this.#draw();
     });
-    proxy.addEventListener("compositionupdate", () => {
+    proxy.addEventListener("compositionupdate", (event) => {
       this.#text = proxy.value;
       this.#selectionStart = proxy.selectionStart;
       this.#selectionEnd = proxy.selectionEnd;
-      this.#record("compositionupdate");
+      this.#record("compositionupdate", "compositionupdate", { insertedText: event.data });
       this.#draw();
     });
     proxy.addEventListener("compositionend", () => {
@@ -210,13 +243,13 @@ export class EditingProbe {
       this.#text = proxy.value;
       this.#selectionStart = proxy.selectionStart;
       this.#selectionEnd = proxy.selectionEnd;
-      this.#record("compositionend");
+      this.#record("compositionend", "compositionend");
       this.#draw();
     });
     proxy.addEventListener("select", () => {
       this.#selectionStart = proxy.selectionStart;
       this.#selectionEnd = proxy.selectionEnd;
-      this.#record("selectionchange");
+      this.#record("selectionchange", "selectionchange");
       this.#draw();
     });
     return proxy;
@@ -232,7 +265,7 @@ export class EditingProbe {
     this.#selectionEnd = offset;
     this.#editContext?.updateSelection(offset, offset);
     this.#proxy?.setSelectionRange(offset, offset);
-    this.#record(`pointer selection=${String(offset)}`);
+    this.#record(`pointer selection=${String(offset)}`, "pointerselection", { offset });
     this.#draw();
   };
 
@@ -250,7 +283,10 @@ export class EditingProbe {
     this.#selectionStart = Math.min(start, next);
     this.#selectionEnd = Math.max(start, next);
     this.#editContext?.updateSelection(this.#selectionStart, this.#selectionEnd);
-    this.#record(`keydown ${event.key}`);
+    this.#record(`keydown ${event.key}`, "keydown", {
+      key: event.key,
+      shiftKey: event.shiftKey,
+    });
     this.#draw();
   };
 
@@ -337,9 +373,28 @@ export class EditingProbe {
     return { x: clientX - bounds.left, y: clientY - bounds.top };
   }
 
-  #record(message: string): void {
-    this.#events.unshift(`${performance.now().toFixed(1)}ms · ${message}`);
+  #record(
+    message: string,
+    event: string,
+    data: Readonly<Record<string, boolean | number | string | null>> = {},
+  ): void {
+    const atMs = Number((performance.now() - this.#recordingStartedAt).toFixed(3));
+    this.#events.unshift(`${atMs.toFixed(1)}ms · ${message}`);
     this.#events.length = Math.min(this.#events.length, 12);
+    this.#records.push({
+      atMs,
+      composing: this.#composing,
+      data: { ...data },
+      event,
+      message,
+      selectionEnd: this.#selectionEnd,
+      selectionStart: this.#selectionStart,
+      text: this.#text,
+    });
+    if (this.#records.length > 512) {
+      this.#records.shift();
+      this.#droppedRecords += 1;
+    }
   }
 }
 

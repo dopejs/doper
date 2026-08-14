@@ -13,10 +13,12 @@ interface ProbeReport {
     readonly mainThread?: CanvasProbeResult;
     readonly worker?: CanvasProbeResult;
   };
+  deviceId: string;
   editing?: EditingProbeSnapshot;
   environment?: EnvironmentSnapshot;
   errors?: Record<string, string>;
   finishedAt?: string;
+  runId: string;
   sabLatency?: TimingProbeResult;
   selfDrive?: TimingProbeResult;
   startedAt?: string;
@@ -28,6 +30,7 @@ interface ProbeReport {
 
 const runner = new PlatformProbeRunner();
 const configuredBuildId: unknown = Reflect.get(import.meta.env, "VITE_DOPER_BUILD_ID");
+const configuredDeviceId: unknown = Reflect.get(import.meta.env, "VITE_DOPER_DEVICE_ID");
 const report: ProbeReport = {
   build: {
     id:
@@ -36,6 +39,11 @@ const report: ProbeReport = {
         : "local-uncommitted",
     mode: import.meta.env.MODE,
   },
+  deviceId:
+    typeof configuredDeviceId === "string" && configuredDeviceId.length > 0
+      ? configuredDeviceId
+      : "local-dev",
+  runId: crypto.randomUUID(),
   version: 1,
 };
 Reflect.set(window, "__DOPER_PLATFORM_PROBE_REPORT__", report);
@@ -83,6 +91,7 @@ async function runAll(): Promise<void> {
   runButton.disabled = true;
   exportButton.disabled = true;
   runState.textContent = "Running";
+  report.runId = crypto.randomUUID();
   report.startedAt = new Date().toISOString();
   delete report.finishedAt;
   delete report.canvas;

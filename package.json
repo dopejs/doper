@@ -9,6 +9,7 @@
   "scripts": {
     "build": "pnpm wasm:build && pnpm -r build",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm contracts:check && pnpm build && pnpm rust:check",
+    "coop:check": "node scripts/audit-coop-coep.mjs",
     "contracts:check": "node scripts/validate-contracts.mjs",
     "format": "prettier --write . && cargo fmt --all",
     "format:check": "prettier --check . && cargo fmt --all -- --check",
@@ -16,6 +17,7 @@
     "probe:dev": "pnpm wasm:build && pnpm --filter @dopejs/platform-probe dev",
     "probe:dev:no-isolation": "pnpm wasm:build && pnpm --filter @dopejs/platform-probe dev:no-isolation",
     "probe:preview": "pnpm --filter @dopejs/platform-probe preview",
+    "probe:summary": "node scripts/summarize-probes.mjs",
     "rust:check": "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
     "test": "vitest run",
     "typecheck": "pnpm -r typecheck",
@@ -27,6 +29,7 @@
     "ajv-formats": "3.0.1",
     "eslint": "10.8.1",
     "globals": "16.4.0",
+    "parse5": "8.0.0",
     "prettier": "3.9.6",
     "typescript": "5.9.3",
     "typescript-eslint": "8.67.0",

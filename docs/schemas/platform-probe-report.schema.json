@@ -4,7 +4,7 @@
   "title": "doper platform probe report",
   "type": "object",
   "additionalProperties": false,
-  "required": ["build", "version"],
+  "required": ["build", "deviceId", "runId", "version"],
   "properties": {
     "build": {
       "type": "object",
@@ -23,6 +23,7 @@
         "worker": { "$ref": "#/$defs/canvasResult" }
       }
     },
+    "deviceId": { "type": "string", "minLength": 1 },
     "editing": { "$ref": "#/$defs/editingSnapshot" },
     "environment": { "$ref": "#/$defs/environment" },
     "errors": {
@@ -30,6 +31,7 @@
       "additionalProperties": { "type": "string", "minLength": 1 }
     },
     "finishedAt": { "type": "string", "format": "date-time" },
+    "runId": { "type": "string", "format": "uuid" },
     "sabLatency": { "$ref": "#/$defs/timingResult" },
     "selfDrive": { "$ref": "#/$defs/timingResult" },
     "startedAt": { "type": "string", "format": "date-time" },
@@ -76,11 +78,62 @@
     "editingSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["composing", "events", "mode", "selectionEnd", "selectionStart", "text"],
+      "required": [
+        "composing",
+        "droppedRecords",
+        "events",
+        "mode",
+        "recordingVersion",
+        "records",
+        "selectionEnd",
+        "selectionStart",
+        "text"
+      ],
       "properties": {
         "composing": { "type": "boolean" },
+        "droppedRecords": { "type": "integer", "minimum": 0 },
         "events": { "type": "array", "items": { "type": "string" } },
         "mode": { "enum": ["edit-context", "textarea-proxy"] },
+        "recordingVersion": { "const": 1 },
+        "records": {
+          "type": "array",
+          "maxItems": 512,
+          "items": { "$ref": "#/$defs/editingEventRecord" }
+        },
+        "selectionEnd": { "type": "integer", "minimum": 0 },
+        "selectionStart": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" }
+      }
+    },
+    "editingEventRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "atMs",
+        "composing",
+        "data",
+        "event",
+        "message",
+        "selectionEnd",
+        "selectionStart",
+        "text"
+      ],
+      "properties": {
+        "atMs": { "type": "number", "minimum": 0 },
+        "composing": { "type": "boolean" },
+        "data": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              { "type": "boolean" },
+              { "type": "number" },
+              { "type": "string" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "event": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
         "selectionEnd": { "type": "integer", "minimum": 0 },
         "selectionStart": { "type": "integer", "minimum": 0 },
         "text": { "type": "string" }

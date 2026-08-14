@@ -67,6 +67,28 @@ for (let index = 1; index < sequence.events.length; index += 1) {
   }
 }
 
+const platformReportPath = path.join(
+  repositoryRoot,
+  "benchmarks/platform-probe/report.fixture.v1.json",
+);
+const platformReport = await readJson(platformReportPath);
+validate(
+  ajv.getSchema("https://dopejs.dev/schemas/platform-probe-report-v1.json"),
+  platformReport,
+  "report.fixture.v1.json",
+);
+if (platformReport.editing !== undefined) {
+  for (let index = 0; index < platformReport.editing.records.length; index += 1) {
+    const record = platformReport.editing.records[index];
+    if (index > 0 && record.atMs < platformReport.editing.records[index - 1].atMs) {
+      throw new Error("Editing event timestamps must be monotonic");
+    }
+    if (record.selectionStart > record.selectionEnd || record.selectionEnd > record.text.length) {
+      throw new Error(`Editing event ${String(index)} has an invalid UTF-16 selection`);
+    }
+  }
+}
+
 process.stdout.write("contract fixtures valid\n");
 
 async function readJson(filename) {
