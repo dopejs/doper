@@ -12,6 +12,10 @@ import type {
   CanvasProbeResult,
   ClockAnchorMessage,
   FrameContinuityResult,
+  MessageBackpressureAck,
+  MessageBackpressurePayload,
+  MessageBackpressurePortMessage,
+  MessageBackpressureWorkerResult,
   RenderContinuityPayload,
   SabBackpressurePayload,
   SabBackpressureWorkerResult,
@@ -53,6 +57,8 @@ function run(request: WorkerRequest): unknown {
   switch (request.method) {
     case "capabilities":
       return capabilities();
+    case "message-backpressure":
+      return messageBackpressureProbe(request.payload as MessageBackpressurePayload);
     case "offscreen-canvas":
       return offscreenCanvasProbe();
     case "render-continuity":
@@ -68,19 +74,79 @@ function run(request: WorkerRequest): unknown {
   }
 }
 
+async function messageBackpressureProbe(
+  payload: MessageBackpressurePayload,
+): Promise<MessageBackpressureWorkerResult> {
+  validateConsumerDelay(payload.consumerDelayEvery, payload.consumerDelayMs);
+  if (!(payload.port instanceof MessagePort)) {
+    throw new TypeError("message backpressure probe requires a transferred MessagePort");
+  }
+  const queue: number[] = [];
+  const consumedSequences: number[] = [];
+  let done = false;
+  let protocolError: Error | null = null;
+  let wake: (() => void) | null = null;
+  const notify = (): void => {
+    const pendingWake = wake;
+    wake = null;
+    pendingWake?.();
+  };
+  const handleMessage = (event: MessageEvent<MessageBackpressurePortMessage>): void => {
+    const message = event.data;
+    if (message.kind === "done") {
+      if (done) protocolError = new Error("message backpressure stream sent done twice");
+      done = true;
+    } else if (
+      message.kind === "sequence" &&
+      Number.isInteger(message.sequence) &&
+      message.sequence >= 1 &&
+      message.sequence <= 0x7fffffff &&
+      !done
+    ) {
+      queue.push(message.sequence);
+      if (queue.length > 1_000_000) {
+        protocolError = new Error("message backpressure queue exceeded its safety bound");
+      }
+    } else {
+      protocolError = new Error("message backpressure stream contains an invalid message");
+    }
+    notify();
+  };
+  payload.port.addEventListener("message", handleMessage);
+  payload.port.start();
+  const startedAt = performance.now();
+  try {
+    while (!done || queue.length > 0) {
+      throwIfError(protocolError);
+      const sequence = queue.shift();
+      if (sequence === undefined) {
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+        continue;
+      }
+      consumedSequences.push(sequence);
+      const acknowledgement: MessageBackpressureAck = { kind: "ack", sequence };
+      payload.port.postMessage(acknowledgement);
+      if (consumedSequences.length % payload.consumerDelayEvery === 0) {
+        await delay(payload.consumerDelayMs);
+      }
+    }
+    throwIfError(protocolError);
+    return {
+      consumedSequences,
+      durationMs: round(performance.now() - startedAt),
+    };
+  } finally {
+    payload.port.removeEventListener("message", handleMessage);
+    payload.port.close();
+  }
+}
+
 async function sabBackpressureProbe(
   payload: SabBackpressurePayload,
 ): Promise<SabBackpressureWorkerResult> {
-  if (!Number.isInteger(payload.consumerDelayEvery) || payload.consumerDelayEvery < 1) {
-    throw new RangeError("consumerDelayEvery must be a positive integer");
-  }
-  if (
-    !Number.isFinite(payload.consumerDelayMs) ||
-    payload.consumerDelayMs < 0 ||
-    payload.consumerDelayMs > 100
-  ) {
-    throw new RangeError("consumerDelayMs must be from 0 to 100");
-  }
+  validateConsumerDelay(payload.consumerDelayEvery, payload.consumerDelayMs);
   const ring = attachSabSequenceRing(payload.buffer, payload.capacity);
   const consumedSequences: number[] = [];
   const startedAt = performance.now();
@@ -105,6 +171,19 @@ async function sabBackpressureProbe(
     finalReadCursor: cursors.read,
     finalWriteCursor: cursors.write,
   };
+}
+
+function validateConsumerDelay(delayEvery: number, delayMs: number): void {
+  if (!Number.isInteger(delayEvery) || delayEvery < 1) {
+    throw new RangeError("consumerDelayEvery must be a positive integer");
+  }
+  if (!Number.isFinite(delayMs) || delayMs < 0 || delayMs > 100) {
+    throw new RangeError("consumerDelayMs must be from 0 to 100");
+  }
+}
+
+function throwIfError(value: unknown): void {
+  if (value instanceof Error) throw value;
 }
 
 async function renderContinuityProbe(

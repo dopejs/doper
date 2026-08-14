@@ -3,6 +3,7 @@ import "./style.css";
 import { EditingProbe, type EditingProbeSnapshot } from "./editing-probe";
 import type {
   CanvasProbeResult,
+  MessageBackpressureResult,
   SabBackpressureResult,
   TimingProbeResult,
   TransportMatrixResult,
@@ -36,6 +37,7 @@ interface ProbeReport {
   environment?: EnvironmentSnapshot;
   errors?: Record<string, string>;
   finishedAt?: string;
+  messageBackpressure?: MessageBackpressureResult;
   runId: string;
   sabBackpressure?: SabBackpressureResult;
   sabLatency?: TimingProbeResult;
@@ -172,6 +174,7 @@ async function runAll(): Promise<void> {
   report.startedAt = new Date().toISOString();
   delete report.finishedAt;
   delete report.canvas;
+  delete report.messageBackpressure;
   delete report.sabBackpressure;
   delete report.sabLatency;
   delete report.selfDrive;
@@ -214,6 +217,19 @@ async function runAll(): Promise<void> {
       if (!sabBackpressure.backpressureHandled && report.errors !== undefined) {
         report.errors["sab-backpressure"] =
           "bounded SAB ring failed loss accounting, ordering, capacity, or drain invariants";
+      }
+    }
+    const messageBackpressure = await runProbe(
+      "message-backpressure",
+      "message-backpressure-result",
+      () => runner.messageBackpressure(),
+      compactMessageBackpressure,
+    );
+    if (messageBackpressure !== undefined) {
+      report.messageBackpressure = messageBackpressure;
+      if (!messageBackpressure.backpressureHandled && report.errors !== undefined) {
+        report.errors["message-backpressure"] =
+          "bounded postMessage failed credit, acknowledgement, ordering, or drain invariants";
       }
     }
     const selfDrive = await runProbe(
@@ -410,6 +426,11 @@ function compactTimingResult(result: TimingProbeResult): unknown {
 
 function compactSabBackpressure(result: SabBackpressureResult): unknown {
   const { consumedSequences: _, ...summary } = result;
+  return summary;
+}
+
+function compactMessageBackpressure(result: MessageBackpressureResult): unknown {
+  const { acknowledgedSequences: _, consumedSequences: __, ...summary } = result;
   return summary;
 }
 

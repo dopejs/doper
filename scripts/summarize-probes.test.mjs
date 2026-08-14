@@ -95,6 +95,56 @@ describe("summarizeReports", () => {
       /inconsistent SAB backpressure/u,
     );
   });
+
+  it("recomputes postMessage credit, acknowledgement, and drain evidence", async () => {
+    const messageBackpressure = {
+      acceptedCount: 3,
+      acceptedPerSecond: 300,
+      acknowledgementsMatch: true,
+      acknowledgedCount: 3,
+      acknowledgedSequences: [1, 2, 4],
+      backpressureHandled: true,
+      capacity: 2,
+      consumedCount: 3,
+      consumedSequences: [1, 2, 4],
+      drained: true,
+      droppedCount: 1,
+      durationMs: 10,
+      finalInFlight: 0,
+      highWatermark: 2,
+      latestAcceptedSequence: 4,
+      latestAcknowledgedSequence: 4,
+      latestConsumedSequence: 4,
+      producedCount: 4,
+      sequenceMonotonic: true,
+    };
+    const validReport = report({ messageBackpressure });
+    await expect(validateProbeReport(validReport)).resolves.toBe(validReport);
+    expect(
+      summarizeReports([validReport], "2026-08-14T00:10:00.000Z").runs[0].metrics
+        .messageBackpressureAcceptedPerSecond.value,
+    ).toBe(300);
+
+    const forgedAck = report({
+      messageBackpressure: {
+        ...messageBackpressure,
+        acknowledgedSequences: [1, 4, 2],
+      },
+    });
+    await expect(validateProbeReport(forgedAck)).rejects.toThrow(
+      /inconsistent postMessage backpressure/u,
+    );
+
+    const forgedThroughput = report({
+      messageBackpressure: {
+        ...messageBackpressure,
+        acceptedPerSecond: 999_999,
+      },
+    });
+    await expect(validateProbeReport(forgedThroughput)).rejects.toThrow(
+      /inconsistent postMessage backpressure/u,
+    );
+  });
 });
 
 function batchReport(batchId, sequence, low, high, throughput, runId) {

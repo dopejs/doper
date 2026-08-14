@@ -1,5 +1,10 @@
 import { round } from "./metrics";
-import type { SabBackpressureResult, SabBackpressureWorkerResult } from "./protocol";
+import type {
+  MessageBackpressureResult,
+  MessageBackpressureWorkerResult,
+  SabBackpressureResult,
+  SabBackpressureWorkerResult,
+} from "./protocol";
 
 const writeCursorIndex = 0;
 const readCursorIndex = 1;
@@ -19,6 +24,16 @@ export interface SabSequenceRing {
 export interface SabBackpressureProducerStats {
   readonly acceptedCount: number;
   readonly droppedCount: number;
+  readonly highWatermark: number;
+  readonly latestAcceptedSequence: number;
+  readonly producedCount: number;
+}
+
+export interface MessageBackpressureProducerStats {
+  readonly acceptedCount: number;
+  readonly acknowledgedSequences: readonly number[];
+  readonly droppedCount: number;
+  readonly finalInFlight: number;
   readonly highWatermark: number;
   readonly latestAcceptedSequence: number;
   readonly producedCount: number;
@@ -160,6 +175,66 @@ export function analyzeSabBackpressure(
     droppedCount: producer.droppedCount,
     highWatermark: producer.highWatermark,
     latestAcceptedSequence: producer.latestAcceptedSequence,
+    latestConsumedSequence,
+    producedCount: producer.producedCount,
+    sequenceMonotonic,
+  };
+}
+
+export function analyzeMessageBackpressure(
+  capacity: number,
+  producer: MessageBackpressureProducerStats,
+  worker: MessageBackpressureWorkerResult,
+): MessageBackpressureResult {
+  const consumedCount = worker.consumedSequences.length;
+  const acknowledgedCount = producer.acknowledgedSequences.length;
+  const latestConsumedSequence = worker.consumedSequences.at(-1) ?? 0;
+  const latestAcknowledgedSequence = producer.acknowledgedSequences.at(-1) ?? 0;
+  const sequenceMonotonic = worker.consumedSequences.every(
+    (sequence, index, values) => index === 0 || sequence > (values[index - 1] ?? sequence),
+  );
+  const sequencesWithinProducedRange = worker.consumedSequences.every(
+    (sequence) => sequence >= 1 && sequence <= producer.producedCount,
+  );
+  const acknowledgementsMatch =
+    acknowledgedCount === consumedCount &&
+    producer.acknowledgedSequences.every(
+      (sequence, index) => sequence === worker.consumedSequences[index],
+    );
+  const drained =
+    producer.finalInFlight === 0 &&
+    consumedCount === producer.acceptedCount &&
+    acknowledgedCount === producer.acceptedCount;
+  const accountingValid = producer.acceptedCount + producer.droppedCount === producer.producedCount;
+  const backpressureHandled =
+    producer.droppedCount > 0 &&
+    producer.acceptedCount > 0 &&
+    producer.highWatermark === capacity &&
+    accountingValid &&
+    drained &&
+    sequenceMonotonic &&
+    sequencesWithinProducedRange &&
+    acknowledgementsMatch &&
+    latestConsumedSequence === producer.latestAcceptedSequence &&
+    latestAcknowledgedSequence === producer.latestAcceptedSequence;
+
+  return {
+    ...worker,
+    acceptedCount: producer.acceptedCount,
+    acceptedPerSecond:
+      worker.durationMs === 0 ? 0 : round(producer.acceptedCount / (worker.durationMs / 1000)),
+    acknowledgementsMatch,
+    acknowledgedCount,
+    acknowledgedSequences: [...producer.acknowledgedSequences],
+    backpressureHandled,
+    capacity,
+    consumedCount,
+    drained,
+    droppedCount: producer.droppedCount,
+    finalInFlight: producer.finalInFlight,
+    highWatermark: producer.highWatermark,
+    latestAcceptedSequence: producer.latestAcceptedSequence,
+    latestAcknowledgedSequence,
     latestConsumedSequence,
     producedCount: producer.producedCount,
     sequenceMonotonic,

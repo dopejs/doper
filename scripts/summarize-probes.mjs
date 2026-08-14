@@ -11,6 +11,11 @@ const metricDefinitions = {
     read: (report) => report.canvas?.mainThread?.operationsPerSecond,
     unit: "operations/s",
   },
+  messageBackpressureAcceptedPerSecond: {
+    better: "higher",
+    read: (report) => report.messageBackpressure?.acceptedPerSecond,
+    unit: "items/s",
+  },
   recommendedTransportMaxFrameGapMs: {
     better: "lower",
     read: (report) => {
@@ -133,7 +138,63 @@ export async function validateProbeReport(
   if (report.sabBackpressure !== undefined) {
     validateBackpressureEvidence(report.sabBackpressure, label);
   }
+  if (report.messageBackpressure !== undefined) {
+    validateMessageBackpressureEvidence(report.messageBackpressure, label);
+  }
   return report;
+}
+
+function validateMessageBackpressureEvidence(result, label) {
+  const acceptedPerSecond =
+    result.durationMs === 0 ? 0 : roundMetric(result.acceptedCount / (result.durationMs / 1000));
+  const sequenceMonotonic = result.consumedSequences.every(
+    (sequence, index, values) => index === 0 || sequence > values[index - 1],
+  );
+  const sequencesWithinProducedRange = result.consumedSequences.every(
+    (sequence) => sequence >= 1 && sequence <= result.producedCount,
+  );
+  const consumedCount = result.consumedSequences.length;
+  const acknowledgedCount = result.acknowledgedSequences.length;
+  const latestConsumedSequence = result.consumedSequences.at(-1) ?? 0;
+  const latestAcknowledgedSequence = result.acknowledgedSequences.at(-1) ?? 0;
+  const acknowledgementsMatch =
+    acknowledgedCount === consumedCount &&
+    result.acknowledgedSequences.every(
+      (sequence, index) => sequence === result.consumedSequences[index],
+    );
+  const drained =
+    result.finalInFlight === 0 &&
+    consumedCount === result.acceptedCount &&
+    acknowledgedCount === result.acceptedCount;
+  const backpressureHandled =
+    result.droppedCount > 0 &&
+    result.acceptedCount > 0 &&
+    result.highWatermark === result.capacity &&
+    result.acceptedCount + result.droppedCount === result.producedCount &&
+    drained &&
+    sequenceMonotonic &&
+    sequencesWithinProducedRange &&
+    acknowledgementsMatch &&
+    latestConsumedSequence === result.latestAcceptedSequence &&
+    latestAcknowledgedSequence === result.latestAcceptedSequence;
+  if (
+    result.acceptedPerSecond !== acceptedPerSecond ||
+    result.consumedCount !== consumedCount ||
+    result.acknowledgedCount !== acknowledgedCount ||
+    result.latestConsumedSequence !== latestConsumedSequence ||
+    result.latestAcknowledgedSequence !== latestAcknowledgedSequence ||
+    result.sequenceMonotonic !== sequenceMonotonic ||
+    result.acknowledgementsMatch !== acknowledgementsMatch ||
+    result.drained !== drained ||
+    result.backpressureHandled !== backpressureHandled
+  ) {
+    throw new Error(`${label} has inconsistent postMessage backpressure evidence`);
+  }
+}
+
+function roundMetric(value, digits = 3) {
+  const scale = 10 ** digits;
+  return Math.round(value * scale) / scale;
 }
 
 function validateBackpressureEvidence(result, label) {
@@ -369,6 +430,7 @@ function capabilitySignature(report) {
     devicePixelRatio: report.environment?.devicePixelRatio ?? null,
     editContext: report.environment?.editContext ?? null,
     hardwareConcurrency: report.environment?.hardwareConcurrency ?? null,
+    messageBackpressureHandled: report.messageBackpressure?.backpressureHandled ?? null,
     offscreenCanvas: report.environment?.offscreenCanvas ?? null,
     recommendedTransport: report.transport?.recommendedMode ?? null,
     sabBackpressureHandled: report.sabBackpressure?.backpressureHandled ?? null,

@@ -17,7 +17,12 @@ export class ProbeWorkerClient {
     this.#worker.addEventListener("error", this.#handleWorkerError);
   }
 
-  call<Result>(method: WorkerMethod, payload: unknown, timeoutMs = 10_000): Promise<Result> {
+  call<Result>(
+    method: WorkerMethod,
+    payload: unknown,
+    timeoutMs = 10_000,
+    transfer: Transferable[] = [],
+  ): Promise<Result> {
     const id = this.#nextId++;
     const request: WorkerRequest = { id, kind: "request", method, payload };
 
@@ -32,7 +37,13 @@ export class ProbeWorkerClient {
         resolve: (result) => resolve(result as Result),
         timeout,
       });
-      this.#worker.postMessage(request);
+      try {
+        this.#worker.postMessage(request, transfer);
+      } catch (error) {
+        clearTimeout(timeout);
+        this.#pending.delete(id);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 

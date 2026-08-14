@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  analyzeMessageBackpressure,
   analyzeSabBackpressure,
   attachSabSequenceRing,
   createSabSequenceRing,
@@ -61,6 +62,43 @@ describe("bounded SAB sequence ring", () => {
           producedCount: 4,
         },
         { ...valid, consumedSequences: [1, 4, 2] },
+      ).backpressureHandled,
+    ).toBe(false);
+  });
+
+  it("requires postMessage acknowledgements to exactly match consumed sequences", () => {
+    const valid = analyzeMessageBackpressure(
+      2,
+      {
+        acceptedCount: 3,
+        acknowledgedSequences: [1, 2, 4],
+        droppedCount: 1,
+        finalInFlight: 0,
+        highWatermark: 2,
+        latestAcceptedSequence: 4,
+        producedCount: 4,
+      },
+      { consumedSequences: [1, 2, 4], durationMs: 10 },
+    );
+    expect(valid).toMatchObject({
+      acknowledgementsMatch: true,
+      backpressureHandled: true,
+      drained: true,
+    });
+
+    expect(
+      analyzeMessageBackpressure(
+        2,
+        {
+          acceptedCount: 3,
+          acknowledgedSequences: [1, 4, 2],
+          droppedCount: 1,
+          finalInFlight: 0,
+          highWatermark: 2,
+          latestAcceptedSequence: 4,
+          producedCount: 4,
+        },
+        { consumedSequences: [1, 2, 4], durationMs: 10 },
       ).backpressureHandled,
     ).toBe(false);
   });

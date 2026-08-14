@@ -32,6 +32,7 @@
       "additionalProperties": { "type": "string", "minLength": 1 }
     },
     "finishedAt": { "type": "string", "format": "date-time" },
+    "messageBackpressure": { "$ref": "#/$defs/messageBackpressureResult" },
     "runId": { "type": "string", "format": "uuid" },
     "sabBackpressure": { "$ref": "#/$defs/sabBackpressureResult" },
     "sabLatency": { "$ref": "#/$defs/timingResult" },
@@ -236,6 +237,60 @@
         "durationMs": { "type": "number", "minimum": 0 },
         "samples": { "type": "array", "minItems": 1, "items": { "type": "number" } },
         "summary": { "$ref": "#/$defs/sampleSummary" }
+      }
+    },
+    "messageBackpressureResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acceptedCount",
+        "acceptedPerSecond",
+        "acknowledgementsMatch",
+        "acknowledgedCount",
+        "acknowledgedSequences",
+        "backpressureHandled",
+        "capacity",
+        "consumedCount",
+        "consumedSequences",
+        "drained",
+        "droppedCount",
+        "durationMs",
+        "finalInFlight",
+        "highWatermark",
+        "latestAcceptedSequence",
+        "latestAcknowledgedSequence",
+        "latestConsumedSequence",
+        "producedCount",
+        "sequenceMonotonic"
+      ],
+      "properties": {
+        "acceptedCount": { "type": "integer", "minimum": 0 },
+        "acceptedPerSecond": { "type": "number", "minimum": 0 },
+        "acknowledgementsMatch": { "type": "boolean" },
+        "acknowledgedCount": { "type": "integer", "minimum": 0 },
+        "acknowledgedSequences": {
+          "type": "array",
+          "maxItems": 1000000,
+          "items": { "type": "integer", "minimum": 1, "maximum": 2147483647 }
+        },
+        "backpressureHandled": { "type": "boolean" },
+        "capacity": { "type": "integer", "minimum": 2, "maximum": 4096 },
+        "consumedCount": { "type": "integer", "minimum": 0 },
+        "consumedSequences": {
+          "type": "array",
+          "maxItems": 1000000,
+          "items": { "type": "integer", "minimum": 1, "maximum": 2147483647 }
+        },
+        "drained": { "type": "boolean" },
+        "droppedCount": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "finalInFlight": { "type": "integer", "minimum": 0 },
+        "highWatermark": { "type": "integer", "minimum": 0 },
+        "latestAcceptedSequence": { "type": "integer", "minimum": 0 },
+        "latestAcknowledgedSequence": { "type": "integer", "minimum": 0 },
+        "latestConsumedSequence": { "type": "integer", "minimum": 0 },
+        "producedCount": { "type": "integer", "minimum": 1 },
+        "sequenceMonotonic": { "type": "boolean" }
       }
     },
     "sabBackpressureResult": {

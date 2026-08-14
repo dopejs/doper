@@ -151,6 +151,7 @@ script、style、image、media、font preload 与 iframe，并检查跨域资源
 | Worker frame driver   | 60 个 Worker rAF 帧间隔                               | 检查可用性和帧间隔长尾            |
 | SAB timestamp latency | 60 个主线程 rAF 发布时间到 Worker 观测时间            | 评估共享传输延迟                  |
 | Bounded SAB ring      | 容量 32，生产 4096 项并故意预填充溢出                 | 验证背压、丢弃记账、顺序与排空    |
+| Bounded postMessage   | 容量 32，生产 4096 项，以逐项 ACK 归还发送额度        | 验证 in-flight 上限、顺序与排空   |
 | Main-thread stall     | Worker 自驱 450ms，主线程延迟 50ms 后阻塞 200ms       | 验证 Worker 时钟是否继续推进      |
 | Transport continuity  | 三档各执行 500ms Canvas2D 绘制，中间阻塞主线程 200ms  | 验证自动选择、实际 paint 和帧序列 |
 | Canvas2D throughput   | 主线程与 Worker 各执行 250ms fill、250ms scroll-copy  | 形成相同实现的粗粒度对照          |
@@ -183,6 +184,10 @@ shaping 路径，并将结果与
 - SAB backpressure 保存全部 accepted sequence；`accepted + dropped == produced`、
   high-watermark 不超过容量、严格递增消费、最终 cursor 相等且最后 accepted 已消费时才
   标记 `backpressureHandled`。服务端会重新计算这些不变式，不信任客户端布尔值。
+- postMessage backpressure 保存全部 consumed 与 acknowledged sequence；只有
+  `accepted + dropped == produced`、high-watermark 等于容量、最终 in-flight 为 0、
+  消费严格递增且每个 ACK 与消费序列逐项相等时才标记 `backpressureHandled`。服务端
+  同样从原始序列复算，不信任客户端结论。
 - 本地桌面结果只用于校验探针自身，不能替代低端 Android、iOS 与目标 PC
   的重复采样。
 
@@ -199,6 +204,12 @@ Canvas 编辑能收到 `textupdate` 并执行 grapheme 级光标移动。隔离�
 严格递增且最后 accepted sequence 已消费。完整页面报告通过 schema 和服务端不变式
 回读。该“满时拒绝新项”仅为 M0 压力策略，不预先决定 M2 Mutation Stream 的合并或
 背压语义。
+同一环境的 bounded postMessage 探针生产 4096 项，在 application-level credit 上限
+32 下接受并消费 1024 项、显式拒绝 3072 项；high-watermark 为 32，最终 in-flight
+为 0，1024 个 ACK 与 Worker 消费序列逐项相等，最后 accepted/consumed/acknowledged
+sequence 均为 4072。完整页面报告通过 schema 和服务端不变式回读。该结果证明
+发送方主动限制 in-flight 并按 ACK 归还额度的原型，不代表浏览器内部消息队列天然
+有界，也不替代不同 payload 大小的复制成本测量。
 production build 的同源采集器也已完成本地 E2E：服务端 schema 校验、201 写入、
 重复 run 409、防匿名写入 401、汇总 API、趋势页以及双样本 batch 自动归档均可
 工作。该结果证明采集链路，不替代物理目标设备数据或外部存储保留策略。

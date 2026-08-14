@@ -34,7 +34,7 @@
 | Worker 自驱与相位锁，含 200ms 阻塞 | 进行中     | 本地 Chrome 的 SAB/postMessage 在阻塞窗口持续实际 paint；ADR-0001 | 目标低端设备重复采样                     |
 | Worker/主线程 Canvas2D 对照        | 进行中     | 桌面 fill、scroll-copy 与 128/256/512/1024 tile 扫描              | 低端 Android 成本                        |
 | Rust/WASM 体积与冷启动预算         | 进行中     | 最小 180B；文本包络 236,368B gzip，余量 173,232B；ADR-0002        | 目标移动设备重复冷启动数据               |
-| SAB/postMessage/主线程三档原型     | 进行中     | 三档同 paint；SAB ring 背压/顺序/排空通过 Chrome E2E              | 缺失能力真机验证、postMessage 背压       |
+| SAB/postMessage/主线程三档原型     | 进行中     | 三档同 paint；SAB ring 与 postMessage credit/ACK 背压均通过 E2E   | 缺失能力真机验证、payload 复制成本曲线   |
 | COOP/COEP 业务可行性               | 外部待验证 | 本地 Vite 隔离头、响应头/跨域子资源审计工具                       | 真实业务 URL、登录态、动态资源与业务结论 |
 | EditContext/输入代理能力矩阵       | 进行中     | v2 schema/导出/replay/认证归档；Chrome 两路径通过本地 E2E         | 真实多 OS/IME、软键盘和候选窗证据        |
 | 真机采集、上传与趋势               | 进行中     | 认证/TLS 采集器、5+15 batch、不可覆盖归档、summary v2/趋势页 E2E  | 物理设备采集与外部持久存储保留策略       |

@@ -1,5 +1,6 @@
 import { absoluteHighResolutionTime, round } from "./metrics";
 import {
+  analyzeMessageBackpressure,
   analyzeSabBackpressure,
   createSabSequenceRing,
   finishSequenceRing,
@@ -9,6 +10,11 @@ import {
 import type {
   CanvasProbeResult,
   FrameContinuityResult,
+  MessageBackpressureAck,
+  MessageBackpressurePayload,
+  MessageBackpressurePortMessage,
+  MessageBackpressureResult,
+  MessageBackpressureWorkerResult,
   RenderContinuityPayload,
   SabBackpressurePayload,
   SabBackpressureResult,
@@ -202,6 +208,112 @@ export class PlatformProbeRunner {
       },
       await workerResult,
     );
+  }
+
+  async messageBackpressure(
+    producedCount = 4096,
+    capacity = 32,
+  ): Promise<MessageBackpressureResult> {
+    if (
+      !Number.isInteger(producedCount) ||
+      producedCount < capacity * 2 ||
+      producedCount > 100_000
+    ) {
+      throw new RangeError("producedCount must be an integer from capacity * 2 to 100000");
+    }
+    if (!Number.isInteger(capacity) || capacity < 2 || capacity > 4096) {
+      throw new RangeError("capacity must be an integer from 2 to 4096");
+    }
+    const channel = new MessageChannel();
+    const acknowledgedSequences: number[] = [];
+    let acceptedCount = 0;
+    let acknowledgementError: Error | null = null;
+    let droppedCount = 0;
+    let highWatermark = 0;
+    let inFlight = 0;
+    let latestAcceptedSequence = 0;
+    const handleAcknowledgement = (event: MessageEvent<MessageBackpressureAck>): void => {
+      const acknowledgement = event.data;
+      if (
+        acknowledgement.kind !== "ack" ||
+        !Number.isInteger(acknowledgement.sequence) ||
+        acknowledgement.sequence < 1 ||
+        inFlight < 1
+      ) {
+        acknowledgementError = new Error("message backpressure stream received an invalid ack");
+        return;
+      }
+      inFlight -= 1;
+      acknowledgedSequences.push(acknowledgement.sequence);
+    };
+    channel.port1.addEventListener("message", handleAcknowledgement);
+    channel.port1.start();
+    const publish = (sequence: number): void => {
+      if (inFlight >= capacity) {
+        droppedCount += 1;
+        return;
+      }
+      const message: MessageBackpressurePortMessage = { kind: "sequence", sequence };
+      channel.port1.postMessage(message);
+      acceptedCount += 1;
+      inFlight += 1;
+      latestAcceptedSequence = sequence;
+      highWatermark = Math.max(highWatermark, inFlight);
+    };
+
+    const deterministicOverflowCount = capacity * 2;
+    for (let sequence = 1; sequence <= deterministicOverflowCount; sequence += 1) {
+      publish(sequence);
+    }
+    const payload: MessageBackpressurePayload = {
+      consumerDelayEvery: 8,
+      consumerDelayMs: 1,
+      port: channel.port2,
+    };
+    const workerResult = this.#worker.call<MessageBackpressureWorkerResult>(
+      "message-backpressure",
+      payload,
+      10_000,
+      [channel.port2],
+    );
+    try {
+      for (
+        let firstSequence = deterministicOverflowCount + 1;
+        firstSequence <= producedCount;
+        firstSequence += capacity
+      ) {
+        const lastSequence = Math.min(producedCount, firstSequence + capacity - 1);
+        for (let sequence = firstSequence; sequence <= lastSequence; sequence += 1) {
+          publish(sequence);
+        }
+        await delay(0);
+      }
+      const done: MessageBackpressurePortMessage = { kind: "done" };
+      channel.port1.postMessage(done);
+      const consumed = await workerResult;
+      await waitForCondition(
+        () => acknowledgedSequences.length === acceptedCount || acknowledgementError !== null,
+        5000,
+        "message backpressure acknowledgements",
+      );
+      throwIfError(acknowledgementError);
+      return analyzeMessageBackpressure(
+        capacity,
+        {
+          acceptedCount,
+          acknowledgedSequences,
+          droppedCount,
+          finalInFlight: inFlight,
+          highWatermark,
+          latestAcceptedSequence,
+          producedCount,
+        },
+        consumed,
+      );
+    } finally {
+      channel.port1.removeEventListener("message", handleAcknowledgement);
+      channel.port1.close();
+    }
   }
 
   async selfDriveDuringMainThreadStall(stallMs = 200): Promise<TimingProbeResult> {
@@ -503,6 +615,22 @@ function tileSizeScan(
 
 function delay(durationMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
+}
+
+async function waitForCondition(
+  predicate: () => boolean,
+  timeoutMs: number,
+  label: string,
+): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (!predicate()) {
+    if (performance.now() >= deadline) throw new Error(`${label} timed out`);
+    await delay(0);
+  }
+}
+
+function throwIfError(value: unknown): void {
+  if (value instanceof Error) throw value;
 }
 
 function absoluteNow(): number {

@@ -2,6 +2,7 @@ import type { SampleSummary } from "./metrics";
 
 export type WorkerMethod =
   | "capabilities"
+  | "message-backpressure"
   | "offscreen-canvas"
   | "render-continuity"
   | "sab-backpressure"
@@ -89,6 +90,45 @@ export interface SabBackpressureResult extends SabBackpressureWorkerResult {
   readonly droppedCount: number;
   readonly highWatermark: number;
   readonly latestAcceptedSequence: number;
+  readonly latestConsumedSequence: number;
+  readonly producedCount: number;
+  readonly sequenceMonotonic: boolean;
+}
+
+export interface MessageBackpressurePayload {
+  readonly consumerDelayEvery: number;
+  readonly consumerDelayMs: number;
+  readonly port: MessagePort;
+}
+
+export type MessageBackpressurePortMessage =
+  { readonly kind: "done" } | { readonly kind: "sequence"; readonly sequence: number };
+
+export interface MessageBackpressureAck {
+  readonly kind: "ack";
+  readonly sequence: number;
+}
+
+export interface MessageBackpressureWorkerResult {
+  readonly consumedSequences: readonly number[];
+  readonly durationMs: number;
+}
+
+export interface MessageBackpressureResult extends MessageBackpressureWorkerResult {
+  readonly acceptedCount: number;
+  readonly acceptedPerSecond: number;
+  readonly acknowledgementsMatch: boolean;
+  readonly acknowledgedCount: number;
+  readonly acknowledgedSequences: readonly number[];
+  readonly backpressureHandled: boolean;
+  readonly capacity: number;
+  readonly consumedCount: number;
+  readonly drained: boolean;
+  readonly droppedCount: number;
+  readonly finalInFlight: number;
+  readonly highWatermark: number;
+  readonly latestAcceptedSequence: number;
+  readonly latestAcknowledgedSequence: number;
   readonly latestConsumedSequence: number;
   readonly producedCount: number;
   readonly sequenceMonotonic: boolean;
