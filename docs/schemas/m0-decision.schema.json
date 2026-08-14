@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dopejs.dev/schemas/m0-decision-v1.json",
-  "title": "doper M0 Go/Pivot/Stop decision evidence",
+  "title": "doper platform qualification Go/Pivot/Stop evidence",
   "type": "object",
   "additionalProperties": false,
   "required": [

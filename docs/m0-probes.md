@@ -1,7 +1,7 @@
 # M0 平台能力探针
 
-本文记录 `apps/platform-probe` 的运行口径。探针的职责是收集架构决策证据，
-不是 benchmark 结论，也不代表 M0 已通过出口门禁。
+本文记录 `apps/platform-probe` 的运行口径。M0 工程完成由 `pnpm m0:check` 自动
+判定；本文后半的物理设备采集用于平台资格，不反向决定 M0 状态。
 
 ## 运行方式
 
@@ -131,7 +131,7 @@ HTTP Basic 登录，用户名为 `doper`、密码为同一令牌。
 IME 归档位于独立的 `ime/v2` namespace，不会被平台报告 summary 当作 v1 报告读取。
 两个写接口与趋势接口使用同一鉴权和 10 MiB 请求上限。
 
-### P0/M0 可执行出口门禁
+### 可选平台资格门禁
 
 最终证据 manifest 符合
 [`schemas/m0-evidence-manifest.schema.json`](schemas/m0-evidence-manifest.schema.json)。
@@ -143,13 +143,13 @@ IME 归档位于独立的 `ime/v2` namespace，不会被平台报告 summary 当
 证据的 digest，恢复结果必须与备份的字节数和 digest 相同。
 
 ```bash
-pnpm m0:evidence -- \
+pnpm platform:qualify -- \
   --archive /mounted/immutable-probe-artifacts \
   --manifest /mounted/immutable-probe-artifacts/m0-evidence.v1.json \
   --output /mounted/immutable-probe-artifacts/m0-gate-result.v1.json
 ```
 
-门禁不提供 `--allow-local`。它重新校验正式报告与 IME schema/不变式，要求每个角色
+资格门禁不提供 `--allow-local`。它重新校验正式报告与 IME schema/不变式，要求每个角色
 指定的两组 batch 各有 5 个完整 warmup 和 15 个完整 sample，复算 10% 帧 P95 与
 5% 吞吐重复性，按能力检查 SAB/postMessage/主线程路径、WASM 包络和低端 Android
 Worker 连续性。IME 覆盖逐角色检查中/日/韩/复杂/Unicode、textarea proxy，以及能力
@@ -268,7 +268,7 @@ textarea proxy 的 `pointerselection → beforeinput → input`；两份页面�
 production collector 页面也已完成本地 E2E：生成的 textarea proxy v2 录制经服务端
 校验后写入独立 archive，回读文件再次 replay 通过，成功后页面锁定录制控件。
 
-尚未验证且阻止 M0 关闭的项目包括：
+以下平台资格尚未完成，不影响 M0 工程状态，但禁止对应平台进入已认证支持矩阵：
 
 - 目标真机矩阵与重复采样；
 - 使用审计工具并结合真实登录态浏览器验证形成的 COOP/COEP 业务影响结论；

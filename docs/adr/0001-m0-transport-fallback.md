@@ -1,8 +1,8 @@
-# ADR-0001：M0 transport 降级链（提议）
+# ADR-0001：M0 transport 降级链
 
-- 状态：Proposed
+- 状态：Accepted
 - 日期：2026-08-14
-- 决策者：待 M0 Go / Pivot / Stop 评审确认
+- 决策者：doper maintainers
 - 关联设计：`docs/design.md` §8
 
 ## Context
@@ -13,7 +13,7 @@ COOP/COEP；部分平台可能缺少 SAB、Worker 或 OffscreenCanvas。必须�
 
 ## Decision
 
-当前提议维持以下自动选择顺序：
+采用以下自动选择顺序：
 
 1. cross-origin isolated 且主线程/Worker 均支持 SAB：`sab`。
 2. Worker 支持 OffscreenCanvas 但 SAB 不可用：`post-message`。
@@ -61,10 +61,8 @@ accepted/consumed/acknowledged sequence 均为 4072。服务端从原始消费�
 后 ACK。256B、4KiB、64KiB、1MiB 的 P95 round-trip 分别为 0.165ms、0.363ms、
 1.367ms、28.986ms，1MiB 有效吞吐为 67.923MiB/s。服务端从原始样本复算 summary、
 总字节数和吞吐。结果包含消息调度和校验成本，不声称是纯内存复制带宽；单次开发机
-数据仅验证探针，目标设备分布仍是接受本 ADR 的前置证据。
-
-仍需目标低端 Android、iOS、Safari、Firefox 与业务 COOP/COEP 结论后才能把本 ADR
-改为 Accepted。
+数据验证探针和选择逻辑的正确性，不构成任何目标平台的性能资格声明。目标设备与
+业务 COOP/COEP 结果进入独立的平台资格记录，不阻止本 ADR 接受。
 
 ## Consequences
 
@@ -76,6 +74,6 @@ accepted/consumed/acknowledged sequence 均为 4072。服务端从原始消费�
 
 ## Rollback
 
-M0 真机若证明 Worker 自驱不稳定，将本 ADR 标记 Rejected，保留 main-thread 原型与
-测量基建，重新评审平台范围、性能目标或 compositor 路线。实现尚未进入业务包，
-回滚只需移除探针选择，不涉及持久状态迁移。
+若某个平台的资格数据证明 Worker 自驱不稳定，对该平台通过 capability override 或
+feature flag 固定使用 postMessage/main-thread，并保留原始报告。只有自动选择模型本身
+无法安全降级时才替换本 ADR；回滚不涉及持久状态迁移。

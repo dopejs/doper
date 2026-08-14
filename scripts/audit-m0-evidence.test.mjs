@@ -27,7 +27,7 @@ beforeAll(async () => {
   );
 });
 
-describe("P0/M0 evidence gate", () => {
+describe("platform qualification evidence gate", () => {
   it("passes only with registered roles, two 5+15 batches, and complete IME coverage", () => {
     const manifest = structuredClone(fixtureManifest);
     const result = evaluateM0Evidence({

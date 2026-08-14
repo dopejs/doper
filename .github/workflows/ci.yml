@@ -32,6 +32,6 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - run: pnpm m0:check
         env:
           VITE_DOPER_BUILD_ID: ${{ github.sha }}

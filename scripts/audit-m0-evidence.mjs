@@ -626,7 +626,7 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
     await main();
   } catch (error) {
     process.stderr.write(
-      `M0 evidence audit failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      `Platform qualification audit failed: ${error instanceof Error ? error.message : String(error)}\n`,
     );
     process.exitCode = 1;
   }

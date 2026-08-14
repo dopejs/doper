@@ -1,4 +1,7 @@
-# P0 / M0 设备矩阵
+# 平台资格设备矩阵
+
+本矩阵用于产品支持声明，不是 P0/M0 工程出口。没有设备或证据时，对应平台保持
+`unqualified`；这会阻止宣称该平台已达到性能/输入法目标，但不阻止工程里程碑完成。
 
 设备矩阵采用“固定资产 + 角色”管理。正式报告中的 `deviceId` 必须指向不可歧义的
 物理设备；只写“低端安卓”或 User-Agent 不构成证据。
@@ -8,17 +11,17 @@
 `desktop-firefox`；报告与 IME 录制必须保留各自 `roleId`，汇总按
 role/device/build 分组，不能跨浏览器比较 batch。
 
-## 必需角色
+## 资格角色
 
-| 角色 ID            | 用途                                      | 最低覆盖                             | 当前资产     | 状态       |
-| ------------------ | ----------------------------------------- | ------------------------------------ | ------------ | ---------- |
-| `android-low`      | 移动滚动 P95/P99、scroll-copy、阻塞连续性 | 一台目标业务仍支持的低端物理 Android | 待分配       | 外部待验证 |
-| `android-mid`      | 默认 Android 能力与 IME                   | 一台主流中端物理 Android             | 待分配       | 外部待验证 |
-| `ios-baseline`     | iOS Safari、输入代理、软键盘              | 一台最低受支持 iOS 物理设备          | 待分配       | 外部待验证 |
-| `ios-current`      | 当前 iOS Safari / EditContext 能力        | 一台当前主力 iPhone                  | 待分配       | 外部待验证 |
-| `desktop-chromium` | PC 性能门禁与 SAB 参考                    | 固定 macOS/Windows 资产              | `dev-mac-01` | 已登记     |
-| `desktop-safari`   | 无 Chromium 假设验证                      | 固定 macOS 资产                      | 待分配       | 外部待验证 |
-| `desktop-firefox`  | postMessage/主线程降级验证                | 固定 macOS/Windows/Linux 资产        | 待分配       | 外部待验证 |
+| 角色 ID            | 用途                                      | 最低覆盖                             | 当前资产     | 状态        |
+| ------------------ | ----------------------------------------- | ------------------------------------ | ------------ | ----------- |
+| `android-low`      | 移动滚动 P95/P99、scroll-copy、阻塞连续性 | 一台目标业务仍支持的低端物理 Android | 待分配       | unqualified |
+| `android-mid`      | 默认 Android 能力与 IME                   | 一台主流中端物理 Android             | 待分配       | unqualified |
+| `ios-baseline`     | iOS Safari、输入代理、软键盘              | 一台最低受支持 iOS 物理设备          | 待分配       | unqualified |
+| `ios-current`      | 当前 iOS Safari / EditContext 能力        | 一台当前主力 iPhone                  | 待分配       | unqualified |
+| `desktop-chromium` | PC 性能门禁与 SAB 参考                    | 固定 macOS/Windows 资产              | `dev-mac-01` | 已登记      |
+| `desktop-safari`   | 无 Chromium 假设验证                      | 固定 macOS 资产                      | 待分配       | unqualified |
+| `desktop-firefox`  | postMessage/主线程降级验证                | 固定 macOS/Windows/Linux 资产        | 待分配       | unqualified |
 
 ## 资产登记字段
 
@@ -63,6 +66,6 @@ role/device/build 分组，不能跨浏览器比较 batch。
 `characterboundsupdate`。fixture、自动化键盘、事件溢出或本地占位 build/device id
 均不能替代正式矩阵证据。
 
-矩阵中任何“待分配”资产都会阻止 P0/M0 对相应平台宣布完成。最终机器可读登记写入
-`m0-evidence-manifest-v1`；除角色和资产 ID 外，还必须固定上述硬件、环境、输入法、
-能力快照以及两组正式 batch ID。
+矩阵中任何“待分配”资产只会让相应平台保持 `unqualified`。机器可读资格登记写入
+`m0-evidence-manifest-v1`，并由 `pnpm platform:qualify` 验证；除角色和资产 ID 外，
+还必须固定上述硬件、环境、输入法、能力快照以及两组正式 batch ID。

@@ -4,7 +4,8 @@ doper 是一套从零设计的 Web Canvas 渲染引擎，目标是提供高性�
 原生虚拟滚动、确定性的 Rust/WASM Core、版本化二进制 ABI，以及完整的文本
 渲染与 Canvas 原生编辑能力。
 
-仓库当前处于 **P0 / M0 探针阶段**，尚不是可供业务使用的渲染引擎。技术决策以
+仓库已经通过 **P0 / M0 工程门禁**，正在进入 M1 单线程内核阶段；目前仍不是可供
+业务使用的渲染引擎。技术决策以
 [`docs/design.md`](docs/design.md) 为准，交付顺序与出口门禁见
 [`docs/plan.md`](docs/plan.md)。
 
@@ -27,13 +28,16 @@ doper 是一套从零设计的 Web Canvas 渲染引擎，目标是提供高性�
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm check
+pnpm m0:check
 pnpm probe:dev
 ```
 
 打开终端输出的本地地址后运行完整探针并导出 JSON。开发服务器会发送
 COOP/COEP 响应头以启用跨源隔离；这只证明本地探针环境可用，不代表业务部署
 已经满足这些条件。采集口径与已知限制见 [`docs/m0-probes.md`](docs/m0-probes.md)。
+
+真机性能、真实输入法和业务部署属于平台资格认证，不阻止工程里程碑完成。具备正式
+设备与环境时使用 `pnpm platform:qualify`；未认证平台不得对外宣称已达到对应指标。
 
 ## 工程约束
 

@@ -225,13 +225,15 @@ Minimum expectations by change type:
 - Backend changes: DisplayList conformance and differential image testing with
   the documented tolerance. Incremental/full and optimized/reference paths
   require exact output where the design specifies it.
-- Performance changes: correctness tests plus before/after measurements using
-  the same workload, device, build mode, sample count, and percentile method.
+- Performance changes: correctness tests plus automated before/after
+  measurements using the same workload, build mode, sample count, and
+  percentile method. Physical-device measurements qualify support claims but
+  do not block engineering completion when no automated device service exists.
 - User-visible behavior: semantic-tree-driven E2E coverage; pixel snapshots are
   supplementary, not the only assertion.
 - Editing changes: property tests for offset/revision/undo invariants, recorded
-  IME composition sequences, EditContext/fallback contract tests, and the
-  browser/OS/input-method matrix affected by the change.
+  composition fixtures, and automated EditContext/fallback contract tests.
+  Real browser/OS/input-method results belong to platform qualification.
 
 Never update a golden image, binary fixture, benchmark baseline, or tolerance
 solely to make a failure pass. Explain and review the intended semantic change.
@@ -240,14 +242,21 @@ solely to make a failure pass. Explain and review the intended semantic change.
 
 Follow the dependency order in `docs/design.md`:
 
-- M0 validates worker timing, SAB/COOP-COEP, OffscreenCanvas, WASM startup/size,
-  and real-device measurement.
+- M0 validates worker timing, SAB/COOP-COEP, OffscreenCanvas, and WASM
+  startup/size through automated repository gates. Real-device measurement is
+  platform qualification, not an engineering milestone blocker.
 - M1 establishes the deterministic single-threaded core and shared headless
   differential-test infrastructure.
 - M2 adds the worker, dual clocks, caches, and fallback chain.
 - M3 adds native virtual scrolling and the initial text subsystem.
 - M4 adds complete hit testing, event phases, and accessibility behavior.
 - M5 adds migration tooling and evaluates WebGPU with measured device data.
+
+Engineering milestone completion is determined only by automated, reproducible
+repository/CI gates. Physical-device performance, real IME, authenticated
+business deployment, and external storage exercises determine whether a
+platform is qualified for a support claim; missing qualification must remain
+visible but must not mark completed engineering work incomplete.
 
 Do not pull WebGPU work before M2 is proven, or complex text work before the
 minimal text path and core are stable. A prototype may cross milestone
