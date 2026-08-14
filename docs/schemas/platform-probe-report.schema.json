@@ -33,6 +33,7 @@
     "sabLatency": { "$ref": "#/$defs/timingResult" },
     "selfDrive": { "$ref": "#/$defs/timingResult" },
     "startedAt": { "type": "string", "format": "date-time" },
+    "transport": { "$ref": "#/$defs/transportMatrix" },
     "version": { "const": 1 },
     "wasm": { "$ref": "#/$defs/wasmResult" },
     "workerRaf": { "$ref": "#/$defs/timingResult" }
@@ -46,14 +47,30 @@
         "operations",
         "operationsPerSecond",
         "scrollCopyOperations",
-        "scrollCopyOperationsPerSecond"
+        "scrollCopyOperationsPerSecond",
+        "tileSizes"
       ],
       "properties": {
         "durationMs": { "type": "number", "minimum": 0 },
         "operations": { "type": "integer", "minimum": 0 },
         "operationsPerSecond": { "type": "number", "minimum": 0 },
         "scrollCopyOperations": { "type": "integer", "minimum": 0 },
-        "scrollCopyOperationsPerSecond": { "type": "number", "minimum": 0 }
+        "scrollCopyOperationsPerSecond": { "type": "number", "minimum": 0 },
+        "tileSizes": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["megapixelsPerSecond", "operations", "operationsPerSecond", "tileSizePx"],
+            "properties": {
+              "megapixelsPerSecond": { "type": "number", "minimum": 0 },
+              "operations": { "type": "integer", "minimum": 0 },
+              "operationsPerSecond": { "type": "number", "minimum": 0 },
+              "tileSizePx": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
       }
     },
     "editingSnapshot": {
@@ -140,6 +157,91 @@
         "summary": { "$ref": "#/$defs/sampleSummary" }
       }
     },
+    "frameContinuityResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchorLatencySamples",
+        "continuousDuringStall",
+        "durationMs",
+        "finalPixelRgba",
+        "frameIntervals",
+        "frameSummary",
+        "framesDuringStall",
+        "maxFrameGapMs",
+        "missedFrameBudget",
+        "mode",
+        "paintOperations",
+        "phaseErrorSamples",
+        "renderedFrames"
+      ],
+      "properties": {
+        "anchorLatencySamples": { "type": "array", "items": { "type": "number" } },
+        "anchorLatencySummary": { "$ref": "#/$defs/sampleSummary" },
+        "continuousDuringStall": { "type": "boolean" },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "finalPixelRgba": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+        },
+        "frameIntervals": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number", "minimum": 0 }
+        },
+        "frameSummary": { "$ref": "#/$defs/sampleSummary" },
+        "framesDuringStall": { "type": "integer", "minimum": 0 },
+        "maxFrameGapMs": { "type": "number", "minimum": 0 },
+        "missedFrameBudget": { "type": "integer", "minimum": 0 },
+        "mode": { "enum": ["sab", "post-message", "main-thread"] },
+        "paintOperations": { "type": "integer", "minimum": 0 },
+        "phaseErrorSamples": { "type": "array", "items": { "type": "number" } },
+        "phaseErrorSummary": { "$ref": "#/$defs/sampleSummary" },
+        "renderedFrames": { "type": "integer", "minimum": 2 }
+      }
+    },
+    "transportOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "result"],
+          "properties": {
+            "status": { "const": "ok" },
+            "result": { "$ref": "#/$defs/frameContinuityResult" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "enum": ["unsupported", "error"] },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "transportMatrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modes", "recommendedMode"],
+      "properties": {
+        "recommendedMode": { "enum": ["sab", "post-message", "main-thread"] },
+        "modes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sab", "post-message", "main-thread"],
+          "properties": {
+            "sab": { "$ref": "#/$defs/transportOutcome" },
+            "post-message": { "$ref": "#/$defs/transportOutcome" },
+            "main-thread": { "$ref": "#/$defs/transportOutcome" }
+          }
+        }
+      }
+    },
     "wasmResult": {
       "type": "object",
       "additionalProperties": false,
@@ -150,7 +252,8 @@
         "firstCallMs",
         "gzipBytes",
         "mixedValue",
-        "rawBytes"
+        "rawBytes",
+        "strategy"
       ],
       "properties": {
         "abiVersion": { "type": "integer", "minimum": 0 },
@@ -159,7 +262,8 @@
         "firstCallMs": { "type": "number", "minimum": 0 },
         "gzipBytes": { "type": "integer", "minimum": 0 },
         "mixedValue": { "type": "integer" },
-        "rawBytes": { "type": "integer", "minimum": 0 }
+        "rawBytes": { "type": "integer", "minimum": 0 },
+        "strategy": { "enum": ["instantiate", "instantiateStreaming"] }
       }
     }
   }

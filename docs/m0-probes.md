@@ -17,6 +17,9 @@ pnpm probe:dev
 报告 v1 的机器可读契约位于
 [`schemas/platform-probe-report.schema.json`](schemas/platform-probe-report.schema.json)。
 
+默认使用 EditContext；访问 `?editing=proxy` 可强制使用唯一的 textarea 输入代理，
+用于在同一浏览器验证降级行为。该开关只属于 M0 探针，不是业务 API。
+
 Vite 开发与预览服务器发送：
 
 ```text
@@ -27,6 +30,12 @@ Cross-Origin-Embedder-Policy: require-corp
 这用于验证 SAB 路径。业务环境是否能部署同等策略仍需单独盘点第三方资源、
 iframe、登录跳转、下载和监控 SDK。
 
+无跨源隔离路径使用独立端口运行，验证自动选择 postMessage：
+
+```bash
+pnpm probe:dev:no-isolation
+```
+
 ## 采集内容
 
 | 探针                  | 当前口径                                             | 主要用途                          |
@@ -34,6 +43,7 @@ iframe、登录跳转、下载和监控 SDK。
 | Worker frame driver   | 60 个 Worker rAF 帧间隔                              | 检查可用性和帧间隔长尾            |
 | SAB timestamp latency | 60 个主线程 rAF 发布时间到 Worker 观测时间           | 评估共享传输延迟                  |
 | Main-thread stall     | Worker 自驱 450ms，主线程延迟 50ms 后阻塞 200ms      | 验证 Worker 时钟是否继续推进      |
+| Transport continuity  | 三档各执行 500ms Canvas2D 绘制，中间阻塞主线程 200ms | 验证自动选择、实际 paint 和帧序列 |
 | Canvas2D throughput   | 主线程与 Worker 各执行 250ms fill、250ms scroll-copy | 形成相同实现的粗粒度对照          |
 | Rust/WASM cold start  | no-store fetch、instantiate、首次导出调用            | 跟踪最小基线和预算余量            |
 | Canvas IME            | EditContext；不可用时使用唯一的隐藏 textarea proxy   | 验证 caret/selection/IME 基础路径 |
@@ -47,23 +57,27 @@ SAB 延迟必须将各全局上下文的 `performance.timeOrigin + performance.n
 - 单项能力不可用或运行失败时，其他探针继续执行；状态显示
   `Complete with gaps`，具体原因写入 `errors`。
 - 页面只展示时序样本的汇总，完整原始数据以导出的 JSON 为准。
+- continuity 同时检查阻塞窗口帧数、最大帧隙、paint 次数和最终像素；timer tick
+  本身不算绘制证据。
 - 本地桌面结果只用于校验探针自身，不能替代低端 Android、iOS 与目标 PC
   的重复采样。
 
 ## 当前已验证范围
 
-2026-08-14 在本地 Chrome 开发环境完成一次探针自检：Worker rAF、SAB、
-OffscreenCanvas、EditContext 和 Rust/WASM 路径均可运行，Canvas 编辑能收到
-`textupdate` 并执行 grapheme 级光标移动。该记录不进入产品性能基线。
+2026-08-14 在本地 Chrome 开发环境完成探针自检：Worker rAF、SAB、
+OffscreenCanvas、EditContext、输入代理和 Rust/WASM streaming instantiate 均可运行，
+Canvas 编辑能收到 `textupdate` 并执行 grapheme 级光标移动。隔离环境自动选择 SAB；
+无隔离环境自动选择 postMessage。两种 Worker 模式在 200ms 主线程阻塞窗口内均持续
+实际 Canvas 绘制，主线程对照出现约 200ms 帧空洞。数据见
+[`adr/0001-m0-transport-fallback.md`](adr/0001-m0-transport-fallback.md)，不进入产品性能基线。
 
 尚未验证且阻止 M0 关闭的项目包括：
 
 - 目标真机矩阵与重复采样；
-- postMessage 和主线程 Canvas2D 两档完整原型；
 - COOP/COEP 对实际业务的影响结论；
 - 中文、日文、韩文与复杂 composition 的录制回放；
 - 候选窗 bounds、软键盘和 textarea proxy 的跨浏览器/OS 验证；
-- Faster 黑盒同口径基线、数据上传与趋势展示。
+- 数据上传与趋势展示。
 
 ## 失败与回滚
 

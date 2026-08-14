@@ -1,0 +1,109 @@
+{
+  "$schema": "../docs/schemas/benchmark-suite.schema.json",
+  "suiteVersion": 1,
+  "seed": 3490578157,
+  "scenarios": [
+    {
+      "id": "static-table",
+      "category": "initial-render",
+      "dataset": {
+        "rows": 1000,
+        "columns": 20,
+        "textPattern": "row-{row}-column-{column}"
+      },
+      "viewport": { "width": 1280, "height": 720, "devicePixelRatio": 1 },
+      "workload": { "kind": "settle", "durationMs": 2000 },
+      "metrics": ["firstFrameMs", "settledFrameMs", "heapBytes", "pixelHash"]
+    },
+    {
+      "id": "continuous-scroll",
+      "category": "scroll",
+      "dataset": {
+        "rows": 100000,
+        "columns": 12,
+        "itemHeightPx": 44,
+        "textPattern": "row-{row}-column-{column}"
+      },
+      "viewport": { "width": 390, "height": 844, "devicePixelRatio": 2 },
+      "workload": {
+        "kind": "scroll",
+        "durationMs": 10000,
+        "distancePx": 24000,
+        "inputRateHz": 120
+      },
+      "metrics": ["frameTimeMs", "inputToPresentMs", "droppedFrameRate", "heapBytes"]
+    },
+    {
+      "id": "dynamic-height-list",
+      "category": "scroll",
+      "dataset": {
+        "rows": 50000,
+        "columns": 1,
+        "itemHeightCyclePx": [32, 48, 72, 40, 96, 56],
+        "textPattern": "dynamic-row-{row}"
+      },
+      "viewport": { "width": 390, "height": 844, "devicePixelRatio": 2 },
+      "workload": {
+        "kind": "scroll",
+        "durationMs": 10000,
+        "distancePx": 20000,
+        "inputRateHz": 120
+      },
+      "metrics": ["frameTimeMs", "layoutMs", "placeholderRate", "heapBytes"]
+    },
+    {
+      "id": "image-list",
+      "category": "resource-scroll",
+      "dataset": {
+        "rows": 10000,
+        "columns": 2,
+        "itemHeightPx": 180,
+        "imageSet": "generated-svg-64-v1",
+        "textPattern": "image-row-{row}"
+      },
+      "viewport": { "width": 390, "height": 844, "devicePixelRatio": 2 },
+      "workload": {
+        "kind": "scroll",
+        "durationMs": 10000,
+        "distancePx": 18000,
+        "inputRateHz": 120
+      },
+      "metrics": ["frameTimeMs", "decodeMs", "cacheHitRate", "heapBytes"]
+    },
+    {
+      "id": "high-frequency-updates",
+      "category": "mutation",
+      "dataset": {
+        "rows": 10000,
+        "columns": 12,
+        "itemHeightPx": 44,
+        "textPattern": "cell-{row}-{column}"
+      },
+      "viewport": { "width": 1280, "height": 720, "devicePixelRatio": 1 },
+      "workload": {
+        "kind": "update",
+        "durationMs": 10000,
+        "updatesPerSecond": 500,
+        "visibleUpdateRatio": 0.2
+      },
+      "metrics": ["frameTimeMs", "commitMs", "overInvalidationRate", "heapBytes"]
+    },
+    {
+      "id": "cell-editing-ime",
+      "category": "editing",
+      "dataset": {
+        "rows": 1000,
+        "columns": 20,
+        "itemHeightPx": 44,
+        "textPattern": "editable-{row}-{column}"
+      },
+      "viewport": { "width": 390, "height": 844, "devicePixelRatio": 2 },
+      "workload": {
+        "kind": "edit-replay",
+        "durationMs": 5000,
+        "sequence": "ime/synthetic-composition.v1.json"
+      },
+      "metrics": ["inputLatencyMs", "caretErrorPx", "revisionLag", "pixelHash"]
+    }
+  ]
+}

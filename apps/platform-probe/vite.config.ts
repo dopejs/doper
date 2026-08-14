@@ -1,20 +1,22 @@
 import { defineConfig } from "vite";
 
-export default defineConfig({
-  build: {
-    sourcemap: true,
-    target: "es2022",
-  },
-  server: {
-    headers: {
-      "Cross-Origin-Embedder-Policy": "require-corp",
-      "Cross-Origin-Opener-Policy": "same-origin",
+const isolationHeaders = {
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Cross-Origin-Opener-Policy": "same-origin",
+};
+
+export default defineConfig(({ mode }) => {
+  const isolated = mode !== "non-isolated";
+  return {
+    build: {
+      sourcemap: true,
+      target: "es2022",
     },
-  },
-  preview: {
-    headers: {
-      "Cross-Origin-Embedder-Policy": "require-corp",
-      "Cross-Origin-Opener-Policy": "same-origin",
+    server: {
+      ...(isolated ? { headers: isolationHeaders } : {}),
     },
-  },
+    preview: {
+      ...(isolated ? { headers: isolationHeaders } : {}),
+    },
+  };
 });

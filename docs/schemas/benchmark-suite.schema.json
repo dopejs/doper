@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dopejs.dev/schemas/benchmark-suite-v1.json",
+  "title": "doper benchmark suite",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["suiteVersion", "seed", "scenarios"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "suiteVersion": { "const": 1 },
+    "seed": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "scenarios": {
+      "type": "array",
+      "minItems": 6,
+      "items": { "$ref": "#/$defs/scenario" }
+    }
+  },
+  "$defs": {
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "dataset", "viewport", "workload", "metrics"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "category": { "type": "string", "minLength": 1 },
+        "dataset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rows", "columns", "textPattern"],
+          "properties": {
+            "rows": { "type": "integer", "minimum": 1 },
+            "columns": { "type": "integer", "minimum": 1 },
+            "itemHeightPx": { "type": "number", "exclusiveMinimum": 0 },
+            "itemHeightCyclePx": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "imageSet": { "type": "string", "minLength": 1 },
+            "textPattern": { "type": "string", "minLength": 1 }
+          }
+        },
+        "viewport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height", "devicePixelRatio"],
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 },
+            "devicePixelRatio": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "workload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "durationMs"],
+          "properties": {
+            "kind": { "enum": ["settle", "scroll", "update", "edit-replay"] },
+            "durationMs": { "type": "integer", "minimum": 1 },
+            "distancePx": { "type": "number", "minimum": 0 },
+            "inputRateHz": { "type": "number", "exclusiveMinimum": 0 },
+            "updatesPerSecond": { "type": "number", "exclusiveMinimum": 0 },
+            "visibleUpdateRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+            "sequence": { "type": "string", "minLength": 1 }
+          }
+        },
+        "metrics": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

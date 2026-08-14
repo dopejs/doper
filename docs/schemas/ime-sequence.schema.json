@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dopejs.dev/schemas/ime-sequence-v1.json",
+  "title": "doper IME event sequence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "provenance", "description", "initialText", "events"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "provenance": { "enum": ["synthetic", "recorded"] },
+    "description": { "type": "string", "minLength": 1 },
+    "initialText": { "type": "string" },
+    "environment": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/selection" },
+          { "$ref": "#/$defs/composition" },
+          { "$ref": "#/$defs/textUpdate" }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "base": {
+      "type": "object",
+      "required": ["atMs", "type"],
+      "properties": {
+        "atMs": { "type": "number", "minimum": 0 },
+        "type": { "type": "string" }
+      }
+    },
+    "selection": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["atMs", "type", "start", "end"],
+          "properties": {
+            "atMs": { "type": "number", "minimum": 0 },
+            "type": { "const": "selection" },
+            "start": { "type": "integer", "minimum": 0 },
+            "end": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "composition": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["atMs", "type"],
+          "properties": {
+            "atMs": { "type": "number", "minimum": 0 },
+            "type": { "enum": ["compositionstart", "compositionend"] }
+          }
+        }
+      ]
+    },
+    "textUpdate": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "atMs",
+            "type",
+            "rangeStart",
+            "rangeEnd",
+            "text",
+            "selectionStart",
+            "selectionEnd"
+          ],
+          "properties": {
+            "atMs": { "type": "number", "minimum": 0 },
+            "type": { "const": "textupdate" },
+            "rangeStart": { "type": "integer", "minimum": 0 },
+            "rangeEnd": { "type": "integer", "minimum": 0 },
+            "text": { "type": "string" },
+            "selectionStart": { "type": "integer", "minimum": 0 },
+            "selectionEnd": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    }
+  }
+}

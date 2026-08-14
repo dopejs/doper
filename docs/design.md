@@ -1,9 +1,8 @@
 # doper 渲染引擎 · 技术设计
 
 > 状态：草案 v0.2
-> 定位：Web canvas 渲染引擎，替代 Faster（字节 `@faster/*`）
+> 定位：面向高性能交互、虚拟滚动与原生编辑的 Web canvas 渲染引擎
 > 技术栈：Rust → WASM core / TypeScript shell / Canvas2D 优先可插拔后端
-> 资源假设：3-5 人，一年以上
 
 ---
 
@@ -13,8 +12,8 @@
 
 1. **彻底解决滚动过程中的 FPS 下降**，尤其是移动端 P95/P99 长尾。
 2. 维持 TSX 编写方式，且支持 **function component + hooks/state**。
-3. 虚拟滚动与多级缓存能力不弱于 Faster，并下沉为引擎原生能力。
-4. PC 端性能不低于 Faster（以 benchmark 卡点强制保证）。
+3. 将虚拟滚动与多级缓存下沉为引擎原生能力，并满足百万行场景指标。
+4. PC 与移动端均以绝对帧时间、掉帧率、输入延迟和内存指标作为性能门禁。
 5. 后端可插拔，为 WebGPU 留出演进路径。
 6. 提供引擎原生的光标、选择与文本编辑能力，不要求业务通过 EmbedDOM 创建
    HTML 输入控件。
@@ -41,7 +40,9 @@
 | 输入延迟（touchmove → 呈现）                | ≤ 2 帧                                    |
 | 编辑延迟（文本输入 → glyph/caret 呈现）     | ≤ 2 帧                                    |
 | 主线程人为阻塞 200ms 期间滚动               | 不掉帧、不停顿                            |
-| PC 端同场景 benchmark 对比 Faster           | 不回归（CI 卡点，回归即拦截合入）         |
+| PC 端连续交互帧时间（60Hz 参考设备）        | P95 ≤ 16.7ms，P99 ≤ 25ms                  |
+| PC 端连续交互 10s 掉帧率                    | < 0.5%                                    |
+| doper 相对目标分支的性能回归                | P95/吞吐回归 > 5% 时阻止合入并要求解释    |
 | WASM 体积（gzip）                           | < 400KB                                   |
 | WASM 冷启对首帧的额外延迟                   | < 50ms（streaming compile + JS 降级兜底） |
 
@@ -172,7 +173,7 @@ pub struct Scene {
 
 设计要点：
 
-- **拓扑序存放**：父先于子。布局、剔除、绘制都退化为顺序扫描，无指针追逐。Faster 每帧要 `SortedArray(depthComparator)` 排序脏节点，这里不需要。
+- **拓扑序存放**：父先于子。布局、剔除、绘制都退化为顺序扫描，无指针追逐，稳态帧不重复排序脏节点。
 - **脏节点遍历 = 位图扫描**：`dirty_layout.iter_ones()`，天然按拓扑序，天然去重。
 - **NodeId 带 generation**：节点回收后 id 复用不会造成悬垂引用，跨线程传递安全。
 - **拓扑序维护**：结构变更（插入/移动）可能破坏拓扑序。策略是**延迟重排**——变更时只标记 `topology_dirty`，在 commit 阶段做一次紧凑化（compaction），把变更代价从 O(n) per mutation 摊平成 O(n) per frame，且只在结构真变时发生。稳态（只改 props）零开销。
@@ -183,17 +184,16 @@ pub struct Scene {
 
 这是引擎性能的决定性设计，单列一节。
 
-### Faster 的做法与问题
+### 约束与问题定义
 
-Faster 是「Flutter 自动边界 + 手工 `@Static`/`forceUpdate` 逃生舱」的混合。三个实测到的缺陷：
+增量渲染必须同时避免三类系统性问题：
 
-1. **三个失效域硬耦合**。`base.ts:266-280` 的 `markNeedsBuild()` 无条件连带 `markNeedsLayout()` + `markNeedsPaint()`。改一个 `onClick` 回调也要走完 build→layout→paint，业务无法规避。
-2. **失效传播的正确性靠补丁维持**。`repaint_widgets.ts:44-58` 的注释自认 `RepaintWidgets` 阻断了上层 build 对子树的 paint 传播，需要额外挂 `AfterBuild` 监听补漏。模型有洞才需要补丁。
-3. **布局变化检测每帧分配闭包**。`base.ts:230` 用 `addOnceListener(AfterSelfLayout, closure)` 延迟判断位置是否变化，每个布局变化的节点每帧一个闭包 + 一次监听器注册/注销。滚动场景下是纯浪费。
+1. **失效域硬耦合**：纯事件或绘制属性变化不应无条件触发 build、layout、paint 全链路。
+2. **正确性依赖业务补丁**：业务不应通过静态标注或 `forceUpdate` 猜测引擎内部依赖。
+3. **热路径动态分配**：布局变化检测不得为每个节点分配闭包或监听器。
 
-根因不是「手动」，而是**失效关系从未被显式建模**。手动标注只是把建模责任推给业务，而业务无法掌握全局依赖，必然要么标少（bug）要么标多（性能）。`forceUpdate` 被标 `@deprecated` 却仍被广泛使用，就是这个必然结果。
-
-`relayoutBoundary` 的判定规则（`base.ts:188`：`!parentUsesSize || sizedByParent || cst.isTight()`）Faster 是对的，**本设计直接沿用，不重新发明**。
+因此 doper 从自身 Scene、约束布局与 DisplayList 不变式推导失效模型，并用全量参考
+路径做差分验证；不以任何存量引擎的内部规则或抽象作为实现来源。
 
 ### doper 的五层模型
 
@@ -224,7 +224,7 @@ Prop::OnTap     => NONE,         // 纯回调，什么都不脏
 
 | 策略             | 未标注 prop 的默认值 | 权衡                                               |
 | ---------------- | -------------------- | -------------------------------------------------- |
-| 保守             | `LAYOUT \| PAINT`    | 安全，但性能等价 Faster，收益要逐个 prop 慢慢释放  |
+| 保守             | `LAYOUT \| PAINT`    | 安全，但会扩大重算范围，性能收益需逐个 prop 释放   |
 | **激进（采用）** | 最窄（`NONE`）       | 收益立刻拿到，但漏标即 bug，**强依赖属性测试兜底** |
 
 **采用激进默认**。前提是配套的属性测试必须在 M1 就位，不可推后。
@@ -253,23 +253,23 @@ Prop::OnTap     => NONE,         // 纯回调，什么都不脏
 - shrink 能力是刚需——没有最小复现，漏标问题的排查成本会高到让人放弃这套机制。
 - 该测试与 L5 的过度失效率统计共用同一套 headless 渲染与 picture hash 基建，**一次投入两处收益**，这也是它值得在 M1 就做的原因。
 
-残余风险：属性测试只能覆盖生成器能构造出的 scene 空间，无法证明完备。因此保留一个**全局开关**，可在运行时把所有 prop 强制降级为 `LAYOUT | PAINT`——线上若出现疑似漏标的显示 bug，先开开关止血（退化为 Faster 级性能，功能正确），再定位修复。
+残余风险：属性测试只能覆盖生成器能构造出的 scene 空间，无法证明完备。因此保留一个**全局开关**，可在运行时把所有 prop 强制降级为 `LAYOUT | PAINT`——线上若出现疑似漏标的显示 bug，先开开关止血（退化为保守全失效路径，功能正确），再定位修复。
 
 **L3 · 布局变化检测改为双缓冲批量对比**
 
-布局产出写入 SoA 的 `offset` / `size` 数组；commit 阶段与上一帧数组做一次顺序扫描对比，批量得出位置/尺寸变化的节点集合。零闭包、零监听器，直接消除 Faster 的 `AfterSelfLayout` 热点。
+布局产出写入 SoA 的 `offset` / `size` 数组；commit 阶段与上一帧数组做一次顺序扫描对比，批量得出位置/尺寸变化的节点集合。热路径零闭包、零监听器。
 
 **L4 · repaint boundary 自动提升**
 
 Core 按启发式自动决定哪些子树独立成 layer：滚动容器内容、带 transform 动画的节点、被频繁标脏但 picture hash 稳定的子树。业务不标注。
 
-配合 `DrawPicture`：子树内容未变时，父节点只需重组一条引用指令，不重建子指令流。对比 Faster——尺寸一变就重绘整个 repaintBoundary 子树。
+配合 `DrawPicture`：子树内容未变时，父节点只需重组一条引用指令，不重建子指令流。
 
 **L5 · 过度失效必须可观测**
 
 devtools 逐帧统计「被标脏但 picture hash 与上一帧一致」的节点数，该比率即**过度失效率**，纳入 CI 卡点与线上监控。
 
-Faster 完全没有这个观测面，因此无人知晓 `forceUpdate` 究竟浪费了多少。**没有度量就没有优化**——这条的长期价值高于前四条之和。
+**没有度量就没有优化**：过度失效率必须与帧时间一起进入基线和回归门禁。
 
 ---
 
@@ -354,7 +354,7 @@ Faster 完全没有这个观测面，因此无人知晓 `forceUpdate` 究竟浪�
 `SharedArrayBuffer` 需要 COOP/COEP 跨源隔离响应头，这是**业务侧的外部依赖，可能一票否决**。降级链：
 
 1. SAB 不可用 → `postMessage` 传 mutation（多一次拷贝，延迟略增，仍在 Worker 内合成）。
-2. Worker/OffscreenCanvas 不可用 → 全部退回主线程单线程模式（行为等价 Faster，性能同级，功能不缺失）。
+2. Worker/OffscreenCanvas 不可用 → 全部退回主线程单线程模式，功能不缺失，性能按 doper 自身的主线程基线独立记录。
 
 降级在 `@dopejs/doper-host` 的能力探测中自动完成，业务无感知。
 
@@ -527,7 +527,7 @@ const editor = useTextEditingController({ value: cell.value });
 - **编辑输入**：文本意图、composition、selection 与 clipboard 走专用编辑输入
   协议，不伪装成普通 key event；快捷键和 `beforeinput` 的优先级由编辑会话决定。
 - **命中测试**：Core 内用 BVH（基于 `world_aabb`，随 scene 增量维护）。找到目标后构建事件路径。
-- **事件模型**：对齐 DOM，支持 capture / target / bubble 三阶段（Faster 只有冒泡，这是明确的能力升级）。
+- **事件模型**：对齐 DOM，支持 capture / target / bubble 三阶段。
 - **回传**：命中结果与事件路径通过反向 ring buffer 回传 Shell，由 Shell 执行业务回调。
 - **`preventDefault` 的时序问题**：passive 监听器不能 `preventDefault`。需要阻止默认行为的区域（如内部可滚动区）由 Core 预先计算并把「非 passive 区域矩形」同步回主线程，主线程据此对这些区域使用非 passive 监听。这是必须显式处理的正确性点。
 
@@ -545,7 +545,7 @@ function Cell({ row, col }: CellProps) {
 }
 ```
 
-理由：signal 更新精确定位到单个组件，不需要从根 diff。Faster 的 Static/Dynamic Node 标注本质是在手工模拟这件事；signals 让它自动化，且百万 cell 场景下才具备可扩展性。
+理由：signal 更新精确定位到单个组件，不需要从根 diff，也不要求业务标注静态/动态节点；百万 cell 场景下仍可保持更新范围可控。
 
 ### 编译期优化（`@dopejs/doper-jsx`）
 
@@ -566,7 +566,7 @@ function Cell({ row, col }: CellProps) {
 
 - Core 维护语义树（role / label / value / bounds / focusable）。
 - `@dopejs/doper-a11y` 把语义树映射为 canvas 旁的绝对定位 DOM 影子树，供屏幕阅读器与自动化工具消费。
-- E2E 因此可以按语义选择元素，而不是像 Faster 那样只能靠像素录制回放。
+- E2E 因此可以按语义选择元素，像素录制回放只作为补充证据。
 - 保留像素回归测试作为渲染正确性的补充手段（`@napi-rs/canvas` 或 headless 真实浏览器）。
 
 ---
@@ -584,7 +584,7 @@ function Cell({ row, col }: CellProps) {
 - **输入可录制回放**：Mutation Stream 与输入事件流可完整录制为二进制，脱离浏览器在 headless 环境逐帧重放。
 - **无隐式并发**：Core 内部的并行（若引入）必须是确定性调度或结果不依赖调度顺序。
 
-录制回放同时是**线上问题的排查手段**：用户复现一次异常，导出 mutation + 输入流，开发在本地精确重放。Faster 的 `shadow/shelter` 录制回放是同类思路，但因为没有语义层，只能做像素级对比。
+录制回放同时是**线上问题的排查手段**：用户复现一次异常，导出 mutation + 输入流，开发在本地精确重放；语义断言与像素结果一并保存。
 
 ### 15.1 测试分层
 
@@ -648,7 +648,7 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 
 ### 15.6 性能测试与门禁
 
-- **PC benchmark 每次提交卡点**：回归即拦截合入。沿用 Faster 的做法（对比 source 与 target 分支），但**不设置 `ignore_branch.json` 式的无条件豁免**——豁免必须逐次评审并记录理由。
+- **PC benchmark 每次提交卡点**：同时检查 §2 的绝对指标和 doper 目标分支基线；P95 或吞吐回归超过 5% 即拦截合入并要求证据化评审，不设置无条件豁免。
 - **真机 P95 每晚采集**：机型矩阵覆盖低端安卓与主流 iOS，数据入库并做趋势告警。
 - **过度失效率**（§5.1 L5）作为一等指标进卡点，与帧时间同等对待。
 - **WASM 体积**进卡点（§2 目标 < 400KB gzip）。
@@ -670,14 +670,14 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 
 ## 16. 里程碑
 
-| 里程碑                             | 内容                                                                                                                                                                                                                                                           | 出口标准                                                                                              |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **M0 探针**（3-4 周）              | Worker 帧驱动三方案真机实测；SAB/COOP-COEP 可行性；OffscreenCanvas 2D 性能基线；EditContext/IME 与输入代理能力矩阵；wasm 体积与冷启；建立真机 P95 采集与 benchmark 基础设施                                                                                    | 能力矩阵与降级链确定；拿到可用于争取资源的滚动与 canvas 编辑 demo 数据                                |
-| **M1 单线程内核**（~3 月）         | Scene(SoA)、约束布局、Mutation/Input Stream、DisplayList、Canvas2D 回放器、signals + hooks + TSX；建立 editing revision、selection 与 offset 映射模型。先跑主线程，不引入 Worker。**含失效正确性属性测试 + headless 渲染基建**（§5.1 L2 的前置条件，不可推后） | 静态页面与 Faster 像素对齐；编辑事务可确定性回放；PC benchmark 不劣化；属性测试在 CI 常态运行且零失败 |
-| **M2 双时钟 + 缓存**（~3 月）      | Worker 化、SAB 通道、Picture/Raster Cache、tile 合成、降级链                                                                                                                                                                                                   | 主线程人为阻塞 200ms，滚动不掉帧                                                                      |
-| **M3 滚动 + 文本**（~3 月）        | 原生虚拟滚动、前缀和树、预热；web 字体 shaping、glyph atlas；输出 grapheme/cluster/glyph/line 映射与 caret geometry                                                                                                                                            | 百万行表格滚动 P95 达标；文本布局能稳定驱动 selection/caret                                           |
-| **M4 编辑、事件与无障碍**（~2 月） | EditContext 与输入代理、IME、caret/selection、剪贴板、undo/redo、自动滚动；BVH 命中测试、三阶段事件、非 passive 区域协议、语义树与影子 DOM                                                                                                                     | canvas 内文本可直接编辑且无需业务 EmbedDOM；主流输入法与屏幕阅读器可用                                |
-| **M5 迁移与 WebGPU 验证**（~3 月） | Faster 兼容 shim、devtools、迁移文档；wgpu 后端并行验证并用真机数据决定是否切默认                                                                                                                                                                              | 存量业务可增量迁移；后端选型有数据支撑                                                                |
+| 里程碑                    | 内容                                                                                                                                                                                                                                                           | 出口标准                                                                                          |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| **M0 探针**               | Worker 帧驱动三方案真机实测；SAB/COOP-COEP 可行性；OffscreenCanvas 2D 性能基线；EditContext/IME 与输入代理能力矩阵；wasm 体积与冷启；建立真机 P95 采集与 benchmark 基础设施                                                                                    | 能力矩阵与降级链确定；滚动与 canvas 编辑 demo 达到自身指标                                        |
+| **M1 单线程内核**         | Scene(SoA)、约束布局、Mutation/Input Stream、DisplayList、Canvas2D 回放器、signals + hooks + TSX；建立 editing revision、selection 与 offset 映射模型。先跑主线程，不引入 Worker。**含失效正确性属性测试 + headless 渲染基建**（§5.1 L2 的前置条件，不可推后） | 静态页面与参考渲染器/golden 对齐；编辑事务可确定性回放；PC 绝对指标与回归门禁通过；属性测试零失败 |
+| **M2 双时钟 + 缓存**      | Worker 化、SAB 通道、Picture/Raster Cache、tile 合成、降级链                                                                                                                                                                                                   | 主线程人为阻塞 200ms，滚动不掉帧                                                                  |
+| **M3 滚动 + 文本**        | 原生虚拟滚动、前缀和树、预热；web 字体 shaping、glyph atlas；输出 grapheme/cluster/glyph/line 映射与 caret geometry                                                                                                                                            | 百万行表格滚动 P95 达标；文本布局能稳定驱动 selection/caret                                       |
+| **M4 编辑、事件与无障碍** | EditContext 与输入代理、IME、caret/selection、剪贴板、undo/redo、自动滚动；BVH 命中测试、三阶段事件、非 passive 区域协议、语义树与影子 DOM                                                                                                                     | canvas 内文本可直接编辑且无需业务 EmbedDOM；主流输入法与屏幕阅读器可用                            |
+| **M5 迁移与 WebGPU 验证** | 存量兼容 shim、devtools、迁移文档；wgpu 后端并行验证并用真机数据决定是否切默认                                                                                                                                                                                 | 存量业务可增量迁移；后端选型有数据支撑                                                            |
 
 关键排序原则：**M2 之前不碰 WebGPU，M3 之前不碰复杂文本**。收益主要来自双时钟与 Core 内闭环滚动，先把这条主线拿下。
 
@@ -685,17 +685,17 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 
 ## 17. 风险与应对
 
-| 风险                                       | 影响                             | 应对                                                                                                        |
-| ------------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| **COOP/COEP 无法在业务页面启用**           | SAB 不可用，双时钟降级           | M0 必须先与业务确认；降级到 postMessage 通道仍能拿到大部分收益                                              |
-| **Worker 帧驱动在部分平台不稳**            | "主线程阻塞不掉帧"无法成立       | M0 三方案实测 + 自驱相位锁兜底                                                                              |
-| **文本模块被低估**                         | 进度失控                         | M1 只做最小子集；bidi/复杂脚本明确推迟到 M3；预留专人                                                       |
-| **EditContext 支持不完整或输入法行为分裂** | canvas 无法稳定输入、候选窗错位  | M0 建立浏览器/OS/输入法矩阵；引擎托管输入代理兜底；所有 composition 流可录制回放                            |
-| **编辑状态跨线程失序**                     | 丢字、回滚新输入、selection 跳动 | revisioned transaction、单一 active composition、过期更新拒绝、故障注入与确定性重放                         |
-| **WASM 体积与冷启**                        | 移动端弱网首屏劣化               | streaming compile；核心路径保留 JS 兜底实现，wasm 就绪后热切换；体积进 CI 卡点                              |
-| **Rust 人力不足**                          | 核心开发瓶颈                     | Core 内部按 crate 边界切分，`doper-scroll`/`doper-text` 可独立并行；TS 侧工作量占比不小，可容纳非 Rust 成员 |
-| **跨 Worker + WASM 调试困难**              | 排障成本高，长期拖慢迭代         | devtools 在 M1 就作为一等公民；Core 支持 headless 回放（录制 mutation 流，脱离浏览器复现）                  |
-| **低端安卓上 WebGPU 反而更慢**             | 后端选型判断错误                 | 后端可插拔；用 M0/M5 的真机 benchmark 决定默认值，不拍脑袋                                                  |
+| 风险                                       | 影响                             | 应对                                                                                       |
+| ------------------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------ |
+| **COOP/COEP 无法在业务页面启用**           | SAB 不可用，双时钟降级           | M0 必须先与业务确认；降级到 postMessage 通道仍能拿到大部分收益                             |
+| **Worker 帧驱动在部分平台不稳**            | "主线程阻塞不掉帧"无法成立       | M0 三方案实测 + 自驱相位锁兜底                                                             |
+| **文本模块被低估**                         | 进度失控                         | M1 只做最小子集；bidi/复杂脚本明确推迟到 M3；预留专人                                      |
+| **EditContext 支持不完整或输入法行为分裂** | canvas 无法稳定输入、候选窗错位  | M0 建立浏览器/OS/输入法矩阵；引擎托管输入代理兜底；所有 composition 流可录制回放           |
+| **编辑状态跨线程失序**                     | 丢字、回滚新输入、selection 跳动 | revisioned transaction、单一 active composition、过期更新拒绝、故障注入与确定性重放        |
+| **WASM 体积与冷启**                        | 移动端弱网首屏劣化               | streaming compile；核心路径保留 JS 兜底实现，wasm 就绪后热切换；体积进 CI 卡点             |
+| **Rust/WASM 工具链复杂度**                 | 构建、调试或升级阻塞核心迭代     | 固定工具链与 ABI；crate 边界隔离；保留 native/headless 路径并让 CI 同时验证                |
+| **跨 Worker + WASM 调试困难**              | 排障成本高，长期拖慢迭代         | devtools 在 M1 就作为一等公民；Core 支持 headless 回放（录制 mutation 流，脱离浏览器复现） |
+| **低端安卓上 WebGPU 反而更慢**             | 后端选型判断错误                 | 后端可插拔；用 M0/M5 的真机 benchmark 决定默认值，不拍脑袋                                 |
 
 ### 回滚路径
 
@@ -703,7 +703,7 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 
 - M2 的 Worker 化通过 feature flag 控制，线上可一键切回主线程模式。
 - M5 的 WebGPU 后端默认关闭，按机型灰度。
-- Faster 兼容 shim 保证业务可以按页面粒度回退到 Faster。
+- 存量兼容 shim 保证业务可以按页面粒度回退到原有渲染路径。
 
 ---
 

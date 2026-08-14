@@ -42,6 +42,10 @@ export interface EditingProbeSnapshot {
   readonly text: string;
 }
 
+export interface EditingProbeOptions {
+  readonly forceInputProxy?: boolean;
+}
+
 const canvasPadding = 28;
 const font = "28px ui-monospace, SFMono-Regular, Menlo, monospace";
 
@@ -59,7 +63,11 @@ export class EditingProbe {
   #selectionStart = 0;
   #text = "点击这里，测试中文输入法 / IME";
 
-  constructor(canvas: HTMLCanvasElement, onUpdate: (snapshot: EditingProbeSnapshot) => void) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    onUpdate: (snapshot: EditingProbeSnapshot) => void,
+    options: EditingProbeOptions = {},
+  ) {
     const context = canvas.getContext("2d");
     if (context === null) {
       throw new Error("Canvas2D is required for the editing probe");
@@ -70,7 +78,7 @@ export class EditingProbe {
     this.#onUpdate = onUpdate;
 
     const EditContext = Reflect.get(window, "EditContext") as EditContextConstructor | undefined;
-    if (typeof EditContext === "function") {
+    if (typeof EditContext === "function" && options.forceInputProxy !== true) {
       this.mode = "edit-context";
       this.#editContext = new EditContext({
         selectionEnd: this.#text.length,

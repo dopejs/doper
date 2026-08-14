@@ -1,12 +1,18 @@
 import { absoluteHighResolutionTime, round } from "./metrics";
 import type {
   CanvasProbeResult,
+  FrameContinuityResult,
+  RenderContinuityPayload,
   SabLatencyPayload,
   SelfDrivePayload,
   TimingProbeResult,
+  TransportMatrixResult,
+  TransportMode,
+  TransportProbeOutcome,
   WorkerCapabilities,
   WorkerRafPayload,
 } from "./protocol";
+import { analyzeContinuity, selectTransport } from "./transport";
 import { ProbeWorkerClient } from "./worker-client";
 
 export interface EnvironmentSnapshot {
@@ -31,6 +37,7 @@ export interface WasmProbeResult {
   readonly gzipBytes: number;
   readonly mixedValue: number;
   readonly rawBytes: number;
+  readonly strategy: "instantiate" | "instantiateStreaming";
 }
 
 interface ProbeWasmExports extends WebAssembly.Exports {
@@ -106,6 +113,27 @@ export class PlatformProbeRunner {
     return this.#worker.call("offscreen-canvas", undefined, 5000);
   }
 
+  async transportMatrix(canvas: HTMLCanvasElement): Promise<TransportMatrixResult> {
+    const environment = await this.environment();
+    const recommendedMode = selectTransport(environment);
+    const modes: Record<TransportMode, TransportProbeOutcome> = {
+      "sab":
+        environment.crossOriginIsolated &&
+        environment.sharedArrayBuffer &&
+        environment.worker.sharedArrayBuffer
+          ? await this.#captureOutcome(() => this.#workerContinuity("sab"))
+          : {
+              reason: "Cross-origin isolation or SharedArrayBuffer is unavailable",
+              status: "unsupported",
+            },
+      "post-message": environment.worker.offscreenCanvas
+        ? await this.#captureOutcome(() => this.#workerContinuity("post-message"))
+        : { reason: "Worker OffscreenCanvas is unavailable", status: "unsupported" },
+      "main-thread": await this.#captureOutcome(() => this.#mainThreadContinuity(canvas)),
+    };
+    return { modes, recommendedMode };
+  }
+
   mainThreadCanvas(canvas: HTMLCanvasElement): CanvasProbeResult {
     const context = canvas.getContext("2d", { alpha: false });
     if (context === null) {
@@ -119,6 +147,7 @@ export class PlatformProbeRunner {
     const scrollCopy = benchmark(250, () => {
       context.drawImage(canvas, 0, 1, 1024, 1023, 0, 0, 1024, 1023);
     });
+    const tileSizes = tileSizeScan(context, canvas);
 
     return {
       durationMs: round(draw.durationMs + scrollCopy.durationMs),
@@ -126,6 +155,7 @@ export class PlatformProbeRunner {
       operationsPerSecond: round(draw.operationsPerSecond),
       scrollCopyOperations: scrollCopy.operations,
       scrollCopyOperationsPerSecond: round(scrollCopy.operationsPerSecond),
+      tileSizes,
     };
   }
 
@@ -142,8 +172,10 @@ export class PlatformProbeRunner {
 
     const manifest = (await manifestResponse.json()) as WasmManifest;
     const compileStartedAt = performance.now();
-    const source = await response.arrayBuffer();
-    const instance = await WebAssembly.instantiate(source, {});
+    const supportsStreaming = typeof WebAssembly.instantiateStreaming === "function";
+    const instance = supportsStreaming
+      ? await WebAssembly.instantiateStreaming(response, {})
+      : await WebAssembly.instantiate(await response.arrayBuffer(), {});
     const compileAndInstantiateMs = performance.now() - compileStartedAt;
     const exports = instance.instance.exports as ProbeWasmExports;
     const callStartedAt = performance.now();
@@ -158,11 +190,126 @@ export class PlatformProbeRunner {
       gzipBytes: manifest.gzipBytes,
       mixedValue,
       rawBytes: manifest.rawBytes,
+      strategy: supportsStreaming ? "instantiateStreaming" : "instantiate",
     };
   }
 
   dispose(): void {
     this.#worker.dispose();
+  }
+
+  async #workerContinuity(
+    mode: Exclude<TransportMode, "main-thread">,
+  ): Promise<FrameContinuityResult> {
+    const targetFrameMs = 1000 / 60;
+    const startAtEpochMs = absoluteNow() + 200;
+    const stallStartEpochMs = startAtEpochMs + 100;
+    const stallEndEpochMs = stallStartEpochMs + 200;
+    const anchorBuffer = mode === "sab" ? new SharedArrayBuffer(16) : undefined;
+    const payload: RenderContinuityPayload = {
+      ...(anchorBuffer === undefined ? {} : { anchorBuffer }),
+      durationMs: 500,
+      mode,
+      stallEndEpochMs,
+      stallStartEpochMs,
+      startAtEpochMs,
+      targetFrameMs,
+    };
+    const result = this.#worker.call<FrameContinuityResult>("render-continuity", payload, 5000);
+    const stopPublishing = this.#publishClockAnchors(mode, anchorBuffer);
+    try {
+      await delayUntilEpoch(stallStartEpochMs);
+      blockMainThread(stallEndEpochMs - stallStartEpochMs);
+      return await result;
+    } finally {
+      stopPublishing();
+    }
+  }
+
+  async #mainThreadContinuity(canvas: HTMLCanvasElement): Promise<FrameContinuityResult> {
+    const context = canvas.getContext("2d", { alpha: false });
+    if (context === null) {
+      throw new Error("Main-thread Canvas2D context is unavailable for continuity rendering");
+    }
+
+    const targetFrameMs = 1000 / 60;
+    const startAtEpochMs = absoluteNow() + 200;
+    const stallStartEpochMs = startAtEpochMs + 100;
+    const stallEndEpochMs = stallStartEpochMs + 200;
+    const frameTimestamps: number[] = [];
+    let paintOperations = 0;
+    const rendering = (async (): Promise<FrameContinuityResult> => {
+      await delayUntilEpoch(startAtEpochMs);
+      const endAtEpochMs = startAtEpochMs + 500;
+      let nextDeadline = performance.now();
+      while (absoluteNow() < endAtEpochMs) {
+        await delayUntilMonotonic(nextDeadline);
+        paintMainThreadContinuityFrame(context, paintOperations);
+        paintOperations += 1;
+        frameTimestamps.push(absoluteNow());
+        nextDeadline += targetFrameMs;
+        if (nextDeadline < performance.now() - targetFrameMs) {
+          nextDeadline = performance.now();
+        }
+      }
+      const pixel = context.getImageData(0, 0, 1, 1).data;
+      return analyzeContinuity({
+        finalPixelRgba: [...pixel],
+        frameTimestamps,
+        mode: "main-thread",
+        paintOperations,
+        stallEndEpochMs,
+        stallStartEpochMs,
+        targetFrameMs,
+      });
+    })();
+
+    await delayUntilEpoch(stallStartEpochMs);
+    blockMainThread(stallEndEpochMs - stallStartEpochMs);
+    return rendering;
+  }
+
+  #publishClockAnchors(
+    mode: Exclude<TransportMode, "main-thread">,
+    anchorBuffer: SharedArrayBuffer | undefined,
+  ): () => void {
+    const sequenceView = anchorBuffer === undefined ? null : new Int32Array(anchorBuffer, 0, 1);
+    const timestampView = anchorBuffer === undefined ? null : new Float64Array(anchorBuffer, 8, 1);
+    let sequence = 0;
+    let animationFrame = 0;
+    let stopped = false;
+    const publish = (timestamp: number): void => {
+      if (stopped) {
+        return;
+      }
+      sequence += 1;
+      const absoluteTimestamp = absoluteHighResolutionTime(performance.timeOrigin, timestamp);
+      if (mode === "sab" && sequenceView !== null && timestampView !== null) {
+        timestampView[0] = absoluteTimestamp;
+        Atomics.store(sequenceView, 0, sequence);
+      } else {
+        this.#worker.publishClockAnchor(sequence, absoluteTimestamp);
+      }
+      animationFrame = requestAnimationFrame(publish);
+    };
+    animationFrame = requestAnimationFrame(publish);
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(animationFrame);
+    };
+  }
+
+  async #captureOutcome(
+    probe: () => Promise<FrameContinuityResult>,
+  ): Promise<TransportProbeOutcome> {
+    try {
+      return { result: await probe(), status: "ok" };
+    } catch (error) {
+      return {
+        reason: error instanceof Error ? error.message : String(error),
+        status: "error",
+      };
+    }
   }
 }
 
@@ -195,6 +342,48 @@ function benchmark(
   };
 }
 
+function tileSizeScan(
+  context: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+): CanvasProbeResult["tileSizes"] {
+  return [128, 256, 512, 1024].map((tileSizePx) => {
+    const result = benchmark(100, () => {
+      context.drawImage(canvas, 0, 1, tileSizePx, tileSizePx - 1, 0, 0, tileSizePx, tileSizePx - 1);
+    });
+    return {
+      megapixelsPerSecond: round(
+        (result.operationsPerSecond * tileSizePx * tileSizePx) / 1_000_000,
+      ),
+      operations: result.operations,
+      operationsPerSecond: round(result.operationsPerSecond),
+      tileSizePx,
+    };
+  });
+}
+
 function delay(durationMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
+}
+
+function absoluteNow(): number {
+  return absoluteHighResolutionTime(performance.timeOrigin, performance.now());
+}
+
+async function delayUntilEpoch(deadline: number): Promise<void> {
+  while (absoluteNow() < deadline) {
+    await delay(Math.min(20, Math.max(0, deadline - absoluteNow())));
+  }
+}
+
+async function delayUntilMonotonic(deadline: number): Promise<void> {
+  while (performance.now() < deadline) {
+    await delay(Math.min(10, Math.max(0, deadline - performance.now())));
+  }
+}
+
+function paintMainThreadContinuityFrame(context: CanvasRenderingContext2D, sequence: number): void {
+  context.fillStyle = `hsl(${String(sequence % 360)} 70% 45%)`;
+  context.fillRect(0, 0, context.canvas.width, context.canvas.height);
+  context.fillStyle = "#ffffff";
+  context.fillRect((sequence * 7) % Math.max(1, context.canvas.width - 16), 72, 16, 36);
 }

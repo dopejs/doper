@@ -3,18 +3,28 @@
 import { absoluteHighResolutionTime, round, summarize } from "./metrics";
 import type {
   CanvasProbeResult,
+  ClockAnchorMessage,
+  FrameContinuityResult,
+  RenderContinuityPayload,
   SabLatencyPayload,
   SelfDrivePayload,
   TimingProbeResult,
   WorkerCapabilities,
+  WorkerInboundMessage,
   WorkerRafPayload,
   WorkerRequest,
   WorkerResponse,
 } from "./protocol";
+import { analyzeContinuity, clampPhaseCorrection, nextAlignedFrame } from "./transport";
 
 const scope = self as DedicatedWorkerGlobalScope;
+let latestMessageAnchor: ClockAnchorMessage | null = null;
 
-scope.addEventListener("message", (event: MessageEvent<WorkerRequest>) => {
+scope.addEventListener("message", (event: MessageEvent<WorkerInboundMessage>) => {
+  if (event.data.kind === "clock-anchor") {
+    latestMessageAnchor = event.data;
+    return;
+  }
   void handleRequest(event.data);
 });
 
@@ -36,6 +46,8 @@ function run(request: WorkerRequest): unknown {
       return capabilities();
     case "offscreen-canvas":
       return offscreenCanvasProbe();
+    case "render-continuity":
+      return renderContinuityProbe(request.payload as RenderContinuityPayload);
     case "sab-latency":
       return sabLatencyProbe(request.payload as SabLatencyPayload);
     case "self-drive":
@@ -43,6 +55,88 @@ function run(request: WorkerRequest): unknown {
     case "worker-raf":
       return workerRafProbe(request.payload as WorkerRafPayload);
   }
+}
+
+async function renderContinuityProbe(
+  payload: RenderContinuityPayload,
+): Promise<FrameContinuityResult> {
+  if (typeof OffscreenCanvas !== "function") {
+    throw new Error("OffscreenCanvas is unavailable for continuity rendering");
+  }
+  if (payload.mode === "sab" && payload.anchorBuffer === undefined) {
+    throw new Error("SAB continuity mode requires an anchor buffer");
+  }
+
+  const canvas = new OffscreenCanvas(320, 180);
+  const context = canvas.getContext("2d", { alpha: false });
+  if (context === null) {
+    throw new Error("OffscreenCanvas 2D context is unavailable for continuity rendering");
+  }
+
+  const sabSequence =
+    payload.anchorBuffer === undefined ? null : new Int32Array(payload.anchorBuffer, 0, 1);
+  const sabTimestamp =
+    payload.anchorBuffer === undefined ? null : new Float64Array(payload.anchorBuffer, 8, 1);
+  const frameTimestamps: number[] = [];
+  const anchorLatencies: number[] = [];
+  const phaseErrors: number[] = [];
+  let observedAnchorSequence = -1;
+  let paintOperations = 0;
+
+  await delayUntilEpoch(payload.startAtEpochMs);
+  const endAtEpochMs = payload.startAtEpochMs + payload.durationMs;
+  let nextDeadline = performance.now();
+
+  while (absoluteNow() < endAtEpochMs) {
+    await delayUntilMonotonic(nextDeadline);
+    const renderedAt = absoluteNow();
+    const anchor = readAnchor(payload.mode, sabSequence, sabTimestamp);
+    let correction = 0;
+
+    if (anchor !== null && anchor.sequence !== observedAnchorSequence) {
+      observedAnchorSequence = anchor.sequence;
+      const latency = renderedAt - anchor.timestamp;
+      if (latency >= 0 && latency < 1000) {
+        anchorLatencies.push(latency);
+      }
+    }
+    if (anchor !== null && renderedAt - anchor.timestamp <= 100) {
+      const anchorMonotonic = anchor.timestamp - performance.timeOrigin;
+      const alignedDeadline = nextAlignedFrame(
+        performance.now(),
+        anchorMonotonic,
+        payload.targetFrameMs,
+      );
+      const uncorrectedDeadline = nextDeadline + payload.targetFrameMs;
+      correction = clampPhaseCorrection(alignedDeadline - uncorrectedDeadline);
+      const nearestPhase =
+        anchorMonotonic +
+        Math.round((performance.now() - anchorMonotonic) / payload.targetFrameMs) *
+          payload.targetFrameMs;
+      phaseErrors.push(performance.now() - nearestPhase);
+    }
+
+    paintContinuityFrame(context, paintOperations);
+    paintOperations += 1;
+    frameTimestamps.push(renderedAt);
+    nextDeadline += payload.targetFrameMs + correction;
+    if (nextDeadline < performance.now() - payload.targetFrameMs) {
+      nextDeadline = performance.now();
+    }
+  }
+
+  const pixel = context.getImageData(0, 0, 1, 1).data;
+  return analyzeContinuity({
+    anchorLatencies,
+    finalPixelRgba: [...pixel],
+    frameTimestamps,
+    mode: payload.mode,
+    paintOperations,
+    phaseErrors,
+    stallEndEpochMs: payload.stallEndEpochMs,
+    stallStartEpochMs: payload.stallStartEpochMs,
+    targetFrameMs: payload.targetFrameMs,
+  });
 }
 
 function capabilities(): WorkerCapabilities {
@@ -142,6 +236,7 @@ function offscreenCanvasProbe(): CanvasProbeResult {
   const scrollCopy = benchmark(250, () => {
     context.drawImage(canvas, 0, 1, 1024, 1023, 0, 0, 1024, 1023);
   });
+  const tileSizes = tileSizeScan(context, canvas);
 
   return {
     durationMs: round(draw.durationMs + scrollCopy.durationMs),
@@ -149,7 +244,27 @@ function offscreenCanvasProbe(): CanvasProbeResult {
     operationsPerSecond: round(draw.operationsPerSecond),
     scrollCopyOperations: scrollCopy.operations,
     scrollCopyOperationsPerSecond: round(scrollCopy.operationsPerSecond),
+    tileSizes,
   };
+}
+
+function tileSizeScan(
+  context: OffscreenCanvasRenderingContext2D,
+  canvas: OffscreenCanvas,
+): CanvasProbeResult["tileSizes"] {
+  return [128, 256, 512, 1024].map((tileSizePx) => {
+    const result = benchmark(100, () => {
+      context.drawImage(canvas, 0, 1, tileSizePx, tileSizePx - 1, 0, 0, tileSizePx, tileSizePx - 1);
+    });
+    return {
+      megapixelsPerSecond: round(
+        (result.operationsPerSecond * tileSizePx * tileSizePx) / 1_000_000,
+      ),
+      operations: result.operations,
+      operationsPerSecond: round(result.operationsPerSecond),
+      tileSizePx,
+    };
+  });
 }
 
 function benchmark(
@@ -175,6 +290,30 @@ function benchmark(
   };
 }
 
+function readAnchor(
+  mode: RenderContinuityPayload["mode"],
+  sabSequence: Int32Array | null,
+  sabTimestamp: Float64Array | null,
+): { readonly sequence: number; readonly timestamp: number } | null {
+  if (mode === "post-message") {
+    return latestMessageAnchor;
+  }
+  if (sabSequence === null || sabTimestamp === null) {
+    return null;
+  }
+  return {
+    sequence: Atomics.load(sabSequence, 0),
+    timestamp: sabTimestamp[0] ?? 0,
+  };
+}
+
+function paintContinuityFrame(context: OffscreenCanvasRenderingContext2D, sequence: number): void {
+  context.fillStyle = `hsl(${String(sequence % 360)} 70% 45%)`;
+  context.fillRect(0, 0, 320, 180);
+  context.fillStyle = "#ffffff";
+  context.fillRect((sequence * 7) % 304, 72, 16, 36);
+}
+
 function intervals(timestamps: readonly number[]): number[] {
   const result: number[] = [];
   for (let index = 1; index < timestamps.length; index += 1) {
@@ -189,6 +328,26 @@ function intervals(timestamps: readonly number[]): number[] {
 
 function yieldTask(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function absoluteNow(): number {
+  return absoluteHighResolutionTime(performance.timeOrigin, performance.now());
+}
+
+async function delayUntilEpoch(deadline: number): Promise<void> {
+  while (absoluteNow() < deadline) {
+    await delay(Math.min(20, Math.max(0, deadline - absoluteNow())));
+  }
+}
+
+async function delayUntilMonotonic(deadline: number): Promise<void> {
+  while (performance.now() < deadline) {
+    await delay(Math.min(10, Math.max(0, deadline - performance.now())));
+  }
+}
+
+function delay(durationMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
 function post(response: WorkerResponse): void {

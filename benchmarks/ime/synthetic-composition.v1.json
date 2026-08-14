@@ -1,0 +1,39 @@
+{
+  "$schema": "../../docs/schemas/ime-sequence.schema.json",
+  "version": 1,
+  "provenance": "synthetic",
+  "description": "Deterministic composition fixture for runner development; not target-platform evidence.",
+  "initialText": "A😀éZ",
+  "events": [
+    { "atMs": 0, "type": "selection", "start": 7, "end": 7 },
+    { "atMs": 16, "type": "compositionstart" },
+    {
+      "atMs": 32,
+      "type": "textupdate",
+      "rangeStart": 7,
+      "rangeEnd": 7,
+      "text": "n",
+      "selectionStart": 8,
+      "selectionEnd": 8
+    },
+    {
+      "atMs": 48,
+      "type": "textupdate",
+      "rangeStart": 7,
+      "rangeEnd": 8,
+      "text": "ni",
+      "selectionStart": 9,
+      "selectionEnd": 9
+    },
+    {
+      "atMs": 80,
+      "type": "textupdate",
+      "rangeStart": 7,
+      "rangeEnd": 9,
+      "text": "你",
+      "selectionStart": 8,
+      "selectionEnd": 8
+    },
+    { "atMs": 96, "type": "compositionend" }
+  ]
+}

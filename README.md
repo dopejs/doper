@@ -1,8 +1,8 @@
 # doper
 
-doper 是一套从零设计的 Web Canvas 渲染引擎，目标是在保留 Faster 已验证的
-TSX、虚拟滚动和 PC 性能优势的同时，重新构建移动端帧调度、Rust/WASM Core、
-二进制 ABI、文本与原生编辑能力。
+doper 是一套从零设计的 Web Canvas 渲染引擎，目标是提供高性能 TSX 运行时、
+原生虚拟滚动、确定性的 Rust/WASM Core、版本化二进制 ABI，以及完整的文本
+渲染与 Canvas 原生编辑能力。
 
 仓库当前处于 **P0 / M0 探针阶段**，尚不是可供业务使用的渲染引擎。技术决策以
 [`docs/design.md`](docs/design.md) 为准，交付顺序与出口门禁见
@@ -36,5 +36,5 @@ COOP/COEP 响应头以启用跨源隔离；这只证明本地探针环境可用�
 
 ## 工程约束
 
-在修改架构或行为前阅读 [`AGENTS.md`](AGENTS.md)。Faster 只作为黑盒行为、
-性能和迁移基线；不得复制其源码或默认沿用内部抽象。
+在修改架构或行为前阅读 [`AGENTS.md`](AGENTS.md)，并遵守设计文档中的模块边界、
+性能门禁和测试要求。

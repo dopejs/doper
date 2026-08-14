@@ -8,18 +8,16 @@ truth; this file turns its decisions into day-to-day engineering rules.
 
 ## Project status
 
-doper is a ground-up Web canvas rendering engine intended to supersede Faster
-(`@faster/*`). It is currently in the design/prototyping stage. The planned
-stack is a Rust-to-WASM core, a TypeScript shell, and a pluggable rendering
-backend with Canvas2D first.
+doper is a ground-up Web canvas rendering engine for high-performance
+interaction, virtual scrolling, and canvas-native editing. It is currently in
+the design/prototyping stage. The planned stack is a Rust-to-WASM core, a
+TypeScript shell, and a pluggable rendering backend with Canvas2D first.
 
-Faster is a source of validated product requirements, benchmark baselines, and
-migration constraints—not an implementation blueprint. Preserve the advantages
-that matter to applications, but redesign the architecture from first
-principles. Do not copy Faster's source, reproduce its internal abstractions by
-default, or carry forward compatibility quirks without a measured product need.
-When a Faster behavior is retained, document the user-facing requirement or
-performance evidence that justifies it.
+Existing engines are migration inputs, not implementation blueprints or
+performance baselines. Redesign the architecture from first principles. Do not
+copy source, reproduce internal abstractions by default, or carry forward
+compatibility quirks without a measured product need. Performance gates use
+doper's absolute targets and target-branch regression data.
 
 Do not present planned packages, crates, APIs, benchmarks, or platform support
 as implemented until they exist in the repository and have been verified.
@@ -53,7 +51,7 @@ editable-text primitives; do not push those responsibilities back to business
 EmbedDOM components.
 
 Compatibility work is an edge adapter for migration, not a constraint on the
-core architecture. Keep Faster shims outside the core and make them removable
+core architecture. Keep legacy shims outside the core and make them removable
 once migration is complete.
 
 ## Intended repository layout

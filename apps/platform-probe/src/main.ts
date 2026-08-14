@@ -1,7 +1,7 @@
 import "./style.css";
 
 import { EditingProbe, type EditingProbeSnapshot } from "./editing-probe";
-import type { CanvasProbeResult, TimingProbeResult } from "./protocol";
+import type { CanvasProbeResult, TimingProbeResult, TransportMatrixResult } from "./protocol";
 import { PlatformProbeRunner, type EnvironmentSnapshot, type WasmProbeResult } from "./probes";
 
 interface ProbeReport {
@@ -20,6 +20,7 @@ interface ProbeReport {
   sabLatency?: TimingProbeResult;
   selfDrive?: TimingProbeResult;
   startedAt?: string;
+  transport?: TransportMatrixResult;
   version: 1;
   wasm?: WasmProbeResult;
   workerRaf?: TimingProbeResult;
@@ -37,17 +38,24 @@ const report: ProbeReport = {
   },
   version: 1,
 };
+Reflect.set(window, "__DOPER_PLATFORM_PROBE_REPORT__", report);
 const runButton = element<HTMLButtonElement>("run-all");
 const exportButton = element<HTMLButtonElement>("export");
 const runState = element<HTMLElement>("run-state");
 const editorMode = element<HTMLElement>("editor-mode");
 const editorLog = element<HTMLElement>("editor-log");
-const editingProbe = new EditingProbe(element<HTMLCanvasElement>("editor"), (snapshot) => {
-  report.editing = snapshot;
-  editorMode.textContent = snapshot.mode === "edit-context" ? "EditContext" : "Input proxy";
-  editorLog.textContent =
-    snapshot.events.length > 0 ? snapshot.events.join("\n") : "No editing events";
-});
+const forceInputProxy = new URLSearchParams(location.search).get("editing") === "proxy";
+const editingProbe = new EditingProbe(
+  element<HTMLCanvasElement>("editor"),
+  (snapshot) => {
+    report.editing = snapshot;
+    editorMode.textContent = snapshot.mode === "edit-context" ? "EditContext" : "Input proxy";
+    editorLog.textContent =
+      snapshot.events.length > 0 ? snapshot.events.join("\n") : "No editing events";
+    syncReportSnapshot();
+  },
+  { forceInputProxy },
+);
 
 runButton.addEventListener("click", () => {
   void runAll();
@@ -64,6 +72,7 @@ async function initialize(): Promise<void> {
   try {
     report.environment = await runner.environment();
     renderCapabilities(report.environment);
+    syncReportSnapshot();
   } catch (error) {
     runState.textContent = "Initialization failed";
     renderError("capabilities", error);
@@ -79,6 +88,7 @@ async function runAll(): Promise<void> {
   delete report.canvas;
   delete report.sabLatency;
   delete report.selfDrive;
+  delete report.transport;
   delete report.wasm;
   delete report.workerRaf;
   report.errors = {};
@@ -114,6 +124,15 @@ async function runAll(): Promise<void> {
     if (selfDrive !== undefined) {
       report.selfDrive = selfDrive;
     }
+    const transport = await runProbe(
+      "transport",
+      "transport-result",
+      () => runner.transportMatrix(element<HTMLCanvasElement>("continuity-benchmark")),
+      compactTransportMatrix,
+    );
+    if (transport !== undefined) {
+      report.transport = transport;
+    }
     const workerCanvas = await runProbe("worker-canvas", "canvas-result", () =>
       runner.offscreenCanvas(),
     );
@@ -135,10 +154,12 @@ async function runAll(): Promise<void> {
     report.finishedAt = new Date().toISOString();
     runState.textContent =
       Object.keys(report.errors).length === 0 ? "Complete" : "Complete with gaps";
+    syncReportSnapshot();
     exportButton.disabled = false;
   } catch (error) {
     runState.textContent = "Failed";
     console.error(error);
+    syncReportSnapshot();
     exportButton.disabled = false;
   } finally {
     runButton.disabled = false;
@@ -168,6 +189,28 @@ async function runProbe<Result>(
 
 function compactTimingResult(result: TimingProbeResult): unknown {
   return { durationMs: result.durationMs, summary: result.summary };
+}
+
+function compactTransportMatrix(result: TransportMatrixResult): unknown {
+  return {
+    recommendedMode: result.recommendedMode,
+    modes: Object.fromEntries(
+      Object.entries(result.modes).map(([mode, outcome]) => [
+        mode,
+        outcome.status === "ok"
+          ? {
+              continuousDuringStall: outcome.result.continuousDuringStall,
+              framesDuringStall: outcome.result.framesDuringStall,
+              maxFrameGapMs: outcome.result.maxFrameGapMs,
+              missedFrameBudget: outcome.result.missedFrameBudget,
+              paintOperations: outcome.result.paintOperations,
+              renderedFrames: outcome.result.renderedFrames,
+              status: outcome.status,
+            }
+          : outcome,
+      ]),
+    ),
+  };
 }
 
 function renderCapabilities(environment: EnvironmentSnapshot): void {
@@ -209,6 +252,7 @@ function renderError(targetId: string, error: unknown): void {
 
 function exportReport(): void {
   report.editing = editingProbe.snapshot();
+  syncReportSnapshot();
   const blob = new Blob([`${JSON.stringify(report, null, 2)}\n`], {
     type: "application/json",
   });
@@ -217,6 +261,10 @@ function exportReport(): void {
   link.href = URL.createObjectURL(blob);
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 0);
+}
+
+function syncReportSnapshot(): void {
+  element<HTMLScriptElement>("probe-report").textContent = `${JSON.stringify(report, null, 2)}\n`;
 }
 
 function yesNo(value: boolean): string {

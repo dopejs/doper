@@ -51,6 +51,11 @@
           <pre id="stall-result">Not run</pre>
         </article>
         <article class="probe-card">
+          <p class="eyebrow">Fallback</p>
+          <h2>Transport continuity matrix</h2>
+          <pre id="transport-result">Not run</pre>
+        </article>
+        <article class="probe-card">
           <p class="eyebrow">Raster</p>
           <h2>Canvas2D throughput</h2>
           <pre id="canvas-result">Not run</pre>
@@ -85,7 +90,11 @@
       </section>
 
       <canvas id="main-benchmark" width="1024" height="1024" hidden></canvas>
+      <canvas id="continuity-benchmark" width="320" height="180" hidden></canvas>
     </main>
+    <script id="probe-report" type="application/json">
+      {}
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

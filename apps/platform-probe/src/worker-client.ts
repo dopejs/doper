@@ -1,4 +1,4 @@
-import type { WorkerMethod, WorkerRequest, WorkerResponse } from "./protocol";
+import type { ClockAnchorMessage, WorkerMethod, WorkerRequest, WorkerResponse } from "./protocol";
 
 interface PendingRequest {
   readonly reject: (reason: Error) => void;
@@ -19,7 +19,7 @@ export class ProbeWorkerClient {
 
   call<Result>(method: WorkerMethod, payload: unknown, timeoutMs = 10_000): Promise<Result> {
     const id = this.#nextId++;
-    const request: WorkerRequest = { id, method, payload };
+    const request: WorkerRequest = { id, kind: "request", method, payload };
 
     return new Promise<Result>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -34,6 +34,11 @@ export class ProbeWorkerClient {
       });
       this.#worker.postMessage(request);
     });
+  }
+
+  publishClockAnchor(sequence: number, timestamp: number): void {
+    const message: ClockAnchorMessage = { kind: "clock-anchor", sequence, timestamp };
+    this.#worker.postMessage(message);
   }
 
   dispose(): void {
