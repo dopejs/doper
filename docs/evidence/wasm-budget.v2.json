@@ -6,8 +6,8 @@
       "rawBytes": 377967
     },
     "x86_64-unknown-linux-gnu": {
-      "gzipBytes": 236247,
-      "rawBytes": 591477
+      "gzipBytes": 148470,
+      "rawBytes": 377810
     }
   },
   "maximumGzipBytes": 307200,
