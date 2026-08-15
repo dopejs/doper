@@ -9,6 +9,8 @@ pub enum StreamKind {
     Input,
     /// Core-to-backend display list.
     DisplayList,
+    /// Core-to-backend glyph-span resource deltas.
+    GlyphResources,
     /// Ordered mutation and editing replay recording.
     Recording,
 }

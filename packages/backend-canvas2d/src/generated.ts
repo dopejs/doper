@@ -11,15 +11,19 @@ export const NULL_NODE_ID = 4294967295 as const;
 export const MUTATION_MAGIC = 1297108804 as const;
 export const INPUT_MAGIC = 1229999940 as const;
 export const DISPLAY_LIST_MAGIC = 1146113860 as const;
+export const GLYPH_RESOURCES_MAGIC = 1196445508 as const;
 export const RECORDING_MAGIC = 1380994884 as const;
 export const MAX_MUTATION_BYTES = 16777216 as const;
 export const MAX_INPUT_BYTES = 16777216 as const;
 export const MAX_DISPLAY_LIST_BYTES = 33554432 as const;
+export const MAX_GLYPH_RESOURCES_BYTES = 16777216 as const;
 export const MAX_RECORDING_BYTES = 67108864 as const;
 export const MAX_RESOURCE_BYTES = 8388608 as const;
 export const MAX_MUTATION_INSTRUCTIONS = 262144 as const;
 export const MAX_INPUT_INSTRUCTIONS = 262144 as const;
 export const MAX_DISPLAY_INSTRUCTIONS = 1048576 as const;
+export const MAX_GLYPH_RESOURCE_INSTRUCTIONS = 262144 as const;
+export const MAX_GLYPH_BITMAP_PIXELS = 16777216 as const;
 export const MAX_RECORDING_RECORDS = 1048576 as const;
 export const MAX_VIRTUAL_ITEMS = 4000000 as const;
 export const VIRTUAL_REFILL_VERSION = 1 as const;
@@ -30,6 +34,21 @@ export const VIRTUAL_REFILL_HEADER_REQUEST_COUNT_INDEX = 1 as const;
 export const VIRTUAL_REFILL_RECORD_NODE_ID_INDEX = 0 as const;
 export const VIRTUAL_REFILL_RECORD_START_INDEX = 1 as const;
 export const VIRTUAL_REFILL_RECORD_END_INDEX = 2 as const;
+export const GLYPH_BITMAP_FIXED_BYTES = null;
+export const GLYPH_BITMAP_MINIMUM_BYTES = 28 as const;
+export const GLYPH_BITMAP_GLYPH_ID_OFFSET = 0 as const;
+export const GLYPH_BITMAP_LEFT_OFFSET = 4 as const;
+export const GLYPH_BITMAP_TOP_OFFSET = 8 as const;
+export const GLYPH_BITMAP_WIDTH_OFFSET = 12 as const;
+export const GLYPH_BITMAP_HEIGHT_OFFSET = 16 as const;
+export const GLYPH_BITMAP_DEVICE_PIXEL_RATIO_OFFSET = 20 as const;
+export const GLYPH_BITMAP_DATA_BYTES_OFFSET = 24 as const;
+export const GLYPH_BITMAP_DATA_OFFSET = 28 as const;
+export const GLYPH_PLACEMENT_FIXED_BYTES = 12 as const;
+export const GLYPH_PLACEMENT_MINIMUM_BYTES = 12 as const;
+export const GLYPH_PLACEMENT_BITMAP_INDEX_OFFSET = 0 as const;
+export const GLYPH_PLACEMENT_X_OFFSET = 4 as const;
+export const GLYPH_PLACEMENT_Y_OFFSET = 8 as const;
 export const FRAME_DIAGNOSTICS_VERSION = 2 as const;
 export const FRAME_DIAGNOSTICS_WORDS = 19 as const;
 export const FRAME_DIAGNOSTICS_VERSION_INDEX = 0 as const;
@@ -191,6 +210,16 @@ export const DISPLAY_LAYOUTS = {
   [DisplayOpcode.DrawTextFallback]: { fixedBytes: 20, minimumBytes: 20 },
   [DisplayOpcode.DrawImage]: { fixedBytes: 40, minimumBytes: 40 },
   [DisplayOpcode.DrawPicture]: { fixedBytes: 16, minimumBytes: 16 },
+} as const;
+
+export enum GlyphResourceOpcode {
+  DefineGlyphSpan = 1,
+  ReleaseGlyphSpan = 2,
+}
+
+export const GLYPH_RESOURCE_LAYOUTS = {
+  [GlyphResourceOpcode.DefineGlyphSpan]: { fixedBytes: null, minimumBytes: 24 },
+  [GlyphResourceOpcode.ReleaseGlyphSpan]: { fixedBytes: 8, minimumBytes: 8 },
 } as const;
 
 export enum NodeKind {

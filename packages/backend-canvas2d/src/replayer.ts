@@ -1,6 +1,7 @@
 import { readDisplayListHeader, validateInstructionSize } from "./display-list";
 import type { DisplayListReader } from "./display-list";
 import { DisplayOpcode } from "./generated";
+import type { CanvasGlyphSpan } from "./glyph-resources";
 
 /** Canvas 2D contexts supported on the main thread and in workers. */
 export type Canvas2DContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -22,7 +23,7 @@ export interface Canvas2DResources {
   getText(id: number): string | undefined;
   getTextStyle(id: number): CanvasTextStyle | undefined;
   getFont(id: number): object | undefined;
-  getGlyphSpan(id: number): object | undefined;
+  getGlyphSpan(id: number): CanvasGlyphSpan | undefined;
   getPicture(id: number): Uint8Array | undefined;
   drawGlyphRun:
     | ((

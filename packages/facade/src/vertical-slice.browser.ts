@@ -52,7 +52,9 @@ describe("browser product vertical slice", () => {
     expect(report.core?.layoutVisitedNodes).toBeGreaterThan(0);
     expect(report.core?.displayCommands).toBe(report.commands);
 
-    const interior = context.getImageData(4, 4, 1, 1).data;
+    // Sample outside the system-font fallback glyph bounds so the exact pixel
+    // assertion is independent of platform font rasterization.
+    const interior = context.getImageData(100, 40, 1, 1).data;
     expect([...interior]).toEqual([26, 115, 232, 255]);
     const exterior = context.getImageData(140, 70, 1, 1).data;
     expect([...exterior]).toEqual([0, 0, 0, 0]);

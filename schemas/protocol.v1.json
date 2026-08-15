@@ -31,6 +31,8 @@
     "mutationInstructions": 262144,
     "inputInstructions": 262144,
     "displayInstructions": 1048576,
+    "glyphResourceInstructions": 262144,
+    "glyphBitmapPixels": 16777216,
     "recordingRecords": 1048576,
     "virtualItems": 4000000
   },
@@ -219,7 +221,50 @@
         },
         { "name": "DrawPicture", "opcode": 35, "fields": ["u32", "f32", "f32"] }
       ]
+    },
+    "glyphResources": {
+      "magic": "DOPG",
+      "maxBytes": 16777216,
+      "commands": [
+        {
+          "name": "DefineGlyphSpan",
+          "opcode": 1,
+          "fields": [
+            { "name": "spanId", "type": "u32" },
+            { "name": "paintId", "type": "u32" },
+            { "name": "bitmapCount", "type": "u32" },
+            { "name": "glyphCount", "type": "u32" },
+            { "name": "payloadBytes", "type": "u32" },
+            { "name": "payload", "type": "bytes" },
+            "align4"
+          ]
+        },
+        {
+          "name": "ReleaseGlyphSpan",
+          "opcode": 2,
+          "fields": [{ "name": "spanId", "type": "u32" }]
+        }
+      ]
     }
+  },
+  "glyphSpanPayload": {
+    "bitmapFields": [
+      { "name": "glyphId", "type": "u16" },
+      "pad16",
+      { "name": "left", "type": "f32" },
+      { "name": "top", "type": "f32" },
+      { "name": "width", "type": "u32" },
+      { "name": "height", "type": "u32" },
+      { "name": "devicePixelRatio", "type": "f32" },
+      { "name": "dataBytes", "type": "u32" },
+      { "name": "data", "type": "bytes" },
+      "align4"
+    ],
+    "placementFields": [
+      { "name": "bitmapIndex", "type": "u32" },
+      { "name": "x", "type": "f32" },
+      { "name": "y", "type": "f32" }
+    ]
   },
   "nodeKinds": [
     { "name": "Root", "id": 1 },

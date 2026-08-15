@@ -523,13 +523,22 @@ Shell 的最新 durable value 获胜：部分重叠请求裁到新边界，完�
 - bidi：`unicode-bidi`
 - glyph atlas：Core 维护，Canvas2D 后端以 `ImageBitmap` 贴图，WebGPU 后端直接采样纹理
 
+Core 与 Backend 之间另有 schema 生成、版本化的 `DOPG` Glyph Resource Batch。它只
+传输 `DrawGlyphRun` 所引用 span 的增量 define/release，包含受限灰度 bitmap、DPR、
+placement 和 paint 引用；Host 必须完整校验并预检资源生命周期后原子安装，再回放
+DisplayList。bitmap 面积、批次字节数和记录数均有 fail-closed 上限，不能把像素数据
+塞进逐 draw 的 WASM→JS 调用。若 glyph batch 或显式字体路径失败，整段文本走宿主
+fallback，不允许一半 atlas、一半 fallback 造成 caret/advance 分歧。
+
 实现状态（2026-08-16）：`doper-text` 已建立独立的无 unsafe Core 基础，使用
 `swash` 完成显式 SFNT 字体的 LTR shaping，使用 UAX #14 数据完成基础换行，并输出
 UTF-8/UTF-16、grapheme、cluster、glyph、line 与 caret 映射；Text Shape Cache 和
 灰度 outline glyph atlas 均使用可观测的字节预算 LRU。公开字体 ABI、glyph 资源
 回传和 Canvas2D 贴图仍未接入，因此这仍属于 M3-B 内部基础，不能视为公开文本路径
 完成。当前 Core 输入只接受解码后的 TTF/OTF/TTC SFNT；WOFF/WOFF2 解码放在显式
-字体加载器边界，接入时必须与失败回退、格式能力矩阵和体积门禁一起交付。
+字体加载器边界，接入时必须与失败回退、格式能力矩阵和体积门禁一起交付。`DOPG`
+批次的 schema、Rust/TypeScript 安全 codec、golden 和跨语言 round-trip 已落地，但
+Core 尚未产生真实 span，Host 也尚未执行 bitmap 贴图。
 
 栅格器选择以 WASM 体积门禁为准：同一 Rust 1.96.0、`opt-z`、LTO 探针中，
 `swash` 同时承担 shaping 与 raster 时为 308,835 bytes gzip，超过代表性文本包络的

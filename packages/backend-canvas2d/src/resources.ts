@@ -1,4 +1,5 @@
 import type { Canvas2DResources, CanvasTextStyle } from "./replayer";
+import { decodeGlyphResourceBatch, type CanvasGlyphSpan } from "./glyph-resources";
 import {
   AFFINE_A_OFFSET,
   AFFINE_RESOURCE_FIXED_BYTES,
@@ -37,7 +38,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
   readonly #texts = new Map<number, string>();
   readonly #textStyles = new Map<number, CanvasTextStyle>();
   readonly #fonts = new Map<number, object>();
-  readonly #glyphSpans = new Map<number, object>();
+  readonly #glyphSpans = new Map<number, CanvasGlyphSpan>();
   readonly #pictures = new Map<number, Uint8Array>();
   readonly #encodedKinds = new Map<number, ResourceKind>();
 
@@ -75,8 +76,31 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
   }
 
   /** Defines a text-backend glyph span exactly once. */
-  public defineGlyphSpan(id: number, value: object): void {
+  public defineGlyphSpan(id: number, value: CanvasGlyphSpan): void {
     define(this.#glyphSpans, id, value, "glyph span");
+  }
+
+  /** Atomically applies a fully validated Core-owned glyph-span delta batch. */
+  public applyGlyphResourceBatch(bytes: Uint8Array): void {
+    const deltas = decodeGlyphResourceBatch(bytes);
+    const next = new Map(this.#glyphSpans);
+    for (const delta of deltas) {
+      if (delta.type === "define") {
+        if (next.has(delta.span.spanId)) {
+          throw new Error(`glyph span ${String(delta.span.spanId)} is already defined`);
+        }
+        if (!this.#paints.has(delta.span.paintId)) {
+          throw new Error(
+            `glyph span ${String(delta.span.spanId)} references missing paint ${String(delta.span.paintId)}`,
+          );
+        }
+        next.set(delta.span.spanId, delta.span);
+      } else if (!next.delete(delta.spanId)) {
+        throw new Error(`glyph span ${String(delta.spanId)} is not defined`);
+      }
+    }
+    this.#glyphSpans.clear();
+    for (const [id, span] of next) this.#glyphSpans.set(id, span);
   }
 
   /** Defines a copied immutable picture payload exactly once. */
@@ -172,7 +196,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
     return this.#fonts.get(id);
   }
 
-  public getGlyphSpan(id: number): object | undefined {
+  public getGlyphSpan(id: number): CanvasGlyphSpan | undefined {
     return this.#glyphSpans.get(id);
   }
 

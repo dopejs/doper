@@ -4,6 +4,10 @@ import { ABI_VERSION, DISPLAY_LIST_MAGIC, DisplayOpcode, STREAM_HEADER_BYTES } f
 import { Canvas2DReplayer, type Canvas2DContext } from "./replayer";
 import { Canvas2DResourceRegistry } from "./resources";
 
+function glyphSpan(spanId: number) {
+  return { spanId, paintId: 1, bitmaps: [], placements: [] } as const;
+}
+
 describe("Canvas2DReplayer", () => {
   it("validates all commands and resources before touching canvas", () => {
     const calls: unknown[][] = [];
@@ -93,7 +97,7 @@ describe("Canvas2DReplayer", () => {
     resources.definePaint(1, "#123456");
     resources.definePath(2, pathValue);
     resources.defineFont(3, {});
-    resources.defineGlyphSpan(4, {});
+    resources.defineGlyphSpan(4, glyphSpan(4));
     resources.defineText(5, "hello");
     resources.defineTextStyle(6, {
       font: "500 14px Inter",
@@ -161,7 +165,7 @@ describe("Canvas2DReplayer", () => {
     const resources = new Canvas2DResourceRegistry();
     resources.definePaint(1, "red");
     resources.defineFont(2, {});
-    resources.defineGlyphSpan(3, {});
+    resources.defineGlyphSpan(3, glyphSpan(3));
     const cases = [
       command(DisplayOpcode.Alpha, 4, (view) => view.setFloat32(4, 1.1, true)),
       command(DisplayOpcode.FillRRect, 36, (view) => {

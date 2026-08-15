@@ -329,6 +329,8 @@ web 字体 shaping、复杂排版和 glyph atlas 属于 M3。M1 的“像素对�
 WASM 体积门禁约束的灰度 outline glyph atlas 已完成；真实 SFNT 自动门禁为
 `pnpm m3:text:foundation`。公开字体 ABI、WOFF/WOFF2 加载边界、系统字体测量反馈、
 glyph 资源回传、Canvas2D 贴图与 Core/Host 集成仍未完成，因此 M3-B 尚未达到出口。
+Core→Backend 的版本化 glyph-span 增量批次、安全 codec、golden 和跨语言 round-trip
+已完成；目前缺口是让 Core 产生真实 span，并由 Host 原子安装后执行 Canvas2D 贴图。
 
 - 显式 web 字体加载、LTR、基础换行和 Text Shape Cache。
 - 系统字体 `measureText`/`fillText` fallback 及缓存失效。

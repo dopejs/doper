@@ -38,6 +38,7 @@ async function checkAbiRoundtrip() {
   const mutationGolden = await readGolden("mutation-stream.v1.json");
   const inputGolden = await readGolden("input-stream.v1.json");
   const displayGolden = await readGolden("display-list.v1.json");
+  const glyphGolden = await readGolden("glyph-resources.v1.json");
   const recordingGolden = await readGolden("replay-recording.v1.json");
   const resourceGolden = JSON.parse(
     await readFile(path.join(root, "benchmarks/abi/resources.v1.json"), "utf8"),
@@ -149,6 +150,36 @@ async function checkAbiRoundtrip() {
     roundTripInRust("display", displayGolden),
     displayGolden,
     "Rust display-list round trip",
+  );
+
+  const glyphBytes = backend.encodeGlyphResourceBatch([
+    {
+      type: "define",
+      span: {
+        spanId: 7,
+        paintId: 3,
+        bitmaps: [
+          {
+            glyphId: 42,
+            left: -1,
+            top: 9,
+            width: 2,
+            height: 2,
+            devicePixelRatio: 2,
+            data: new Uint8Array([0, 127, 255, 64]),
+          },
+        ],
+        placements: [{ bitmapIndex: 0, x: 1.5, y: 12 }],
+      },
+    },
+    { type: "release", spanId: 8 },
+  ]);
+  const glyphHex = encodeHex(glyphBytes);
+  assertEqual(glyphHex, glyphGolden, "TypeScript glyph resource encoder vs golden");
+  assertEqual(
+    roundTripInRust("glyph", glyphHex),
+    glyphHex,
+    "TypeScript to Rust glyph resource round trip",
   );
 
   console.log("ABI cross-language round trips passed");

@@ -5,6 +5,15 @@ export {
   type DisplayList,
 } from "./display-list";
 export { Canvas2DResourceRegistry } from "./resources";
+export {
+  GlyphResourceError,
+  decodeGlyphResourceBatch,
+  encodeGlyphResourceBatch,
+  type CanvasGlyphBitmap,
+  type CanvasGlyphPlacement,
+  type CanvasGlyphSpan,
+  type GlyphResourceDelta,
+} from "./glyph-resources";
 export { ResourceKind } from "./generated";
 export {
   RasterTileCache,

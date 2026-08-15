@@ -10,6 +10,7 @@
 mod codec;
 mod display_list;
 mod error;
+mod glyph_resources;
 mod input;
 mod mutation;
 mod recording;
@@ -18,6 +19,10 @@ use core::fmt;
 
 pub use display_list::{DisplayCommand, DisplayInstruction, DisplayList};
 pub use error::{AbiError, StreamKind};
+pub use glyph_resources::{
+    GlyphBitmapResource, GlyphPlacementResource, GlyphResourceBatch, GlyphResourceCommand,
+    GlyphResourceInstruction, GlyphSpanResource,
+};
 pub use input::{
     InputAffinity, InputBatch, InputCommand, InputInstruction, InputPosition, InputSelection,
 };

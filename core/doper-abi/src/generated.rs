@@ -11,15 +11,19 @@ pub const NULL_NODE_ID: u32 = 4294967295;
 pub const MUTATION_MAGIC: u32 = 1297108804;
 pub const INPUT_MAGIC: u32 = 1229999940;
 pub const DISPLAY_LIST_MAGIC: u32 = 1146113860;
+pub const GLYPH_RESOURCES_MAGIC: u32 = 1196445508;
 pub const RECORDING_MAGIC: u32 = 1380994884;
 pub const MAX_MUTATION_BYTES: usize = 16777216;
 pub const MAX_INPUT_BYTES: usize = 16777216;
 pub const MAX_DISPLAY_LIST_BYTES: usize = 33554432;
+pub const MAX_GLYPH_RESOURCES_BYTES: usize = 16777216;
 pub const MAX_RECORDING_BYTES: usize = 67108864;
 pub const MAX_RESOURCE_BYTES: usize = 8388608;
 pub const MAX_MUTATION_INSTRUCTIONS: u32 = 262144;
 pub const MAX_INPUT_INSTRUCTIONS: u32 = 262144;
 pub const MAX_DISPLAY_INSTRUCTIONS: u32 = 1048576;
+pub const MAX_GLYPH_RESOURCE_INSTRUCTIONS: u32 = 262144;
+pub const MAX_GLYPH_BITMAP_PIXELS: usize = 16777216;
 pub const MAX_RECORDING_RECORDS: u32 = 1048576;
 pub const MAX_VIRTUAL_ITEMS: u32 = 4000000;
 pub const VIRTUAL_REFILL_VERSION: u32 = 1;
@@ -30,6 +34,21 @@ pub const VIRTUAL_REFILL_HEADER_REQUEST_COUNT_INDEX: usize = 1;
 pub const VIRTUAL_REFILL_RECORD_NODE_ID_INDEX: usize = 0;
 pub const VIRTUAL_REFILL_RECORD_START_INDEX: usize = 1;
 pub const VIRTUAL_REFILL_RECORD_END_INDEX: usize = 2;
+pub const GLYPH_BITMAP_FIXED_BYTES: Option<usize> = None;
+pub const GLYPH_BITMAP_MINIMUM_BYTES: usize = 28;
+pub const GLYPH_BITMAP_GLYPH_ID_OFFSET: usize = 0;
+pub const GLYPH_BITMAP_LEFT_OFFSET: usize = 4;
+pub const GLYPH_BITMAP_TOP_OFFSET: usize = 8;
+pub const GLYPH_BITMAP_WIDTH_OFFSET: usize = 12;
+pub const GLYPH_BITMAP_HEIGHT_OFFSET: usize = 16;
+pub const GLYPH_BITMAP_DEVICE_PIXEL_RATIO_OFFSET: usize = 20;
+pub const GLYPH_BITMAP_DATA_BYTES_OFFSET: usize = 24;
+pub const GLYPH_BITMAP_DATA_OFFSET: usize = 28;
+pub const GLYPH_PLACEMENT_FIXED_BYTES: Option<usize> = Some(12);
+pub const GLYPH_PLACEMENT_MINIMUM_BYTES: usize = 12;
+pub const GLYPH_PLACEMENT_BITMAP_INDEX_OFFSET: usize = 0;
+pub const GLYPH_PLACEMENT_X_OFFSET: usize = 4;
+pub const GLYPH_PLACEMENT_Y_OFFSET: usize = 8;
 pub const FRAME_DIAGNOSTICS_VERSION: u32 = 2;
 pub const FRAME_DIAGNOSTICS_WORDS: usize = 19;
 pub const FRAME_DIAGNOSTICS_VERSION_INDEX: usize = 0;
@@ -354,6 +373,42 @@ impl DisplayOpcode {
             Self::DrawTextFallback => 20,
             Self::DrawImage => 40,
             Self::DrawPicture => 16,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
+pub enum GlyphResourceOpcode {
+    DefineGlyphSpan = 1,
+    ReleaseGlyphSpan = 2,
+}
+
+impl GlyphResourceOpcode {
+    #[must_use]
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::DefineGlyphSpan),
+            2 => Some(Self::ReleaseGlyphSpan),
+            _ => None,
+        }
+    }
+}
+
+impl GlyphResourceOpcode {
+    #[must_use]
+    pub const fn fixed_bytes(self) -> Option<usize> {
+        match self {
+            Self::DefineGlyphSpan => None,
+            Self::ReleaseGlyphSpan => Some(8),
+        }
+    }
+
+    #[must_use]
+    pub const fn minimum_bytes(self) -> usize {
+        match self {
+            Self::DefineGlyphSpan => 24,
+            Self::ReleaseGlyphSpan => 8,
         }
     }
 }
