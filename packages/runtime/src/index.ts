@@ -6,7 +6,7 @@ export {
   useSignal,
   useState,
   type RefObject,
-} from "./hooks.js";
+} from "./hooks";
 export {
   batch,
   computed,
@@ -16,4 +16,4 @@ export {
   type ReadonlySignal,
   type Signal,
   type Unsubscribe,
-} from "./signal.js";
+} from "./signal";

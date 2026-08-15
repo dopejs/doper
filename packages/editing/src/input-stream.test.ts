@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { InputOpcode } from "./generated.js";
+import { InputOpcode } from "./generated";
 import {
   InputAffinity,
   InputStreamError,
   decodeInputBatch,
   encodeInputBatch,
   type InputBatch,
-} from "./input-stream.js";
+} from "./input-stream";
 
 const REVISION = 0x0123_4567_89ab_cdefn;
 

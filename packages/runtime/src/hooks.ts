@@ -1,4 +1,4 @@
-import { ReactiveObserver, signal, type Signal, type Unsubscribe } from "./signal.js";
+import { ReactiveObserver, signal, type Signal, type Unsubscribe } from "./signal";
 
 /** Mutable stable reference returned by `useRef`. */
 export interface RefObject<T> {

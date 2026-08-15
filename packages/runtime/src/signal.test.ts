@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { batch, computed, effect, signal } from "./signal.js";
+import { batch, computed, effect, signal } from "./signal";
 
 describe("signals", () => {
   it("tracks dynamic dependencies without duplicate or stale subscriptions", () => {

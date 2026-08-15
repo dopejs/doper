@@ -1,6 +1,6 @@
-import initialize, { WasmCore } from "../wasm/doper_core.js";
+import initialize, { WasmCore } from "../wasm/doper_core";
 
-import type { CoreClient } from "./main-thread.js";
+import type { CoreClient } from "./main-thread";
 
 /** Inputs supported by wasm-bindgen's web-target loader. */
 export type WasmCoreInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;

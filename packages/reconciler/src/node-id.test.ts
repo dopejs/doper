@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { NULL_NODE_ID } from "./generated.js";
-import { NodeIdAllocator, decodeNodeId } from "./node-id.js";
+import { NULL_NODE_ID } from "./generated";
+import { NodeIdAllocator, decodeNodeId } from "./node-id";
 
 describe("NodeIdAllocator", () => {
   it("reuses a released slot only with a newer generation", () => {

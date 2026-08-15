@@ -5,7 +5,7 @@ export {
   Prop,
   ResourceKind,
   PROP_METADATA,
-} from "./generated.js";
+} from "./generated";
 export {
   MutationEncodingError,
   NULL_NODE_ID,
@@ -13,6 +13,6 @@ export {
   encodeMutationBatch,
   type Mutation,
   type MutationBatch,
-} from "./mutation-stream.js";
-export { NodeIdAllocator, NodeIdError, decodeNodeId, type DecodedNodeId } from "./node-id.js";
-export { createRoot, type DoperRoot, type MutationSink, type RootOptions } from "./reconciler.js";
+} from "./mutation-stream";
+export { NodeIdAllocator, NodeIdError, decodeNodeId, type DecodedNodeId } from "./node-id";
+export { createRoot, type DoperRoot, type MutationSink, type RootOptions } from "./reconciler";

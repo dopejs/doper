@@ -14,16 +14,16 @@ import {
 } from "@dopejs/doper-jsx";
 import { ComponentScope } from "@dopejs/doper-runtime/internal";
 
-import { NodeKind, Prop, ResourceKind } from "./generated.js";
-import { encodeMutationBatch, NULL_NODE_ID, type Mutation } from "./mutation-stream.js";
-import { NodeIdAllocator } from "./node-id.js";
+import { NodeKind, Prop, ResourceKind } from "./generated";
+import { encodeMutationBatch, NULL_NODE_ID, type Mutation } from "./mutation-stream";
+import { NodeIdAllocator } from "./node-id";
 import {
   ResourcePool,
   encodeAffine,
   encodeSolidPaint,
   encodeTextStyle,
   encodeUtf8,
-} from "./resource-pool.js";
+} from "./resource-pool";
 
 /** Synchronous main-thread or transport adapter for committed mutation bytes. */
 export interface MutationSink {

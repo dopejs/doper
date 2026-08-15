@@ -8,7 +8,7 @@ import {
   MAX_DISPLAY_LIST_BYTES,
   PROTOCOL_ALIGNMENT,
   STREAM_HEADER_BYTES,
-} from "./generated.js";
+} from "./generated";
 
 /** A decoded drawing command used by diagnostics and contract tests. */
 export type DisplayCommand =

@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  ABI_VERSION,
-  DISPLAY_LIST_MAGIC,
-  DisplayOpcode,
-  STREAM_HEADER_BYTES,
-} from "./generated.js";
-import { Canvas2DReplayer, type Canvas2DContext } from "./replayer.js";
-import { Canvas2DResourceRegistry } from "./resources.js";
+import { ABI_VERSION, DISPLAY_LIST_MAGIC, DisplayOpcode, STREAM_HEADER_BYTES } from "./generated";
+import { Canvas2DReplayer, type Canvas2DContext } from "./replayer";
+import { Canvas2DResourceRegistry } from "./resources";
 
 describe("Canvas2DReplayer", () => {
   it("validates all commands and resources before touching canvas", () => {

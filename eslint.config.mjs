@@ -40,6 +40,18 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              regex: "^\\.{1,2}/.*\\.js$",
+              message:
+                "Use an extensionless relative module specifier in component-library source.",
+            },
+          ],
+        },
+      ],
     },
   },
   {

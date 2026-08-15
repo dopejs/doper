@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { RESOURCE_ENCODING_VERSION, ResourceKind } from "./generated.js";
-import { Canvas2DResourceRegistry } from "./resources.js";
+import { RESOURCE_ENCODING_VERSION, ResourceKind } from "./generated";
+import { Canvas2DResourceRegistry } from "./resources";
 
 describe("Canvas2DResourceRegistry", () => {
   it("decodes schema-versioned paint, text, and text-style resources", () => {

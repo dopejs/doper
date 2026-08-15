@@ -7,7 +7,7 @@ import {
 } from "@dopejs/doper-reconciler";
 import { describe, expect, it, vi } from "vitest";
 
-import { CanvasFrameSink, type CoreClient, type FrameReport } from "./main-thread.js";
+import { CanvasFrameSink, type CoreClient, type FrameReport } from "./main-thread";
 
 const DISPLAY_LIST_MAGIC = 0x4450_4f44;
 const STREAM_HEADER_BYTES = 16;

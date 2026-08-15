@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeDisplayList } from "./display-list.js";
+import { decodeDisplayList } from "./display-list";
 
 describe("DisplayList", () => {
   it("decodes the cross-language golden list", () => {

@@ -5,8 +5,8 @@ export {
   type CoreClient,
   type CoreFrameDiagnostics,
   type FrameReport,
-} from "./main-thread.js";
-export { createWasmCore, type WasmCoreInput } from "./wasm.js";
+} from "./main-thread";
+export { createWasmCore, type WasmCoreInput } from "./wasm";
 export {
   BinaryReplayRecorder,
   ReplayRecordingError,
@@ -17,5 +17,5 @@ export {
   type ReplayHandlers,
   type ReplayRecord,
   type ReplayRecording,
-} from "./recording.js";
-export { SabMutationRing, type SabMutationFrame, type SabMutationRingMetrics } from "./sab-ring.js";
+} from "./recording";
+export { SabMutationRing, type SabMutationFrame, type SabMutationRingMetrics } from "./sab-ring";

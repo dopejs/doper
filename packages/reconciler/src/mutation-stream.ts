@@ -12,11 +12,11 @@ import {
   PROTOCOL_ALIGNMENT,
   ResourceKind,
   STREAM_HEADER_BYTES,
-} from "./generated.js";
-import type { Prop } from "./generated.js";
+} from "./generated";
+import type { Prop } from "./generated";
 
 /** Sentinel used for an absent parent or sibling. */
-export { NULL_NODE_ID } from "./generated.js";
+export { NULL_NODE_ID } from "./generated";
 
 /** A generated, validated mutation command. */
 export type Mutation =

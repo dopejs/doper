@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_MUTATION_INSTRUCTIONS, NodeKind, Prop, ResourceKind } from "./generated.js";
+import { MAX_MUTATION_INSTRUCTIONS, NodeKind, Prop, ResourceKind } from "./generated";
 import {
   NULL_NODE_ID,
   decodeMutationBatch,
   encodeMutationBatch,
   type Mutation,
   type MutationBatch,
-} from "./mutation-stream.js";
+} from "./mutation-stream";
 
 const GOLDEN_BATCH: MutationBatch = {
   frameSeq: 42,

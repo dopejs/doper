@@ -30,9 +30,9 @@ import {
   TEXT_STYLE_VARIANT_OFFSET,
   TEXT_STYLE_VERSION_OFFSET,
   TEXT_STYLE_WEIGHT_OFFSET,
-} from "./generated.js";
-import type { ResourceKind } from "./generated.js";
-import type { Mutation } from "./mutation-stream.js";
+} from "./generated";
+import type { ResourceKind } from "./generated";
+import type { Mutation } from "./mutation-stream";
 
 interface ResourceEntry {
   readonly id: number;

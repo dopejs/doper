@@ -1,4 +1,4 @@
-export { DOPER_ELEMENT_TYPE, createElement, isDoperElement, normalizeChildren } from "./element.js";
+export { DOPER_ELEMENT_TYPE, createElement, isDoperElement, normalizeChildren } from "./element";
 export {
   Fragment,
   type AnyDoperElement,
@@ -18,4 +18,4 @@ export {
   type Ref,
   type ScrollProps,
   type TextProps,
-} from "./types.js";
+} from "./types";

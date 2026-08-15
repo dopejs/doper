@@ -1,6 +1,6 @@
-import { readDisplayListHeader, validateInstructionSize } from "./display-list.js";
-import type { DisplayListReader } from "./display-list.js";
-import { DisplayOpcode } from "./generated.js";
+import { readDisplayListHeader, validateInstructionSize } from "./display-list";
+import type { DisplayListReader } from "./display-list";
+import { DisplayOpcode } from "./generated";
 
 /** Canvas 2D contexts supported on the main thread and in workers. */
 export type Canvas2DContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;

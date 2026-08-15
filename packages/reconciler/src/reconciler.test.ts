@@ -2,9 +2,9 @@ import { createElement, type DoperNode, type NodeHandle } from "@dopejs/doper-js
 import { signal, useEffect } from "@dopejs/doper-runtime";
 import { describe, expect, it, vi } from "vitest";
 
-import { NodeKind, Prop } from "./generated.js";
-import { decodeMutationBatch, type Mutation, type MutationBatch } from "./mutation-stream.js";
-import { createRoot, type MutationSink } from "./reconciler.js";
+import { NodeKind, Prop } from "./generated";
+import { decodeMutationBatch, type Mutation, type MutationBatch } from "./mutation-stream";
+import { createRoot, type MutationSink } from "./reconciler";
 
 class RecordingSink implements MutationSink {
   public readonly batches: MutationBatch[] = [];

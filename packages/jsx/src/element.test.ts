@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { createElement, isDoperElement, normalizeChildren } from "./element.js";
-import { Fragment } from "./types.js";
+import { createElement, isDoperElement, normalizeChildren } from "./element";
+import { Fragment } from "./types";
 
 describe("JSX element protocol", () => {
   it("extracts identity without mutating or leaking key into component props", () => {

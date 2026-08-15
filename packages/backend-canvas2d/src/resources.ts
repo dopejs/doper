@@ -1,4 +1,4 @@
-import type { Canvas2DResources, CanvasTextStyle } from "./replayer.js";
+import type { Canvas2DResources, CanvasTextStyle } from "./replayer";
 import {
   AFFINE_A_OFFSET,
   AFFINE_RESOURCE_FIXED_BYTES,
@@ -25,7 +25,7 @@ import {
   TEXT_STYLE_VARIANT_OFFSET,
   TEXT_STYLE_VERSION_OFFSET,
   TEXT_STYLE_WEIGHT_OFFSET,
-} from "./generated.js";
+} from "./generated";
 
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 

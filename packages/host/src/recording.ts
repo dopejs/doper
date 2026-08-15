@@ -10,7 +10,7 @@ import {
   RECORDING_MAGIC,
   RecordingRecordKind,
   STREAM_HEADER_BYTES,
-} from "./generated.js";
+} from "./generated";
 
 const MUTATION_RECORD_KIND = Number(RecordingRecordKind.Mutation);
 const INPUT_RECORD_KIND = Number(RecordingRecordKind.Input);

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
+import { createServer } from "vite";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const wasmDirectory = path.join(repositoryRoot, "packages/host/wasm");
@@ -8,13 +9,12 @@ const wasmModule = await import(pathToFileURL(path.join(wasmDirectory, "doper_co
 const wasmBytes = await readFile(path.join(wasmDirectory, "doper_core_bg.wasm"));
 await wasmModule.default({ module_or_path: wasmBytes });
 
-const { createElement } = await import(
-  pathToFileURL(path.join(repositoryRoot, "packages/jsx/dist/index.js"))
-);
-const { createRoot } = await import(
-  pathToFileURL(path.join(repositoryRoot, "packages/facade/dist/index.js"))
-);
-
+const bundler = await createServer({
+  root: repositoryRoot,
+  appType: "custom",
+  logLevel: "error",
+  server: { middlewareMode: true },
+});
 const calls = [];
 const state = { fillStyle: "", font: "", globalAlpha: 1 };
 const context = {
@@ -49,27 +49,34 @@ const context = {
   },
 };
 
-const core = new wasmModule.WasmCore(320, 240);
 try {
-  const root = createRoot(context, core);
-  root.render(
-    createElement("container", {
-      width: 120,
-      height: 60,
-      backgroundColor: "#123456",
-      children: createElement("text", { value: "WASM frame", color: "#abcdef" }),
-    }),
+  const { createElement, createRoot } = await bundler.ssrLoadModule(
+    "/packages/facade/src/index.ts",
   );
-  if (!calls.some(([name]) => name === "fillRect")) {
-    throw new Error("WASM vertical slice did not replay a rectangle");
+  const core = new wasmModule.WasmCore(320, 240);
+  try {
+    const root = createRoot(context, core);
+    root.render(
+      createElement("container", {
+        width: 120,
+        height: 60,
+        backgroundColor: "#123456",
+        children: createElement("text", { value: "WASM frame", color: "#abcdef" }),
+      }),
+    );
+    if (!calls.some(([name]) => name === "fillRect")) {
+      throw new Error("WASM vertical slice did not replay a rectangle");
+    }
+    if (!calls.some(([name, value]) => name === "fillText" && value === "WASM frame")) {
+      throw new Error("WASM vertical slice did not replay fallback text");
+    }
+    if (core.is_poisoned()) throw new Error("WASM Core was poisoned by a valid facade frame");
+    root.unmount();
+  } finally {
+    core.free();
   }
-  if (!calls.some(([name, value]) => name === "fillText" && value === "WASM frame")) {
-    throw new Error("WASM vertical slice did not replay fallback text");
-  }
-  if (core.is_poisoned()) throw new Error("WASM Core was poisoned by a valid facade frame");
-  root.unmount();
 } finally {
-  core.free();
+  await bundler.close();
 }
 
 process.stdout.write(`WASM vertical slice: ${String(calls.length)} Canvas calls\n`);

@@ -3,9 +3,9 @@ export {
   decodeDisplayList,
   type DisplayCommand,
   type DisplayList,
-} from "./display-list.js";
-export { Canvas2DResourceRegistry } from "./resources.js";
-export { ResourceKind } from "./generated.js";
+} from "./display-list";
+export { Canvas2DResourceRegistry } from "./resources";
+export { ResourceKind } from "./generated";
 export {
   Canvas2DReplayError,
   Canvas2DReplayer,
@@ -13,4 +13,4 @@ export {
   type Canvas2DResources,
   type CanvasTextStyle,
   type ReplayStats,
-} from "./replayer.js";
+} from "./replayer";

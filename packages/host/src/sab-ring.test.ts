@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SabMutationRing } from "./sab-ring.js";
+import { SabMutationRing } from "./sab-ring";
 
 describe("SabMutationRing", () => {
   it("publishes detached frames in order and reports explicit backpressure", () => {

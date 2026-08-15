@@ -9,7 +9,7 @@ import {
   MAX_RESOURCE_BYTES,
   PROTOCOL_ALIGNMENT,
   STREAM_HEADER_BYTES,
-} from "./generated.js";
+} from "./generated";
 
 const MAX_U64 = 0xffff_ffff_ffff_ffffn;
 const utf8Encoder = new TextEncoder();

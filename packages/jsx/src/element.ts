@@ -5,7 +5,7 @@ import {
   type DoperNode,
   type ElementType,
   type Key,
-} from "./types.js";
+} from "./types";
 
 /** Stable element brand shared across package copies and realms. */
 export const DOPER_ELEMENT_TYPE: symbol = Symbol.for("dopejs.doper.element");

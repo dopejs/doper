@@ -5,9 +5,9 @@ import {
   TEXT_STYLE_FAMILY_OFFSET,
   TEXT_STYLE_PAINT_ID_OFFSET,
   ResourceKind,
-} from "./generated.js";
-import type { Mutation } from "./mutation-stream.js";
-import { ResourcePool, encodeSolidPaint, encodeTextStyle } from "./resource-pool.js";
+} from "./generated";
+import type { Mutation } from "./mutation-stream";
+import { ResourcePool, encodeSolidPaint, encodeTextStyle } from "./resource-pool";
 
 describe("ResourcePool", () => {
   it("discards retained entries when a root becomes unusable", () => {

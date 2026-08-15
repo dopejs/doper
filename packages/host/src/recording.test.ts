@@ -8,7 +8,7 @@ import {
   encodeReplayRecording,
   replayRecording,
   type ReplayDataClassification,
-} from "./recording.js";
+} from "./recording";
 
 describe("binary replay recording", () => {
   it("preserves exact transaction bytes and observed order", () => {

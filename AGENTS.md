@@ -73,6 +73,11 @@ Do not introduce imports that invert these boundaries or make the facade a
 mandatory internal dependency. Business code must depend only on the facade's
 public surface.
 
+Use extensionless relative module specifiers in component-library source, for
+example `./signal`, including re-exports and references to JavaScript modules.
+The repository uses bundler module resolution; do not encode emitted filenames
+such as `.js` into source imports.
+
 ## Architectural invariants
 
 Preserve the following invariants in every implementation and review:

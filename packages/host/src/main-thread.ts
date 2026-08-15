@@ -30,7 +30,7 @@ import {
   FRAME_DIAGNOSTICS_VERSION,
   FRAME_DIAGNOSTICS_VERSION_INDEX,
   FRAME_DIAGNOSTICS_WORDS,
-} from "./generated.js";
+} from "./generated";
 
 /** Minimal binding implemented by the generated WASM Core wrapper. */
 export interface CoreClient {

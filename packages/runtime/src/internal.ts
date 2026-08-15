@@ -1,2 +1,2 @@
-export { ComponentScope } from "./hooks.js";
-export { ReactiveObserver } from "./signal.js";
+export { ComponentScope } from "./hooks";
+export { ReactiveObserver } from "./signal";

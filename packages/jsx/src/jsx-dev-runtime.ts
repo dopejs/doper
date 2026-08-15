@@ -1,5 +1,5 @@
-import { createElement } from "./element.js";
-import { Fragment, type DoperElement, type ElementType, type JSX, type Key } from "./types.js";
+import { createElement } from "./element";
+import { Fragment, type DoperElement, type ElementType, type JSX, type Key } from "./types";
 
 /** Development JSX transform with source arguments intentionally excluded from runtime state. */
 export function jsxDEV<Props extends Record<string, unknown>>(

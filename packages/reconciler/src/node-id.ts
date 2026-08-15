@@ -1,4 +1,4 @@
-import { NODE_ID_GENERATION_BITS, NODE_ID_INDEX_BITS, NULL_NODE_ID } from "./generated.js";
+import { NODE_ID_GENERATION_BITS, NODE_ID_INDEX_BITS, NULL_NODE_ID } from "./generated";
 
 const INDEX_RANGE = 2 ** NODE_ID_INDEX_BITS;
 const INDEX_MASK = INDEX_RANGE - 1;

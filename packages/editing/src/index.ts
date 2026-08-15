@@ -7,4 +7,4 @@ export {
   type InputCommand,
   type InputPosition,
   type InputSelection,
-} from "./input-stream.js";
+} from "./input-stream";

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { ComponentScope } from "./hooks.js";
-import { useEffect, useMemo, useSignal, useState } from "./hooks.js";
+import { ComponentScope } from "./hooks";
+import { useEffect, useMemo, useSignal, useState } from "./hooks";
 
 describe("component hooks", () => {
   it("retains state and schedules exactly one owning scope invalidation", () => {
