@@ -101,11 +101,15 @@ WebGPU 后端则由 Rust 内的 `wgpu` 直接消费 DisplayList，不经过 JS�
 | `doper-scroll` | 滚动物理、前缀和树、可见区间求解、预热调度                       |
 | `doper-paint`  | DisplayList 构建、Picture cache、tile 划分与失效                 |
 | `doper-anim`   | 时间轴、插值、animation driver                                   |
-| `doper-abi`    | Mutation Stream / DisplayList 的编解码，版本协商                 |
+| `doper-abi`    | Mutation/Input/Recording/DisplayList 编解码与版本协商            |
 | `doper-core`   | 顶层编排、帧循环、commit 协议、wasm-bindgen 入口                 |
 | `doper-gpu`    | （M3+）wgpu 后端                                                 |
 
 ### TypeScript packages（`packages/`）
+
+仓库内目录使用去掉公共前缀后的职责名，例如 `packages/reconciler`、
+`packages/backend-canvas2d` 和 `packages/facade`。`packages/` 已提供仓库级命名空间，
+目录不重复 `doper-`；下表的完整名称仅用于 npm 发布与包间导入。
 
 | package                          | 职责                                                         |
 | -------------------------------- | ------------------------------------------------------------ |
@@ -285,7 +289,21 @@ devtools 逐帧统计「被标脏但 picture hash 与上一帧一致」的节点
 
 ### 编码
 
-小端序，4 字节对齐。每条指令：`[u8 opcode][u8 flags][u16 _pad][payload...]`
+小端序，4 字节对齐。流以固定 16 字节 header 开始：
+
+`[u32 magic][u16 abi_version][u16 header_bytes][u32 stream_bytes][u32 instruction_count]`
+
+Mutation Stream 的 magic 为 `DOPM`。每条指令为
+`[u8 opcode][u8 flags][u16 reserved][payload...]`；ABI v1 的 flags、reserved 和所有
+对齐填充必须为零。完整字段布局、opcode、prop、失效元数据与大小上限以
+[`../schemas/protocol.v1.json`](../schemas/protocol.v1.json) 为单一来源并生成 Rust/TS
+定义。解码器先验证整批数据和末尾唯一 `Commit`，成功后才能把 mutation 交给 Scene，
+畸形输入不得产生部分状态变更。
+
+编辑意图使用同一封套的独立 Input Stream（magic `DOPI`）。每条输入携带目标
+`node_id` 与 `base_revision: u64`；字符串以 UTF-8 编码，selection offset 保持浏览器
+边界的 UTF-16 语义。整批输入只在末尾唯一 `Commit(frame_seq)` 后生效，任一指令的
+revision、offset、composition 或路由校验失败都回滚整个批次。
 
 | opcode | 指令             | payload                                                     |
 | ------ | ---------------- | ----------------------------------------------------------- |
@@ -308,6 +326,20 @@ devtools 逐帧统计「被标脏但 picture hash 与上一帧一致」的节点
 - `prop` 是编译期生成的常量表，Rust 与 TS 两侧由同一份 schema 文件生成，杜绝漂移。
 - ABI 版本号在 Worker 握手时协商，不匹配直接拒绝启动并降级到兜底路径。
 
+### 录制回放与帧诊断
+
+Mutation/Input 的线上复现使用版本化 Replay Recording（magic `DOPR`）。记录封套沿用
+16 字节 header；每条记录为
+`[kind:u8, flags:u8, reserved:u16, payload_bytes:u32, payload...]`，payload 必须是完整且
+可独立验证的 `DOPM` 或 `DOPI` 流。解码器在返回第一条记录前递归验证全部记录，保证
+headless 回放不会消费半份损坏归档。录制入口必须显式声明数据为 `recordable` 或
+`sensitive`；密码与其他敏感流直接跳过，不能依赖日志侧事后脱敏。
+
+成功帧另有 schema 生成的 versioned `u32` 诊断布局，包含各脏域节点数、Scene 节点数、
+布局 changed/visited 数、DisplayList command 数、是否重建 Picture 与 64 位 picture
+hash。Host 只在存在 `onFrame` 观察者时从 WASM 复制该数组，正常渲染热路径不分配诊断
+对象；版本或 `frame_seq` 不一致视为 Core/Host 契约错误。
+
 ### 为什么不用 SharedArrayBuffer 直接共享 Scene
 
 共享可变状态需要跨线程锁，且 JS 侧无法安全地维护 Rust 的不变式。单向 patch 流是更强的隔离：Core 完全拥有 Scene，Shell 完全拥有组件树，两者不共享任何可变对象。这也让 Core 能在 Shell 卡死时继续独立跑帧。
@@ -317,6 +349,11 @@ devtools 逐帧统计「被标脏但 picture hash 与上一帧一致」的节点
 ## 7. DisplayList（Core → Backend ABI）
 
 同样是扁平二进制。每帧产出，或从 Picture Cache 拼接。
+
+DisplayList 使用同一 16 字节 stream header，magic 为 `DOPD`。ABI v1 要求图形状态
+`Save`/`Restore` 严格平衡，未知 opcode、未定义 flags、非有限浮点、错误长度、非零
+reserved/padding 或越界资源一律在回放前失败关闭。详细决策见
+[`adr/0005-versioned-binary-stream-envelope.md`](adr/0005-versioned-binary-stream-envelope.md)。
 
 | opcode                                            | 指令                              |
 | ------------------------------------------------- | --------------------------------- |
@@ -588,7 +625,8 @@ function Cell({ row, col }: CellProps) {
 
 - **时间可注入**：帧循环不直接读 `performance.now()`，时间源作为依赖注入。测试中可逐帧步进。
 - **随机数可注入**：引擎内部任何随机（如 cache 淘汰的抽样、预热调度的抖动）走可播种的 RNG。
-- **输入可录制回放**：Mutation Stream 与输入事件流可完整录制为二进制，脱离浏览器在 headless 环境逐帧重放。
+- **输入可录制回放**：Mutation Stream 与输入事件流按原始顺序封装为 `DOPR` 二进制，
+  两侧递归验证后可脱离浏览器在 headless 环境逐帧重放；敏感流不得写入归档。
 - **无隐式并发**：Core 内部的并行（若引入）必须是确定性调度或结果不依赖调度顺序。
 
 录制回放同时是**线上问题的排查手段**：用户复现一次异常，导出 mutation + 输入流，开发在本地精确重放；语义断言与像素结果一并保存。

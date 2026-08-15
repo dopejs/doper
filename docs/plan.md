@@ -211,6 +211,18 @@ postMessage 路径，通过 capability override 降级该平台，不回滚已�
 
 ### M1：确定性单线程内核
 
+> 当前状态：**已完成（2026-08-15）**。协议单源、版本化 Mutation/Input/Recording/
+> DisplayList、安全 Rust 解码、
+> Scene/Layout/Edit/Paint、确定性 headless oracle、runtime/JSX/reconciler/facade、主线程
+> host、产品 WASM 与 Canvas2D 纵向切片均已落地；Node 与无头 Chromium 都会执行
+> TSX → Mutation → WASM Core → DisplayList → Canvas 像素闭环。公开 API、ABI golden、
+> TS→Rust round-trip、畸形输入、属性/差分/fuzz、发布包内容、WASM gzip、覆盖率和 PC
+> 快集性能已形成自动门禁。`DOPR` 归档支持 Mutation/Input 原序录制与 headless 回放，
+> 敏感流显式跳过；Host 可导出各脏域、布局工作量、命令数和 picture hash。最终
+> `pnpm m1:check` 全量通过：104 个 TS 测试、Rust workspace/ABI/Scene 行覆盖率分别为
+> 91.75%/95.33%/95.80%，真实 Chromium E2E 通过，产品 WASM gzip 75,626 bytes，
+> 5,000 节点快集 P95/P99 为 1.48/1.54ms。
+
 目标：建立正确、可测试的端到端渲染内核，不提前引入并发复杂度。
 
 主要交付：

@@ -7,8 +7,11 @@ export default tseslint.config(
     ignores: [
       "**/dist/**",
       "**/coverage/**",
+      "benchmarks/api/**",
       "**/node_modules/**",
       "**/public/wasm/**",
+      "**/generated/**",
+      "**/wasm/**",
       "**/target/**",
     ],
   },

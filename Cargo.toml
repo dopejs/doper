@@ -1,6 +1,16 @@
 [workspace]
 resolver = "2"
-members = ["probes/wasm-budget", "probes/wasm-cold-start"]
+members = [
+  "core/doper-abi",
+  "core/doper-core",
+  "core/doper-edit",
+  "core/doper-headless",
+  "core/doper-layout",
+  "core/doper-paint",
+  "core/doper-scene",
+  "probes/wasm-budget",
+  "probes/wasm-cold-start",
+]
 
 [workspace.package]
 edition = "2024"

@@ -1,0 +1,39 @@
+{
+  "name": "@dopejs/doper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
+      "import": "./dist/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./dist/jsx-dev-runtime.d.ts",
+      "import": "./dist/jsx-dev-runtime.js"
+    },
+    "./backend-canvas2d": {
+      "types": "./dist/backend-canvas2d.d.ts",
+      "import": "./dist/backend-canvas2d.js"
+    }
+  },
+  "dependencies": {
+    "@dopejs/doper-backend-canvas2d": "workspace:*",
+    "@dopejs/doper-host": "workspace:*",
+    "@dopejs/doper-jsx": "workspace:*",
+    "@dopejs/doper-reconciler": "workspace:*",
+    "@dopejs/doper-runtime": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  }
+}

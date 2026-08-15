@@ -19,12 +19,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.96.0
-          components: clippy, rustfmt
+          components: clippy, rustfmt, llvm-tools-preview
           targets: wasm32-unknown-unknown
 
       - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.14.0
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.7
 
       - uses: actions/setup-node@v7
         with:
@@ -32,6 +40,7 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm m0:check
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm check
         env:
           VITE_DOPER_BUILD_ID: ${{ github.sha }}

@@ -2,5 +2,7 @@ node_modules/
 dist/
 coverage/
 target/
+packages/host/generated/
+packages/host/wasm/
 apps/platform-probe/public/wasm/
 pnpm-lock.yaml

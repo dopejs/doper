@@ -1,0 +1,148 @@
+import { describe, expect, it } from "vitest";
+
+import { InputOpcode } from "./generated.js";
+import {
+  InputAffinity,
+  InputStreamError,
+  decodeInputBatch,
+  encodeInputBatch,
+  type InputBatch,
+} from "./input-stream.js";
+
+const REVISION = 0x0123_4567_89ab_cdefn;
+
+function sampleBatch(): InputBatch {
+  return {
+    frameSeq: 77,
+    commands: [
+      {
+        type: "replace",
+        nodeId: 1,
+        baseRevision: REVISION,
+        start: 2,
+        end: 4,
+        text: "替换",
+      },
+      { type: "insert", nodeId: 1, baseRevision: REVISION + 1n, text: "👨‍👩‍👧‍👦" },
+      { type: "deleteBackward", nodeId: 1, baseRevision: REVISION + 2n },
+      { type: "deleteForward", nodeId: 1, baseRevision: REVISION + 3n },
+      {
+        type: "setSelection",
+        nodeId: 1,
+        baseRevision: REVISION + 4n,
+        selection: {
+          anchor: { offset: 8, affinity: InputAffinity.Upstream },
+          focus: { offset: 3, affinity: InputAffinity.Downstream },
+        },
+      },
+      { type: "beginComposition", nodeId: 1, baseRevision: REVISION + 5n },
+      { type: "updateComposition", nodeId: 1, baseRevision: REVISION + 6n, text: "に" },
+      {
+        type: "commitComposition",
+        nodeId: 1,
+        baseRevision: REVISION + 7n,
+        text: "日本",
+      },
+      { type: "commitComposition", nodeId: 1, baseRevision: REVISION + 8n },
+      { type: "cancelComposition", nodeId: 1, baseRevision: REVISION + 9n },
+      { type: "undo", nodeId: 1, baseRevision: REVISION + 10n },
+      { type: "redo", nodeId: 1, baseRevision: REVISION + 11n },
+    ],
+  };
+}
+
+describe("Input Stream", () => {
+  it("round trips every command without losing u64 revisions or Unicode", () => {
+    const batch = sampleBatch();
+    const bytes = encodeInputBatch(batch);
+    expect(bytes.byteLength % 4).toBe(0);
+    expect(decodeInputBatch(bytes)).toEqual(batch);
+  });
+
+  it("rejects invalid revisions and range fields before encoding", () => {
+    expect(() =>
+      encodeInputBatch({
+        frameSeq: 1,
+        commands: [{ type: "undo", nodeId: 1, baseRevision: -1n }],
+      }),
+    ).toThrow(/u64 bigint/u);
+    expect(() =>
+      encodeInputBatch({
+        frameSeq: 1,
+        commands: [
+          {
+            type: "replace",
+            nodeId: 1,
+            baseRevision: 0n,
+            start: -1,
+            end: 0,
+            text: "",
+          },
+        ],
+      }),
+    ).toThrow(/u32/u);
+  });
+
+  it("fails closed on unknown affinities, non-zero padding, and invalid UTF-8", () => {
+    const selection = encodeInputBatch({
+      frameSeq: 1,
+      commands: [
+        {
+          type: "setSelection",
+          nodeId: 1,
+          baseRevision: 0n,
+          selection: {
+            anchor: { offset: 0, affinity: InputAffinity.Upstream },
+            focus: { offset: 0, affinity: InputAffinity.Downstream },
+          },
+        },
+      ],
+    });
+    selection[40] = 2;
+    expect(() => decodeInputBatch(selection)).toThrow(/unknown input affinity/u);
+
+    const padded = encodeInputBatch({
+      frameSeq: 1,
+      commands: [{ type: "insert", nodeId: 1, baseRevision: 0n, text: "x" }],
+    });
+    padded[37] = 1;
+    expect(() => decodeInputBatch(padded)).toThrow(/reserved input bytes/u);
+
+    const invalidUtf8 = encodeInputBatch({
+      frameSeq: 1,
+      commands: [{ type: "insert", nodeId: 1, baseRevision: 0n, text: "x" }],
+    });
+    invalidUtf8[36] = 0xff;
+    expect(() => decodeInputBatch(invalidUtf8)).toThrow(/not valid UTF-8/u);
+  });
+
+  it("rejects hostile envelopes and arbitrary bytes without leaking native errors", () => {
+    const canonical = encodeInputBatch({ frameSeq: 1, commands: [] });
+    const unknown = canonical.slice();
+    unknown[16] = 0xfe;
+    expect(() => decodeInputBatch(unknown)).toThrow(InputStreamError);
+
+    const notLast = new Uint8Array(canonical.byteLength + 8);
+    notLast.set(canonical);
+    notLast.set([InputOpcode.Commit, 0, 0, 0, 2, 0, 0, 0], canonical.byteLength);
+    const view = new DataView(notLast.buffer);
+    view.setUint32(8, notLast.byteLength, true);
+    view.setUint32(12, 2, true);
+    expect(() => decodeInputBatch(notLast)).toThrow(/must be the last/u);
+
+    let state = 0x1234_5678;
+    for (let sample = 0; sample < 1_000; sample += 1) {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+      const bytes = new Uint8Array(state % 128);
+      for (let index = 0; index < bytes.length; index += 1) {
+        state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+        bytes[index] = state & 0xff;
+      }
+      try {
+        decodeInputBatch(bytes);
+      } catch (error) {
+        expect(error).toBeInstanceOf(InputStreamError);
+      }
+    }
+  });
+});

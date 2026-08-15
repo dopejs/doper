@@ -1,0 +1,801 @@
+use crate::codec::{
+    Reader, Writer, checked_padding, read_header, read_instruction_header,
+    validate_encode_instruction_count,
+};
+use crate::{
+    AbiError, MAX_MUTATION_BYTES, MAX_MUTATION_INSTRUCTIONS, MAX_RESOURCE_BYTES, MUTATION_MAGIC,
+    MutationOpcode, NodeKind, Prop, PropValueType, ResourceKind, StreamKind,
+};
+
+/// One validated Shell-to-Core mutation.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Mutation {
+    /// Creates a node and optionally inserts it before a sibling.
+    CreateNode {
+        /// Generation-bearing node identifier.
+        node_id: u32,
+        /// Generated host node kind.
+        kind: NodeKind,
+        /// Parent identifier or `NULL_NODE_ID` for the root.
+        parent: u32,
+        /// Sibling identifier or `NULL_NODE_ID` for append.
+        before_sibling: u32,
+    },
+    /// Removes a node and its subtree.
+    RemoveNode {
+        /// Generation-bearing node identifier.
+        node_id: u32,
+    },
+    /// Moves a node under a new parent.
+    Reparent {
+        /// Generation-bearing node identifier.
+        node_id: u32,
+        /// New parent identifier.
+        new_parent: u32,
+        /// Sibling identifier or `NULL_NODE_ID` for append.
+        before_sibling: u32,
+    },
+    /// Sets a scalar property.
+    SetF32 {
+        /// Target node.
+        node_id: u32,
+        /// Generated scalar property.
+        prop: Prop,
+        /// Finite property value.
+        value: f32,
+    },
+    /// Sets a four-component property.
+    SetVec4 {
+        /// Target node.
+        node_id: u32,
+        /// Generated vector property.
+        prop: Prop,
+        /// Four finite values.
+        value: [f32; 4],
+    },
+    /// Sets an interned-resource property.
+    SetRef {
+        /// Target node.
+        node_id: u32,
+        /// Generated reference property.
+        prop: Prop,
+        /// Interned resource identifier.
+        resource_id: u32,
+    },
+    /// Updates node flags atomically.
+    SetFlags {
+        /// Target node.
+        node_id: u32,
+        /// Bits to set.
+        set: u32,
+        /// Bits to clear.
+        clear: u32,
+    },
+    /// Restores one generated property to its absent/default state.
+    ClearProp {
+        /// Target node.
+        node_id: u32,
+        /// Property to clear, regardless of its wire value lane.
+        prop: Prop,
+    },
+    /// Associates text and style resources with a text node.
+    SetTextRun {
+        /// Target node.
+        node_id: u32,
+        /// UTF-8 string resource identifier.
+        string_id: u32,
+        /// Text style resource identifier.
+        style_id: u32,
+    },
+    /// Defines an immutable interned resource.
+    DefineResource {
+        /// Resource identifier.
+        resource_id: u32,
+        /// Generated resource kind.
+        kind: ResourceKind,
+        /// Canonical resource bytes.
+        bytes: Vec<u8>,
+    },
+    /// Releases an immutable resource after all references are removed in the transaction.
+    ReleaseResource {
+        /// Resource identifier.
+        resource_id: u32,
+    },
+    /// Requests a Core-owned scroll position change.
+    ScrollTo {
+        /// Target scroll node.
+        node_id: u32,
+        /// Finite horizontal position.
+        x: f32,
+        /// Finite vertical position.
+        y: f32,
+        /// Generated behavior identifier reserved by the scrolling subsystem.
+        behavior: u16,
+    },
+}
+
+/// A mutation plus transport flags retained for forward-compatible semantics.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MutationInstruction {
+    /// Instruction flags. Version 1 requires this value to be zero.
+    pub flags: u8,
+    /// Validated mutation.
+    pub mutation: Mutation,
+}
+
+/// A complete transaction ending in one Commit instruction.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MutationBatch {
+    /// Monotonic Shell frame sequence.
+    pub frame_seq: u32,
+    /// Mutations to apply atomically.
+    pub instructions: Vec<MutationInstruction>,
+}
+
+impl MutationBatch {
+    /// Decodes and validates a complete transaction without mutating caller state.
+    pub fn decode(bytes: &[u8]) -> Result<Self, AbiError> {
+        let mut reader = Reader::new(bytes);
+        let declared_count = read_header(&mut reader, MUTATION_MAGIC, MAX_MUTATION_BYTES)?;
+        if declared_count > MAX_MUTATION_INSTRUCTIONS {
+            return Err(AbiError::InstructionCountTooLarge {
+                declared: declared_count,
+                maximum: MAX_MUTATION_INSTRUCTIONS,
+            });
+        }
+        let maximum_count =
+            u32::try_from(reader.remaining() / 4).map_err(|_| AbiError::ArithmeticOverflow)?;
+        if declared_count > maximum_count {
+            return Err(AbiError::InstructionCountTooLarge {
+                declared: declared_count,
+                maximum: maximum_count,
+            });
+        }
+        let capacity = usize::try_from(declared_count).map_err(|_| AbiError::ArithmeticOverflow)?;
+        let mut instructions = Vec::with_capacity(capacity.saturating_sub(1));
+        let mut actual_count = 0_u32;
+        let mut frame_seq = None;
+
+        while reader.remaining() != 0 {
+            let (offset, raw_opcode, flags) = read_instruction_header(&mut reader)?;
+            actual_count = actual_count
+                .checked_add(1)
+                .ok_or(AbiError::ArithmeticOverflow)?;
+            if frame_seq.is_some() {
+                return Err(AbiError::CommitNotLast { offset });
+            }
+            let opcode = MutationOpcode::from_u8(raw_opcode).ok_or(AbiError::UnknownOpcode {
+                stream: StreamKind::Mutation,
+                opcode: raw_opcode,
+                offset,
+            })?;
+
+            if opcode == MutationOpcode::Commit {
+                frame_seq = Some(reader.read_u32()?);
+                validate_instruction_size(opcode, offset, reader.offset())?;
+                continue;
+            }
+
+            let mutation = decode_mutation(opcode, &mut reader)?;
+            validate_instruction_size(opcode, offset, reader.offset())?;
+            instructions.push(MutationInstruction { flags, mutation });
+        }
+
+        if actual_count != declared_count {
+            return Err(AbiError::InstructionCountMismatch {
+                declared: declared_count,
+                actual: actual_count,
+            });
+        }
+        Ok(Self {
+            frame_seq: frame_seq.ok_or(AbiError::MissingCommit)?,
+            instructions,
+        })
+    }
+
+    /// Encodes a canonical, little-endian transaction.
+    pub fn encode(&self) -> Result<Vec<u8>, AbiError> {
+        validate_encode_instruction_count(self.instructions.len(), 1, MAX_MUTATION_INSTRUCTIONS)?;
+        let mut writer = Writer::new(MUTATION_MAGIC);
+        for instruction in &self.instructions {
+            encode_mutation(&mut writer, instruction)?;
+        }
+        let commit_offset = writer.offset();
+        writer.instruction(MutationOpcode::Commit as u8, 0);
+        writer.u32(self.frame_seq);
+        validate_instruction_size(MutationOpcode::Commit, commit_offset, writer.offset())?;
+        writer.finish(MAX_MUTATION_BYTES)
+    }
+}
+
+fn decode_mutation(opcode: MutationOpcode, reader: &mut Reader<'_>) -> Result<Mutation, AbiError> {
+    Ok(match opcode {
+        MutationOpcode::CreateNode => {
+            let node_id = reader.read_u32()?;
+            let raw_kind = reader.read_u16()?;
+            reader.read_zeroes(2)?;
+            let kind = NodeKind::from_u16(raw_kind).ok_or(AbiError::UnknownIdentifier {
+                category: "node kind",
+                value: u32::from(raw_kind),
+            })?;
+            Mutation::CreateNode {
+                node_id,
+                kind,
+                parent: reader.read_u32()?,
+                before_sibling: reader.read_u32()?,
+            }
+        }
+        MutationOpcode::RemoveNode => Mutation::RemoveNode {
+            node_id: reader.read_u32()?,
+        },
+        MutationOpcode::Reparent => Mutation::Reparent {
+            node_id: reader.read_u32()?,
+            new_parent: reader.read_u32()?,
+            before_sibling: reader.read_u32()?,
+        },
+        MutationOpcode::SetF32 => {
+            let node_id = reader.read_u32()?;
+            let prop = read_prop(reader, PropValueType::F32, "SetF32")?;
+            Mutation::SetF32 {
+                node_id,
+                prop,
+                value: reader.read_f32()?,
+            }
+        }
+        MutationOpcode::SetVec4 => {
+            let node_id = reader.read_u32()?;
+            let prop = read_prop(reader, PropValueType::Vec4, "SetVec4")?;
+            Mutation::SetVec4 {
+                node_id,
+                prop,
+                value: [
+                    reader.read_f32()?,
+                    reader.read_f32()?,
+                    reader.read_f32()?,
+                    reader.read_f32()?,
+                ],
+            }
+        }
+        MutationOpcode::SetRef => {
+            let node_id = reader.read_u32()?;
+            let prop = read_prop(reader, PropValueType::Ref, "SetRef")?;
+            Mutation::SetRef {
+                node_id,
+                prop,
+                resource_id: reader.read_u32()?,
+            }
+        }
+        MutationOpcode::SetFlags => {
+            let node_id = reader.read_u32()?;
+            let set = reader.read_u32()?;
+            let clear = reader.read_u32()?;
+            if set & clear != 0 {
+                return Err(AbiError::InvalidValue(
+                    "SetFlags set and clear masks overlap",
+                ));
+            }
+            Mutation::SetFlags {
+                node_id,
+                set,
+                clear,
+            }
+        }
+        MutationOpcode::ClearProp => Mutation::ClearProp {
+            node_id: reader.read_u32()?,
+            prop: read_any_prop(reader)?,
+        },
+        MutationOpcode::SetTextRun => Mutation::SetTextRun {
+            node_id: reader.read_u32()?,
+            string_id: reader.read_u32()?,
+            style_id: reader.read_u32()?,
+        },
+        MutationOpcode::DefineResource => {
+            let resource_id = reader.read_u32()?;
+            let raw_kind = reader.read_u16()?;
+            reader.read_zeroes(2)?;
+            let kind = ResourceKind::from_u16(raw_kind).ok_or(AbiError::UnknownIdentifier {
+                category: "resource kind",
+                value: u32::from(raw_kind),
+            })?;
+            let length =
+                usize::try_from(reader.read_u32()?).map_err(|_| AbiError::ArithmeticOverflow)?;
+            if length > MAX_RESOURCE_BYTES {
+                return Err(AbiError::ResourceTooLarge {
+                    actual: length,
+                    maximum: MAX_RESOURCE_BYTES,
+                });
+            }
+            let bytes = reader.read_bytes(length)?.to_vec();
+            reader.read_zeroes(checked_padding(length)?)?;
+            Mutation::DefineResource {
+                resource_id,
+                kind,
+                bytes,
+            }
+        }
+        MutationOpcode::ReleaseResource => Mutation::ReleaseResource {
+            resource_id: reader.read_u32()?,
+        },
+        MutationOpcode::ScrollTo => {
+            let result = Mutation::ScrollTo {
+                node_id: reader.read_u32()?,
+                x: reader.read_f32()?,
+                y: reader.read_f32()?,
+                behavior: reader.read_u16()?,
+            };
+            reader.read_zeroes(2)?;
+            result
+        }
+        MutationOpcode::Commit => return Err(AbiError::InvalidValue("nested commit")),
+    })
+}
+
+fn read_any_prop(reader: &mut Reader<'_>) -> Result<Prop, AbiError> {
+    let raw_prop = reader.read_u16()?;
+    reader.read_zeroes(2)?;
+    Prop::from_u16(raw_prop).ok_or(AbiError::UnknownIdentifier {
+        category: "prop",
+        value: u32::from(raw_prop),
+    })
+}
+
+fn read_prop(
+    reader: &mut Reader<'_>,
+    expected: PropValueType,
+    actual: &'static str,
+) -> Result<Prop, AbiError> {
+    let raw_prop = reader.read_u16()?;
+    reader.read_zeroes(2)?;
+    let prop = Prop::from_u16(raw_prop).ok_or(AbiError::UnknownIdentifier {
+        category: "prop",
+        value: u32::from(raw_prop),
+    })?;
+    if prop.value_type() != expected {
+        return Err(AbiError::WrongPropertyEncoding {
+            prop: raw_prop,
+            expected: match prop.value_type() {
+                PropValueType::F32 => "SetF32",
+                PropValueType::Vec4 => "SetVec4",
+                PropValueType::Ref => "SetRef",
+            },
+            actual,
+        });
+    }
+    Ok(prop)
+}
+
+fn encode_mutation(writer: &mut Writer, instruction: &MutationInstruction) -> Result<(), AbiError> {
+    let offset = writer.offset();
+    let flags = instruction.flags;
+    if flags != 0 {
+        return Err(AbiError::UnsupportedFlags { offset: 0, flags });
+    }
+    match &instruction.mutation {
+        Mutation::CreateNode {
+            node_id,
+            kind,
+            parent,
+            before_sibling,
+        } => {
+            writer.instruction(MutationOpcode::CreateNode as u8, flags);
+            writer.u32(*node_id);
+            writer.u16(*kind as u16);
+            writer.u16(0);
+            writer.u32(*parent);
+            writer.u32(*before_sibling);
+        }
+        Mutation::RemoveNode { node_id } => {
+            writer.instruction(MutationOpcode::RemoveNode as u8, flags);
+            writer.u32(*node_id);
+        }
+        Mutation::Reparent {
+            node_id,
+            new_parent,
+            before_sibling,
+        } => {
+            writer.instruction(MutationOpcode::Reparent as u8, flags);
+            writer.u32(*node_id);
+            writer.u32(*new_parent);
+            writer.u32(*before_sibling);
+        }
+        Mutation::SetF32 {
+            node_id,
+            prop,
+            value,
+        } => {
+            require_prop_type(*prop, PropValueType::F32, "SetF32")?;
+            writer.instruction(MutationOpcode::SetF32 as u8, flags);
+            writer.u32(*node_id);
+            writer.u16(*prop as u16);
+            writer.u16(0);
+            writer.f32(*value)?;
+        }
+        Mutation::SetVec4 {
+            node_id,
+            prop,
+            value,
+        } => {
+            require_prop_type(*prop, PropValueType::Vec4, "SetVec4")?;
+            writer.instruction(MutationOpcode::SetVec4 as u8, flags);
+            writer.u32(*node_id);
+            writer.u16(*prop as u16);
+            writer.u16(0);
+            for component in value {
+                writer.f32(*component)?;
+            }
+        }
+        Mutation::SetRef {
+            node_id,
+            prop,
+            resource_id,
+        } => {
+            require_prop_type(*prop, PropValueType::Ref, "SetRef")?;
+            writer.instruction(MutationOpcode::SetRef as u8, flags);
+            writer.u32(*node_id);
+            writer.u16(*prop as u16);
+            writer.u16(0);
+            writer.u32(*resource_id);
+        }
+        Mutation::SetFlags {
+            node_id,
+            set,
+            clear,
+        } => {
+            if set & clear != 0 {
+                return Err(AbiError::InvalidValue(
+                    "SetFlags set and clear masks overlap",
+                ));
+            }
+            writer.instruction(MutationOpcode::SetFlags as u8, flags);
+            writer.u32(*node_id);
+            writer.u32(*set);
+            writer.u32(*clear);
+        }
+        Mutation::ClearProp { node_id, prop } => {
+            writer.instruction(MutationOpcode::ClearProp as u8, flags);
+            writer.u32(*node_id);
+            writer.u16(*prop as u16);
+            writer.u16(0);
+        }
+        Mutation::SetTextRun {
+            node_id,
+            string_id,
+            style_id,
+        } => {
+            writer.instruction(MutationOpcode::SetTextRun as u8, flags);
+            writer.u32(*node_id);
+            writer.u32(*string_id);
+            writer.u32(*style_id);
+        }
+        Mutation::DefineResource {
+            resource_id,
+            kind,
+            bytes,
+        } => {
+            if bytes.len() > MAX_RESOURCE_BYTES {
+                return Err(AbiError::ResourceTooLarge {
+                    actual: bytes.len(),
+                    maximum: MAX_RESOURCE_BYTES,
+                });
+            }
+            let length = u32::try_from(bytes.len()).map_err(|_| AbiError::ArithmeticOverflow)?;
+            writer.instruction(MutationOpcode::DefineResource as u8, flags);
+            writer.u32(*resource_id);
+            writer.u16(*kind as u16);
+            writer.u16(0);
+            writer.u32(length);
+            writer.bytes(bytes);
+            writer.pad();
+        }
+        Mutation::ReleaseResource { resource_id } => {
+            writer.instruction(MutationOpcode::ReleaseResource as u8, flags);
+            writer.u32(*resource_id);
+        }
+        Mutation::ScrollTo {
+            node_id,
+            x,
+            y,
+            behavior,
+        } => {
+            writer.instruction(MutationOpcode::ScrollTo as u8, flags);
+            writer.u32(*node_id);
+            writer.f32(*x)?;
+            writer.f32(*y)?;
+            writer.u16(*behavior);
+            writer.u16(0);
+        }
+    }
+    validate_instruction_size(
+        mutation_opcode(&instruction.mutation),
+        offset,
+        writer.offset(),
+    )?;
+    Ok(())
+}
+
+fn mutation_opcode(mutation: &Mutation) -> MutationOpcode {
+    match mutation {
+        Mutation::CreateNode { .. } => MutationOpcode::CreateNode,
+        Mutation::RemoveNode { .. } => MutationOpcode::RemoveNode,
+        Mutation::Reparent { .. } => MutationOpcode::Reparent,
+        Mutation::SetF32 { .. } => MutationOpcode::SetF32,
+        Mutation::SetVec4 { .. } => MutationOpcode::SetVec4,
+        Mutation::SetRef { .. } => MutationOpcode::SetRef,
+        Mutation::SetFlags { .. } => MutationOpcode::SetFlags,
+        Mutation::ClearProp { .. } => MutationOpcode::ClearProp,
+        Mutation::SetTextRun { .. } => MutationOpcode::SetTextRun,
+        Mutation::DefineResource { .. } => MutationOpcode::DefineResource,
+        Mutation::ReleaseResource { .. } => MutationOpcode::ReleaseResource,
+        Mutation::ScrollTo { .. } => MutationOpcode::ScrollTo,
+    }
+}
+
+fn validate_instruction_size(
+    opcode: MutationOpcode,
+    offset: usize,
+    end: usize,
+) -> Result<(), AbiError> {
+    let actual = end
+        .checked_sub(offset)
+        .ok_or(AbiError::ArithmeticOverflow)?;
+    if let Some(expected) = opcode.fixed_bytes()
+        && actual != expected
+    {
+        return Err(AbiError::InstructionLengthMismatch {
+            opcode: opcode as u8,
+            offset,
+            expected,
+            actual,
+        });
+    }
+    if actual < opcode.minimum_bytes() {
+        return Err(AbiError::InstructionLengthMismatch {
+            opcode: opcode as u8,
+            offset,
+            expected: opcode.minimum_bytes(),
+            actual,
+        });
+    }
+    Ok(())
+}
+
+fn require_prop_type(
+    prop: Prop,
+    expected: PropValueType,
+    actual: &'static str,
+) -> Result<(), AbiError> {
+    if prop.value_type() == expected {
+        Ok(())
+    } else {
+        Err(AbiError::WrongPropertyEncoding {
+            prop: prop as u16,
+            expected: match prop.value_type() {
+                PropValueType::F32 => "SetF32",
+                PropValueType::Vec4 => "SetVec4",
+                PropValueType::Ref => "SetRef",
+            },
+            actual,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+    use crate::{ABI_VERSION, NULL_NODE_ID};
+
+    fn sample_batch() -> MutationBatch {
+        MutationBatch {
+            frame_seq: 42,
+            instructions: vec![
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::CreateNode {
+                        node_id: 7,
+                        kind: NodeKind::Text,
+                        parent: NULL_NODE_ID,
+                        before_sibling: NULL_NODE_ID,
+                    },
+                },
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::SetF32 {
+                        node_id: 7,
+                        prop: Prop::Width,
+                        value: 320.5,
+                    },
+                },
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::DefineResource {
+                        resource_id: 9,
+                        kind: ResourceKind::Utf8String,
+                        bytes: b"hello".to_vec(),
+                    },
+                },
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::SetTextRun {
+                        node_id: 7,
+                        string_id: 9,
+                        style_id: 10,
+                    },
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn canonical_round_trip() {
+        let batch = sample_batch();
+        let bytes = batch.encode().expect("sample encodes");
+        assert_eq!(MutationBatch::decode(&bytes), Ok(batch));
+    }
+
+    #[test]
+    fn every_mutation_opcode_round_trips_in_one_transaction() {
+        let mutations = vec![
+            Mutation::CreateNode {
+                node_id: 1,
+                kind: NodeKind::Scroll,
+                parent: NULL_NODE_ID,
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::RemoveNode { node_id: 2 },
+            Mutation::Reparent {
+                node_id: 3,
+                new_parent: 4,
+                before_sibling: 5,
+            },
+            Mutation::SetF32 {
+                node_id: 6,
+                prop: Prop::Opacity,
+                value: 0.5,
+            },
+            Mutation::SetVec4 {
+                node_id: 7,
+                prop: Prop::Padding,
+                value: [1.0, 2.0, 3.0, 4.0],
+            },
+            Mutation::SetRef {
+                node_id: 8,
+                prop: Prop::Transform,
+                resource_id: 9,
+            },
+            Mutation::SetFlags {
+                node_id: 10,
+                set: 0b0011,
+                clear: 0b1100,
+            },
+            Mutation::ClearProp {
+                node_id: 11,
+                prop: Prop::SemanticLabel,
+            },
+            Mutation::SetTextRun {
+                node_id: 12,
+                string_id: 13,
+                style_id: 14,
+            },
+            Mutation::DefineResource {
+                resource_id: 15,
+                kind: ResourceKind::GlyphSpan,
+                bytes: vec![1, 2, 3],
+            },
+            Mutation::ReleaseResource { resource_id: 16 },
+            Mutation::ScrollTo {
+                node_id: 17,
+                x: 18.0,
+                y: 19.0,
+                behavior: 20,
+            },
+        ];
+        let batch = MutationBatch {
+            frame_seq: 21,
+            instructions: mutations
+                .into_iter()
+                .map(|mutation| MutationInstruction { flags: 0, mutation })
+                .collect(),
+        };
+        assert_eq!(
+            MutationBatch::decode(&batch.encode().expect("encode")),
+            Ok(batch)
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_version_and_trailing_command() {
+        let mut version = sample_batch().encode().expect("sample encodes");
+        version[4..6].copy_from_slice(&(ABI_VERSION + 1).to_le_bytes());
+        assert!(matches!(
+            MutationBatch::decode(&version),
+            Err(AbiError::UnsupportedVersion { .. })
+        ));
+
+        let mut trailing = sample_batch().encode().expect("sample encodes");
+        trailing.extend_from_slice(&[MutationOpcode::RemoveNode as u8, 0, 0, 0, 7, 0, 0, 0]);
+        let length = u32::try_from(trailing.len()).expect("test length");
+        trailing[8..12].copy_from_slice(&length.to_le_bytes());
+        trailing[12..16].copy_from_slice(&6_u32.to_le_bytes());
+        assert!(matches!(
+            MutationBatch::decode(&trailing),
+            Err(AbiError::CommitNotLast { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_wrong_prop_encoding_without_partial_result() {
+        let mut bytes = sample_batch().encode().expect("sample encodes");
+        let width_prop_offset = 16 + 20 + 8;
+        bytes[width_prop_offset..width_prop_offset + 2]
+            .copy_from_slice(&(Prop::Padding as u16).to_le_bytes());
+        assert!(matches!(
+            MutationBatch::decode(&bytes),
+            Err(AbiError::WrongPropertyEncoding { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_hostile_counts_and_undefined_flags_before_allocating_commands() {
+        let mut count = sample_batch().encode().expect("sample encodes");
+        count[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(matches!(
+            MutationBatch::decode(&count),
+            Err(AbiError::InstructionCountTooLarge { .. })
+        ));
+
+        let mut flags = sample_batch().encode().expect("sample encodes");
+        flags[17] = 1;
+        assert!(matches!(
+            MutationBatch::decode(&flags),
+            Err(AbiError::UnsupportedFlags { .. })
+        ));
+    }
+
+    #[test]
+    fn clear_and_release_round_trip() {
+        let batch = MutationBatch {
+            frame_seq: 7,
+            instructions: vec![
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::ClearProp {
+                        node_id: 5,
+                        prop: Prop::BackgroundColor,
+                    },
+                },
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::ReleaseResource { resource_id: 9 },
+                },
+            ],
+        };
+        let encoded = batch.encode().expect("batch encodes");
+        assert_eq!(MutationBatch::decode(&encoded), Ok(batch));
+    }
+
+    proptest! {
+        #[test]
+        fn arbitrary_bytes_never_panic(bytes in prop::collection::vec(any::<u8>(), 0..4096)) {
+            let _ = MutationBatch::decode(&bytes);
+        }
+
+        #[test]
+        fn resource_round_trips(bytes in prop::collection::vec(any::<u8>(), 0..2048), frame_seq in any::<u32>()) {
+            let batch = MutationBatch {
+                frame_seq,
+                instructions: vec![MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::DefineResource {
+                        resource_id: 1,
+                        kind: ResourceKind::Utf8String,
+                        bytes,
+                    },
+                }],
+            };
+            let encoded = batch.encode().expect("valid batch encodes");
+            prop_assert_eq!(MutationBatch::decode(&encoded), Ok(batch));
+        }
+    }
+}

@@ -1,0 +1,42 @@
+[package]
+name = "doper-abi-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+doper-abi = { path = ".." }
+
+[[bin]]
+name = "mutation_decode"
+path = "fuzz_targets/mutation_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "display_list_decode"
+path = "fuzz_targets/display_list_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "input_decode"
+path = "fuzz_targets/input_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "recording_decode"
+path = "fuzz_targets/recording_decode.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
