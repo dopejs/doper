@@ -1,5 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
+use swash::shape::ShapeContext;
+
 use crate::{FontFace, TextError, TextLayout, TextOptions, layout::layout_text};
 
 /// Default retained Text Shape Cache budget (8 MiB).
@@ -41,6 +43,7 @@ struct CacheEntry {
 pub struct TextEngine {
     budget_bytes: usize,
     clock: u64,
+    shape_context: ShapeContext,
     entries: HashMap<CacheKey, CacheEntry>,
     metrics: TextCacheMetrics,
 }
@@ -58,6 +61,7 @@ impl TextEngine {
         Self {
             budget_bytes,
             clock: 0,
+            shape_context: ShapeContext::new(),
             entries: HashMap::new(),
             metrics: TextCacheMetrics::default(),
         }
@@ -91,7 +95,7 @@ impl TextEngine {
             return Ok(Arc::clone(&entry.layout));
         }
         self.metrics.misses += 1;
-        let layout = Arc::new(layout_text(font, text, options)?);
+        let layout = Arc::new(layout_text(&mut self.shape_context, font, text, options)?);
         let bytes = key.text.len().saturating_add(layout.estimated_bytes());
         if bytes <= self.budget_bytes {
             self.evict_until_fits(bytes);

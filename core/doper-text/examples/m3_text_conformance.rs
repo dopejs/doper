@@ -1,6 +1,6 @@
 use std::{env, fs, sync::Arc};
 
-use doper_text::{FontFace, TextEngine, TextOptions};
+use doper_text::{FontFace, GlyphAtlas, GlyphContent, TextEngine, TextOptions};
 
 fn main() {
     let path = env::args()
@@ -18,6 +18,19 @@ fn main() {
         .layout(&font, "\u{ea60}", options)
         .expect("shape a font-owned glyph");
     assert_eq!(supported.missing_glyphs, 0, "fixture glyph must exist");
+    let mut atlas = GlyphAtlas::new(128 * 1024);
+    let bitmap = atlas
+        .rasterize(&font, options.font_size, 2.0, supported.glyphs[0].id)
+        .expect("raster a shaped glyph");
+    assert!(bitmap.width > 0 && bitmap.height > 0);
+    assert_eq!(bitmap.content, GlyphContent::Mask);
+    assert_eq!(
+        bitmap.data.len(),
+        usize::try_from(bitmap.width)
+            .expect("width fits usize")
+            .checked_mul(usize::try_from(bitmap.height).expect("height fits usize"))
+            .expect("bitmap area")
+    );
     let text = "\u{ea60}\u{ea61}\u{ea62}\u{ea63}\nA e\u{301} 👩‍💻 中文";
     let first = engine.layout(&font, text, options).expect("shape and wrap");
     assert!(first.lines.len() >= 2, "newline must create multiple lines");
@@ -53,4 +66,5 @@ fn main() {
         first.missing_glyphs,
         metrics.retained_bytes
     );
+    assert!(atlas.metrics().retained_bytes <= 128 * 1024);
 }

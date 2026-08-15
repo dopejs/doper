@@ -3,6 +3,7 @@
 
 //! Deterministic web-font shaping, wrapping and editing-offset geometry.
 
+mod atlas;
 mod cache;
 mod error;
 mod font;
@@ -46,3 +47,4 @@ fn conformance_font() -> std::sync::Arc<[u8]> {
         .expect("Playwright trace-viewer SFNT fixture");
     Arc::from(fs::read(font.path()).expect("read SFNT fixture"))
 }
+pub use atlas::{DEFAULT_ATLAS_BYTES, GlyphAtlas, GlyphAtlasMetrics, GlyphBitmap, GlyphContent};

@@ -1,6 +1,9 @@
 use std::{collections::BTreeSet, ops::Range};
 
-use rustybuzz::{BufferClusterLevel, Direction, UnicodeBuffer};
+use swash::{
+    shape::ShapeContext,
+    text::{Codepoint, Script},
+};
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -161,6 +164,7 @@ impl TextLayout {
 }
 
 pub(crate) fn layout_text(
+    context: &mut ShapeContext,
     font: &FontFace,
     text: &str,
     options: TextOptions,
@@ -173,10 +177,8 @@ pub(crate) fn layout_text(
         });
     }
 
-    let face = font.rustybuzz_face()?;
-    let scale = options.font_size / f32::from(font.units_per_em());
     let graphemes = grapheme_table(text)?;
-    let ranges = line_ranges(&face, text, options.max_width, scale)?;
+    let ranges = line_ranges(context, font, text, options.max_width, options.font_size)?;
     let mut layout = TextLayout {
         text: text.to_owned(),
         graphemes,
@@ -190,10 +192,10 @@ pub(crate) fn layout_text(
     };
 
     for (line_index, bytes) in ranges.into_iter().enumerate() {
-        append_line(&face, &mut layout, line_index, bytes, options, scale)?;
+        append_line(context, font, &mut layout, line_index, bytes, options)?;
     }
     if layout.lines.is_empty() {
-        append_line(&face, &mut layout, 0, 0..0, options, scale)?;
+        append_line(context, font, &mut layout, 0, 0..0, options)?;
     }
     layout.height = usize_to_f32(layout.lines.len()) * options.line_height;
     build_carets(&mut layout, options.line_height)?;
@@ -201,10 +203,11 @@ pub(crate) fn layout_text(
 }
 
 fn line_ranges(
-    face: &rustybuzz::Face<'_>,
+    context: &mut ShapeContext,
+    font: &FontFace,
     text: &str,
     max_width: f32,
-    scale: f32,
+    font_size: f32,
 ) -> Result<Vec<Range<usize>>, TextError> {
     let mut result = Vec::new();
     let mut paragraph_start = 0_usize;
@@ -214,11 +217,12 @@ fn line_ranges(
             .checked_add(content_len)
             .ok_or(TextError::ArithmeticOverflow)?;
         wrap_paragraph(
-            face,
+            context,
+            font,
             text,
             paragraph_start..paragraph_end,
             max_width,
-            scale,
+            font_size,
             &mut result,
         )?;
         paragraph_start = paragraph_start
@@ -232,11 +236,12 @@ fn line_ranges(
         result.push(0..0);
     } else if paragraph_start < text.len() {
         wrap_paragraph(
-            face,
+            context,
+            font,
             text,
             paragraph_start..text.len(),
             max_width,
-            scale,
+            font_size,
             &mut result,
         )?;
     }
@@ -244,11 +249,12 @@ fn line_ranges(
 }
 
 fn wrap_paragraph(
-    face: &rustybuzz::Face<'_>,
+    context: &mut ShapeContext,
+    font: &FontFace,
     text: &str,
     paragraph: Range<usize>,
     max_width: f32,
-    scale: f32,
+    font_size: f32,
     output: &mut Vec<Range<usize>>,
 ) -> Result<(), TextError> {
     let value = &text[paragraph.clone()];
@@ -260,8 +266,8 @@ fn wrap_paragraph(
         output.push(paragraph);
         return Ok(());
     }
-    let shaped = shape(face, value);
-    let mut clusters = cluster_advances(value, &shaped, scale)?;
+    let shaped = shape(context, font, value, font_size)?;
+    let mut clusters = cluster_advances(&shaped);
     let allowed = linebreaks(value)
         .filter_map(|(offset, opportunity)| {
             matches!(
@@ -318,100 +324,67 @@ struct ClusterAdvance {
     break_allowed: bool,
 }
 
-fn cluster_advances(
-    text: &str,
-    shaped: &rustybuzz::GlyphBuffer,
-    scale: f32,
-) -> Result<Vec<ClusterAdvance>, TextError> {
-    let mut starts = shaped
-        .glyph_infos()
+fn cluster_advances(shaped: &[RawCluster]) -> Vec<ClusterAdvance> {
+    shaped
         .iter()
-        .map(|info| usize::try_from(info.cluster).map_err(|_| TextError::ArithmeticOverflow))
-        .collect::<Result<Vec<_>, _>>()?;
-    starts.push(text.len());
-    starts.sort_unstable();
-    starts.dedup();
-    let mut result = Vec::with_capacity(starts.len().saturating_sub(1));
-    for pair in starts.windows(2) {
-        let start = pair[0];
-        let end = pair[1];
-        if start > text.len() || end > text.len() || !text.is_char_boundary(start) {
-            return Err(TextError::ArithmeticOverflow);
-        }
-        let advance = shaped
-            .glyph_infos()
-            .iter()
-            .zip(shaped.glyph_positions())
-            .filter(|(info, _)| usize::try_from(info.cluster).ok() == Some(start))
-            .map(|(_, position)| design_to_px(position.x_advance, scale))
-            .sum();
-        result.push(ClusterAdvance {
-            start,
-            end,
-            advance,
+        .map(|cluster| ClusterAdvance {
+            start: cluster.bytes.start,
+            end: cluster.bytes.end,
+            advance: cluster.glyphs.iter().map(|glyph| glyph.advance).sum(),
             break_allowed: false,
-        });
-    }
-    Ok(result)
+        })
+        .collect()
 }
 
 fn append_line(
-    face: &rustybuzz::Face<'_>,
+    context: &mut ShapeContext,
+    font: &FontFace,
     layout: &mut TextLayout,
     line_index: usize,
     bytes: Range<usize>,
     options: TextOptions,
-    scale: f32,
 ) -> Result<(), TextError> {
-    let shaped = shape(face, &layout.text[bytes.clone()]);
+    let shaped = shape(
+        context,
+        font,
+        &layout.text[bytes.clone()],
+        options.font_size,
+    )?;
     let glyph_start = layout.glyphs.len();
     let cluster_start = layout.clusters.len();
     let baseline = options.font_size + usize_to_f32(line_index) * options.line_height;
     let mut x = 0.0_f32;
-    let mut current_cluster = None;
-    for (info, position) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
-        let local_cluster =
-            usize::try_from(info.cluster).map_err(|_| TextError::ArithmeticOverflow)?;
-        let global_cluster = bytes
+    for raw_cluster in shaped {
+        let global_start = bytes
             .start
-            .checked_add(local_cluster)
+            .checked_add(raw_cluster.bytes.start)
             .ok_or(TextError::ArithmeticOverflow)?;
-        if current_cluster != Some(global_cluster) {
-            let next_index = layout.clusters.len();
-            if let Some(previous) = layout.clusters.last_mut() {
-                previous.bytes.end = global_cluster;
-                previous.utf16.end = utf16_offset(&layout.text, global_cluster)?;
-                previous.glyphs.end = layout.glyphs.len();
-            }
-            layout.clusters.push(ShapeCluster {
-                bytes: global_cluster..bytes.end,
-                utf16: utf16_offset(&layout.text, global_cluster)?
-                    ..utf16_offset(&layout.text, bytes.end)?,
-                glyphs: layout.glyphs.len()..layout.glyphs.len(),
+        let global_end = bytes
+            .start
+            .checked_add(raw_cluster.bytes.end)
+            .ok_or(TextError::ArithmeticOverflow)?;
+        let cluster_index = layout.clusters.len();
+        let cluster_glyph_start = layout.glyphs.len();
+        for glyph in raw_cluster.glyphs {
+            layout.glyphs.push(PositionedGlyph {
+                id: glyph.id,
+                cluster: cluster_index,
+                line: line_index,
+                x: x + glyph.x,
+                y: baseline - glyph.y,
+                advance: glyph.advance,
             });
-            current_cluster = Some(global_cluster);
-            debug_assert_eq!(next_index, layout.clusters.len() - 1);
+            if glyph.id == 0 {
+                layout.missing_glyphs += 1;
+            }
+            x += glyph.advance;
         }
-        let advance = design_to_px(position.x_advance, scale);
-        layout.glyphs.push(PositionedGlyph {
-            id: u16::try_from(info.glyph_id).map_err(|_| TextError::ArithmeticOverflow)?,
-            cluster: layout.clusters.len() - 1,
-            line: line_index,
-            x: x + design_to_px(position.x_offset, scale),
-            y: baseline - design_to_px(position.y_offset, scale),
-            advance,
+        layout.clusters.push(ShapeCluster {
+            bytes: global_start..global_end,
+            utf16: utf16_offset(&layout.text, global_start)?
+                ..utf16_offset(&layout.text, global_end)?,
+            glyphs: cluster_glyph_start..layout.glyphs.len(),
         });
-        if info.glyph_id == 0 {
-            layout.missing_glyphs += 1;
-        }
-        x += advance;
-    }
-    if cluster_start < layout.clusters.len()
-        && let Some(last) = layout.clusters.last_mut()
-    {
-        last.bytes.end = bytes.end;
-        last.utf16.end = utf16_offset(&layout.text, bytes.end)?;
-        last.glyphs.end = layout.glyphs.len();
     }
     let grapheme_start = layout
         .graphemes
@@ -490,17 +463,67 @@ fn utf16_offset(text: &str, byte_offset: usize) -> Result<u32, TextError> {
         .map_err(|_| TextError::ArithmeticOverflow)
 }
 
-fn shape(face: &rustybuzz::Face<'_>, text: &str) -> rustybuzz::GlyphBuffer {
-    let mut buffer = UnicodeBuffer::new();
-    buffer.push_str(text);
-    buffer.set_direction(Direction::LeftToRight);
-    buffer.set_cluster_level(BufferClusterLevel::MonotoneGraphemes);
-    rustybuzz::shape(face, &[], buffer)
+#[derive(Clone, Copy)]
+struct RawGlyph {
+    id: u16,
+    x: f32,
+    y: f32,
+    advance: f32,
 }
 
-#[allow(clippy::cast_precision_loss)]
-fn design_to_px(value: i32, scale: f32) -> f32 {
-    value as f32 * scale
+struct RawCluster {
+    bytes: Range<usize>,
+    glyphs: Vec<RawGlyph>,
+}
+
+fn shape(
+    context: &mut ShapeContext,
+    font: &FontFace,
+    text: &str,
+    font_size: f32,
+) -> Result<Vec<RawCluster>, TextError> {
+    let face = font.swash_face()?;
+    let mut shaper = context
+        .builder_with_id(face, [font.fingerprint(), u64::from(font.revision())])
+        .script(script_for(text))
+        .size(font_size)
+        .build();
+    shaper.add_str(text);
+    let mut clusters = Vec::new();
+    shaper.shape_with(|cluster| {
+        clusters.push(RawCluster {
+            bytes: cluster.source.to_range(),
+            glyphs: cluster
+                .glyphs
+                .iter()
+                .map(|glyph| RawGlyph {
+                    id: glyph.id,
+                    x: glyph.x,
+                    y: glyph.y,
+                    advance: glyph.advance,
+                })
+                .collect(),
+        });
+    });
+    if clusters.iter().any(|cluster| {
+        cluster.bytes.start > cluster.bytes.end
+            || cluster.bytes.end > text.len()
+            || !text.is_char_boundary(cluster.bytes.start)
+            || !text.is_char_boundary(cluster.bytes.end)
+            || cluster.glyphs.iter().any(|glyph| {
+                !glyph.x.is_finite() || !glyph.y.is_finite() || !glyph.advance.is_finite()
+            })
+    }) {
+        return Err(TextError::ArithmeticOverflow);
+    }
+    Ok(clusters)
+}
+
+fn script_for(text: &str) -> Script {
+    text.chars()
+        .map(Codepoint::script)
+        .find(|script| !matches!(script, Script::Common | Script::Inherited | Script::Unknown))
+        .unwrap_or(Script::Latin)
 }
 
 #[allow(clippy::cast_precision_loss)]

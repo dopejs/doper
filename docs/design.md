@@ -516,19 +516,30 @@ Shell 的最新 durable value 获胜：部分重叠请求裁到新边界，完�
 
 ### 组成
 
-- shaping / 栅格：`swash`
+- shaping：`swash`
+- 首期 outline glyph 栅格：`fontdue`；彩色字体与未声明系统字体走宿主 fallback
 - 段落布局：`parley`（或按需自研简化版）
 - 换行：UAX #14 line breaking；CJK 需要额外的标点避头尾规则
 - bidi：`unicode-bidi`
 - glyph atlas：Core 维护，Canvas2D 后端以 `ImageBitmap` 贴图，WebGPU 后端直接采样纹理
 
 实现状态（2026-08-16）：`doper-text` 已建立独立的无 unsafe Core 基础，使用
-`rustybuzz` 完成显式 SFNT 字体的 LTR shaping，使用 UAX #14 数据完成基础换行，
-并输出 UTF-8/UTF-16、grapheme、cluster、glyph、line 与 caret 映射；Text Shape
-Cache 使用可观测的字节预算 LRU。该 crate 尚未接入公开字体 ABI、glyph atlas
-回传和 Canvas2D 贴图，因此仍属于 M3-B 内部基础，不能视为公开文本路径完成。
-当前 Core 输入只接受解码后的 TTF/OTF/TTC SFNT；WOFF/WOFF2 解码放在显式字体
-加载器边界，接入时必须与失败回退、格式能力矩阵和体积门禁一起交付。
+`swash` 完成显式 SFNT 字体的 LTR shaping，使用 UAX #14 数据完成基础换行，并输出
+UTF-8/UTF-16、grapheme、cluster、glyph、line 与 caret 映射；Text Shape Cache 和
+灰度 outline glyph atlas 均使用可观测的字节预算 LRU。公开字体 ABI、glyph 资源
+回传和 Canvas2D 贴图仍未接入，因此这仍属于 M3-B 内部基础，不能视为公开文本路径
+完成。当前 Core 输入只接受解码后的 TTF/OTF/TTC SFNT；WOFF/WOFF2 解码放在显式
+字体加载器边界，接入时必须与失败回退、格式能力矩阵和体积门禁一起交付。
+
+栅格器选择以 WASM 体积门禁为准：同一 Rust 1.96.0、`opt-z`、LTO 探针中，
+`swash` 同时承担 shaping 与 raster 时为 308,835 bytes gzip，超过代表性文本包络的
+300 KiB 门禁；`rustybuzz` shaping 加 `swash` raster 为 433,477 bytes gzip，超过
+产品 400 KiB 总预算。`swash` shaping 加 `fontdue` raster 的本机基线为 148,459
+bytes gzip，因此首期采用后者。能力影响是 atlas 只承诺 TTF/OTF/TTC 中的单色
+outline glyph，不把 COLR/CBDT/SVG、系统字体或浏览器合成字体伪装成受支持；这些输入
+必须走 `fillText` fallback。该决定可通过文本后端 feature flag 回滚；若未来栅格器、
+工具链或按需裁剪在同一门禁下证明彩色字体可行，可替换 atlas 实现而不改变 shaping
+和 DisplayList 契约。
 
 ### 风险
 

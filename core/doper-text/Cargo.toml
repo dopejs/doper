@@ -8,7 +8,9 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-rustybuzz = { version = "=0.20.1", default-features = false, features = ["std"] }
+fontdue = { version = "=0.9.4", default-features = false, features = ["std"] }
+swash = { version = "=0.2.10", default-features = false, features = ["libm"] }
+ttf-parser = "=0.25.1"
 unicode-linebreak = "=0.1.5"
 unicode-segmentation = "=1.13.3"
 

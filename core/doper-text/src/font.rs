@@ -14,6 +14,7 @@ pub struct FontFace {
     fingerprint: u64,
     units_per_em: u16,
     bytes: Arc<[u8]>,
+    raster_font: Arc<fontdue::Font>,
 }
 
 impl FontFace {
@@ -38,15 +39,25 @@ impl FontFace {
         if !is_sfnt(&bytes) {
             return Err(TextError::UnsupportedFontContainer);
         }
-        let face = rustybuzz::Face::from_slice(&bytes, face_index)
-            .ok_or(TextError::InvalidFont { face_index })?;
-        let units_per_em = u16::try_from(face.units_per_em())
+        ttf_parser::Face::parse(&bytes, face_index)
             .map_err(|_| TextError::InvalidFont { face_index })?;
+        let swash_index =
+            usize::try_from(face_index).map_err(|_| TextError::InvalidFont { face_index })?;
+        let face = swash::FontRef::from_index(&bytes, swash_index)
+            .ok_or(TextError::InvalidFont { face_index })?;
+        let units_per_em = face.metrics(&[]).units_per_em;
         if units_per_em == 0 {
             return Err(TextError::InvalidFont { face_index });
         }
+        let raster_font = fontdue::Font::from_bytes(
+            Arc::clone(&bytes),
+            fontdue::FontSettings {
+                collection_index: face_index,
+                ..fontdue::FontSettings::default()
+            },
+        )
+        .map_err(|_| TextError::InvalidFont { face_index })?;
         let fingerprint = fingerprint(&bytes, face_index);
-        drop(face);
         Ok(Self {
             id,
             revision,
@@ -54,6 +65,7 @@ impl FontFace {
             fingerprint,
             units_per_em,
             bytes,
+            raster_font: Arc::new(raster_font),
         })
     }
 
@@ -81,10 +93,17 @@ impl FontFace {
         self.units_per_em
     }
 
-    pub(crate) fn rustybuzz_face(&self) -> Result<rustybuzz::Face<'_>, TextError> {
-        rustybuzz::Face::from_slice(&self.bytes, self.face_index).ok_or(TextError::InvalidFont {
+    pub(crate) fn swash_face(&self) -> Result<swash::FontRef<'_>, TextError> {
+        let face_index = usize::try_from(self.face_index).map_err(|_| TextError::InvalidFont {
+            face_index: self.face_index,
+        })?;
+        swash::FontRef::from_index(&self.bytes, face_index).ok_or(TextError::InvalidFont {
             face_index: self.face_index,
         })
+    }
+
+    pub(crate) fn raster_font(&self) -> &fontdue::Font {
+        &self.raster_font
     }
 }
 

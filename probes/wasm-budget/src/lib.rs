@@ -1,12 +1,12 @@
 //! Disposable M0 size-envelope probe for text-heavy Core dependencies.
 //!
 //! This crate is intentionally separate from the product Core. Linking a real
-//! shaper and grapheme segmenter gives M0 a conservative measured envelope;
-//! it does not select these crates for the eventual text architecture.
+//! shaper, rasterizer and grapheme segmenter gives a conservative measured
+//! envelope for the selected M3 text foundation.
 
 use std::{cell::RefCell, str};
 
-use rustybuzz::{Face, UnicodeBuffer, shape};
+use swash::{FontRef, shape::ShapeContext};
 use unicode_segmentation::UnicodeSegmentation;
 
 const INVALID_INPUT: u32 = u32::MAX;
@@ -93,13 +93,50 @@ pub extern "C" fn doper_budget_shape_count() -> u32 {
             let Ok(text) = str::from_utf8(text_bytes.as_slice()) else {
                 return INVALID_INPUT;
             };
-            let Some(face) = Face::from_slice(font.as_slice(), 0) else {
+            let Some(face) = FontRef::from_index(font.as_slice(), 0) else {
                 return INVALID_INPUT;
             };
-            let mut buffer = UnicodeBuffer::new();
-            buffer.push_str(text);
-            u32::try_from(shape(&face, &[], buffer).len()).unwrap_or(INVALID_INPUT)
+            let mut context = ShapeContext::new();
+            let mut shaper = context.builder(face).size(16.0).build();
+            shaper.add_str(text);
+            let mut glyphs = 0_u32;
+            shaper.shape_with(|cluster| {
+                glyphs =
+                    glyphs.saturating_add(u32::try_from(cluster.glyphs.len()).unwrap_or(u32::MAX));
+            });
+            glyphs
         })
+    })
+}
+
+/// Rasterizes one buffered font glyph and returns its pixel byte count.
+///
+/// `size_bits` contains a finite positive `f32` pixel size. Returns `u32::MAX`
+/// for malformed font data, unsupported glyphs, or invalid sizes. This keeps
+/// the selected production rasterizer in the optimized WASM size envelope.
+// SAFETY: This crate owns this globally unique probe export name.
+#[allow(unsafe_code)]
+#[unsafe(no_mangle)]
+pub extern "C" fn doper_budget_raster_bytes(glyph_id: u32, size_bits: u32) -> u32 {
+    let size = f32::from_bits(size_bits);
+    let Ok(glyph_id) = u16::try_from(glyph_id) else {
+        return INVALID_INPUT;
+    };
+    if !size.is_finite() || size <= 0.0 || size > 16_384.0 {
+        return INVALID_INPUT;
+    }
+    FONT_INPUT.with_borrow(|font| {
+        let Ok(face) = fontdue::Font::from_bytes(
+            font.as_slice(),
+            fontdue::FontSettings {
+                collection_index: 0,
+                ..fontdue::FontSettings::default()
+            },
+        ) else {
+            return INVALID_INPUT;
+        };
+        let (_, pixels) = face.rasterize_indexed(glyph_id, size);
+        u32::try_from(pixels.len()).unwrap_or(INVALID_INPUT)
     })
 }
 
@@ -107,7 +144,7 @@ pub extern "C" fn doper_budget_shape_count() -> u32 {
 mod tests {
     use super::{
         INVALID_INPUT, doper_budget_grapheme_count, doper_budget_push_text_byte,
-        doper_budget_reset_inputs,
+        doper_budget_raster_bytes, doper_budget_reset_inputs,
     };
 
     #[test]
@@ -125,5 +162,13 @@ mod tests {
         assert_eq!(doper_budget_push_text_byte(256), 0);
         assert_eq!(doper_budget_push_text_byte(0xFF), 1);
         assert_eq!(doper_budget_grapheme_count(), INVALID_INPUT);
+        assert_eq!(
+            doper_budget_raster_bytes(1, 0.0_f32.to_bits()),
+            INVALID_INPUT
+        );
+        assert_eq!(
+            doper_budget_raster_bytes(u32::MAX, 12.0_f32.to_bits()),
+            INVALID_INPUT
+        );
     }
 }

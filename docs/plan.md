@@ -325,10 +325,10 @@ web 字体 shaping、复杂排版和 glyph atlas 属于 M3。M1 的“像素对�
 #### M3-B Text
 
 状态：**实施中**。`doper-text` 的显式 SFNT 校验、LTR shaping、UAX #14 基础
-换行、grapheme/cluster/glyph/line/caret 映射和有界 Text Shape Cache 已完成，
-真实 SFNT 自动门禁为 `pnpm m3:text:foundation`。公开字体 ABI、WOFF/WOFF2
-加载边界、系统字体测量反馈、glyph atlas/Canvas2D 贴图与 Core/Host 集成仍未完成，
-因此 M3-B 尚未达到出口。
+换行、grapheme/cluster/glyph/line/caret 映射、有界 Text Shape Cache，以及受
+WASM 体积门禁约束的灰度 outline glyph atlas 已完成；真实 SFNT 自动门禁为
+`pnpm m3:text:foundation`。公开字体 ABI、WOFF/WOFF2 加载边界、系统字体测量反馈、
+glyph 资源回传、Canvas2D 贴图与 Core/Host 集成仍未完成，因此 M3-B 尚未达到出口。
 
 - 显式 web 字体加载、LTR、基础换行和 Text Shape Cache。
 - 系统字体 `measureText`/`fillText` fallback 及缓存失效。
