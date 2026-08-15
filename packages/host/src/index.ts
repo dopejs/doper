@@ -1,12 +1,53 @@
 export {
   CanvasFrameSink,
   createCanvasRoot,
+  createDefaultRasterCache,
   type CanvasRootOptions,
   type CoreClient,
   type CoreFrameDiagnostics,
   type FrameReport,
 } from "./main-thread";
 export { createWasmCore, type WasmCoreInput } from "./wasm";
+export {
+  detectHostCapabilities,
+  selectHostTransport,
+  type CapabilityEnvironment,
+  type HostCapabilities,
+  type HostTransportDecision,
+  type HostTransportMode,
+  type HostTransportPolicy,
+  type HostTransportPreference,
+  type TransferableCanvasCandidate,
+} from "./capabilities";
+export {
+  PostMessageMutationReceiver,
+  PostMessageMutationTransport,
+  type PostMessageMutationReceiverOptions,
+  type PostMessageTransportMetrics,
+  type PostMessageTransportOptions,
+} from "./post-message";
+export {
+  HybridRenderClock,
+  nextAlignedFrame,
+  type HybridRenderClockOptions,
+  type RenderClockFrame,
+  type RenderClockMetrics,
+  type RenderClockScheduler,
+} from "./render-clock";
+export {
+  createHostedCanvasRoot,
+  type ClockAnchorDriver,
+  type HostMutationTransportMetrics,
+  type HostedCanvasRoot,
+  type HostedCanvasRootOptions,
+} from "./hosted-root";
+export {
+  SabMutationReceiver,
+  SabMutationTransport,
+  type SabMutationReceiverOptions,
+  type SabMutationTransportMetrics,
+  type SabMutationTransportOptions,
+} from "./sab-transport";
 export {
   BinaryReplayRecorder,
   ReplayRecordingError,

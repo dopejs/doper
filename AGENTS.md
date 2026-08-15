@@ -207,6 +207,9 @@ After changing code:
 
 - Run the narrowest relevant checks first, then the repository-wide gates that
   exist.
+- Run Rust tests through `pnpm rust:test` or `pnpm rust:check`, not a bare
+  `cargo test`. The repository runners clean `target/` in a `finally` path so
+  successful and failed test runs do not retain multi-gigabyte artifacts.
 - Report exact commands and results. If a required environment or device is
   unavailable, state what remains unverified.
 - For non-trivial changes, document failure modes and the rollback or feature

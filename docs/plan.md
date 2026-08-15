@@ -261,6 +261,20 @@ web 字体 shaping、复杂排版和 glyph atlas 属于 M3。M1 的“像素对�
 
 ### M2：双时钟、Worker 与缓存
 
+> 当前状态：**已完成（2026-08-15）**。生产 Host 已实现 capability 驱动的 SAB →
+> postMessage → main-thread 三路径、Worker 握手/双时钟/ACK watchdog、崩溃与队列
+> 容量恢复、完整 Scene 快照重建和三层 feature flag；SAB 固定槽 ring 与 postMessage
+> 都有有界字节/帧预算、严格序列、未发布事务无损合并和可拉取诊断。Core Picture
+> Cache 复用不可变子树，Canvas2D Raster Cache 按 tile、LRU 和硬预算合成，并保留
+> cache-off/reference 差分路径。确定性调度穷举、20,000 次 ring oracle、5,000 帧
+> raster churn、乱序/卡死/初始化失败/运行时崩溃和容量耗尽均有自动测试；真实
+> Chromium 会验证三路径输出、缓存开关、200ms 主线程阻塞连续性，以及 160 个同步
+> transaction 超过 128 帧队列时两种 Worker transport 都合并 32 次并到达最终 Scene。
+> `pnpm m2:check` 全量通过：156 项 TS 测试、93 项 Rust 测试、5 项浏览器测试，TS/Rust
+> 行覆盖率 85.1%/92.02%，ABI/Scene 分别为 95.33%/95.88%；产品 WASM gzip 79,945
+> bytes，5,000 节点快集 P95/P99 为 1.26/1.30ms，过度失效为 0。物理设备数据继续按
+> 平台资格管理，不作为工程完成条件。
+
 目标：把已验证的单线程内核迁入 Worker，并证明主线程阻塞时滚动持续。
 
 主要交付：

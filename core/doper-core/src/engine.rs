@@ -5,11 +5,13 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_DIRTY_PAINT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_PAINT_SELF_NODES_INDEX,
     FRAME_DIAGNOSTICS_DIRTY_SEMANTICS_NODES_INDEX, FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX,
     FRAME_DIAGNOSTICS_FRAME_SEQ_INDEX, FRAME_DIAGNOSTICS_LAYOUT_CHANGED_NODES_INDEX,
-    FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX, FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX,
-    FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX,
-    FRAME_DIAGNOSTICS_SCENE_NODES_INDEX, FRAME_DIAGNOSTICS_VERSION,
-    FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS, MutationBatch, ResourceKind,
-    TEXT_STYLE_FONT_SIZE_OFFSET, TEXT_STYLE_LINE_HEIGHT_OFFSET,
+    FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX, FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX,
+    FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX, FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
+    FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
+    MutationBatch, ResourceKind, TEXT_STYLE_FONT_SIZE_OFFSET, TEXT_STYLE_LINE_HEIGHT_OFFSET,
 };
 use doper_layout::{BoxConstraints, IntrinsicMeasurer, LayoutEngine, Size};
 use doper_paint::{PaintEngine, PaintMetrics};
@@ -55,6 +57,16 @@ pub struct FrameDiagnostics {
     pub display_commands: usize,
     /// Whether paint rebuilt the Picture instead of reusing it.
     pub paint_rebuilt: bool,
+    /// Cumulative immutable Picture builds.
+    pub picture_builds: u64,
+    /// Cumulative clean-frame Picture cache hits.
+    pub picture_cache_hits: u64,
+    /// Cumulative immutable subtree Picture builds.
+    pub picture_subtree_builds: u64,
+    /// Cumulative unchanged sibling subtree reuse.
+    pub picture_subtree_cache_hits: u64,
+    /// Cumulative dirty frames whose rebuilt bytes did not change.
+    pub over_invalidated_frames: u64,
     /// Deterministic FNV-1a hash of the active Picture bytes.
     pub picture_hash: u64,
 }
@@ -78,6 +90,14 @@ impl FrameDiagnostics {
         words[FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX] = count_word(self.layout_visited_nodes);
         words[FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX] = count_word(self.display_commands);
         words[FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX] = u32::from(self.paint_rebuilt);
+        words[FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX] = count_u64_word(self.picture_builds);
+        words[FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX] = count_u64_word(self.picture_cache_hits);
+        words[FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX] =
+            count_u64_word(self.picture_subtree_builds);
+        words[FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX] =
+            count_u64_word(self.picture_subtree_cache_hits);
+        words[FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX] =
+            count_u64_word(self.over_invalidated_frames);
         let hash = self.picture_hash.to_le_bytes();
         words[FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX] =
             u32::from_le_bytes([hash[0], hash[1], hash[2], hash[3]]);
@@ -176,6 +196,7 @@ impl CoreEngine {
             Ok(outcome) => outcome,
             Err(error) => return self.poison(CoreError::Paint(error)),
         };
+        let paint_metrics = self.paint.metrics();
         let diagnostics = FrameDiagnostics {
             frame_seq,
             scene_nodes,
@@ -188,6 +209,11 @@ impl CoreEngine {
             layout_visited_nodes: geometry.visited,
             display_commands: self.paint.metrics().last_command_count,
             paint_rebuilt: painted.rebuilt,
+            picture_builds: paint_metrics.builds,
+            picture_cache_hits: paint_metrics.cache_hits,
+            picture_subtree_builds: paint_metrics.subtree_builds,
+            picture_subtree_cache_hits: paint_metrics.subtree_cache_hits,
+            over_invalidated_frames: paint_metrics.over_invalidated_frames,
             picture_hash: painted.picture.hash(),
         };
         self.scene.clear_dirty();
@@ -256,6 +282,10 @@ fn dirty_count(scene: &Scene, domain: DirtyDomain) -> usize {
 }
 
 fn count_word(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+fn count_u64_word(value: u64) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
@@ -406,7 +436,12 @@ mod tests {
         assert_eq!(output.diagnostics.layout_changed_nodes, 2);
         assert!(output.diagnostics.display_commands > 0);
         assert_ne!(output.diagnostics.picture_hash, 0);
-        assert_eq!(output.diagnostics.to_words().len(), 14);
+        assert_eq!(output.diagnostics.to_words().len(), 19);
+        assert_eq!(output.diagnostics.picture_builds, 1);
+        assert_eq!(output.diagnostics.picture_cache_hits, 0);
+        assert_eq!(output.diagnostics.picture_subtree_builds, 2);
+        assert_eq!(output.diagnostics.picture_subtree_cache_hits, 0);
+        assert_eq!(output.diagnostics.over_invalidated_frames, 0);
         assert!(display.instructions.iter().any(|instruction| matches!(
             instruction.command,
             DisplayCommand::FillRect {
@@ -458,6 +493,10 @@ mod tests {
         assert_eq!(second.diagnostics.layout_changed_nodes, 0);
         assert_eq!(second.diagnostics.layout_visited_nodes, 0);
         assert!(!second.diagnostics.paint_rebuilt);
+        assert_eq!(second.diagnostics.picture_builds, 1);
+        assert_eq!(second.diagnostics.picture_cache_hits, 1);
+        assert_eq!(second.diagnostics.picture_subtree_builds, 2);
+        assert_eq!(second.diagnostics.picture_subtree_cache_hits, 0);
     }
 
     #[test]

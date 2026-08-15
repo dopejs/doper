@@ -42,7 +42,7 @@
     ]
   },
   "frameDiagnostics": {
-    "version": 1,
+    "version": 2,
     "fields": [
       { "name": "version", "type": "u32" },
       { "name": "frameSeq", "type": "u32" },
@@ -56,6 +56,11 @@
       { "name": "layoutVisitedNodes", "type": "u32" },
       { "name": "displayCommands", "type": "u32" },
       { "name": "paintRebuilt", "type": "u32" },
+      { "name": "pictureBuilds", "type": "u32" },
+      { "name": "pictureCacheHits", "type": "u32" },
+      { "name": "pictureSubtreeBuilds", "type": "u32" },
+      { "name": "pictureSubtreeCacheHits", "type": "u32" },
+      { "name": "overInvalidatedFrames", "type": "u32" },
       { "name": "pictureHashLow", "type": "u32" },
       { "name": "pictureHashHigh", "type": "u32" }
     ]

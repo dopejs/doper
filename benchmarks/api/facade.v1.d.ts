@@ -36,10 +36,21 @@ export {
 export { type DoperRoot } from "@dopejs/doper-reconciler";
 export {
   createCanvasRoot,
+  createHostedCanvasRoot,
   createCanvasRoot as createRoot,
   createWasmCore,
+  type ClockAnchorDriver,
   type CanvasRootOptions,
   type CoreClient,
   type FrameReport,
+  type HostCapabilities,
+  type HostMutationTransportMetrics,
+  type HostTransportDecision,
+  type HostTransportMode,
+  type HostTransportPolicy,
+  type HostTransportPreference,
+  type HostedCanvasRoot,
+  type HostedCanvasRootOptions,
+  type RenderClockMetrics,
   type WasmCoreInput,
 } from "@dopejs/doper-host";

@@ -85,8 +85,12 @@ function validateSchema(value) {
   if (!Number.isInteger(value.recording.maxBytes) || value.recording.maxBytes <= 0) {
     throw new Error("recording maxBytes must be a positive integer");
   }
-  if (value.frameDiagnostics.version !== 1) {
-    throw new Error("frame diagnostics must declare encoding version 1");
+  if (
+    !Number.isInteger(value.frameDiagnostics.version) ||
+    value.frameDiagnostics.version < 1 ||
+    value.frameDiagnostics.version > 0xffff_ffff
+  ) {
+    throw new Error("frame diagnostics must declare a positive u32 encoding version");
   }
   validateNamedFields(value.frameDiagnostics.fields, "frame diagnostics");
   if (

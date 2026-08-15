@@ -24,3 +24,13 @@ lto = true
 opt-level = "z"
 panic = "abort"
 strip = "symbols"
+
+# Test/debug artifacts otherwise dominate local disk usage. Line tables retain
+# actionable backtraces while disabling the large incremental object cache.
+[profile.dev]
+debug = "line-tables-only"
+incremental = false
+
+[profile.test]
+debug = "line-tables-only"
+incremental = false

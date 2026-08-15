@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use doper_abi::{DisplayCommand, DisplayInstruction, DisplayList, NodeKind, Prop, ResourceKind};
 use doper_layout::LayoutSnapshot;
@@ -38,6 +38,10 @@ pub struct PaintMetrics {
     pub last_command_count: usize,
     /// Dirty nodes whose rebuilt Picture hash did not change.
     pub over_invalidated_frames: u64,
+    /// Immutable subtree Pictures rebuilt across successful frames.
+    pub subtree_builds: u64,
+    /// Unchanged child subtree Pictures reused while rebuilding an ancestor.
+    pub subtree_cache_hits: u64,
 }
 
 /// Result of one paint decision.
@@ -53,8 +57,16 @@ pub struct PaintOutcome {
 #[derive(Default)]
 pub struct PaintEngine {
     current: Option<Picture>,
+    subtrees: HashMap<NodeId, Arc<CachedSubtree>>,
     topology: Vec<NodeId>,
     metrics: PaintMetrics,
+}
+
+#[derive(Debug)]
+struct CachedSubtree {
+    children: Arc<[Arc<CachedSubtree>]>,
+    command_count: usize,
+    local: Arc<[DisplayInstruction]>,
 }
 
 impl PaintEngine {
@@ -81,6 +93,12 @@ impl PaintEngine {
         if scene.ids() != layout.ids() {
             return Err(PaintError::LayoutTopologyMismatch);
         }
+        if geometry_changed.len() < scene.len() {
+            return Err(PaintError::GeometryBitmapLengthMismatch {
+                actual: geometry_changed.len(),
+                expected: scene.len(),
+            });
+        }
         let topology_unchanged = self.topology == scene.ids();
         let paint_dirty = has_dirty(scene, DirtyDomain::Paint)
             || has_dirty(scene, DirtyDomain::PaintSelf)
@@ -97,7 +115,9 @@ impl PaintEngine {
             });
         }
 
-        let display_list = build_display_list(scene, layout)?;
+        let rebuild = rebuild_subtrees(scene, geometry_changed, topology_unchanged, force_full);
+        let (display_list, updates, subtree_builds, subtree_cache_hits) =
+            build_display_list(scene, layout, &self.subtrees, &rebuild)?;
         let command_count = display_list.instructions.len();
         let bytes = display_list.encode()?;
         let picture = Picture {
@@ -113,10 +133,20 @@ impl PaintEngine {
             self.metrics.over_invalidated_frames += 1;
         }
         self.current = Some(picture.clone());
+        if topology_unchanged {
+            self.subtrees.extend(updates);
+        } else {
+            self.subtrees = updates;
+        }
         self.topology.clear();
         self.topology.extend_from_slice(scene.ids());
         self.metrics.builds += 1;
         self.metrics.last_command_count = command_count;
+        self.metrics.subtree_builds = self.metrics.subtree_builds.saturating_add(subtree_builds);
+        self.metrics.subtree_cache_hits = self
+            .metrics
+            .subtree_cache_hits
+            .saturating_add(subtree_cache_hits);
         Ok(PaintOutcome {
             picture,
             rebuilt: true,
@@ -124,78 +154,193 @@ impl PaintEngine {
     }
 }
 
-fn build_display_list(scene: &Scene, layout: &LayoutSnapshot) -> Result<DisplayList, PaintError> {
-    let mut instructions = Vec::with_capacity(scene.len().saturating_mul(5));
-    let mut open_nodes = 0_usize;
-    for (index, node) in scene.ids().iter().copied().enumerate() {
-        let depth = usize::from(
-            scene
-                .depth(node)
-                .ok_or(PaintError::MissingGeometry { node })?,
-        );
-        while open_nodes > depth {
-            push(&mut instructions, DisplayCommand::Restore);
-            open_nodes -= 1;
+fn rebuild_subtrees(
+    scene: &Scene,
+    geometry_changed: &BitSet,
+    topology_unchanged: bool,
+    force_full: bool,
+) -> Vec<bool> {
+    let mut rebuild = vec![force_full || !topology_unchanged; scene.len()];
+    if topology_unchanged && !force_full {
+        let paint = scene.dirty(DirtyDomain::Paint);
+        let paint_self = scene.dirty(DirtyDomain::PaintSelf);
+        for (index, dirty) in rebuild.iter_mut().enumerate() {
+            *dirty = paint.contains(index)
+                || paint_self.contains(index)
+                || geometry_changed.contains(index);
         }
-        let (offset, size) = layout
-            .geometry_at(index)
-            .ok_or(PaintError::MissingGeometry { node })?;
-        push(&mut instructions, DisplayCommand::Save);
-        open_nodes += 1;
+        for index in (0..scene.len()).rev() {
+            if !rebuild[index] {
+                continue;
+            }
+            let Some(node) = scene.ids().get(index).copied() else {
+                continue;
+            };
+            if let Some(parent) = scene.parent(node)
+                && let Some(parent_index) = scene.resolve(parent)
+            {
+                rebuild[parent_index] = true;
+            }
+        }
+    }
+    rebuild
+}
+
+type SubtreeBuild = (DisplayList, HashMap<NodeId, Arc<CachedSubtree>>, u64, u64);
+
+fn build_display_list(
+    scene: &Scene,
+    layout: &LayoutSnapshot,
+    current: &HashMap<NodeId, Arc<CachedSubtree>>,
+    rebuild: &[bool],
+) -> Result<SubtreeBuild, PaintError> {
+    let mut updates = HashMap::new();
+    let mut subtree_builds = 0_u64;
+    let mut subtree_cache_hits = 0_u64;
+    for (index, node) in scene.ids().iter().copied().enumerate().rev() {
+        if !rebuild.get(index).copied().unwrap_or(true) && current.contains_key(&node) {
+            continue;
+        }
+        let local: Arc<[DisplayInstruction]> = Arc::from(build_node(scene, layout, index, node)?);
+        let mut children = Vec::new();
+        let mut command_count = local.len().checked_add(1).ok_or_else(overflow)?;
+        let mut child = scene.first_child(node);
+        while let Some(child_id) = child {
+            let cached = updates
+                .get(&child_id)
+                .or_else(|| current.get(&child_id))
+                .cloned()
+                .ok_or(PaintError::MissingCachedSubtree { node: child_id })?;
+            if !scene
+                .resolve(child_id)
+                .and_then(|child_index| rebuild.get(child_index))
+                .copied()
+                .unwrap_or(true)
+            {
+                subtree_cache_hits = subtree_cache_hits.saturating_add(1);
+            }
+            command_count = command_count
+                .checked_add(cached.command_count)
+                .ok_or_else(overflow)?;
+            children.push(cached);
+            child = scene.next_sibling(child_id);
+        }
+        updates.insert(
+            node,
+            Arc::new(CachedSubtree {
+                children: Arc::from(children),
+                command_count,
+                local,
+            }),
+        );
+        subtree_builds = subtree_builds.saturating_add(1);
+    }
+
+    let Some(root_id) = scene.ids().first().copied() else {
+        return Ok((
+            DisplayList {
+                instructions: Vec::new(),
+            },
+            updates,
+            subtree_builds,
+            subtree_cache_hits,
+        ));
+    };
+    let root = updates
+        .get(&root_id)
+        .or_else(|| current.get(&root_id))
+        .ok_or(PaintError::MissingCachedSubtree { node: root_id })?;
+    let mut instructions = Vec::with_capacity(root.command_count);
+    let mut stack = vec![FlattenItem::Subtree(root)];
+    while let Some(item) = stack.pop() {
+        match item {
+            FlattenItem::Subtree(subtree) => {
+                instructions.extend_from_slice(&subtree.local);
+                stack.push(FlattenItem::Restore);
+                for child in subtree.children.iter().rev() {
+                    stack.push(FlattenItem::Subtree(child));
+                }
+            }
+            FlattenItem::Restore => push(&mut instructions, DisplayCommand::Restore),
+        }
+    }
+    Ok((
+        DisplayList { instructions },
+        updates,
+        subtree_builds,
+        subtree_cache_hits,
+    ))
+}
+
+enum FlattenItem<'a> {
+    Restore,
+    Subtree(&'a CachedSubtree),
+}
+
+fn build_node(
+    scene: &Scene,
+    layout: &LayoutSnapshot,
+    index: usize,
+    node: NodeId,
+) -> Result<Vec<DisplayInstruction>, PaintError> {
+    let (offset, size) = layout
+        .geometry_at(index)
+        .ok_or(PaintError::MissingGeometry { node })?;
+    let mut instructions = Vec::with_capacity(6);
+    push(&mut instructions, DisplayCommand::Save);
+    push(
+        &mut instructions,
+        DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, offset.x, offset.y]),
+    );
+
+    if let Some(transform_id) = scene.ref_prop(node, Prop::Transform) {
+        let resource = typed_resource(scene, transform_id, ResourceKind::Affine)?;
+        let affine = AffineResource::decode(transform_id, resource)?;
+        push(&mut instructions, DisplayCommand::Transform(affine.matrix));
+    }
+    if let Some(opacity) = scene.f32_prop(node, Prop::Opacity) {
+        if !(0.0..=1.0).contains(&opacity) {
+            return Err(PaintError::InvalidOpacity { node });
+        }
+        push(&mut instructions, DisplayCommand::Alpha(opacity));
+    }
+    if scene.kind(node) == Some(NodeKind::Scroll) {
         push(
             &mut instructions,
-            DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, offset.x, offset.y]),
+            DisplayCommand::ClipRect([0.0, 0.0, size.width, size.height]),
         );
+    }
+    if let Some(paint_id) = scene.ref_prop(node, Prop::BackgroundColor) {
+        let resource = typed_resource(scene, paint_id, ResourceKind::Paint)?;
+        SolidPaint::decode(paint_id, resource)?;
+        push(
+            &mut instructions,
+            DisplayCommand::FillRect {
+                rect: [0.0, 0.0, size.width, size.height],
+                paint_id,
+            },
+        );
+    }
+    if let Some(text_run) = scene.text_run(node) {
+        typed_resource(scene, text_run.string_id, ResourceKind::Utf8String)?;
+        let style_resource = typed_resource(scene, text_run.style_id, ResourceKind::TextStyle)?;
+        let style = TextStyleResource::decode(text_run.style_id, style_resource)?;
+        let paint_resource = typed_resource(scene, style.paint_id, ResourceKind::Paint)?;
+        SolidPaint::decode(style.paint_id, paint_resource)?;
+        push(
+            &mut instructions,
+            DisplayCommand::DrawTextFallback {
+                string_id: text_run.string_id,
+                font_description_id: text_run.style_id,
+                origin: [0.0, style.font_size],
+            },
+        );
+    }
+    Ok(instructions)
+}
 
-        if let Some(transform_id) = scene.ref_prop(node, Prop::Transform) {
-            let resource = typed_resource(scene, transform_id, ResourceKind::Affine)?;
-            let affine = AffineResource::decode(transform_id, resource)?;
-            push(&mut instructions, DisplayCommand::Transform(affine.matrix));
-        }
-        if let Some(opacity) = scene.f32_prop(node, Prop::Opacity) {
-            if !(0.0..=1.0).contains(&opacity) {
-                return Err(PaintError::InvalidOpacity { node });
-            }
-            push(&mut instructions, DisplayCommand::Alpha(opacity));
-        }
-        if scene.kind(node) == Some(NodeKind::Scroll) {
-            push(
-                &mut instructions,
-                DisplayCommand::ClipRect([0.0, 0.0, size.width, size.height]),
-            );
-        }
-        if let Some(paint_id) = scene.ref_prop(node, Prop::BackgroundColor) {
-            let resource = typed_resource(scene, paint_id, ResourceKind::Paint)?;
-            SolidPaint::decode(paint_id, resource)?;
-            push(
-                &mut instructions,
-                DisplayCommand::FillRect {
-                    rect: [0.0, 0.0, size.width, size.height],
-                    paint_id,
-                },
-            );
-        }
-        if let Some(text_run) = scene.text_run(node) {
-            typed_resource(scene, text_run.string_id, ResourceKind::Utf8String)?;
-            let style_resource = typed_resource(scene, text_run.style_id, ResourceKind::TextStyle)?;
-            let style = TextStyleResource::decode(text_run.style_id, style_resource)?;
-            let paint_resource = typed_resource(scene, style.paint_id, ResourceKind::Paint)?;
-            SolidPaint::decode(style.paint_id, paint_resource)?;
-            push(
-                &mut instructions,
-                DisplayCommand::DrawTextFallback {
-                    string_id: text_run.string_id,
-                    font_description_id: text_run.style_id,
-                    origin: [0.0, style.font_size],
-                },
-            );
-        }
-    }
-    while open_nodes != 0 {
-        push(&mut instructions, DisplayCommand::Restore);
-        open_nodes -= 1;
-    }
-    Ok(DisplayList { instructions })
+fn overflow() -> PaintError {
+    PaintError::Abi(doper_abi::AbiError::ArithmeticOverflow)
 }
 
 fn typed_resource(
@@ -342,6 +487,123 @@ mod tests {
         assert!(!second.rebuilt);
         assert_eq!(first.picture, second.picture);
         assert_eq!(paint.metrics().cache_hits, 1);
+    }
+
+    #[test]
+    fn rebuilds_only_the_dirty_ancestor_chain_and_reuses_immutable_siblings() {
+        let root = id(0);
+        let left = id(1);
+        let right = id(2);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(left, NodeKind::Container, Some(root)),
+                create(right, NodeKind::Container, Some(root)),
+                set_f32(left, Prop::Width, 40.0),
+                set_f32(left, Prop::Height, 20.0),
+                set_f32(right, Prop::Width, 40.0),
+                set_f32(right, Prop::Height, 20.0),
+            ],
+        );
+        let constraints = BoxConstraints::tight(Size::new(320.0, 240.0)).expect("viewport");
+        let mut incremental_layout = LayoutEngine::new();
+        let initial = incremental_layout
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("initial layout");
+        let mut paint = PaintEngine::new();
+        paint
+            .paint(
+                &scene,
+                incremental_layout.snapshot(),
+                &initial.changed,
+                false,
+            )
+            .expect("initial paint");
+        assert_eq!(paint.metrics().subtree_builds, 3);
+        scene.clear_dirty();
+
+        commit(&mut scene, 2, vec![set_f32(left, Prop::Opacity, 0.5)]);
+        let changed = incremental_layout
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("incremental layout");
+        let incremental = paint
+            .paint(
+                &scene,
+                incremental_layout.snapshot(),
+                &changed.changed,
+                false,
+            )
+            .expect("incremental paint");
+        assert_eq!(paint.metrics().subtree_builds, 5);
+        assert_eq!(paint.metrics().subtree_cache_hits, 1);
+
+        let mut full_layout = LayoutEngine::new();
+        let full_changed = full_layout
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("full layout");
+        let full = PaintEngine::new()
+            .paint(&scene, full_layout.snapshot(), &full_changed.changed, true)
+            .expect("full paint");
+        assert_eq!(incremental.picture.bytes(), full.picture.bytes());
+    }
+
+    #[test]
+    fn rejects_misaligned_geometry_bitmap_without_mutating_cache_metrics() {
+        let root = id(0);
+        let mut scene = Scene::new();
+        commit(&mut scene, 1, vec![create(root, NodeKind::Root, None)]);
+        let (layout, _) = layout(&scene);
+        let mut paint = PaintEngine::new();
+        let before = paint.metrics();
+        assert!(matches!(
+            paint.paint(&scene, layout.snapshot(), &BitSet::with_len(0), false),
+            Err(PaintError::GeometryBitmapLengthMismatch {
+                expected: 1,
+                actual: 0,
+            })
+        ));
+        assert_eq!(paint.metrics(), before);
+    }
+
+    #[test]
+    fn accepts_removed_geometry_bits_when_the_scene_becomes_empty() {
+        let root = id(0);
+        let mut scene = Scene::new();
+        commit(&mut scene, 1, vec![create(root, NodeKind::Root, None)]);
+        let constraints = BoxConstraints::tight(Size::new(320.0, 240.0)).expect("viewport");
+        let mut layout = LayoutEngine::new();
+        let first = layout
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("initial layout");
+        let mut paint = PaintEngine::new();
+        paint
+            .paint(&scene, layout.snapshot(), &first.changed, false)
+            .expect("initial paint");
+        scene.clear_dirty();
+
+        commit(
+            &mut scene,
+            2,
+            vec![Mutation::RemoveNode {
+                node_id: root.raw(),
+            }],
+        );
+        let removed = layout
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("empty layout");
+        assert!(removed.changed.len() > scene.len());
+        let output = paint
+            .paint(&scene, layout.snapshot(), &removed.changed, false)
+            .expect("empty paint");
+        assert_eq!(
+            DisplayList::decode(output.picture.bytes())
+                .expect("empty DisplayList")
+                .instructions,
+            Vec::new()
+        );
     }
 
     proptest! {

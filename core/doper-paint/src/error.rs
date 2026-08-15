@@ -8,6 +8,10 @@ use doper_scene::NodeId;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PaintError {
     LayoutTopologyMismatch,
+    GeometryBitmapLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
     MissingGeometry {
         node: NodeId,
     },
@@ -24,6 +28,9 @@ pub enum PaintError {
         reason: &'static str,
     },
     InvalidOpacity {
+        node: NodeId,
+    },
+    MissingCachedSubtree {
         node: NodeId,
     },
     WrongPropertyResource {

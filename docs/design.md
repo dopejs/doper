@@ -337,8 +337,11 @@ headless 回放不会消费半份损坏归档。录制入口必须显式声明�
 
 成功帧另有 schema 生成的 versioned `u32` 诊断布局，包含各脏域节点数、Scene 节点数、
 布局 changed/visited 数、DisplayList command 数、是否重建 Picture 与 64 位 picture
-hash。Host 只在存在 `onFrame` 观察者时从 WASM 复制该数组，正常渲染热路径不分配诊断
-对象；版本或 `frame_seq` 不一致视为 Core/Host 契约错误。
+hash，以及 Picture 整体/子树 build、cache hit 和过度失效计数。Host 只在存在
+`onFrame` 观察者或缓存需要 picture key 时从 WASM 复制该数组；版本或 `frame_seq`
+不一致视为 Core/Host 契约错误。Worker transport 另提供可拉取的有界队列快照，包含
+当前深度、字节数、高水位、ACK、合并、拒绝、超时和最新序列；运行时降级后仍保留
+故障前最后一份快照，供 devtools 和线上诊断使用。
 
 ### 为什么不用 SharedArrayBuffer 直接共享 Scene
 
@@ -381,6 +384,21 @@ reserved/padding 或越界资源一律在回放前失败关闭。详细决策见
 - **渲染帧**（Worker）：稳定驱动，负责动画、滚动、布局、绘制、合成。
 
 两者通过 SAB 上的 `frame_seq` 与双缓冲 ring buffer 同步。渲染帧读取"当前已 commit 的最新一批 mutation"，Shell 写入下一批。**Shell 慢或卡住时，渲染帧继续用上一批 scene 跑**——这正是滚动不受主线程影响的机制。
+
+### 有界背压与事务合并
+
+Shell 产生的 transaction 使用连续 `frame_seq`。transport 已发布或等待 ACK 的
+transaction 不可改写；队列触达帧数或字节预算时，只允许把“最新一个尚未发布的
+完整 transaction”和新 transaction 解码后按 mutation 原序合并，再以新
+transaction 的 `frame_seq` 重新编码。Core/receiver 因此要求序列**严格变新**，但不
+要求 transport 输出连续序列；中间序列缺口明确表示事务已无损合并，不表示 mutation
+被丢弃。ACK 仍逐个对应实际发布的 transaction。
+
+若合并结果超过 Mutation Stream、SAB slot 或队列字节硬预算，HostedRoot 将该容量
+耗尽识别为可恢复 transport 故障：停止 Worker，保留 Shell 的完整 Scene 快照，在新
+主线程 Core 中以一个 full-state transaction 重建。协议错误、非法序列与畸形 payload
+仍然 fail-fast，不能借降级隐藏实现缺陷。该策略的回滚开关是全局/设备/页面 Worker
+policy；关闭 Worker 后直接使用 M1 主线程路径。
 
 ### Worker 帧驱动（M0 自动故障注入，平台资格补充实测）
 

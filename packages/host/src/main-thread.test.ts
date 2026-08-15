@@ -1,4 +1,8 @@
-import { type Canvas2DContext } from "@dopejs/doper-backend-canvas2d";
+import {
+  RasterTileCache,
+  type Canvas2DContext,
+  type ReplayStats,
+} from "@dopejs/doper-backend-canvas2d";
 import {
   ABI_VERSION,
   ResourceKind,
@@ -24,7 +28,7 @@ describe("CanvasFrameSink", () => {
         return displayList;
       },
       frame_diagnostics: () =>
-        Uint32Array.of(1, 1, 2, 2, 2, 0, 2, 2, 2, 2, 7, 1, 0x89ab_cdef, 0x0123_4567),
+        Uint32Array.of(2, 1, 2, 2, 2, 0, 2, 2, 2, 2, 7, 1, 1, 0, 2, 0, 0, 0x89ab_cdef, 0x0123_4567),
     };
     const onFrame = vi.fn((_report: FrameReport) => events.push("report"));
     const sink = new CanvasFrameSink(fakeContext(calls, events), core, onFrame);
@@ -59,10 +63,18 @@ describe("CanvasFrameSink", () => {
         layoutVisitedNodes: 2,
         displayCommands: 7,
         paintRebuilt: true,
+        pictureBuilds: 1,
+        pictureCacheHits: 0,
+        pictureSubtreeBuilds: 2,
+        pictureSubtreeCacheHits: 0,
+        overInvalidatedFrames: 0,
         pictureHash: 0x0123_4567_89ab_cdefn,
       },
     });
     expect(onFrame.mock.calls[0]?.[0].mutationBytes).toBeGreaterThan(0);
+    const canvasCalls = calls.length;
+    expect(sink.replayLastFrame()).toMatchObject({ commands: 1 });
+    expect(calls.length).toBeGreaterThan(canvasCalls);
   });
 
   it("does not mutate host resources when Core rejects the transaction", () => {
@@ -137,6 +149,38 @@ describe("CanvasFrameSink", () => {
       /not defined/u,
     );
   });
+
+  it("reuses bounded raster tiles for an immutable picture and exposes metrics", () => {
+    const targetCalls: unknown[][] = [];
+    const onFrame = vi.fn();
+    const cache = new RasterTileCache<ReplayStats>({
+      budgetBytes: 64 * 64 * 4,
+      surfaceFactory: () => ({
+        context: fakeContext([], []),
+        image: {} as CanvasImageSource,
+      }),
+      tileSize: 64,
+    });
+    const sink = new CanvasFrameSink(
+      fakeContext(targetCalls, []),
+      {
+        commit: () => emptyDisplayList(),
+        frame_diagnostics: () =>
+          Uint32Array.of(2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0x1234_5678, 0),
+      },
+      onFrame,
+      cache,
+    );
+
+    sink.commit(mutationFrame([]));
+    expect(onFrame.mock.calls[0]?.[0]).toMatchObject({
+      rasterCache: { bytes: 64 * 64 * 4, entries: 1, hits: 0, misses: 1 },
+      rasterFrame: { bypassed: false, hits: 0, misses: 1 },
+    });
+    expect(sink.replayLastFrame()).toMatchObject({ commands: 0 });
+    expect(sink.rasterCacheMetrics()).toMatchObject({ entries: 1, hits: 1, misses: 1 });
+    expect(targetCalls.filter(([operation]) => operation === "drawImage")).toHaveLength(2);
+  });
 });
 
 function mutationFrame(mutations: readonly Mutation[]): Uint8Array {
@@ -183,6 +227,9 @@ function displayList(commands: readonly Uint8Array[]): Uint8Array {
 function fakeContext(calls: unknown[][], events: string[]): Canvas2DContext {
   const state = { fillStyle: "", globalAlpha: 1 };
   return {
+    canvas: { height: 64, width: 64 },
+    clearRect: (...values: number[]) => calls.push(["clearRect", ...values]),
+    drawImage: (...values: unknown[]) => calls.push(["drawImage", ...values]),
     get fillStyle() {
       return state.fillStyle;
     },
@@ -203,6 +250,8 @@ function fakeContext(calls: unknown[][], events: string[]): Canvas2DContext {
       events.push("canvas");
       calls.push(["restore"]);
     },
+    resetTransform: () => calls.push(["resetTransform"]),
     fillRect: (...values: number[]) => calls.push(["fillRect", ...values, state.fillStyle]),
+    translate: (...values: number[]) => calls.push(["translate", ...values]),
   } as unknown as Canvas2DContext;
 }

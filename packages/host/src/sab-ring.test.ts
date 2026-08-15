@@ -24,7 +24,31 @@ describe("SabMutationRing", () => {
     expect(consumer.metrics()).toMatchObject({ consumed: 2, occupancy: 0 });
   });
 
-  it("wraps unsigned cursors under sustained model-checked traffic", () => {
+  it("matches a FIFO oracle for every producer/consumer schedule up to ten operations", () => {
+    const operationCount = 10;
+    for (let schedule = 0; schedule < 1 << operationCount; schedule += 1) {
+      const { buffer, ring: producer } = SabMutationRing.create(2, 4);
+      const consumer = SabMutationRing.attach(buffer);
+      const model: Array<{ readonly bytes: Uint8Array; readonly frameSeq: number }> = [];
+      let nextSequence = 1;
+      for (let operation = 0; operation < operationCount; operation += 1) {
+        if ((schedule & (1 << operation)) !== 0) {
+          const frameSeq = nextSequence++;
+          const bytes = frame(frameSeq);
+          const accepted = producer.tryPublish(frameSeq, bytes);
+          expect(accepted).toBe(model.length < 2);
+          if (accepted) model.push({ bytes, frameSeq });
+        } else {
+          expect(consumer.take()).toEqual(model.shift() ?? null);
+        }
+        expect(producer.metrics().occupancy).toBe(model.length);
+        expect(producer.metrics().corruptionFailures).toBe(0);
+      }
+      while (model.length > 0) expect(consumer.take()).toEqual(model.shift());
+    }
+  });
+
+  it("wraps unsigned cursors under sustained deterministic oracle traffic", () => {
     const { buffer, ring: producer } = SabMutationRing.create(3, 16);
     const consumer = SabMutationRing.attach(buffer);
     const model: Array<{ readonly bytes: Uint8Array; readonly frameSeq: number }> = [];
@@ -60,3 +84,9 @@ describe("SabMutationRing", () => {
     expect(() => ring.tryPublish(1, Uint8Array.of(1, 2, 3, 4))).toThrow(/closed/u);
   });
 });
+
+function frame(value: number): Uint8Array {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, value, true);
+  return bytes;
+}
