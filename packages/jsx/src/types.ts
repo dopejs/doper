@@ -2,7 +2,7 @@
 export type Key = string | number;
 
 /** Engine-native host element names. */
-export type HostType = "container" | "editableText" | "scroll" | "text";
+export type HostType = "container" | "editableText" | "scroll" | "text" | "virtualList";
 
 /** Mounted host handle exposed through refs without leaking internal instances. */
 export interface NodeHandle {
@@ -52,6 +52,18 @@ export type ContainerProps = CommonProps;
 
 /** Clipped Core-owned scrolling element. */
 export interface ScrollProps extends CommonProps {
+  readonly scrollX?: number;
+  readonly scrollY?: number;
+}
+
+/** Core-planned virtual list whose Shell materializes only the requested preheat window. */
+export interface VirtualListProps extends Omit<CommonProps, "children"> {
+  readonly itemCount: number;
+  readonly estimatedItemHeight: number;
+  readonly renderItem: (index: number) => DoperNode;
+  readonly baseOverscanViewports?: number;
+  readonly velocityHorizonSeconds?: number;
+  readonly maximumAheadViewports?: number;
   readonly scrollX?: number;
   readonly scrollY?: number;
 }
@@ -123,5 +135,6 @@ export declare namespace JSX {
     editableText: EditableTextProps;
     scroll: ScrollProps;
     text: TextProps;
+    virtualList: VirtualListProps;
   }
 }

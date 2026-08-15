@@ -113,6 +113,95 @@ describe("reconciler", () => {
     expect(() => root.invokeCallback(binding?.resourceId ?? 0)).toThrow(/unknown callback/u);
   });
 
+  it("materializes only Core-requested virtual-list windows and reuses overlapping items", () => {
+    const sink = new RecordingSink();
+    const renderItem = vi.fn((index: number) => createElement("text", { value: `item ${index}` }));
+    const root = createRoot(sink);
+    root.render(
+      createElement("virtualList", {
+        height: 320,
+        itemCount: 1_000_000,
+        estimatedItemHeight: 40,
+        renderItem,
+      }),
+    );
+
+    expect(renderItem).not.toHaveBeenCalled();
+    expect(mutationsOfType(sink.batches[0], "createNode")).toHaveLength(2);
+    const configuration = mutationsOfType(sink.batches[0], "configureVirtualList")[0];
+    expect(configuration).toEqual(
+      expect.objectContaining({
+        itemCount: 1_000_000,
+        estimatedItemHeight: 40,
+        baseOverscanViewports: 1,
+        velocityHorizonSeconds: 0.25,
+        maximumAheadViewports: 4,
+      }),
+    );
+
+    const nodeId = configuration?.nodeId ?? 0;
+    root.refillVirtualRanges([{ nodeId, start: 0, end: 3 }]);
+    expect(renderItem.mock.calls.map(([index]) => index)).toEqual([0, 1, 2]);
+    expect(
+      mutationsOfType(sink.batches[1], "setVirtualItem").map(({ itemIndex }) => itemIndex),
+    ).toEqual([0, 1, 2]);
+    expect(mutationsOfType(sink.batches[1], "createNode")).toHaveLength(6);
+
+    root.refillVirtualRanges([{ nodeId, start: 2, end: 5 }]);
+    expect(renderItem.mock.calls.map(([index]) => index)).toEqual([0, 1, 2, 3, 4]);
+    expect(
+      mutationsOfType(sink.batches[2], "setVirtualItem").map(({ itemIndex }) => itemIndex),
+    ).toEqual([3, 4]);
+    expect(mutationsOfType(sink.batches[2], "createNode")).toHaveLength(4);
+    expect(mutationsOfType(sink.batches[2], "removeNode")).toHaveLength(2);
+
+    root.refillVirtualRanges([{ nodeId: 0xffff_fffe, start: 0, end: 1 }]);
+    expect(sink.batches).toHaveLength(3);
+  });
+
+  it("coalesces virtual windows and clamps a request racing a smaller itemCount", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    root.render(
+      createElement("virtualList", {
+        itemCount: 10,
+        estimatedItemHeight: 20,
+        renderItem: (index: number) => createElement("text", { value: String(index) }),
+      }),
+    );
+    const nodeId = mutationsOfType(sink.batches[0], "configureVirtualList")[0]?.nodeId ?? 0;
+    root.refillVirtualRanges([
+      { nodeId, start: 0, end: 2 },
+      { nodeId, start: 3, end: 5 },
+    ]);
+    expect(
+      mutationsOfType(sink.batches[1], "setVirtualItem").map(({ itemIndex }) => itemIndex),
+    ).toEqual([3, 4]);
+
+    root.refillVirtualRanges([{ nodeId, start: 9, end: 11 }]);
+    expect(
+      mutationsOfType(sink.batches[2], "setVirtualItem").map(({ itemIndex }) => itemIndex),
+    ).toEqual([9]);
+    root.refillVirtualRanges([{ nodeId, start: 11, end: 12 }]);
+    expect(sink.batches).toHaveLength(3);
+    expect(root.failed).toBe(false);
+  });
+
+  it("validates virtual-list policy before producing a frame", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    expect(() =>
+      root.render(
+        createElement("virtualList", {
+          itemCount: 4_000_001,
+          estimatedItemHeight: 20,
+          renderItem: () => null,
+        }),
+      ),
+    ).toThrow(/itemCount/u);
+    expect(sink.batches).toHaveLength(0);
+  });
+
   it("fails closed after a sink rejects a frame", () => {
     const error = new Error("transport unavailable");
     const onFatalError = vi.fn();

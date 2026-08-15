@@ -19,12 +19,48 @@ describe("render Worker protocol validation", () => {
     ).toBe(true);
     expect(
       isRenderWorkerInboundMessage({
+        canvas: {},
+        height: 100,
+        inputRingBuffer: new SharedArrayBuffer(64),
+        kind: "doper:activate",
+        mode: "sab",
+        rasterCache: true,
+        ringBuffer: new SharedArrayBuffer(64),
+        sessionId: 7,
+        width: 100,
+      }),
+    ).toBe(true);
+    expect(
+      isRenderWorkerInboundMessage({
+        canvas: {},
+        height: 100,
+        kind: "doper:activate",
+        mode: "sab",
+        rasterCache: true,
+        ringBuffer: new SharedArrayBuffer(64),
+        sessionId: 7,
+        width: 100,
+      }),
+    ).toBe(false);
+    expect(isRenderWorkerInboundMessage({ kind: "doper:input-wake", sessionId: 7 })).toBe(true);
+    expect(
+      isRenderWorkerInboundMessage({
         kind: "doper:clock-anchor",
         sequence: 1,
         sessionId: 7,
         timestamp: Number.NaN,
       }),
     ).toBe(false);
+    expect(
+      isRenderWorkerInboundMessage({
+        bytes: Uint8Array.of(1, 2, 3, 4),
+        kind: "doper:input",
+        sessionId: 7,
+      }),
+    ).toBe(true);
+    expect(isRenderWorkerInboundMessage({ bytes: [], kind: "doper:input", sessionId: 7 })).toBe(
+      false,
+    );
     expect(
       isRenderWorkerOutboundMessage({
         capabilities: { offscreenCanvas: true, sharedArrayBuffer: false },
@@ -36,6 +72,20 @@ describe("render Worker protocol validation", () => {
       isRenderWorkerOutboundMessage({
         capabilities: { offscreenCanvas: "yes", sharedArrayBuffer: false },
         kind: "doper:prepared",
+        sessionId: 7,
+      }),
+    ).toBe(false);
+    expect(
+      isRenderWorkerOutboundMessage({
+        kind: "doper:virtual-refill",
+        requests: [{ nodeId: 0x0010_0001, start: 4, end: 8 }],
+        sessionId: 7,
+      }),
+    ).toBe(true);
+    expect(
+      isRenderWorkerOutboundMessage({
+        kind: "doper:virtual-refill",
+        requests: [{ nodeId: 1, start: 8, end: 4 }],
         sessionId: 7,
       }),
     ).toBe(false);

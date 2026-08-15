@@ -78,6 +78,20 @@ export type Mutation =
       readonly x: number;
       readonly y: number;
       readonly behavior: number;
+    }
+  | {
+      readonly type: "configureVirtualList";
+      readonly nodeId: number;
+      readonly itemCount: number;
+      readonly estimatedItemHeight: number;
+      readonly baseOverscanViewports: number;
+      readonly velocityHorizonSeconds: number;
+      readonly maximumAheadViewports: number;
+    }
+  | {
+      readonly type: "setVirtualItem";
+      readonly nodeId: number;
+      readonly itemIndex: number;
     };
 
 /** A complete transaction. Commit is encoded automatically at the end. */
@@ -268,6 +282,25 @@ function encodeMutation(writer: ByteWriter, mutation: Mutation): void {
       writer.f32(mutation.y);
       writer.u16(mutation.behavior);
       writer.u16(0);
+      return;
+    case "configureVirtualList":
+      assertU32(mutation.nodeId, "nodeId");
+      assertU32(mutation.itemCount, "itemCount");
+      writer.instruction(MutationOpcode.ConfigureVirtualList);
+      writer.u32(mutation.nodeId);
+      writer.u32(mutation.itemCount);
+      writer.f32(mutation.estimatedItemHeight);
+      writer.f32(mutation.baseOverscanViewports);
+      writer.f32(mutation.velocityHorizonSeconds);
+      writer.f32(mutation.maximumAheadViewports);
+      return;
+    case "setVirtualItem":
+      assertU32(mutation.nodeId, "nodeId");
+      assertU32(mutation.itemIndex, "itemIndex");
+      writer.instruction(MutationOpcode.SetVirtualItem);
+      writer.u32(mutation.nodeId);
+      writer.u32(mutation.itemIndex);
+      return;
   }
 }
 
@@ -360,6 +393,22 @@ function decodeMutation(reader: ByteReader, opcode: MutationOpcode): Mutation {
       reader.zeroes(2);
       return { type: "scrollTo", nodeId, x, y, behavior };
     }
+    case MutationOpcode.ConfigureVirtualList:
+      return {
+        type: "configureVirtualList",
+        nodeId: reader.u32(),
+        itemCount: reader.u32(),
+        estimatedItemHeight: reader.f32(),
+        baseOverscanViewports: reader.f32(),
+        velocityHorizonSeconds: reader.f32(),
+        maximumAheadViewports: reader.f32(),
+      };
+    case MutationOpcode.SetVirtualItem:
+      return {
+        type: "setVirtualItem",
+        nodeId: reader.u32(),
+        itemIndex: reader.u32(),
+      };
     default:
       return fail(`unknown mutation opcode ${String(opcode)}`);
   }

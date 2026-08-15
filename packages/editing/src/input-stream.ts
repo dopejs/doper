@@ -12,6 +12,8 @@ import {
 } from "./generated";
 
 const MAX_U64 = 0xffff_ffff_ffff_ffffn;
+const MAX_SCROLL_DELTA = 1_000_000;
+const MAX_SCROLL_DELTA_MICROS = 1_000_000;
 const utf8Encoder = new TextEncoder();
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
@@ -40,7 +42,7 @@ interface InputTarget {
   readonly baseRevision: bigint;
 }
 
-/** Browser-independent, revision-checked editing command. */
+/** Browser-independent editing or direct-manipulation command. */
 export type InputCommand =
   | (InputTarget & {
       readonly type: "replace";
@@ -57,7 +59,17 @@ export type InputCommand =
   | (InputTarget & { readonly type: "commitComposition"; readonly text?: string })
   | (InputTarget & { readonly type: "cancelComposition" })
   | (InputTarget & { readonly type: "undo" })
-  | (InputTarget & { readonly type: "redo" });
+  | (InputTarget & { readonly type: "redo" })
+  | { readonly type: "scrollBegin"; readonly nodeId: number }
+  | {
+      readonly type: "scrollDelta";
+      readonly nodeId: number;
+      readonly deltaX: number;
+      readonly deltaY: number;
+      readonly elapsedMicros: number;
+    }
+  | { readonly type: "scrollEnd"; readonly nodeId: number }
+  | { readonly type: "scrollCancel"; readonly nodeId: number };
 
 /** Complete ordered transaction; Commit is encoded automatically. */
 export interface InputBatch {
@@ -134,6 +146,30 @@ export function decodeInputBatch(input: Uint8Array): InputBatch {
 function encodeCommand(writer: ByteWriter, command: InputCommand): void {
   const opcode = opcodeFor(command);
   writer.instruction(opcode);
+  switch (command.type) {
+    case "scrollBegin":
+    case "scrollEnd":
+    case "scrollCancel":
+      assertU32(command.nodeId, "scroll nodeId");
+      writer.u32(command.nodeId);
+      return;
+    case "scrollDelta":
+      assertU32(command.nodeId, "scroll nodeId");
+      assertScrollDelta(command.deltaX, "scroll deltaX");
+      assertScrollDelta(command.deltaY, "scroll deltaY");
+      if (
+        !Number.isInteger(command.elapsedMicros) ||
+        command.elapsedMicros < 1 ||
+        command.elapsedMicros > MAX_SCROLL_DELTA_MICROS
+      ) {
+        fail("scroll delta elapsed time is invalid");
+      }
+      writer.u32(command.nodeId);
+      writer.f32(command.deltaX);
+      writer.f32(command.deltaY);
+      writer.u32(command.elapsedMicros);
+      return;
+  }
   writer.target(command);
   switch (command.type) {
     case "replace":
@@ -166,23 +202,23 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
 }
 
 function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
-  const target = reader.target();
   switch (opcode) {
     case InputOpcode.Replace:
       return {
-        ...target,
+        ...reader.target(),
         type: "replace",
         start: reader.u32(),
         end: reader.u32(),
         text: reader.text(),
       };
     case InputOpcode.Insert:
-      return { ...target, type: "insert", text: reader.text() };
+      return { ...reader.target(), type: "insert", text: reader.text() };
     case InputOpcode.DeleteBackward:
-      return { ...target, type: "deleteBackward" };
+      return { ...reader.target(), type: "deleteBackward" };
     case InputOpcode.DeleteForward:
-      return { ...target, type: "deleteForward" };
+      return { ...reader.target(), type: "deleteForward" };
     case InputOpcode.SetSelection: {
+      const target = reader.target();
       const anchorOffset = reader.u32();
       const focusOffset = reader.u32();
       const anchorAffinity = reader.affinity();
@@ -198,10 +234,11 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
       };
     }
     case InputOpcode.BeginComposition:
-      return { ...target, type: "beginComposition" };
+      return { ...reader.target(), type: "beginComposition" };
     case InputOpcode.UpdateComposition:
-      return { ...target, type: "updateComposition", text: reader.text() };
+      return { ...reader.target(), type: "updateComposition", text: reader.text() };
     case InputOpcode.CommitComposition: {
+      const target = reader.target();
       const hasText = reader.u8();
       reader.zeroes(3);
       const text = reader.text();
@@ -211,11 +248,29 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
       return fail("invalid composition text presence flag");
     }
     case InputOpcode.CancelComposition:
-      return { ...target, type: "cancelComposition" };
+      return { ...reader.target(), type: "cancelComposition" };
     case InputOpcode.Undo:
-      return { ...target, type: "undo" };
+      return { ...reader.target(), type: "undo" };
     case InputOpcode.Redo:
-      return { ...target, type: "redo" };
+      return { ...reader.target(), type: "redo" };
+    case InputOpcode.ScrollBegin:
+      return { type: "scrollBegin", nodeId: reader.u32() };
+    case InputOpcode.ScrollDelta: {
+      const nodeId = reader.u32();
+      const deltaX = reader.f32();
+      const deltaY = reader.f32();
+      assertScrollDelta(deltaX, "scroll deltaX");
+      assertScrollDelta(deltaY, "scroll deltaY");
+      const elapsedMicros = reader.u32();
+      if (elapsedMicros < 1 || elapsedMicros > MAX_SCROLL_DELTA_MICROS) {
+        return fail("scroll delta elapsed time is invalid");
+      }
+      return { type: "scrollDelta", nodeId, deltaX, deltaY, elapsedMicros };
+    }
+    case InputOpcode.ScrollEnd:
+      return { type: "scrollEnd", nodeId: reader.u32() };
+    case InputOpcode.ScrollCancel:
+      return { type: "scrollCancel", nodeId: reader.u32() };
     default:
       return fail(`unexpected input opcode ${String(opcode)}`);
   }
@@ -245,6 +300,14 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.Undo;
     case "redo":
       return InputOpcode.Redo;
+    case "scrollBegin":
+      return InputOpcode.ScrollBegin;
+    case "scrollDelta":
+      return InputOpcode.ScrollDelta;
+    case "scrollEnd":
+      return InputOpcode.ScrollEnd;
+    case "scrollCancel":
+      return InputOpcode.ScrollCancel;
   }
 }
 
@@ -302,6 +365,13 @@ class ByteWriter {
       (value >>> 16) & 0xff,
       (value >>> 24) & 0xff,
     );
+  }
+
+  public f32(value: number): void {
+    if (!Number.isFinite(value)) fail("value must be a finite f32");
+    const bytes = new Uint8Array(4);
+    new DataView(bytes.buffer).setFloat32(0, value, true);
+    this.bytes(bytes);
   }
 
   public bytes(value: Uint8Array): void {
@@ -398,6 +468,14 @@ class ByteReader {
     return value;
   }
 
+  public f32(): number {
+    this.require(4);
+    const value = this.#view.getFloat32(this.#offset, true);
+    this.#offset += 4;
+    if (!Number.isFinite(value)) fail("input contains a non-finite f32");
+    return value;
+  }
+
   public bytes(length: number): Uint8Array {
     this.require(length);
     const result = this.#input.slice(this.#offset, this.#offset + length);
@@ -440,6 +518,12 @@ function assertU32(value: number, label: string): void {
 function assertU64(value: bigint, label: string): void {
   if (typeof value !== "bigint" || value < 0n || value > MAX_U64) {
     fail(`${label} must be a u64 bigint`);
+  }
+}
+
+function assertScrollDelta(value: number, label: string): void {
+  if (!Number.isFinite(value) || Math.abs(value) > MAX_SCROLL_DELTA) {
+    fail(`${label} exceeds the finite scroll delta bounds`);
   }
 }
 

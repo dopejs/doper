@@ -73,6 +73,7 @@ dependencies = [
  "doper-layout",
  "doper-paint",
  "doper-scene",
+ "doper-scroll",
  "wasm-bindgen",
 ]
 
@@ -131,6 +132,13 @@ name = "doper-scene"
 version = "0.1.0"
 dependencies = [
  "doper-abi",
+ "proptest",
+]
+
+[[package]]
+name = "doper-scroll"
+version = "0.1.0"
+dependencies = [
  "proptest",
 ]
 

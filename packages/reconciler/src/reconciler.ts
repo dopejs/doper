@@ -1,5 +1,6 @@
 import {
   Fragment,
+  createElement,
   isDoperElement,
   normalizeChildren,
   type AnyDoperElement,
@@ -11,10 +12,11 @@ import {
   type Key,
   type NodeHandle,
   type Ref,
+  type VirtualListProps,
 } from "@dopejs/doper-jsx";
 import { ComponentScope } from "@dopejs/doper-runtime/internal";
 
-import { NodeKind, Prop, ResourceKind } from "./generated";
+import { MAX_VIRTUAL_ITEMS, NodeKind, Prop, ResourceKind } from "./generated";
 import { encodeMutationBatch, NULL_NODE_ID, type Mutation } from "./mutation-stream";
 import { NodeIdAllocator } from "./node-id";
 import {
@@ -46,6 +48,18 @@ export interface DoperRoot {
   readonly failed: boolean;
 }
 
+/** Internal Host contract for applying asynchronous Core virtual windows. */
+export interface CoreDrivenDoperRoot extends DoperRoot {
+  refillVirtualRanges(requests: readonly VirtualRangeRequest[]): void;
+}
+
+/** Core-planned full preheat window to materialize outside the render frame. */
+export interface VirtualRangeRequest {
+  readonly end: number;
+  readonly nodeId: number;
+  readonly start: number;
+}
+
 interface RootOwner {
   readonly kind: "root";
   children: Instance[];
@@ -69,6 +83,10 @@ interface HostInstance extends BaseInstance {
   onTapId: number | undefined;
   ref: Ref<NodeHandle> | undefined;
   scrollPosition: readonly [number, number] | undefined;
+  virtualItemIndex: number | undefined;
+  virtualItems: Map<number, DoperNode>;
+  virtualList: NormalizedVirtualList | undefined;
+  virtualRange: readonly [number, number] | undefined;
 }
 
 interface ComponentInstance extends BaseInstance {
@@ -103,6 +121,17 @@ interface NormalizedHostProps {
       }
     | undefined;
   readonly scrollPosition: readonly [number, number] | undefined;
+  readonly virtualItemIndex: number | undefined;
+  readonly virtualList: NormalizedVirtualList | undefined;
+}
+
+interface NormalizedVirtualList {
+  readonly itemCount: number;
+  readonly estimatedItemHeight: number;
+  readonly baseOverscanViewports: number;
+  readonly velocityHorizonSeconds: number;
+  readonly maximumAheadViewports: number;
+  readonly renderItem: (index: number) => DoperNode;
 }
 
 interface CallbackEntry {
@@ -149,13 +178,23 @@ const EDITABLE_KEYS = new Set([
   "readOnly",
 ]);
 const SCROLL_KEYS = new Set([...COMMON_KEYS, "scrollX", "scrollY"]);
+const VIRTUAL_LIST_KEYS = new Set([
+  ...[...SCROLL_KEYS].filter((key) => key !== "children"),
+  "baseOverscanViewports",
+  "estimatedItemHeight",
+  "itemCount",
+  "maximumAheadViewports",
+  "renderItem",
+  "velocityHorizonSeconds",
+]);
+const VIRTUAL_ITEM_INDEX = Symbol("doper.virtualItemIndex");
 
 /** Creates one deterministic component tree and Mutation Stream producer. */
-export function createRoot(sink: MutationSink, options: RootOptions = {}): DoperRoot {
+export function createRoot(sink: MutationSink, options: RootOptions = {}): CoreDrivenDoperRoot {
   return new ReconcilerRoot(sink, options);
 }
 
-class ReconcilerRoot implements DoperRoot {
+class ReconcilerRoot implements CoreDrivenDoperRoot {
   readonly #sink: MutationSink;
   readonly #schedule: (task: () => void) => void;
   readonly #onFatalError: ((error: Error) => void) | undefined;
@@ -167,6 +206,7 @@ class ReconcilerRoot implements DoperRoot {
   readonly #owner: RootOwner = { kind: "root", children: [] };
   readonly #dirtyComponents = new Set<ComponentInstance>();
   readonly #liveScopes = new Set<ComponentScope>();
+  readonly #hostsByNodeId = new Map<number, HostInstance>();
   readonly #renderedScopes = new Set<ComponentScope>();
   readonly #scopesPendingDisposal = new Set<ComponentScope>();
   readonly #postCommitCleanups: Array<() => void> = [];
@@ -216,6 +256,50 @@ class ReconcilerRoot implements DoperRoot {
     const callback = this.#callbacksById.get(callbackId)?.callback;
     if (callback === undefined) throw new Error(`unknown callback ${String(callbackId)}`);
     callback();
+  }
+
+  public refillVirtualRanges(requests: readonly VirtualRangeRequest[]): void {
+    this.assertUsable();
+    const candidates: readonly VirtualRangeRequest[] = requests;
+    if (!Array.isArray(requests)) {
+      throw new TypeError("virtual refill requests must be an array");
+    }
+    const latest = new Map<number, VirtualRangeRequest>();
+    for (const request of candidates) {
+      if (request === null || typeof request !== "object") {
+        throw new TypeError("virtual refill request must be an object");
+      }
+      assertU32(request.nodeId, "virtual refill nodeId");
+      assertU32(request.start, "virtual refill start");
+      assertU32(request.end, "virtual refill end");
+      if (request.start >= request.end)
+        throw new RangeError("virtual refill range must be non-empty");
+      latest.set(request.nodeId, request);
+    }
+    const applicable = [...latest.values()]
+      .filter((request) => {
+        const instance = this.#hostsByNodeId.get(request.nodeId);
+        return instance?.mounted === true && instance.type === "virtualList";
+      })
+      .sort((left, right) => left.nodeId - right.nodeId);
+    if (applicable.length === 0) return;
+    this.perform(() => {
+      for (const request of applicable) {
+        const instance = this.#hostsByNodeId.get(request.nodeId);
+        if (instance === undefined || instance.type !== "virtualList") continue;
+        const config = instance.virtualList;
+        if (config === undefined) throw new Error("virtual list instance lost its configuration");
+        // A queued Core window may race a newer application render that shrank
+        // itemCount. The Shell's latest durable value wins: clamp overlap and
+        // ignore a window wholly beyond the new end instead of failing the root.
+        if (request.start >= config.itemCount) continue;
+        this.materializeVirtualWindow(
+          instance,
+          request.start,
+          Math.min(request.end, config.itemCount),
+        );
+      }
+    });
   }
 
   public unmount(): void {
@@ -373,6 +457,7 @@ class ReconcilerRoot implements DoperRoot {
     this.#owner.children = [];
     this.#callbacksByFunction.clear();
     this.#callbacksById.clear();
+    this.#hostsByNodeId.clear();
     this.#resources.discard();
     return secondaryErrors;
   }
@@ -491,6 +576,10 @@ class ReconcilerRoot implements DoperRoot {
       onTapId: undefined,
       ref: undefined,
       scrollPosition: undefined,
+      virtualItemIndex: undefined,
+      virtualItems: new Map(),
+      virtualList: undefined,
+      virtualRange: undefined,
       mounted: true,
     };
     this.mutations().push({
@@ -501,6 +590,7 @@ class ReconcilerRoot implements DoperRoot {
       beforeSibling: NULL_NODE_ID,
     });
     this.applyHostProps(instance, normalized);
+    this.#hostsByNodeId.set(nodeId, instance);
     instance.props = props;
     if (allowsHostChildren(type)) {
       instance.children = this.reconcileChildren(
@@ -530,6 +620,7 @@ class ReconcilerRoot implements DoperRoot {
     const props =
       typeof descriptor === "string" ? ({ value: descriptor } as const) : descriptor.props;
     const normalized = normalizeHostProps(instance.type, props);
+    const previousVirtualList = instance.virtualList;
     this.applyHostProps(instance, normalized);
     instance.props = props;
     if (allowsHostChildren(instance.type)) {
@@ -539,6 +630,20 @@ class ReconcilerRoot implements DoperRoot {
         instance.children,
         normalized.children,
       );
+    }
+    if (
+      instance.type === "virtualList" &&
+      instance.virtualRange !== undefined &&
+      (previousVirtualList?.renderItem !== instance.virtualList?.renderItem ||
+        previousVirtualList?.itemCount !== instance.virtualList?.itemCount)
+    ) {
+      const [start, end] = instance.virtualRange;
+      const itemCount = instance.virtualList?.itemCount ?? 0;
+      if (previousVirtualList?.renderItem !== instance.virtualList?.renderItem) {
+        instance.virtualItems.clear();
+      }
+      instance.virtualRange = undefined;
+      this.materializeVirtualWindow(instance, Math.min(start, itemCount), Math.min(end, itemCount));
     }
     this.updateRef(instance, normalized.ref);
     return instance;
@@ -607,6 +712,65 @@ class ReconcilerRoot implements DoperRoot {
     } else {
       instance.scrollPosition = undefined;
     }
+    if (next.virtualList !== undefined) {
+      if (!equalVirtualListPolicy(instance.virtualList, next.virtualList)) {
+        this.mutations().push({
+          type: "configureVirtualList",
+          nodeId: instance.nodeId,
+          itemCount: next.virtualList.itemCount,
+          estimatedItemHeight: next.virtualList.estimatedItemHeight,
+          baseOverscanViewports: next.virtualList.baseOverscanViewports,
+          velocityHorizonSeconds: next.virtualList.velocityHorizonSeconds,
+          maximumAheadViewports: next.virtualList.maximumAheadViewports,
+        });
+      }
+      instance.virtualList = next.virtualList;
+    }
+    if (next.virtualItemIndex !== undefined) {
+      if (instance.virtualItemIndex !== next.virtualItemIndex) {
+        this.mutations().push({
+          type: "setVirtualItem",
+          nodeId: instance.nodeId,
+          itemIndex: next.virtualItemIndex,
+        });
+      }
+      instance.virtualItemIndex = next.virtualItemIndex;
+    }
+  }
+
+  private materializeVirtualWindow(instance: HostInstance, start: number, end: number): void {
+    if (instance.virtualRange?.[0] === start && instance.virtualRange[1] === end) return;
+    const config = instance.virtualList;
+    if (config === undefined) throw new Error("virtual list instance has no configuration");
+    const children: DoperNode[] = [];
+    for (let index = start; index < end; index += 1) {
+      let child = instance.virtualItems.get(index);
+      if (!instance.virtualItems.has(index)) {
+        child = config.renderItem(index);
+        instance.virtualItems.set(index, child);
+      }
+      const props = {
+        children: child,
+        [VIRTUAL_ITEM_INDEX]: index,
+      } as Record<string | symbol, unknown>;
+      children.push(
+        createElement(
+          "container",
+          props as unknown as Record<string, unknown>,
+          `doper:virtual:${String(index)}`,
+        ),
+      );
+    }
+    instance.children = this.reconcileChildren(
+      instance,
+      instance.nodeId,
+      instance.children,
+      children,
+    );
+    for (const index of instance.virtualItems.keys()) {
+      if (index < start || index >= end) instance.virtualItems.delete(index);
+    }
+    instance.virtualRange = [start, end];
   }
 
   private diffScalars(instance: HostInstance, next: Map<Prop, number>): void {
@@ -755,6 +919,7 @@ class ReconcilerRoot implements DoperRoot {
     }
     for (const child of instance.children) this.disposeInstance(child, false);
     instance.children = [];
+    instance.virtualItems.clear();
     for (const resourceId of instance.resources.values()) {
       this.#resources.release(resourceId, this.mutations());
     }
@@ -767,6 +932,7 @@ class ReconcilerRoot implements DoperRoot {
     if (emitHostRemove) {
       this.mutations().push({ type: "removeNode", nodeId: instance.nodeId });
     }
+    this.#hostsByNodeId.delete(instance.nodeId);
     this.#allocator.release(instance.nodeId);
   }
 
@@ -881,6 +1047,7 @@ function normalizeHostProps(
 ): NormalizedHostProps {
   assertAllowedProps(type, props);
   const common = props as CommonProps;
+  const propertyBag = props as Readonly<Record<PropertyKey, unknown>>;
   const scalars = new Map<Prop, number>();
   addOptionalDimension(scalars, Prop.Width, common.width, "width");
   addOptionalDimension(scalars, Prop.Height, common.height, "height");
@@ -931,10 +1098,70 @@ function normalizeHostProps(
   }
 
   let scrollPosition: readonly [number, number] | undefined;
-  if (type === "scroll") {
+  if (type === "scroll" || type === "virtualList") {
     const x = optionalFinite(props.scrollX, 0, "scrollX");
     const y = optionalFinite(props.scrollY, 0, "scrollY");
     scrollPosition = [x, y];
+  }
+
+  let virtualList: NormalizedVirtualList | undefined;
+  if (type === "virtualList") {
+    const virtualProps = props as unknown as VirtualListProps;
+    const itemCount = requireBoundedInteger(
+      virtualProps.itemCount,
+      0,
+      MAX_VIRTUAL_ITEMS,
+      "itemCount",
+    );
+    const estimatedItemHeight = requireBoundedFinite(
+      virtualProps.estimatedItemHeight,
+      Number.EPSILON,
+      1_000_000_000,
+      "estimatedItemHeight",
+    );
+    if (typeof virtualProps.renderItem !== "function") {
+      throw new TypeError("renderItem must be a function");
+    }
+    virtualList = {
+      itemCount,
+      estimatedItemHeight,
+      baseOverscanViewports: optionalBoundedFinite(
+        virtualProps.baseOverscanViewports,
+        1,
+        0,
+        64,
+        "baseOverscanViewports",
+      ),
+      velocityHorizonSeconds: optionalBoundedFinite(
+        virtualProps.velocityHorizonSeconds,
+        0.25,
+        0,
+        10,
+        "velocityHorizonSeconds",
+      ),
+      maximumAheadViewports: optionalBoundedFinite(
+        virtualProps.maximumAheadViewports,
+        4,
+        0,
+        64,
+        "maximumAheadViewports",
+      ),
+      renderItem: virtualProps.renderItem,
+    };
+  }
+
+  let virtualItemIndex: number | undefined;
+  const rawVirtualItemIndex = propertyBag[VIRTUAL_ITEM_INDEX];
+  if (rawVirtualItemIndex !== undefined) {
+    if (type !== "container") {
+      throw new TypeError("virtual item identity is only valid on container nodes");
+    }
+    virtualItemIndex = requireBoundedInteger(
+      rawVirtualItemIndex,
+      0,
+      MAX_VIRTUAL_ITEMS - 1,
+      "virtual item index",
+    );
   }
   return {
     children: allowsHostChildren(type) ? (props.children as DoperNode) : undefined,
@@ -948,6 +1175,8 @@ function normalizeHostProps(
     onTap,
     text,
     scrollPosition,
+    virtualItemIndex,
+    virtualList,
   };
 }
 
@@ -960,6 +1189,7 @@ function hostNodeKind(type: HostType): NodeKind {
     case "editableText":
       return NodeKind.EditableText;
     case "scroll":
+    case "virtualList":
       return NodeKind.Scroll;
     default:
       throw new TypeError(`unsupported host type ${String(type)}`);
@@ -1133,9 +1363,11 @@ function assertAllowedProps(type: HostType, props: Readonly<Record<string, unkno
       ? TEXT_KEYS
       : type === "editableText"
         ? EDITABLE_KEYS
-        : type === "scroll"
-          ? SCROLL_KEYS
-          : COMMON_KEYS;
+        : type === "virtualList"
+          ? VIRTUAL_LIST_KEYS
+          : type === "scroll"
+            ? SCROLL_KEYS
+            : COMMON_KEYS;
   for (const key of Object.keys(props)) {
     if (!allowed.has(key)) throw new TypeError(`unknown ${type} prop ${key}`);
   }
@@ -1163,6 +1395,66 @@ function equalQuad(
     left?.[2] === right[2] &&
     left?.[3] === right[3]
   );
+}
+
+function equalVirtualListPolicy(
+  left: NormalizedVirtualList | undefined,
+  right: NormalizedVirtualList,
+): boolean {
+  return (
+    left?.itemCount === right.itemCount &&
+    left.estimatedItemHeight === right.estimatedItemHeight &&
+    left.baseOverscanViewports === right.baseOverscanViewports &&
+    left.velocityHorizonSeconds === right.velocityHorizonSeconds &&
+    left.maximumAheadViewports === right.maximumAheadViewports
+  );
+}
+
+function assertU32(value: unknown, label: string): asserts value is number {
+  requireBoundedInteger(value, 0, 0xffff_ffff, label);
+}
+
+function requireBoundedInteger(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  label: string,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new RangeError(
+      `${label} must be an integer from ${String(minimum)} through ${String(maximum)}`,
+    );
+  }
+  return value;
+}
+
+function requireBoundedFinite(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  label: string,
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new RangeError(
+      `${label} must be finite and between ${String(minimum)} and ${String(maximum)}`,
+    );
+  }
+  return value;
+}
+
+function optionalBoundedFinite(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+  label: string,
+): number {
+  return value === undefined ? fallback : requireBoundedFinite(value, minimum, maximum, label);
 }
 
 function instanceDepth(instance: Instance): number {

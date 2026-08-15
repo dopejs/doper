@@ -112,6 +112,28 @@ pub enum Mutation {
         /// Generated behavior identifier reserved by the scrolling subsystem.
         behavior: u16,
     },
+    /// Configures a Scroll node as a Core-owned virtual list.
+    ConfigureVirtualList {
+        /// Target Scroll node.
+        node_id: u32,
+        /// Total logical item count without materializing Scene nodes.
+        item_count: u32,
+        /// Initial logical height estimate for every item.
+        estimated_item_height: f32,
+        /// Symmetric preheat extent in viewport multiples.
+        base_overscan_viewports: f32,
+        /// Velocity projection horizon in seconds.
+        velocity_horizon_seconds: f32,
+        /// Maximum directional preheat extent in viewport multiples.
+        maximum_ahead_viewports: f32,
+    },
+    /// Associates one materialized direct child with its logical list index.
+    SetVirtualItem {
+        /// Materialized item wrapper node.
+        node_id: u32,
+        /// Zero-based logical item index.
+        item_index: u32,
+    },
 }
 
 /// A mutation plus transport flags retained for forward-compatible semantics.
@@ -326,6 +348,18 @@ fn decode_mutation(opcode: MutationOpcode, reader: &mut Reader<'_>) -> Result<Mu
             reader.read_zeroes(2)?;
             result
         }
+        MutationOpcode::ConfigureVirtualList => Mutation::ConfigureVirtualList {
+            node_id: reader.read_u32()?,
+            item_count: reader.read_u32()?,
+            estimated_item_height: reader.read_f32()?,
+            base_overscan_viewports: reader.read_f32()?,
+            velocity_horizon_seconds: reader.read_f32()?,
+            maximum_ahead_viewports: reader.read_f32()?,
+        },
+        MutationOpcode::SetVirtualItem => Mutation::SetVirtualItem {
+            node_id: reader.read_u32()?,
+            item_index: reader.read_u32()?,
+        },
         MutationOpcode::Commit => return Err(AbiError::InvalidValue("nested commit")),
     })
 }
@@ -504,6 +538,30 @@ fn encode_mutation(writer: &mut Writer, instruction: &MutationInstruction) -> Re
             writer.u16(*behavior);
             writer.u16(0);
         }
+        Mutation::ConfigureVirtualList {
+            node_id,
+            item_count,
+            estimated_item_height,
+            base_overscan_viewports,
+            velocity_horizon_seconds,
+            maximum_ahead_viewports,
+        } => {
+            writer.instruction(MutationOpcode::ConfigureVirtualList as u8, flags);
+            writer.u32(*node_id);
+            writer.u32(*item_count);
+            writer.f32(*estimated_item_height)?;
+            writer.f32(*base_overscan_viewports)?;
+            writer.f32(*velocity_horizon_seconds)?;
+            writer.f32(*maximum_ahead_viewports)?;
+        }
+        Mutation::SetVirtualItem {
+            node_id,
+            item_index,
+        } => {
+            writer.instruction(MutationOpcode::SetVirtualItem as u8, flags);
+            writer.u32(*node_id);
+            writer.u32(*item_index);
+        }
     }
     validate_instruction_size(
         mutation_opcode(&instruction.mutation),
@@ -527,6 +585,8 @@ fn mutation_opcode(mutation: &Mutation) -> MutationOpcode {
         Mutation::DefineResource { .. } => MutationOpcode::DefineResource,
         Mutation::ReleaseResource { .. } => MutationOpcode::ReleaseResource,
         Mutation::ScrollTo { .. } => MutationOpcode::ScrollTo,
+        Mutation::ConfigureVirtualList { .. } => MutationOpcode::ConfigureVirtualList,
+        Mutation::SetVirtualItem { .. } => MutationOpcode::SetVirtualItem,
     }
 }
 
@@ -689,6 +749,18 @@ mod tests {
                 x: 18.0,
                 y: 19.0,
                 behavior: 20,
+            },
+            Mutation::ConfigureVirtualList {
+                node_id: 17,
+                item_count: 1_000_000,
+                estimated_item_height: 24.0,
+                base_overscan_viewports: 1.0,
+                velocity_horizon_seconds: 0.25,
+                maximum_ahead_viewports: 4.0,
+            },
+            Mutation::SetVirtualItem {
+                node_id: 18,
+                item_index: 999_999,
             },
         ];
         let batch = MutationBatch {

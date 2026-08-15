@@ -18,4 +18,5 @@ export {
   type Ref,
   type ScrollProps,
   type TextProps,
+  type VirtualListProps,
 } from "./types";

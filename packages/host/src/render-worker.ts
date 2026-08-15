@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import { decodeMutationBatch } from "@dopejs/doper-reconciler";
+import { decodeInputBatch } from "@dopejs/doper-editing";
 
 import { ABI_VERSION } from "./generated";
 import { CanvasFrameSink, createDefaultRasterCache, type CoreClient } from "./main-thread";
@@ -27,6 +28,7 @@ let core: CoreClient | undefined;
 let sink: CanvasFrameSink | undefined;
 let postMessageReceiver: PostMessageMutationReceiver | undefined;
 let sabReceiver: SabMutationReceiver | undefined;
+let inputRing: SabMutationRing | undefined;
 let clock: HybridRenderClock | undefined;
 let clockFramesSinceReport = 0;
 let operations = Promise.resolve();
@@ -76,6 +78,15 @@ async function handle(message: RenderWorkerInboundMessage): Promise<void> {
       post({ kind: "doper:shutdown-complete", sessionId });
       scope.close();
       return;
+    case "doper:input":
+      if (!active || message.sessionId !== sessionId) return;
+      drainInputRing();
+      sink?.input(message.bytes);
+      return;
+    case "doper:input-wake":
+      if (!active || message.sessionId !== sessionId) return;
+      drainInputRing();
+      return;
     case "doper:clock-anchor":
       return;
   }
@@ -101,6 +112,7 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
       post({ kind: "doper:frame", report, sessionId });
     },
     message.rasterCache ? createDefaultRasterCache(context, fatal) : undefined,
+    (requests) => post({ kind: "doper:virtual-refill", requests, sessionId }),
   );
   const consume = (frameSeq: number, bytes: Uint8Array): void => {
     const decoded = decodeMutationBatch(bytes);
@@ -109,13 +121,16 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
     sink?.commit(bytes);
   };
   if (message.mode === "sab") {
-    if (message.ringBuffer === undefined) throw new Error("SAB activation omitted ring buffer");
+    if (message.ringBuffer === undefined || message.inputRingBuffer === undefined) {
+      throw new Error("SAB activation omitted mutation or input ring buffer");
+    }
     sabReceiver = new SabMutationReceiver(
       scope,
       SabMutationRing.attach(message.ringBuffer),
       consume,
       { onError: fatal, sessionId },
     );
+    inputRing = SabMutationRing.attach(message.inputRingBuffer);
   } else {
     postMessageReceiver = new PostMessageMutationReceiver(scope, consume, {
       onError: fatal,
@@ -123,9 +138,10 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
     });
   }
   clock = new HybridRenderClock({ onError: fatal });
-  clock.start(() => {
+  clock.start((frame) => {
     sabReceiver?.drain();
-    sink?.replayLastFrame();
+    drainInputRing();
+    sink?.advance(frame.deltaMs / 1000);
     clockFramesSinceReport += 1;
     if (clockFramesSinceReport >= 60) {
       clockFramesSinceReport = 0;
@@ -145,9 +161,24 @@ function disposeRuntime(): void {
   clock = undefined;
   postMessageReceiver = undefined;
   sabReceiver = undefined;
+  inputRing = undefined;
   sink = undefined;
   core = undefined;
   active = false;
+}
+
+function drainInputRing(): void {
+  const ring = inputRing;
+  if (ring === undefined) return;
+  for (;;) {
+    const frame = ring.take();
+    if (frame === null) return;
+    const decoded = decodeInputBatch(frame.bytes);
+    if (decoded.frameSeq !== frame.frameSeq) {
+      throw new Error("transport and Input Stream sequences differ");
+    }
+    sink?.input(frame.bytes);
+  }
 }
 
 function fatal(cause: unknown): void {

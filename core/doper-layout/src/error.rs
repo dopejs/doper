@@ -29,6 +29,10 @@ pub enum LayoutError {
         node: NodeId,
         size: crate::Size,
     },
+    InvalidVirtualGeometry {
+        node: NodeId,
+        value: f32,
+    },
     SceneInvariant(&'static str),
 }
 

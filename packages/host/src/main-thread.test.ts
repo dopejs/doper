@@ -181,6 +181,58 @@ describe("CanvasFrameSink", () => {
     expect(sink.rasterCacheMetrics()).toMatchObject({ entries: 1, hits: 1, misses: 1 });
     expect(targetCalls.filter(([operation]) => operation === "drawImage")).toHaveLength(2);
   });
+
+  it("routes input and animation frames without requiring a Shell mutation", () => {
+    const reports: FrameReport[] = [];
+    let animationChanged = false;
+    const core: CoreClient = {
+      commit: () => emptyDisplayList(),
+      input: () => emptyDisplayList(),
+      advance: () => (animationChanged ? emptyDisplayList() : undefined),
+      frame_diagnostics: () =>
+        Uint32Array.of(2, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0x1234, 0),
+    };
+    const sink = new CanvasFrameSink(fakeContext([], []), core, (report) => reports.push(report));
+    sink.commit(mutationFrame([]));
+    expect(sink.input(Uint8Array.of(1, 2, 3, 4))).toMatchObject({ commands: 0 });
+    expect(sink.advance(1 / 60)).toMatchObject({ commands: 0 });
+    animationChanged = true;
+    expect(sink.advance(1 / 60)).toMatchObject({ commands: 0 });
+
+    expect(reports.map(({ cause }) => cause)).toEqual(["mutation", "input", "animation"]);
+    expect(reports[1]).toMatchObject({ inputBytes: 4, mutationBytes: 0 });
+    expect(reports[2]).toMatchObject({ animationDeltaMs: 1000 / 60, mutationBytes: 0 });
+    expect(() => sink.advance(Number.NaN)).toThrow(/elapsedSeconds/u);
+  });
+
+  it("drains and validates versioned virtual refill ranges after Core frames", () => {
+    const refills = vi.fn();
+    let first = true;
+    const sink = new CanvasFrameSink(
+      fakeContext([], []),
+      {
+        commit: () => emptyDisplayList(),
+        take_virtual_refills: () => {
+          if (!first) return Uint32Array.of(1, 0);
+          first = false;
+          return Uint32Array.of(1, 1, 0x0010_0001, 4, 8);
+        },
+      },
+      undefined,
+      undefined,
+      refills,
+    );
+    sink.commit(mutationFrame([]));
+    sink.commit(mutationFrame([]));
+    expect(refills).toHaveBeenCalledOnce();
+    expect(refills).toHaveBeenCalledWith([{ nodeId: 0x0010_0001, start: 4, end: 8 }]);
+
+    const malformed = new CanvasFrameSink(fakeContext([], []), {
+      commit: () => emptyDisplayList(),
+      take_virtual_refills: () => Uint32Array.of(1, 1),
+    });
+    expect(() => malformed.commit(mutationFrame([]))).toThrow(/request count/u);
+  });
 });
 
 function mutationFrame(mutations: readonly Mutation[]): Uint8Array {

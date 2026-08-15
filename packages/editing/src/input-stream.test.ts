@@ -47,6 +47,10 @@ function sampleBatch(): InputBatch {
       { type: "cancelComposition", nodeId: 1, baseRevision: REVISION + 9n },
       { type: "undo", nodeId: 1, baseRevision: REVISION + 10n },
       { type: "redo", nodeId: 1, baseRevision: REVISION + 11n },
+      { type: "scrollBegin", nodeId: 2 },
+      { type: "scrollDelta", nodeId: 2, deltaX: -3.5, deltaY: 24.25, elapsedMicros: 16_667 },
+      { type: "scrollEnd", nodeId: 2 },
+      { type: "scrollCancel", nodeId: 2 },
     ],
   };
 }
@@ -81,6 +85,25 @@ describe("Input Stream", () => {
         ],
       }),
     ).toThrow(/u32/u);
+  });
+
+  it("rejects non-finite, oversized, and untimed scroll deltas", () => {
+    for (const command of [
+      { type: "scrollDelta", nodeId: 1, deltaX: Number.NaN, deltaY: 0, elapsedMicros: 1 },
+      { type: "scrollDelta", nodeId: 1, deltaX: 0, deltaY: 1_000_001, elapsedMicros: 1 },
+      { type: "scrollDelta", nodeId: 1, deltaX: 0, deltaY: 1, elapsedMicros: 0 },
+    ] as const) {
+      expect(() => encodeInputBatch({ frameSeq: 1, commands: [command] })).toThrow(
+        InputStreamError,
+      );
+    }
+
+    const invalid = encodeInputBatch({
+      frameSeq: 1,
+      commands: [{ type: "scrollDelta", nodeId: 1, deltaX: 0, deltaY: 1, elapsedMicros: 16_667 }],
+    });
+    new DataView(invalid.buffer).setFloat32(24, Number.POSITIVE_INFINITY, true);
+    expect(() => decodeInputBatch(invalid)).toThrow(/non-finite f32/u);
   });
 
   it("fails closed on unknown affinities, non-zero padding, and invalid UTF-8", () => {

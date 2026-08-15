@@ -28,6 +28,8 @@ pub enum InputReplayError {
         /// Node encoded in the rejected command.
         actual: u32,
     },
+    /// The shared Input Stream command belongs to another Core subsystem.
+    UnsupportedCommand,
     /// A revision, offset, composition, or resource invariant was rejected.
     Edit(EditError),
 }
@@ -43,7 +45,7 @@ impl std::error::Error for InputReplayError {
         match self {
             Self::Abi(error) => Some(error),
             Self::Edit(error) => Some(error),
-            Self::WrongTarget { .. } => None,
+            Self::WrongTarget { .. } | Self::UnsupportedCommand => None,
         }
     }
 }
@@ -74,7 +76,7 @@ impl EditSession {
         let mut candidate = self.clone();
         let mut transactions = Vec::with_capacity(batch.instructions.len());
         for instruction in batch.instructions {
-            let (actual_node, command) = edit_command(instruction.command);
+            let (actual_node, command) = edit_command(instruction.command)?;
             if actual_node != node_id {
                 return Err(InputReplayError::WrongTarget {
                     expected: node_id,
@@ -91,7 +93,7 @@ impl EditSession {
     }
 }
 
-fn edit_command(command: InputCommand) -> (u32, EditCommand) {
+fn edit_command(command: InputCommand) -> Result<(u32, EditCommand), InputReplayError> {
     let (node_id, base_revision, intent) = match command {
         InputCommand::Replace {
             node_id,
@@ -155,14 +157,18 @@ fn edit_command(command: InputCommand) -> (u32, EditCommand) {
             node_id,
             base_revision,
         } => (node_id, base_revision, EditIntent::Redo),
+        InputCommand::ScrollBegin { .. }
+        | InputCommand::ScrollDelta { .. }
+        | InputCommand::ScrollEnd { .. }
+        | InputCommand::ScrollCancel { .. } => return Err(InputReplayError::UnsupportedCommand),
     };
-    (
+    Ok((
         node_id,
         EditCommand {
             base_revision,
             intent,
         },
-    )
+    ))
 }
 
 fn selection_from_wire(selection: InputSelection) -> Selection {

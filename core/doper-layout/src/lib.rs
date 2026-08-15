@@ -8,8 +8,8 @@ mod error;
 mod geometry;
 
 pub use engine::{
-    IntrinsicMeasurer, LayoutEngine, LayoutMetrics, LayoutOutcome, LayoutSnapshot,
-    ZeroIntrinsicMeasurer,
+    EstimatedVirtualLayout, IntrinsicMeasurer, LayoutEngine, LayoutMetrics, LayoutOutcome,
+    LayoutSnapshot, VirtualLayoutProvider, ZeroIntrinsicMeasurer,
 };
 pub use error::LayoutError;
 pub use geometry::{BoxConstraints, Point, Size};

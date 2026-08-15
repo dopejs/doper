@@ -82,6 +82,36 @@ describe("Mutation Stream", () => {
     };
     expect(decodeMutationBatch(encodeMutationBatch(batch))).toEqual(batch);
   });
+
+  it("round-trips virtual-list configuration and materialized item identity", () => {
+    const batch: MutationBatch = {
+      frameSeq: 10,
+      mutations: [
+        {
+          type: "configureVirtualList",
+          nodeId: 1,
+          itemCount: 1_000_000,
+          estimatedItemHeight: 24,
+          baseOverscanViewports: 1,
+          velocityHorizonSeconds: 0.25,
+          maximumAheadViewports: 4,
+        },
+        { type: "setVirtualItem", nodeId: 2, itemIndex: 999_999 },
+      ],
+    };
+    expect(decodeMutationBatch(encodeMutationBatch(batch))).toEqual(batch);
+    expect(() =>
+      encodeMutationBatch({
+        ...batch,
+        mutations: [
+          {
+            ...(batch.mutations[0] as Extract<Mutation, { type: "configureVirtualList" }>),
+            estimatedItemHeight: Number.NaN,
+          },
+        ],
+      }),
+    ).toThrow(/finite/u);
+  });
 });
 
 function toHex(bytes: Uint8Array): string {

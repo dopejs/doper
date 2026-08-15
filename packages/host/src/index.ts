@@ -6,6 +6,7 @@ export {
   type CoreClient,
   type CoreFrameDiagnostics,
   type FrameReport,
+  type VirtualRefillRange,
 } from "./main-thread";
 export { createWasmCore, type WasmCoreInput } from "./wasm";
 export {
@@ -37,9 +38,11 @@ export {
 export {
   createHostedCanvasRoot,
   type ClockAnchorDriver,
+  type HostInputTransportMetrics,
   type HostMutationTransportMetrics,
   type HostedCanvasRoot,
   type HostedCanvasRootOptions,
+  type ScrollTarget,
 } from "./hosted-root";
 export {
   SabMutationReceiver,

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use doper_abi::{
     FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_LAYOUT_NODES_INDEX,
@@ -11,13 +11,14 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
-    MutationBatch, ResourceKind, TEXT_STYLE_FONT_SIZE_OFFSET, TEXT_STYLE_LINE_HEIGHT_OFFSET,
+    InputBatch, Mutation, MutationBatch, ResourceKind, TEXT_STYLE_FONT_SIZE_OFFSET,
+    TEXT_STYLE_LINE_HEIGHT_OFFSET,
 };
 use doper_layout::{BoxConstraints, IntrinsicMeasurer, LayoutEngine, Size};
 use doper_paint::{PaintEngine, PaintMetrics};
-use doper_scene::{DirtyDomain, NodeId, Scene, SceneMetrics};
+use doper_scene::{BitSet, DirtyDomain, NodeId, Scene, SceneMetrics};
 
-use crate::CoreError;
+use crate::{CoreError, CoreScrollMetrics, scroll::ScrollController};
 
 /// Cumulative top-level frame and failure counters.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -30,6 +31,12 @@ pub struct CoreMetrics {
     pub scene_rejections: u64,
     /// Derived-state failures that poisoned the instance.
     pub fatal_derivation_failures: u64,
+    /// Input Stream batches accepted by Core-owned subsystems.
+    pub accepted_input_batches: u64,
+    /// Input Stream batches rejected atomically.
+    pub input_rejections: u64,
+    /// Worker clock frames that changed a Core-owned scroll position.
+    pub scroll_frames: u64,
 }
 
 /// Deterministic work and invalidation diagnostics for one accepted frame.
@@ -125,8 +132,10 @@ pub struct CoreEngine {
     scene: Scene,
     layout: LayoutEngine,
     paint: PaintEngine,
+    scroll: ScrollController,
     constraints: BoxConstraints,
     metrics: CoreMetrics,
+    last_frame_seq: Option<u32>,
     poisoned: bool,
 }
 
@@ -142,8 +151,10 @@ impl CoreEngine {
             scene: Scene::new(),
             layout: LayoutEngine::new(),
             paint: PaintEngine::new(),
+            scroll: ScrollController::default(),
             constraints,
             metrics: CoreMetrics::default(),
+            last_frame_seq: None,
             poisoned: false,
         })
     }
@@ -167,63 +178,127 @@ impl CoreEngine {
             }
         };
         let frame_seq = batch.frame_seq;
+        let programmatic_scrolls: BTreeSet<u32> = batch
+            .instructions
+            .iter()
+            .filter_map(|instruction| match instruction.mutation {
+                Mutation::ScrollTo { node_id, .. } => Some(node_id),
+                _ => None,
+            })
+            .collect();
         if let Err(error) = self.scene.commit(batch) {
             self.metrics.scene_rejections += 1;
             return Err(CoreError::Scene(error));
         }
 
-        let scene_nodes = self.scene.len();
-        let dirty_layout_nodes = dirty_count(&self.scene, DirtyDomain::Layout);
-        let dirty_paint_nodes = dirty_count(&self.scene, DirtyDomain::Paint);
-        let dirty_paint_self_nodes = dirty_count(&self.scene, DirtyDomain::PaintSelf);
-        let dirty_hit_nodes = dirty_count(&self.scene, DirtyDomain::Hit);
-        let dirty_semantics_nodes = dirty_count(&self.scene, DirtyDomain::Semantics);
-
         let mut measurer = FallbackTextMeasurer;
-        let geometry = match self
-            .layout
-            .layout(&self.scene, self.constraints, &mut measurer)
-        {
+        let mut geometry = match self.layout.layout_with_virtual(
+            &self.scene,
+            self.constraints,
+            &mut measurer,
+            &self.scroll,
+        ) {
             Ok(outcome) => outcome,
             Err(error) => return self.poison(CoreError::Layout(error)),
         };
-        let painted = match self.paint.paint(
-            &self.scene,
+        let corrected = match self.scroll.synchronize(
+            &mut self.scene,
             self.layout.snapshot(),
-            &geometry.changed,
-            false,
+            &programmatic_scrolls,
         ) {
-            Ok(outcome) => outcome,
-            Err(error) => return self.poison(CoreError::Paint(error)),
+            Ok(corrected) => corrected,
+            Err(error) => return self.poison(error),
         };
-        let paint_metrics = self.paint.metrics();
-        let diagnostics = FrameDiagnostics {
-            frame_seq,
-            scene_nodes,
-            dirty_layout_nodes,
-            dirty_paint_nodes,
-            dirty_paint_self_nodes,
-            dirty_hit_nodes,
-            dirty_semantics_nodes,
-            layout_changed_nodes: geometry.changed.iter_ones().count(),
-            layout_visited_nodes: geometry.visited,
-            display_commands: self.paint.metrics().last_command_count,
-            paint_rebuilt: painted.rebuilt,
-            picture_builds: paint_metrics.builds,
-            picture_cache_hits: paint_metrics.cache_hits,
-            picture_subtree_builds: paint_metrics.subtree_builds,
-            picture_subtree_cache_hits: paint_metrics.subtree_cache_hits,
-            over_invalidated_frames: paint_metrics.over_invalidated_frames,
-            picture_hash: painted.picture.hash(),
-        };
-        self.scene.clear_dirty();
+        if !corrected.is_empty() {
+            self.layout.mark_virtual_measurements_changed(&corrected);
+            let corrected_geometry = match self.layout.layout_with_virtual(
+                &self.scene,
+                self.constraints,
+                &mut measurer,
+                &self.scroll,
+            ) {
+                Ok(outcome) => outcome,
+                Err(error) => return self.poison(CoreError::Layout(error)),
+            };
+            for index in corrected_geometry.changed.iter_ones() {
+                geometry.changed.insert(index);
+            }
+            geometry.visited = geometry.visited.saturating_add(corrected_geometry.visited);
+        }
+        let output = self.paint_frame(frame_seq, &geometry.changed, geometry.visited)?;
         self.metrics.committed_frames += 1;
-        Ok(FrameOutput {
-            frame_seq,
-            display_list: Arc::from(painted.picture.bytes()),
-            rebuilt: painted.rebuilt,
-            diagnostics,
-        })
+        self.last_frame_seq = Some(frame_seq);
+        Ok(output)
+    }
+
+    /// Atomically applies one Input Stream transaction to Core-owned scrolling.
+    ///
+    /// Returns a new `DisplayList` only when direct manipulation changed pixels.
+    /// Editing commands are accepted by the editing subsystem in M3-B and are
+    /// rejected here until that state is integrated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an ABI, sequence, target, or scroll validation error without
+    /// partially applying the input batch.
+    pub fn input(&mut self, bytes: &[u8]) -> Result<Option<FrameOutput>, CoreError> {
+        if self.poisoned {
+            return Err(CoreError::Poisoned);
+        }
+        let batch = match InputBatch::decode(bytes) {
+            Ok(batch) => batch,
+            Err(error) => {
+                self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
+                return Err(CoreError::Abi(error));
+            }
+        };
+        let outcome = match self.scroll.apply_input(&mut self.scene, &batch) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
+                return Err(error);
+            }
+        };
+        if let Err(error) = self.scroll.plan_virtual_frames() {
+            return self.poison(error);
+        }
+        self.metrics.accepted_input_batches = self.metrics.accepted_input_batches.saturating_add(1);
+        if !outcome.changed {
+            return Ok(None);
+        }
+        let frame_seq = self
+            .last_frame_seq
+            .ok_or(CoreError::MissingCommittedFrame)?;
+        let output = self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0)?;
+        Ok(Some(output))
+    }
+
+    /// Advances Core-owned animation from an injectable Worker clock delta.
+    ///
+    /// Returns a `DisplayList` only while the frame changed a scroll position.
+    /// Catch-up work is capped and sub-stepped to remain stable after stalls.
+    ///
+    /// # Errors
+    ///
+    /// Returns a frame-delta or scroll invariant error; derived paint failures
+    /// poison the Core instance.
+    pub fn advance(&mut self, elapsed_seconds: f64) -> Result<Option<FrameOutput>, CoreError> {
+        if self.poisoned {
+            return Err(CoreError::Poisoned);
+        }
+        let outcome = self.scroll.advance(&mut self.scene, elapsed_seconds)?;
+        if let Err(error) = self.scroll.plan_virtual_frames() {
+            return self.poison(error);
+        }
+        if !outcome.changed {
+            return Ok(None);
+        }
+        let frame_seq = self
+            .last_frame_seq
+            .ok_or(CoreError::MissingCommittedFrame)?;
+        let output = self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0)?;
+        self.metrics.scroll_frames = self.metrics.scroll_frames.saturating_add(1);
+        Ok(Some(output))
     }
 
     /// Changes viewport constraints for the next accepted mutation frame.
@@ -268,6 +343,69 @@ impl CoreEngine {
     #[must_use]
     pub const fn paint_metrics(&self) -> PaintMetrics {
         self.paint.metrics()
+    }
+
+    /// Returns Core-owned scroll input, catch-up, and physics counters.
+    #[must_use]
+    pub const fn scroll_metrics(&self) -> CoreScrollMetrics {
+        self.scroll.metrics()
+    }
+
+    /// Drains coalesced virtual-list refill requests produced by accepted frames.
+    ///
+    /// Requests are emitted after rendering and never invoke Shell code from the
+    /// Core frame loop. An empty vector means no new range needs materialization.
+    pub fn take_virtual_refills(&mut self) -> Vec<crate::VirtualRefillRequest> {
+        self.scroll.take_refills()
+    }
+
+    fn paint_frame(
+        &mut self,
+        frame_seq: u32,
+        geometry_changed: &BitSet,
+        layout_visited_nodes: usize,
+    ) -> Result<FrameOutput, CoreError> {
+        let scene_nodes = self.scene.len();
+        let dirty_layout_nodes = dirty_count(&self.scene, DirtyDomain::Layout);
+        let dirty_paint_nodes = dirty_count(&self.scene, DirtyDomain::Paint);
+        let dirty_paint_self_nodes = dirty_count(&self.scene, DirtyDomain::PaintSelf);
+        let dirty_hit_nodes = dirty_count(&self.scene, DirtyDomain::Hit);
+        let dirty_semantics_nodes = dirty_count(&self.scene, DirtyDomain::Semantics);
+        let painted =
+            match self
+                .paint
+                .paint(&self.scene, self.layout.snapshot(), geometry_changed, false)
+            {
+                Ok(outcome) => outcome,
+                Err(error) => return self.poison(CoreError::Paint(error)),
+            };
+        let paint_metrics = self.paint.metrics();
+        let diagnostics = FrameDiagnostics {
+            frame_seq,
+            scene_nodes,
+            dirty_layout_nodes,
+            dirty_paint_nodes,
+            dirty_paint_self_nodes,
+            dirty_hit_nodes,
+            dirty_semantics_nodes,
+            layout_changed_nodes: geometry_changed.iter_ones().count(),
+            layout_visited_nodes,
+            display_commands: paint_metrics.last_command_count,
+            paint_rebuilt: painted.rebuilt,
+            picture_builds: paint_metrics.builds,
+            picture_cache_hits: paint_metrics.cache_hits,
+            picture_subtree_builds: paint_metrics.subtree_builds,
+            picture_subtree_cache_hits: paint_metrics.subtree_cache_hits,
+            over_invalidated_frames: paint_metrics.over_invalidated_frames,
+            picture_hash: painted.picture.hash(),
+        };
+        self.scene.clear_dirty();
+        Ok(FrameOutput {
+            frame_seq,
+            display_list: Arc::from(painted.picture.bytes()),
+            rebuilt: painted.rebuilt,
+            diagnostics,
+        })
     }
 
     fn poison<T>(&mut self, error: CoreError) -> Result<T, CoreError> {
@@ -422,6 +560,102 @@ mod tests {
         )
     }
 
+    fn scroll_tree() -> Vec<u8> {
+        frame(
+            1,
+            vec![
+                Mutation::CreateNode {
+                    node_id: id(0),
+                    kind: NodeKind::Root,
+                    parent: NULL_NODE_ID,
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::CreateNode {
+                    node_id: id(1),
+                    kind: NodeKind::Scroll,
+                    parent: id(0),
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::CreateNode {
+                    node_id: id(2),
+                    kind: NodeKind::Container,
+                    parent: id(1),
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Width,
+                    value: 100.0,
+                },
+                Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Height,
+                    value: 100.0,
+                },
+                Mutation::SetF32 {
+                    node_id: id(2),
+                    prop: Prop::Width,
+                    value: 500.0,
+                },
+                Mutation::SetF32 {
+                    node_id: id(2),
+                    prop: Prop::Height,
+                    value: 1_000.0,
+                },
+            ],
+        )
+    }
+
+    fn virtual_list_tree() -> Vec<u8> {
+        frame(
+            1,
+            vec![
+                Mutation::CreateNode {
+                    node_id: id(0),
+                    kind: NodeKind::Root,
+                    parent: NULL_NODE_ID,
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::CreateNode {
+                    node_id: id(1),
+                    kind: NodeKind::Scroll,
+                    parent: id(0),
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Width,
+                    value: 100.0,
+                },
+                Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Height,
+                    value: 100.0,
+                },
+                Mutation::ConfigureVirtualList {
+                    node_id: id(1),
+                    item_count: 1_000_000,
+                    estimated_item_height: 20.0,
+                    base_overscan_viewports: 1.0,
+                    velocity_horizon_seconds: 0.25,
+                    maximum_ahead_viewports: 4.0,
+                },
+            ],
+        )
+    }
+
+    fn input(frame_seq: u32, commands: Vec<InputCommand>) -> Vec<u8> {
+        InputBatch {
+            frame_seq,
+            instructions: commands
+                .into_iter()
+                .map(|command| InputInstruction { flags: 0, command })
+                .collect(),
+        }
+        .encode()
+        .expect("input frame")
+    }
+
     #[test]
     fn executes_the_complete_single_threaded_frame_pipeline() {
         let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
@@ -497,6 +731,266 @@ mod tests {
         assert_eq!(second.diagnostics.picture_cache_hits, 1);
         assert_eq!(second.diagnostics.picture_subtree_builds, 2);
         assert_eq!(second.diagnostics.picture_subtree_cache_hits, 0);
+    }
+
+    #[test]
+    fn scroll_input_and_worker_ticks_repaint_without_shell_commits() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&scroll_tree()).expect("initial frame");
+        assert_eq!(
+            engine.input(&input(
+                1,
+                vec![InputCommand::ScrollBegin { node_id: id(1) }]
+            )),
+            Ok(None)
+        );
+        let dragged = engine
+            .input(&input(
+                2,
+                vec![InputCommand::ScrollDelta {
+                    node_id: id(1),
+                    delta_x: 5.0,
+                    delta_y: 50.0,
+                    elapsed_micros: 16_667,
+                }],
+            ))
+            .expect("drag")
+            .expect("changed frame");
+        assert_eq!(
+            engine
+                .scene()
+                .scroll_position(NodeId::from_raw(id(1)).expect("id")),
+            Some([5.0, 50.0])
+        );
+        let display = DisplayList::decode(&dragged.display_list).expect("DisplayList");
+        assert!(display.instructions.iter().any(|instruction| matches!(
+            instruction.command,
+            DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, -5.0, -50.0])
+        )));
+
+        assert_eq!(
+            engine.input(&input(3, vec![InputCommand::ScrollEnd { node_id: id(1) }])),
+            Ok(None)
+        );
+        let coasted = engine
+            .advance(1.0 / 60.0)
+            .expect("tick")
+            .expect("coast frame");
+        assert!(coasted.rebuilt);
+        let [_, coast_y] = engine
+            .scene()
+            .scroll_position(NodeId::from_raw(id(1)).expect("id"))
+            .expect("position");
+        assert!(coast_y > 50.0);
+        assert_eq!(engine.metrics().committed_frames, 1);
+        assert_eq!(engine.metrics().accepted_input_batches, 3);
+        assert_eq!(engine.metrics().scroll_frames, 1);
+        assert_eq!(engine.scroll_metrics().input_commands, 3);
+    }
+
+    #[test]
+    fn scroll_input_is_atomic_sequence_checked_and_programmatic_scroll_wins() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&scroll_tree()).expect("initial frame");
+        engine
+            .input(&input(
+                10,
+                vec![
+                    InputCommand::ScrollBegin { node_id: id(1) },
+                    InputCommand::ScrollDelta {
+                        node_id: id(1),
+                        delta_x: 0.0,
+                        delta_y: 75.0,
+                        elapsed_micros: 20_000,
+                    },
+                ],
+            ))
+            .expect("valid input");
+        let scroll = NodeId::from_raw(id(1)).expect("id");
+        let before = engine.scene().scroll_position(scroll);
+        assert!(matches!(
+            engine.input(&input(
+                10,
+                vec![InputCommand::ScrollDelta {
+                    node_id: id(1),
+                    delta_x: 0.0,
+                    delta_y: 10.0,
+                    elapsed_micros: 10_000,
+                }]
+            )),
+            Err(CoreError::InputSequenceNotNewer { .. })
+        ));
+        assert_eq!(engine.scene().scroll_position(scroll), before);
+
+        assert!(matches!(
+            engine.input(&input(
+                11,
+                vec![
+                    InputCommand::ScrollDelta {
+                        node_id: id(1),
+                        delta_x: 0.0,
+                        delta_y: 10.0,
+                        elapsed_micros: 10_000,
+                    },
+                    InputCommand::ScrollBegin { node_id: id(2) },
+                ]
+            )),
+            Err(CoreError::InvalidScrollTarget { .. })
+        ));
+        assert_eq!(engine.scene().scroll_position(scroll), before);
+
+        engine
+            .commit(&frame(
+                2,
+                vec![Mutation::ScrollTo {
+                    node_id: id(1),
+                    x: 2.0,
+                    y: 10.0,
+                    behavior: 0,
+                }],
+            ))
+            .expect("programmatic position");
+        assert_eq!(engine.scene().scroll_position(scroll), Some([2.0, 10.0]));
+        assert_eq!(engine.advance(0.1), Ok(None));
+    }
+
+    #[test]
+    fn scroll_tick_caps_stall_work_and_rejects_invalid_delta() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&scroll_tree()).expect("initial frame");
+        assert!(matches!(
+            engine.advance(f64::NAN),
+            Err(CoreError::InvalidFrameDelta(value)) if value.is_nan()
+        ));
+        engine.advance(10.0).expect("bounded catch-up");
+        assert_eq!(engine.scroll_metrics().clamped_catch_up_frames, 1);
+        assert!(engine.scroll_metrics().physics_frames <= 30);
+    }
+
+    #[test]
+    fn virtual_list_plans_refill_after_frames_without_calling_shell() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&virtual_list_tree()).expect("initial frame");
+        assert_eq!(
+            engine.take_virtual_refills(),
+            vec![crate::VirtualRefillRequest {
+                node_id: id(1),
+                start: 0,
+                end: 15,
+            }]
+        );
+        assert!(engine.take_virtual_refills().is_empty());
+        assert_eq!(engine.scroll_metrics().virtual_frames, 1);
+        assert_eq!(engine.scroll_metrics().virtual_placeholders, 5);
+        assert_eq!(engine.scroll_metrics().virtual_refill_requests, 1);
+        assert_eq!(engine.scroll_metrics().virtual_refill_items, 15);
+
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::ScrollDelta {
+                    node_id: id(1),
+                    delta_x: 0.0,
+                    delta_y: 200.0,
+                    elapsed_micros: 16_667,
+                }],
+            ))
+            .expect("scroll input");
+        let requests = engine.take_virtual_refills();
+        assert!(!requests.is_empty());
+        assert!(requests.iter().all(|request| request.node_id == id(1)));
+        assert!(requests.iter().all(|request| request.start < request.end));
+    }
+
+    #[test]
+    fn virtual_item_measurements_relayout_global_offsets_in_the_same_commit() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&virtual_list_tree()).expect("initial frame");
+        let output = engine
+            .commit(&frame(
+                2,
+                vec![
+                    Mutation::CreateNode {
+                        node_id: id(2),
+                        kind: NodeKind::Container,
+                        parent: id(1),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(3),
+                        kind: NodeKind::Container,
+                        parent: id(1),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(4),
+                        kind: NodeKind::Container,
+                        parent: id(1),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(2),
+                        prop: Prop::Height,
+                        value: 30.0,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(3),
+                        prop: Prop::Height,
+                        value: 40.0,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(4),
+                        prop: Prop::Height,
+                        value: 20.0,
+                    },
+                    Mutation::SetVirtualItem {
+                        node_id: id(2),
+                        item_index: 0,
+                    },
+                    Mutation::SetVirtualItem {
+                        node_id: id(3),
+                        item_index: 1,
+                    },
+                    Mutation::SetVirtualItem {
+                        node_id: id(4),
+                        item_index: 2,
+                    },
+                ],
+            ))
+            .expect("materialized frame");
+
+        assert_eq!(output.diagnostics.layout_visited_nodes, 9);
+
+        assert_eq!(
+            engine
+                .layout
+                .snapshot()
+                .geometry(NodeId::from_raw(id(2)).expect("id")),
+            Some((
+                doper_layout::Point::new(0.0, 0.0),
+                doper_layout::Size::new(0.0, 30.0),
+            ))
+        );
+        assert_eq!(
+            engine
+                .layout
+                .snapshot()
+                .geometry(NodeId::from_raw(id(3)).expect("id")),
+            Some((
+                doper_layout::Point::new(0.0, 30.0),
+                doper_layout::Size::new(0.0, 40.0),
+            ))
+        );
+        assert_eq!(
+            engine
+                .layout
+                .snapshot()
+                .geometry(NodeId::from_raw(id(4)).expect("id")),
+            Some((
+                doper_layout::Point::new(0.0, 70.0),
+                doper_layout::Size::new(0.0, 20.0),
+            ))
+        );
     }
 
     #[test]

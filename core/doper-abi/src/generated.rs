@@ -21,6 +21,15 @@ pub const MAX_MUTATION_INSTRUCTIONS: u32 = 262144;
 pub const MAX_INPUT_INSTRUCTIONS: u32 = 262144;
 pub const MAX_DISPLAY_INSTRUCTIONS: u32 = 1048576;
 pub const MAX_RECORDING_RECORDS: u32 = 1048576;
+pub const MAX_VIRTUAL_ITEMS: u32 = 4000000;
+pub const VIRTUAL_REFILL_VERSION: u32 = 1;
+pub const VIRTUAL_REFILL_HEADER_WORDS: usize = 2;
+pub const VIRTUAL_REFILL_RECORD_WORDS: usize = 3;
+pub const VIRTUAL_REFILL_HEADER_VERSION_INDEX: usize = 0;
+pub const VIRTUAL_REFILL_HEADER_REQUEST_COUNT_INDEX: usize = 1;
+pub const VIRTUAL_REFILL_RECORD_NODE_ID_INDEX: usize = 0;
+pub const VIRTUAL_REFILL_RECORD_START_INDEX: usize = 1;
+pub const VIRTUAL_REFILL_RECORD_END_INDEX: usize = 2;
 pub const FRAME_DIAGNOSTICS_VERSION: u32 = 2;
 pub const FRAME_DIAGNOSTICS_WORDS: usize = 19;
 pub const FRAME_DIAGNOSTICS_VERSION_INDEX: usize = 0;
@@ -108,6 +117,8 @@ pub enum MutationOpcode {
     DefineResource = 48,
     ReleaseResource = 49,
     ScrollTo = 64,
+    ConfigureVirtualList = 65,
+    SetVirtualItem = 66,
     Commit = 240,
 }
 
@@ -127,6 +138,8 @@ impl MutationOpcode {
             48 => Some(Self::DefineResource),
             49 => Some(Self::ReleaseResource),
             64 => Some(Self::ScrollTo),
+            65 => Some(Self::ConfigureVirtualList),
+            66 => Some(Self::SetVirtualItem),
             240 => Some(Self::Commit),
             _ => None,
         }
@@ -149,6 +162,8 @@ impl MutationOpcode {
             Self::DefineResource => None,
             Self::ReleaseResource => Some(8),
             Self::ScrollTo => Some(20),
+            Self::ConfigureVirtualList => Some(28),
+            Self::SetVirtualItem => Some(12),
             Self::Commit => Some(8),
         }
     }
@@ -168,6 +183,8 @@ impl MutationOpcode {
             Self::DefineResource => 16,
             Self::ReleaseResource => 8,
             Self::ScrollTo => 20,
+            Self::ConfigureVirtualList => 28,
+            Self::SetVirtualItem => 12,
             Self::Commit => 8,
         }
     }
@@ -187,6 +204,10 @@ pub enum InputOpcode {
     CancelComposition = 9,
     Undo = 10,
     Redo = 11,
+    ScrollBegin = 32,
+    ScrollDelta = 33,
+    ScrollEnd = 34,
+    ScrollCancel = 35,
     Commit = 240,
 }
 
@@ -205,6 +226,10 @@ impl InputOpcode {
             9 => Some(Self::CancelComposition),
             10 => Some(Self::Undo),
             11 => Some(Self::Redo),
+            32 => Some(Self::ScrollBegin),
+            33 => Some(Self::ScrollDelta),
+            34 => Some(Self::ScrollEnd),
+            35 => Some(Self::ScrollCancel),
             240 => Some(Self::Commit),
             _ => None,
         }
@@ -226,6 +251,10 @@ impl InputOpcode {
             Self::CancelComposition => Some(16),
             Self::Undo => Some(16),
             Self::Redo => Some(16),
+            Self::ScrollBegin => Some(8),
+            Self::ScrollDelta => Some(20),
+            Self::ScrollEnd => Some(8),
+            Self::ScrollCancel => Some(8),
             Self::Commit => Some(8),
         }
     }
@@ -244,6 +273,10 @@ impl InputOpcode {
             Self::CancelComposition => 16,
             Self::Undo => 16,
             Self::Redo => 16,
+            Self::ScrollBegin => 8,
+            Self::ScrollDelta => 20,
+            Self::ScrollEnd => 8,
+            Self::ScrollCancel => 8,
             Self::Commit => 8,
         }
     }

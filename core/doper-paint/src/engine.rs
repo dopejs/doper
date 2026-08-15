@@ -336,6 +336,15 @@ fn build_node(
             },
         );
     }
+    if scene.kind(node) == Some(NodeKind::Scroll) {
+        let [scroll_x, scroll_y] = scene.scroll_position(node).unwrap_or([0.0, 0.0]);
+        if scroll_x.abs() > f32::EPSILON || scroll_y.abs() > f32::EPSILON {
+            push(
+                &mut instructions,
+                DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, -scroll_x, -scroll_y]),
+            );
+        }
+    }
     Ok(instructions)
 }
 
@@ -548,6 +557,58 @@ mod tests {
             .paint(&scene, full_layout.snapshot(), &full_changed.changed, true)
             .expect("full paint");
         assert_eq!(incremental.picture.bytes(), full.picture.bytes());
+    }
+
+    #[test]
+    fn clips_scroll_viewport_and_translates_only_its_child_content() {
+        let root = id(0);
+        let scroll = id(1);
+        let child = id(2);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(scroll, NodeKind::Scroll, Some(root)),
+                create(child, NodeKind::Container, Some(scroll)),
+                set_f32(scroll, Prop::Width, 100.0),
+                set_f32(scroll, Prop::Height, 40.0),
+                set_f32(child, Prop::Width, 100.0),
+                set_f32(child, Prop::Height, 100.0),
+                Mutation::ScrollTo {
+                    node_id: scroll.raw(),
+                    x: 7.0,
+                    y: 23.0,
+                    behavior: 0,
+                },
+            ],
+        );
+        let (layout, changed) = layout(&scene);
+        let picture = PaintEngine::new()
+            .paint(&scene, layout.snapshot(), &changed, false)
+            .expect("paint")
+            .picture;
+        let decoded = DisplayList::decode(picture.bytes()).expect("display list");
+        let commands: Vec<&DisplayCommand> = decoded
+            .instructions
+            .iter()
+            .map(|instruction| &instruction.command)
+            .collect();
+        let clip = commands
+            .iter()
+            .position(|command| matches!(command, DisplayCommand::ClipRect(_)))
+            .expect("scroll clip");
+        let scroll_transform = commands
+            .iter()
+            .position(|command| {
+                let DisplayCommand::Transform(matrix) = command else {
+                    return false;
+                };
+                matrix.map(f32::to_bits) == [1.0, 0.0, 0.0, 1.0, -7.0, -23.0].map(f32::to_bits)
+            })
+            .expect("scroll transform");
+        assert!(clip < scroll_transform);
     }
 
     #[test]

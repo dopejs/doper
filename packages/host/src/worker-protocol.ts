@@ -1,8 +1,9 @@
 import type { FrameReport } from "./main-thread";
+import type { VirtualRefillRange } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
 
-export const WORKER_PROTOCOL_VERSION = 1 as const;
+export const WORKER_PROTOCOL_VERSION = 2 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
@@ -17,6 +18,7 @@ export interface WorkerActivateMessage {
   readonly kind: "doper:activate";
   readonly mode: Exclude<HostTransportMode, "main-thread">;
   readonly rasterCache: boolean;
+  readonly inputRingBuffer?: SharedArrayBuffer;
   readonly ringBuffer?: SharedArrayBuffer;
   readonly sessionId: number;
   readonly width: number;
@@ -34,8 +36,24 @@ export interface WorkerShutdownMessage {
   readonly sessionId: number;
 }
 
+export interface WorkerInputMessage {
+  readonly bytes: Uint8Array;
+  readonly kind: "doper:input";
+  readonly sessionId: number;
+}
+
+export interface WorkerInputWakeMessage {
+  readonly kind: "doper:input-wake";
+  readonly sessionId: number;
+}
+
 export type RenderWorkerInboundMessage =
-  WorkerActivateMessage | WorkerClockAnchorMessage | WorkerPrepareMessage | WorkerShutdownMessage;
+  | WorkerActivateMessage
+  | WorkerClockAnchorMessage
+  | WorkerInputMessage
+  | WorkerInputWakeMessage
+  | WorkerPrepareMessage
+  | WorkerShutdownMessage;
 
 export interface RenderWorkerCapabilities {
   readonly offscreenCanvas: boolean;
@@ -66,6 +84,12 @@ export interface WorkerClockMetricsMessage {
   readonly sessionId: number;
 }
 
+export interface WorkerVirtualRefillMessage {
+  readonly kind: "doper:virtual-refill";
+  readonly requests: readonly VirtualRefillRange[];
+  readonly sessionId: number;
+}
+
 export interface WorkerFatalMessage {
   readonly error: string;
   readonly kind: "doper:fatal";
@@ -83,6 +107,7 @@ export type RenderWorkerOutboundMessage =
   | WorkerFrameMessage
   | WorkerPreparedMessage
   | WorkerReadyMessage
+  | WorkerVirtualRefillMessage
   | WorkerShutdownCompleteMessage;
 
 export function isRenderWorkerInboundMessage(value: unknown): value is RenderWorkerInboundMessage {
@@ -97,10 +122,15 @@ export function isRenderWorkerInboundMessage(value: unknown): value is RenderWor
         isPositiveFinite(value.height) &&
         isRecord(value.canvas) &&
         typeof value.rasterCache === "boolean" &&
-        (value.mode === "post-message" || isSharedArrayBuffer(value.ringBuffer))
+        (value.mode === "post-message" ||
+          (isSharedArrayBuffer(value.ringBuffer) && isSharedArrayBuffer(value.inputRingBuffer)))
       );
     case "doper:clock-anchor":
       return isPositiveU32(value.sequence) && isFiniteNumber(value.timestamp);
+    case "doper:input":
+      return value.bytes instanceof Uint8Array;
+    case "doper:input-wake":
+      return true;
     case "doper:shutdown":
       return true;
     default:
@@ -114,6 +144,8 @@ export function isRenderWorkerInboundEnvelope(value: unknown): boolean {
     value.kind === "doper:prepare" ||
     value.kind === "doper:activate" ||
     value.kind === "doper:clock-anchor" ||
+    value.kind === "doper:input" ||
+    value.kind === "doper:input-wake" ||
     value.kind === "doper:shutdown"
   );
 }
@@ -135,6 +167,8 @@ export function isRenderWorkerOutboundMessage(
       return isFrameReport(value.report);
     case "doper:clock-metrics":
       return isClockMetrics(value.metrics);
+    case "doper:virtual-refill":
+      return Array.isArray(value.requests) && value.requests.every(isVirtualRefillRange);
     case "doper:fatal":
       return typeof value.error === "string";
     case "doper:shutdown-complete":
@@ -151,8 +185,22 @@ export function isRenderWorkerOutboundEnvelope(value: unknown): boolean {
     value.kind === "doper:ready" ||
     value.kind === "doper:frame" ||
     value.kind === "doper:clock-metrics" ||
+    value.kind === "doper:virtual-refill" ||
     value.kind === "doper:fatal" ||
     value.kind === "doper:shutdown-complete"
+  );
+}
+
+function isVirtualRefillRange(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNonNegativeInteger(value.nodeId) &&
+    value.nodeId <= 0xffff_ffff &&
+    isNonNegativeInteger(value.start) &&
+    value.start <= 0xffff_ffff &&
+    isNonNegativeInteger(value.end) &&
+    value.end <= 0xffff_ffff &&
+    value.start < value.end
   );
 }
 
@@ -165,6 +213,16 @@ function isFrameReport(value: unknown): value is FrameReport {
     !isNonNegativeInteger(value.mutationBytes) ||
     !isNonNegativeInteger(value.displayListBytes)
   )
+    return false;
+  if (
+    value.cause !== undefined &&
+    value.cause !== "mutation" &&
+    value.cause !== "input" &&
+    value.cause !== "animation"
+  )
+    return false;
+  if (value.inputBytes !== undefined && !isNonNegativeInteger(value.inputBytes)) return false;
+  if (value.animationDeltaMs !== undefined && !isNonNegativeFinite(value.animationDeltaMs))
     return false;
   if (value.core !== undefined && !isCoreDiagnostics(value.core)) return false;
   if (value.rasterCache !== undefined && !isRasterMetrics(value.rasterCache)) return false;

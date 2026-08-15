@@ -3,7 +3,9 @@ use core::fmt;
 use doper_abi::AbiError;
 use doper_layout::LayoutError;
 use doper_paint::PaintError;
+use doper_scene::NodeId;
 use doper_scene::SceneError;
+use doper_scroll::ScrollError;
 
 /// Failure returned by the top-level deterministic Core pipeline.
 #[derive(Clone, Debug, PartialEq)]
@@ -25,6 +27,33 @@ pub enum CoreError {
     Layout(LayoutError),
     /// Paint failed after Scene accepted the transaction; the instance is poisoned.
     Paint(PaintError),
+    /// A scrolling coefficient, extent, or physics operation was invalid.
+    Scroll(ScrollError),
+    /// An Input Stream transaction was not strictly newer than the accepted sequence.
+    InputSequenceNotNewer {
+        /// Last accepted sequence.
+        previous: u32,
+        /// Rejected sequence.
+        incoming: u32,
+    },
+    /// The current Core pipeline does not own this Input Stream command family.
+    UnsupportedInputCommand,
+    /// A direct-manipulation command did not target an active Scroll node.
+    InvalidScrollTarget {
+        /// Generation-bearing rejected node.
+        node: NodeId,
+    },
+    /// Layout did not contain geometry required by a scroll runtime.
+    MissingScrollGeometry {
+        /// Scroll node or direct child missing geometry.
+        node: NodeId,
+    },
+    /// A Worker frame delta was negative or non-finite.
+    InvalidFrameDelta(f64),
+    /// A physics position could not be represented by the f32 Scene ABI.
+    InvalidScrollPosition(f64),
+    /// Input or animation was requested before the first Mutation frame.
+    MissingCommittedFrame,
 }
 
 impl fmt::Display for CoreError {
@@ -44,5 +73,11 @@ impl From<AbiError> for CoreError {
 impl From<SceneError> for CoreError {
     fn from(error: SceneError) -> Self {
         Self::Scene(error)
+    }
+}
+
+impl From<ScrollError> for CoreError {
+    fn from(error: ScrollError) -> Self {
+        Self::Scroll(error)
     }
 }

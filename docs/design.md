@@ -139,7 +139,15 @@ WebGPU 后端则由 Rust 内的 `wgpu` 直接消费 DisplayList，不经过 JS�
 ```
 
 ```tsx
-import { createRoot, useState, useSelector, VirtualList, Text } from "@dopejs/doper";
+import { createRoot } from "@dopejs/doper";
+
+root.render(
+  <virtualList
+    itemCount={1_000_000}
+    estimatedItemHeight={32}
+    renderItem={(index) => <text value={`row ${index}`} />}
+  />,
+);
 ```
 
 约束：
@@ -300,24 +308,27 @@ Mutation Stream 的 magic 为 `DOPM`。每条指令为
 定义。解码器先验证整批数据和末尾唯一 `Commit`，成功后才能把 mutation 交给 Scene，
 畸形输入不得产生部分状态变更。
 
-编辑意图使用同一封套的独立 Input Stream（magic `DOPI`）。每条输入携带目标
-`node_id` 与 `base_revision: u64`；字符串以 UTF-8 编码，selection offset 保持浏览器
-边界的 UTF-16 语义。整批输入只在末尾唯一 `Commit(frame_seq)` 后生效，任一指令的
-revision、offset、composition 或路由校验失败都回滚整个批次。
+输入使用同一封套的独立 Input Stream（magic `DOPI`）。编辑指令携带目标
+`node_id` 与 `base_revision: u64`；滚动指令携带 generation-bearing `node_id`、逻辑
+delta 与采样间隔。字符串以 UTF-8 编码，selection offset 保持浏览器边界的 UTF-16
+语义。整批输入只在末尾唯一 `Commit(frame_seq)` 后生效，任一指令的 revision、
+offset、composition、滚动采样或路由校验失败都回滚整个批次。
 
-| opcode | 指令             | payload                                                     |
-| ------ | ---------------- | ----------------------------------------------------------- |
-| `0x01` | `CreateNode`     | `node_id: u32, kind: u16, parent: u32, before_sibling: u32` |
-| `0x02` | `RemoveNode`     | `node_id: u32`                                              |
-| `0x03` | `Reparent`       | `node_id: u32, new_parent: u32, before_sibling: u32`        |
-| `0x10` | `SetF32`         | `node_id: u32, prop: u16, value: f32`                       |
-| `0x11` | `SetVec4`        | `node_id: u32, prop: u16, v: [f32;4]`                       |
-| `0x12` | `SetRef`         | `node_id: u32, prop: u16, resource_id: u32`                 |
-| `0x13` | `SetFlags`       | `node_id: u32, set: u32, clear: u32`                        |
-| `0x20` | `SetTextRun`     | `node_id: u32, str_id: u32, style_id: u32`                  |
-| `0x30` | `DefineResource` | `resource_id: u32, kind: u16, len: u32, bytes[]`            |
-| `0x40` | `ScrollTo`       | `node_id: u32, x: f32, y: f32, behavior: u16`               |
-| `0xF0` | `Commit`         | `frame_seq: u32`                                            |
+| opcode | 指令                   | payload                                                     |
+| ------ | ---------------------- | ----------------------------------------------------------- |
+| `0x01` | `CreateNode`           | `node_id: u32, kind: u16, parent: u32, before_sibling: u32` |
+| `0x02` | `RemoveNode`           | `node_id: u32`                                              |
+| `0x03` | `Reparent`             | `node_id: u32, new_parent: u32, before_sibling: u32`        |
+| `0x10` | `SetF32`               | `node_id: u32, prop: u16, value: f32`                       |
+| `0x11` | `SetVec4`              | `node_id: u32, prop: u16, v: [f32;4]`                       |
+| `0x12` | `SetRef`               | `node_id: u32, prop: u16, resource_id: u32`                 |
+| `0x13` | `SetFlags`             | `node_id: u32, set: u32, clear: u32`                        |
+| `0x20` | `SetTextRun`           | `node_id: u32, str_id: u32, style_id: u32`                  |
+| `0x30` | `DefineResource`       | `resource_id: u32, kind: u16, len: u32, bytes[]`            |
+| `0x40` | `ScrollTo`             | `node_id: u32, x: f32, y: f32, behavior: u16`               |
+| `0x41` | `ConfigureVirtualList` | `node_id: u32, item_count: u32, estimate/policy: [f32;4]`   |
+| `0x42` | `SetVirtualItem`       | `node_id: u32, item_index: u32`                             |
+| `0xF0` | `Commit`               | `frame_seq: u32`                                            |
 
 ### 约定
 
@@ -385,6 +396,13 @@ reserved/padding 或越界资源一律在回放前失败关闭。详细决策见
 
 两者通过 SAB 上的 `frame_seq` 与双缓冲 ring buffer 同步。渲染帧读取"当前已 commit 的最新一批 mutation"，Shell 写入下一批。**Shell 慢或卡住时，渲染帧继续用上一批 scene 跑**——这正是滚动不受主线程影响的机制。
 
+Mutation 与低延迟 Input 使用两个独立、有界、定长 slot 的 SAB ring。Input ring 的
+小帧只发送 wake 消息；超过 slot 或 ring 暂满时，Host 先发送 wake 以排空已发布 slot，
+再按 FIFO 发送一次有界 copied fallback。两条 ring 都校验 header `frame_seq` 与流内
+Commit 序列一致，并分别暴露发布、消费、fallback、拒绝和高水位指标。没有 SAB 时
+Input 与 Mutation 分别退到 `postMessage`；没有 Worker 时两者直接进入主线程 Core，
+三条路径共享同一 ABI 和行为测试。
+
 ### 有界背压与事务合并
 
 Shell 产生的 transaction 使用连续 `frame_seq`。transport 已发布或等待 ACK 的
@@ -432,6 +450,28 @@ policy；关闭 Worker 后直接使用 M1 主线程路径。
 - **区间求解**：不定高 item 用前缀和树（Fenwick / 分段平衡树），`offset → index` 与 `index → offset` 均 O(log n)，支持百万级 item。
 - **测量修正**：item 实际高度与估算不符时，增量修正前缀和树并触发一次局部布局，不引发全量重排。
 - **预热**：按滚动方向与速度预测落点，在空闲时预构建/预光栅化 buffer 区。目标是把 cache miss 率压到接近 0。
+
+### `<virtualList>` 与补建事务
+
+`<virtualList>` 是公开 JSX intrinsic，Shell 只提交 item 总数、估高、预热策略和
+`renderItem(index)`，不会在首次 render 构造全部 item。Core 的 `HeightIndex` 持有
+百万级逻辑高度、可见区和预热窗；Shell 只把当前完整预热窗物化为带
+`SetVirtualItem(index)` 的直接子容器。窗口重叠部分按 index/key 复用，离窗节点被
+回收，Scene 节点数因此与预热窗而非数据总量成正比。
+
+Core 在 frame 完成后通过 schema 生成的 versioned `u32` Virtual Refill Batch 返回
+完整物化窗：header 为 `[version, request_count]`，record 为
+`[node_id, start, end]`。Host 严格验证版本、长度、generation-bearing node id 和
+半开区间，再在微任务中调用 reconciler；Core 的滚动/绘制调用栈不会同步进入 Shell。
+同一 node 尚未被 Host 取走的窗口只保留最新值。应用若在微任务前缩小 `itemCount`，
+Shell 的最新 durable value 获胜：部分重叠请求裁到新边界，完全越界的旧请求忽略，
+不得让旧窗口使 root fatal。
+
+实际 item 高度进入 HeightIndex 后保持首个可见 item 的视觉锚点，并在同一 commit 内
+从 virtual list 的固定尺寸 relayout boundary 做一次纠偏；非固定尺寸 list 才向上
+扩到最近安全边界。回滚时可关闭 Worker/SAB 而不改变 `<virtualList>` 语义；若必须
+隔离整个虚拟化能力，业务可在 feature rollout 层切回普通 `<scroll>` 的有界分页
+数据，新增 opcode 仍由 ABI 版本校验失败关闭，不降级解释为其他指令。
 
 ### 滚动帧的闭环
 

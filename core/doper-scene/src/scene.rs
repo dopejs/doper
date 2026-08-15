@@ -3,13 +3,14 @@ use std::sync::Arc;
 
 use doper_abi::{
     AFFINE_A_OFFSET, AFFINE_RESOURCE_FIXED_BYTES, AFFINE_RESOURCE_VARIANT, AFFINE_VARIANT_OFFSET,
-    AFFINE_VERSION_OFFSET, Invalidation, MAX_RESOURCE_BYTES, Mutation, MutationBatch, NULL_NODE_ID,
-    NodeKind, Prop, PropValueType, RESOURCE_ENCODING_VERSION, ResourceKind, SOLID_PAINT_RED_OFFSET,
-    SOLID_PAINT_RESOURCE_FIXED_BYTES, SOLID_PAINT_RESOURCE_VARIANT, SOLID_PAINT_VARIANT_OFFSET,
-    SOLID_PAINT_VERSION_OFFSET, TEXT_STYLE_FAMILY_BYTES_OFFSET, TEXT_STYLE_FAMILY_OFFSET,
-    TEXT_STYLE_FONT_SIZE_OFFSET, TEXT_STYLE_LINE_HEIGHT_OFFSET, TEXT_STYLE_PAINT_ID_OFFSET,
-    TEXT_STYLE_RESOURCE_MINIMUM_BYTES, TEXT_STYLE_RESOURCE_VARIANT, TEXT_STYLE_VARIANT_OFFSET,
-    TEXT_STYLE_VERSION_OFFSET, TEXT_STYLE_WEIGHT_OFFSET,
+    AFFINE_VERSION_OFFSET, Invalidation, MAX_RESOURCE_BYTES, MAX_VIRTUAL_ITEMS, Mutation,
+    MutationBatch, NULL_NODE_ID, NodeKind, Prop, PropValueType, RESOURCE_ENCODING_VERSION,
+    ResourceKind, SOLID_PAINT_RED_OFFSET, SOLID_PAINT_RESOURCE_FIXED_BYTES,
+    SOLID_PAINT_RESOURCE_VARIANT, SOLID_PAINT_VARIANT_OFFSET, SOLID_PAINT_VERSION_OFFSET,
+    TEXT_STYLE_FAMILY_BYTES_OFFSET, TEXT_STYLE_FAMILY_OFFSET, TEXT_STYLE_FONT_SIZE_OFFSET,
+    TEXT_STYLE_LINE_HEIGHT_OFFSET, TEXT_STYLE_PAINT_ID_OFFSET, TEXT_STYLE_RESOURCE_MINIMUM_BYTES,
+    TEXT_STYLE_RESOURCE_VARIANT, TEXT_STYLE_VARIANT_OFFSET, TEXT_STYLE_VERSION_OFFSET,
+    TEXT_STYLE_WEIGHT_OFFSET,
 };
 
 use crate::{BitSet, MAX_GENERATION, NodeId, SceneError};
@@ -45,6 +46,21 @@ pub struct TextRun {
     pub string_id: u32,
     /// Text style resource identifier.
     pub style_id: u32,
+}
+
+/// Validated Core-owned virtual-list policy attached to a Scroll node.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VirtualListConfig {
+    /// Total logical item count without materializing Scene nodes.
+    pub item_count: u32,
+    /// Initial logical height estimate for every item.
+    pub estimated_item_height: f32,
+    /// Symmetric preheat extent in viewport multiples.
+    pub base_overscan_viewports: f32,
+    /// Velocity projection horizon in seconds.
+    pub velocity_horizon_seconds: f32,
+    /// Maximum directional preheat extent in viewport multiples.
+    pub maximum_ahead_viewports: f32,
 }
 
 /// Counters exposing structural work and accepted commits.
@@ -84,6 +100,8 @@ pub struct Scene {
     flags: Vec<u32>,
     text_runs: Vec<Option<TextRun>>,
     scroll_positions: Vec<Option<[f32; 2]>>,
+    virtual_lists: Vec<Option<VirtualListConfig>>,
+    virtual_item_indices: Vec<Option<u32>>,
     props: PropertyLanes,
     slots: Vec<Slot>,
     resources: BTreeMap<u32, Resource>,
@@ -116,6 +134,8 @@ impl Scene {
             flags: Vec::new(),
             text_runs: Vec::new(),
             scroll_positions: Vec::new(),
+            virtual_lists: Vec::new(),
+            virtual_item_indices: Vec::new(),
             props: PropertyLanes::default(),
             slots: Vec::new(),
             resources: BTreeMap::new(),
@@ -141,6 +161,8 @@ impl Scene {
                 Mutation::CreateNode { .. }
                     | Mutation::RemoveNode { .. }
                     | Mutation::Reparent { .. }
+                    | Mutation::ConfigureVirtualList { .. }
+                    | Mutation::SetVirtualItem { .. }
             )
         });
         let releases_resource = batch
@@ -228,6 +250,89 @@ impl Scene {
             .and_then(|index| self.scroll_positions[index])
     }
 
+    /// Returns the virtual-list policy for a configured Scroll node.
+    #[must_use]
+    pub fn virtual_list(&self, node: NodeId) -> Option<VirtualListConfig> {
+        self.resolve(node)
+            .and_then(|index| self.virtual_lists[index])
+    }
+
+    /// Returns the logical item index associated with a materialized wrapper.
+    #[must_use]
+    pub fn virtual_item_index(&self, node: NodeId) -> Option<u32> {
+        self.resolve(node)
+            .and_then(|index| self.virtual_item_indices[index])
+    }
+
+    /// Applies a Core-owned physics position outside the Shell Mutation Stream.
+    ///
+    /// This is restricted to an existing Scroll node and invalidates only paint
+    /// and hit-test state. Shell transactions remain the sole owner of topology
+    /// and durable properties.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stale-node, wrong-kind, or non-finite-value error without
+    /// changing the Scene.
+    pub fn apply_scroll_position(
+        &mut self,
+        node: NodeId,
+        position: [f32; 2],
+    ) -> Result<bool, SceneError> {
+        Ok(self.apply_scroll_positions(&[(node, position)])? != 0)
+    }
+
+    /// Atomically applies a batch of Core-owned scroll positions.
+    ///
+    /// Every target and value is validated before the first Scene write. This
+    /// lets the input hot path stage only the touched physics states instead of
+    /// cloning the entire Scene to preserve transaction semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stale-node, wrong-kind, or non-finite-value error without
+    /// changing the Scene.
+    pub fn apply_scroll_positions(
+        &mut self,
+        positions: &[(NodeId, [f32; 2])],
+    ) -> Result<usize, SceneError> {
+        for &(node, position) in positions {
+            if !position[0].is_finite() || !position[1].is_finite() {
+                return Err(SceneError::NonFiniteValue {
+                    node,
+                    field: "Core scroll position",
+                });
+            }
+            let index = self.resolve(node).ok_or(SceneError::StaleNode { node })?;
+            let kind = self.kinds[index];
+            if kind != NodeKind::Scroll {
+                return Err(SceneError::UnsupportedNodeOperation {
+                    node,
+                    kind,
+                    operation: "apply Core scroll position",
+                });
+            }
+        }
+
+        let mut changed = 0_usize;
+        for &(node, position) in positions {
+            // The validation pass above proved this generation-bearing ID is
+            // live for the duration of this exclusive Scene borrow.
+            let index = self.resolve(node).expect("validated scroll node");
+            let next = Some(position);
+            if self.scroll_positions[index] == next {
+                continue;
+            }
+            self.scroll_positions[index] = next;
+            self.mark(
+                index,
+                Invalidation::from_bits(Invalidation::PAINT.bits() | Invalidation::HIT.bits()),
+            );
+            changed += 1;
+        }
+        Ok(changed)
+    }
+
     /// Returns a node's depth.
     #[must_use]
     pub fn depth(&self, node: NodeId) -> Option<u16> {
@@ -305,6 +410,8 @@ impl Scene {
             || self.flags.len() != length
             || self.text_runs.len() != length
             || self.scroll_positions.len() != length
+            || self.virtual_lists.len() != length
+            || self.virtual_item_indices.len() != length
         {
             return Err(SceneError::InternalInvariant("SoA lane length mismatch"));
         }
@@ -446,6 +553,7 @@ impl Scene {
                 }
             }
         }
+        validate_virtual_plan(&self.plan_nodes())?;
         Ok(())
     }
 
@@ -582,6 +690,8 @@ impl Scene {
             Mutation::CreateNode { .. }
             | Mutation::RemoveNode { .. }
             | Mutation::Reparent { .. }
+            | Mutation::ConfigureVirtualList { .. }
+            | Mutation::SetVirtualItem { .. }
             | Mutation::DefineResource { .. }
             | Mutation::ReleaseResource { .. } => {
                 return Err(SceneError::InternalInvariant(
@@ -637,6 +747,8 @@ impl Scene {
                 Mutation::CreateNode { .. }
                     | Mutation::RemoveNode { .. }
                     | Mutation::Reparent { .. }
+                    | Mutation::ConfigureVirtualList { .. }
+                    | Mutation::SetVirtualItem { .. }
             )
         });
         if structural {
@@ -736,6 +848,23 @@ fn validate_numeric_mutation(mutation: &Mutation) -> Result<(), SceneError> {
                 field: "ScrollTo.position",
             })
         }
+        Mutation::ConfigureVirtualList {
+            node_id,
+            estimated_item_height,
+            base_overscan_viewports,
+            velocity_horizon_seconds,
+            maximum_ahead_viewports,
+            ..
+        } if !estimated_item_height.is_finite()
+            || !base_overscan_viewports.is_finite()
+            || !velocity_horizon_seconds.is_finite()
+            || !maximum_ahead_viewports.is_finite() =>
+        {
+            Err(SceneError::NonFiniteValue {
+                node: NodeId::from_raw(*node_id)?,
+                field: "ConfigureVirtualList.policy",
+            })
+        }
         _ => Ok(()),
     }
 }
@@ -749,6 +878,8 @@ fn validate_node_operation(
     let supported = match mutation {
         Mutation::SetTextRun { .. } => matches!(kind, NodeKind::Text | NodeKind::EditableText),
         Mutation::ScrollTo { .. } => kind == NodeKind::Scroll,
+        Mutation::ConfigureVirtualList { .. } => kind == NodeKind::Scroll,
+        Mutation::SetVirtualItem { .. } => kind == NodeKind::Container,
         _ => true,
     };
     if supported {
@@ -760,6 +891,8 @@ fn validate_node_operation(
             operation: match mutation {
                 Mutation::SetTextRun { .. } => "SetTextRun",
                 Mutation::ScrollTo { .. } => "ScrollTo",
+                Mutation::ConfigureVirtualList { .. } => "ConfigureVirtualList",
+                Mutation::SetVirtualItem { .. } => "SetVirtualItem",
                 _ => "unknown",
             },
         })
@@ -788,7 +921,9 @@ fn mutation_node(mutation: &Mutation) -> Option<u32> {
         | Mutation::SetFlags { node_id, .. }
         | Mutation::ClearProp { node_id, .. }
         | Mutation::SetTextRun { node_id, .. }
-        | Mutation::ScrollTo { node_id, .. } => Some(*node_id),
+        | Mutation::ScrollTo { node_id, .. }
+        | Mutation::ConfigureVirtualList { node_id, .. }
+        | Mutation::SetVirtualItem { node_id, .. } => Some(*node_id),
         Mutation::CreateNode { .. }
         | Mutation::Reparent { .. }
         | Mutation::DefineResource { .. }
@@ -1031,6 +1166,8 @@ struct PlanNode {
     flags: u32,
     text_run: Option<TextRun>,
     scroll_position: Option<[f32; 2]>,
+    virtual_list: Option<VirtualListConfig>,
+    virtual_item_index: Option<u32>,
     f32_props: BTreeMap<Prop, f32>,
     vec4_props: BTreeMap<Prop, [f32; 4]>,
     ref_props: BTreeMap<Prop, u32>,
@@ -1108,6 +1245,7 @@ impl Scene {
             }
         }
 
+        validate_virtual_plan(&nodes)?;
         let order = topology_order(&nodes)?;
         let mut next = Self::build_from_plan(nodes, slots, order)?;
         next.resources = self.resources.clone();
@@ -1134,6 +1272,8 @@ impl Scene {
                     flags: self.flags[index],
                     text_run: self.text_runs[index],
                     scroll_position: self.scroll_positions[index],
+                    virtual_list: self.virtual_lists[index],
+                    virtual_item_index: self.virtual_item_indices[index],
                     f32_props: collect_props(&self.props.f32, index),
                     vec4_props: collect_props(&self.props.vec4, index),
                     ref_props: collect_props(&self.props.refs, index),
@@ -1171,6 +1311,8 @@ impl Scene {
             next.flags.push(node.flags);
             next.text_runs.push(node.text_run);
             next.scroll_positions.push(node.scroll_position);
+            next.virtual_lists.push(node.virtual_list);
+            next.virtual_item_indices.push(node.virtual_item_index);
             push_props(&mut next.props.f32, node.f32_props, next.ids.len() - 1);
             push_props(&mut next.props.vec4, node.vec4_props, next.ids.len() - 1);
             push_props(&mut next.props.refs, node.ref_props, next.ids.len() - 1);
@@ -1302,6 +1444,8 @@ fn plan_create(
             flags: 0,
             text_run: None,
             scroll_position: None,
+            virtual_list: None,
+            virtual_item_index: None,
             f32_props: BTreeMap::new(),
             vec4_props: BTreeMap::new(),
             ref_props: BTreeMap::new(),
@@ -1444,6 +1588,20 @@ fn plan_apply_property(
                 operation: "ScrollTo",
             });
         }
+        Mutation::ConfigureVirtualList { .. } if kind != NodeKind::Scroll => {
+            return Err(SceneError::UnsupportedNodeOperation {
+                node,
+                kind,
+                operation: "ConfigureVirtualList",
+            });
+        }
+        Mutation::SetVirtualItem { .. } if kind != NodeKind::Container => {
+            return Err(SceneError::UnsupportedNodeOperation {
+                node,
+                kind,
+                operation: "SetVirtualItem",
+            });
+        }
         _ => {}
     }
     match mutation {
@@ -1513,6 +1671,33 @@ fn plan_apply_property(
                 .ok_or(SceneError::StaleNode { node })?
                 .scroll_position = Some([x, y]);
         }
+        Mutation::ConfigureVirtualList {
+            item_count,
+            estimated_item_height,
+            base_overscan_viewports,
+            velocity_horizon_seconds,
+            maximum_ahead_viewports,
+            ..
+        } => {
+            let config = VirtualListConfig {
+                item_count,
+                estimated_item_height,
+                base_overscan_viewports,
+                velocity_horizon_seconds,
+                maximum_ahead_viewports,
+            };
+            validate_virtual_list_config(node, config)?;
+            nodes
+                .get_mut(&node)
+                .ok_or(SceneError::StaleNode { node })?
+                .virtual_list = Some(config);
+        }
+        Mutation::SetVirtualItem { item_index, .. } => {
+            nodes
+                .get_mut(&node)
+                .ok_or(SceneError::StaleNode { node })?
+                .virtual_item_index = Some(item_index);
+        }
         Mutation::CreateNode { .. }
         | Mutation::RemoveNode { .. }
         | Mutation::Reparent { .. }
@@ -1521,6 +1706,94 @@ fn plan_apply_property(
             return Err(SceneError::InternalInvariant(
                 "unexpected structural/resource mutation in property planner",
             ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_virtual_list_config(node: NodeId, config: VirtualListConfig) -> Result<(), SceneError> {
+    if config.item_count > MAX_VIRTUAL_ITEMS {
+        return Err(SceneError::InvalidVirtualListConfig {
+            node,
+            field: "itemCount",
+        });
+    }
+    for (field, value, minimum, maximum) in [
+        (
+            "estimatedItemHeight",
+            config.estimated_item_height,
+            f32::EPSILON,
+            1_000_000_000.0,
+        ),
+        (
+            "baseOverscanViewports",
+            config.base_overscan_viewports,
+            0.0,
+            64.0,
+        ),
+        (
+            "velocityHorizonSeconds",
+            config.velocity_horizon_seconds,
+            0.0,
+            10.0,
+        ),
+        (
+            "maximumAheadViewports",
+            config.maximum_ahead_viewports,
+            0.0,
+            64.0,
+        ),
+    ] {
+        if !value.is_finite() || value < minimum || value > maximum {
+            return Err(SceneError::InvalidVirtualListConfig { node, field });
+        }
+    }
+    Ok(())
+}
+
+fn validate_virtual_plan(nodes: &BTreeMap<NodeId, PlanNode>) -> Result<(), SceneError> {
+    let mut materialized = BTreeSet::new();
+    for (&node, entry) in nodes {
+        if let Some(config) = entry.virtual_list {
+            if entry.kind != NodeKind::Scroll {
+                return Err(SceneError::UnsupportedNodeOperation {
+                    node,
+                    kind: entry.kind,
+                    operation: "ConfigureVirtualList",
+                });
+            }
+            validate_virtual_list_config(node, config)?;
+        }
+        let Some(item_index) = entry.virtual_item_index else {
+            continue;
+        };
+        if entry.kind != NodeKind::Container {
+            return Err(SceneError::UnsupportedNodeOperation {
+                node,
+                kind: entry.kind,
+                operation: "SetVirtualItem",
+            });
+        }
+        let parent = entry
+            .parent
+            .and_then(|parent| nodes.get(&parent).map(|entry| (parent, entry)))
+            .ok_or(SceneError::MissingVirtualListParent { node })?;
+        let config = parent
+            .1
+            .virtual_list
+            .ok_or(SceneError::MissingVirtualListParent { node })?;
+        if item_index >= config.item_count {
+            return Err(SceneError::InvalidVirtualItemIndex {
+                node,
+                index: item_index,
+                item_count: config.item_count,
+            });
+        }
+        if !materialized.insert((parent.0, item_index)) {
+            return Err(SceneError::DuplicateVirtualItemIndex {
+                list: parent.0,
+                index: item_index,
+            });
         }
     }
     Ok(())
@@ -1953,6 +2226,138 @@ mod tests {
         assert_eq!(scene.vec4_prop(root, Prop::Padding), None);
         assert_eq!(scene.ref_prop(root, Prop::Transform), None);
         scene.validate_invariants().expect("valid all-lane scene");
+    }
+
+    #[test]
+    fn core_scroll_position_is_generation_safe_and_marks_only_dynamic_domains() {
+        let root = id(0, 1);
+        let scroll = id(1, 1);
+        let child = id(2, 1);
+        let mut scene = Scene::new();
+        scene
+            .commit(batch(
+                1,
+                vec![
+                    create(root, NodeKind::Root, None),
+                    create(scroll, NodeKind::Scroll, Some(root)),
+                    create(child, NodeKind::Container, Some(scroll)),
+                ],
+            ))
+            .expect("scene");
+        scene.clear_dirty();
+
+        assert_eq!(scene.apply_scroll_position(scroll, [3.0, 25.0]), Ok(true));
+        assert_eq!(scene.scroll_position(scroll), Some([3.0, 25.0]));
+        assert!(scene.dirty(DirtyDomain::Paint).contains(1));
+        assert!(scene.dirty(DirtyDomain::Hit).contains(1));
+        assert_eq!(scene.dirty(DirtyDomain::Layout).iter_ones().next(), None);
+        assert_eq!(scene.dirty(DirtyDomain::Semantics).iter_ones().next(), None);
+        scene.clear_dirty();
+        assert_eq!(scene.apply_scroll_position(scroll, [3.0, 25.0]), Ok(false));
+        assert_eq!(scene.dirty(DirtyDomain::Paint).iter_ones().next(), None);
+
+        assert!(matches!(
+            scene.apply_scroll_position(child, [0.0, 1.0]),
+            Err(SceneError::UnsupportedNodeOperation { .. })
+        ));
+        assert_eq!(
+            scene.apply_scroll_position(id(1, 2), [0.0, 1.0]),
+            Err(SceneError::StaleNode { node: id(1, 2) })
+        );
+        assert!(matches!(
+            scene.apply_scroll_position(scroll, [f32::NAN, 0.0]),
+            Err(SceneError::NonFiniteValue { .. })
+        ));
+        assert_eq!(scene.scroll_position(scroll), Some([3.0, 25.0]));
+
+        assert!(matches!(
+            scene.apply_scroll_positions(&[(scroll, [8.0, 40.0]), (child, [0.0, 2.0])]),
+            Err(SceneError::UnsupportedNodeOperation { .. })
+        ));
+        assert_eq!(
+            scene.scroll_position(scroll),
+            Some([3.0, 25.0]),
+            "a late invalid target must roll back the whole Core position batch"
+        );
+    }
+
+    #[test]
+    fn virtual_list_metadata_is_bounded_generation_safe_and_transactional() {
+        let root = id(0, 1);
+        let list = id(1, 1);
+        let first = id(2, 1);
+        let second = id(3, 1);
+        let mut scene = Scene::new();
+        scene
+            .commit(batch(
+                1,
+                vec![
+                    create(root, NodeKind::Root, None),
+                    create(list, NodeKind::Scroll, Some(root)),
+                    create(first, NodeKind::Container, Some(list)),
+                    create(second, NodeKind::Container, Some(list)),
+                    Mutation::ConfigureVirtualList {
+                        node_id: list.raw(),
+                        item_count: 1_000_000,
+                        estimated_item_height: 24.0,
+                        base_overscan_viewports: 1.0,
+                        velocity_horizon_seconds: 0.25,
+                        maximum_ahead_viewports: 4.0,
+                    },
+                    Mutation::SetVirtualItem {
+                        node_id: first.raw(),
+                        item_index: 10,
+                    },
+                    Mutation::SetVirtualItem {
+                        node_id: second.raw(),
+                        item_index: 11,
+                    },
+                ],
+            ))
+            .expect("virtual scene");
+        assert_eq!(
+            scene.virtual_list(list).expect("config").item_count,
+            1_000_000
+        );
+        assert_eq!(scene.virtual_item_index(first), Some(10));
+        assert_eq!(scene.virtual_item_index(second), Some(11));
+
+        let before = scene.clone();
+        assert!(matches!(
+            scene.commit(batch(
+                2,
+                vec![Mutation::ConfigureVirtualList {
+                    node_id: list.raw(),
+                    item_count: 1,
+                    estimated_item_height: 24.0,
+                    base_overscan_viewports: 1.0,
+                    velocity_horizon_seconds: 0.25,
+                    maximum_ahead_viewports: 4.0,
+                }]
+            )),
+            Err(SceneError::InvalidVirtualItemIndex { .. })
+        ));
+        assert_eq!(scene.ids(), before.ids());
+        assert_eq!(scene.virtual_list(list), before.virtual_list(list));
+
+        assert!(matches!(
+            scene.commit(batch(
+                2,
+                vec![Mutation::ConfigureVirtualList {
+                    node_id: list.raw(),
+                    item_count: MAX_VIRTUAL_ITEMS + 1,
+                    estimated_item_height: 24.0,
+                    base_overscan_viewports: 1.0,
+                    velocity_horizon_seconds: 0.25,
+                    maximum_ahead_viewports: 4.0,
+                }]
+            )),
+            Err(SceneError::InvalidVirtualListConfig {
+                field: "itemCount",
+                ..
+            })
+        ));
+        assert_eq!(scene.virtual_list(list), before.virtual_list(list));
     }
 
     #[test]

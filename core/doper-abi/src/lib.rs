@@ -187,6 +187,10 @@ mod tests {
             InputOpcode::CancelComposition,
             InputOpcode::Undo,
             InputOpcode::Redo,
+            InputOpcode::ScrollBegin,
+            InputOpcode::ScrollDelta,
+            InputOpcode::ScrollEnd,
+            InputOpcode::ScrollCancel,
             InputOpcode::Commit,
         ];
         for opcode in inputs {

@@ -48,8 +48,11 @@ pub struct InputSelection {
     pub focus: InputPosition,
 }
 
-/// One browser-independent, revision-checked editing command.
-#[derive(Clone, Debug, Eq, PartialEq)]
+const MAX_SCROLL_DELTA: f32 = 1_000_000.0;
+const MAX_SCROLL_DELTA_MICROS: u32 = 1_000_000;
+
+/// One browser-independent editing or direct-manipulation command.
+#[derive(Clone, Debug, PartialEq)]
 pub enum InputCommand {
     /// Replaces an explicit UTF-16 range.
     Replace {
@@ -142,10 +145,36 @@ pub enum InputCommand {
         /// Exact Core revision observed by the producer.
         base_revision: u64,
     },
+    /// Starts direct manipulation of a Core-owned scroll node.
+    ScrollBegin {
+        /// Generation-bearing target scroll node.
+        node_id: u32,
+    },
+    /// Applies a timed two-dimensional logical content-offset delta.
+    ScrollDelta {
+        /// Generation-bearing target scroll node.
+        node_id: u32,
+        /// Horizontal logical-pixel delta.
+        delta_x: f32,
+        /// Vertical logical-pixel delta.
+        delta_y: f32,
+        /// Time since the preceding sample, in microseconds.
+        elapsed_micros: u32,
+    },
+    /// Ends direct manipulation and starts a Core-estimated fling.
+    ScrollEnd {
+        /// Generation-bearing target scroll node.
+        node_id: u32,
+    },
+    /// Cancels direct manipulation without retaining fling velocity.
+    ScrollCancel {
+        /// Generation-bearing target scroll node.
+        node_id: u32,
+    },
 }
 
 /// One input command plus versioned instruction flags.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InputInstruction {
     /// Version 1 requires zero.
     pub flags: u8,
@@ -154,7 +183,7 @@ pub struct InputInstruction {
 }
 
 /// A complete input transaction ending in one Commit instruction.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InputBatch {
     /// Monotonic input transaction sequence.
     pub frame_seq: u32,
@@ -237,29 +266,41 @@ fn validate_declared_count(declared: u32, remaining: usize) -> Result<(), AbiErr
 }
 
 fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputCommand, AbiError> {
-    let (node_id, base_revision) = read_target(reader)?;
     Ok(match opcode {
-        InputOpcode::Replace => InputCommand::Replace {
-            node_id,
-            base_revision,
-            start: reader.read_u32()?,
-            end: reader.read_u32()?,
-            text: read_text(reader)?,
-        },
-        InputOpcode::Insert => InputCommand::Insert {
-            node_id,
-            base_revision,
-            text: read_text(reader)?,
-        },
-        InputOpcode::DeleteBackward => InputCommand::DeleteBackward {
-            node_id,
-            base_revision,
-        },
-        InputOpcode::DeleteForward => InputCommand::DeleteForward {
-            node_id,
-            base_revision,
-        },
+        InputOpcode::Replace => {
+            let (node_id, base_revision) = read_target(reader)?;
+            InputCommand::Replace {
+                node_id,
+                base_revision,
+                start: reader.read_u32()?,
+                end: reader.read_u32()?,
+                text: read_text(reader)?,
+            }
+        }
+        InputOpcode::Insert => {
+            let (node_id, base_revision) = read_target(reader)?;
+            InputCommand::Insert {
+                node_id,
+                base_revision,
+                text: read_text(reader)?,
+            }
+        }
+        InputOpcode::DeleteBackward => {
+            let (node_id, base_revision) = read_target(reader)?;
+            InputCommand::DeleteBackward {
+                node_id,
+                base_revision,
+            }
+        }
+        InputOpcode::DeleteForward => {
+            let (node_id, base_revision) = read_target(reader)?;
+            InputCommand::DeleteForward {
+                node_id,
+                base_revision,
+            }
+        }
         InputOpcode::SetSelection => {
+            let (node_id, base_revision) = read_target(reader)?;
             let anchor_offset = reader.read_u32()?;
             let focus_offset = reader.read_u32()?;
             let anchor_affinity = InputAffinity::decode(reader.read_u8()?)?;
@@ -280,16 +321,23 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
                 },
             }
         }
-        InputOpcode::BeginComposition => InputCommand::BeginComposition {
-            node_id,
-            base_revision,
-        },
-        InputOpcode::UpdateComposition => InputCommand::UpdateComposition {
-            node_id,
-            base_revision,
-            text: read_text(reader)?,
-        },
+        InputOpcode::BeginComposition => {
+            let (node_id, base_revision) = read_target(reader)?;
+            InputCommand::BeginComposition {
+                node_id,
+                base_revision,
+            }
+        }
+        InputOpcode::UpdateComposition => {
+            let (node_id, base_revision) = read_target(reader)?;
+            InputCommand::UpdateComposition {
+                node_id,
+                base_revision,
+                text: read_text(reader)?,
+            }
+        }
         InputOpcode::CommitComposition => {
+            let (node_id, base_revision) = read_target(reader)?;
             let has_text = reader.read_u8()?;
             reader.read_zeroes(3)?;
             let text = read_text(reader)?;
@@ -313,17 +361,55 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
                 text,
             }
         }
-        InputOpcode::CancelComposition => InputCommand::CancelComposition {
-            node_id,
-            base_revision,
+        InputOpcode::CancelComposition => {
+            let (node_id, base_revision) = read_target(reader)?;
+            InputCommand::CancelComposition {
+                node_id,
+                base_revision,
+            }
+        }
+        InputOpcode::Undo => {
+            let (node_id, base_revision) = read_target(reader)?;
+            InputCommand::Undo {
+                node_id,
+                base_revision,
+            }
+        }
+        InputOpcode::Redo => {
+            let (node_id, base_revision) = read_target(reader)?;
+            InputCommand::Redo {
+                node_id,
+                base_revision,
+            }
+        }
+        InputOpcode::ScrollBegin => InputCommand::ScrollBegin {
+            node_id: reader.read_u32()?,
         },
-        InputOpcode::Undo => InputCommand::Undo {
-            node_id,
-            base_revision,
+        InputOpcode::ScrollDelta => {
+            let node_id = reader.read_u32()?;
+            let delta_x = reader.read_f32()?;
+            let delta_y = reader.read_f32()?;
+            if delta_x.abs() > MAX_SCROLL_DELTA || delta_y.abs() > MAX_SCROLL_DELTA {
+                return Err(AbiError::InvalidValue("scroll delta exceeds maximum"));
+            }
+            let elapsed_micros = reader.read_u32()?;
+            if elapsed_micros == 0 || elapsed_micros > MAX_SCROLL_DELTA_MICROS {
+                return Err(AbiError::InvalidValue(
+                    "scroll delta elapsed time is invalid",
+                ));
+            }
+            InputCommand::ScrollDelta {
+                node_id,
+                delta_x,
+                delta_y,
+                elapsed_micros,
+            }
+        }
+        InputOpcode::ScrollEnd => InputCommand::ScrollEnd {
+            node_id: reader.read_u32()?,
         },
-        InputOpcode::Redo => InputCommand::Redo {
-            node_id,
-            base_revision,
+        InputOpcode::ScrollCancel => InputCommand::ScrollCancel {
+            node_id: reader.read_u32()?,
         },
         InputOpcode::Commit => return Err(AbiError::InvalidValue("nested input commit")),
     })
@@ -388,6 +474,28 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             writer.u16(0);
             write_text(writer, text.as_deref().unwrap_or_default())?;
         }
+        InputCommand::ScrollBegin { node_id }
+        | InputCommand::ScrollEnd { node_id }
+        | InputCommand::ScrollCancel { node_id } => writer.u32(*node_id),
+        InputCommand::ScrollDelta {
+            node_id,
+            delta_x,
+            delta_y,
+            elapsed_micros,
+        } => {
+            if delta_x.abs() > MAX_SCROLL_DELTA || delta_y.abs() > MAX_SCROLL_DELTA {
+                return Err(AbiError::InvalidValue("scroll delta exceeds maximum"));
+            }
+            if *elapsed_micros == 0 || *elapsed_micros > MAX_SCROLL_DELTA_MICROS {
+                return Err(AbiError::InvalidValue(
+                    "scroll delta elapsed time is invalid",
+                ));
+            }
+            writer.u32(*node_id);
+            writer.f32(*delta_x)?;
+            writer.f32(*delta_y)?;
+            writer.u32(*elapsed_micros);
+        }
         command => {
             let (node_id, base_revision) = command_target(command);
             write_target(writer, node_id, base_revision);
@@ -439,6 +547,10 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::CancelComposition { .. } => InputOpcode::CancelComposition,
         InputCommand::Undo { .. } => InputOpcode::Undo,
         InputCommand::Redo { .. } => InputOpcode::Redo,
+        InputCommand::ScrollBegin { .. } => InputOpcode::ScrollBegin,
+        InputCommand::ScrollDelta { .. } => InputOpcode::ScrollDelta,
+        InputCommand::ScrollEnd { .. } => InputOpcode::ScrollEnd,
+        InputCommand::ScrollCancel { .. } => InputOpcode::ScrollCancel,
     }
 }
 
@@ -593,6 +705,15 @@ mod tests {
                     node_id: 1,
                     base_revision: revision + 11,
                 }),
+                instruction(InputCommand::ScrollBegin { node_id: 2 }),
+                instruction(InputCommand::ScrollDelta {
+                    node_id: 2,
+                    delta_x: -3.5,
+                    delta_y: 24.25,
+                    elapsed_micros: 16_667,
+                }),
+                instruction(InputCommand::ScrollEnd { node_id: 2 }),
+                instruction(InputCommand::ScrollCancel { node_id: 2 }),
             ],
         }
     }
@@ -698,6 +819,42 @@ mod tests {
         assert_eq!(
             InputBatch::decode(&composition),
             Err(AbiError::InvalidValue("input text is not valid UTF-8"))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_scroll_sample_bounds_on_encode_and_decode() {
+        let invalid_time = InputBatch {
+            frame_seq: 1,
+            instructions: vec![instruction(InputCommand::ScrollDelta {
+                node_id: 1,
+                delta_x: 0.0,
+                delta_y: 1.0,
+                elapsed_micros: 0,
+            })],
+        };
+        assert_eq!(
+            invalid_time.encode(),
+            Err(AbiError::InvalidValue(
+                "scroll delta elapsed time is invalid"
+            ))
+        );
+
+        let mut bytes = InputBatch {
+            frame_seq: 1,
+            instructions: vec![instruction(InputCommand::ScrollDelta {
+                node_id: 1,
+                delta_x: 0.0,
+                delta_y: 1.0,
+                elapsed_micros: 16_667,
+            })],
+        }
+        .encode()
+        .expect("scroll sample");
+        bytes[24..28].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert_eq!(
+            InputBatch::decode(&bytes),
+            Err(AbiError::NonFiniteFloat { offset: 24 })
         );
     }
 

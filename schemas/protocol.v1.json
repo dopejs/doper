@@ -31,7 +31,8 @@
     "mutationInstructions": 262144,
     "inputInstructions": 262144,
     "displayInstructions": 1048576,
-    "recordingRecords": 1048576
+    "recordingRecords": 1048576,
+    "virtualItems": 4000000
   },
   "recording": {
     "magic": "DOPR",
@@ -63,6 +64,18 @@
       { "name": "overInvalidatedFrames", "type": "u32" },
       { "name": "pictureHashLow", "type": "u32" },
       { "name": "pictureHashHigh", "type": "u32" }
+    ]
+  },
+  "virtualRefillBatch": {
+    "version": 1,
+    "headerFields": [
+      { "name": "version", "type": "u32" },
+      { "name": "requestCount", "type": "u32" }
+    ],
+    "recordFields": [
+      { "name": "nodeId", "type": "u32" },
+      { "name": "start", "type": "u32" },
+      { "name": "end", "type": "u32" }
     ]
   },
   "streams": {
@@ -106,6 +119,16 @@
           "opcode": 64,
           "fields": ["u32", "f32", "f32", "u16", "pad16"]
         },
+        {
+          "name": "ConfigureVirtualList",
+          "opcode": 65,
+          "fields": ["u32", "u32", "f32", "f32", "f32", "f32"]
+        },
+        {
+          "name": "SetVirtualItem",
+          "opcode": 66,
+          "fields": ["u32", "u32"]
+        },
         { "name": "Commit", "opcode": 240, "fields": ["u32"] }
       ]
     },
@@ -144,6 +167,14 @@
         { "name": "CancelComposition", "opcode": 9, "fields": ["u32", "u32", "u32"] },
         { "name": "Undo", "opcode": 10, "fields": ["u32", "u32", "u32"] },
         { "name": "Redo", "opcode": 11, "fields": ["u32", "u32", "u32"] },
+        { "name": "ScrollBegin", "opcode": 32, "fields": ["u32"] },
+        {
+          "name": "ScrollDelta",
+          "opcode": 33,
+          "fields": ["u32", "f32", "f32", "u32"]
+        },
+        { "name": "ScrollEnd", "opcode": 34, "fields": ["u32"] },
+        { "name": "ScrollCancel", "opcode": 35, "fields": ["u32"] },
         { "name": "Commit", "opcode": 240, "fields": ["u32"] }
       ]
     },

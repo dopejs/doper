@@ -1,17 +1,20 @@
 import {
   createRoot,
   decodeMutationBatch,
+  type CoreDrivenDoperRoot,
   type DoperRoot,
   type MutationSink,
   type RootOptions,
 } from "@dopejs/doper-reconciler";
+import { decodeInputBatch, encodeInputBatch, type InputCommand } from "@dopejs/doper-editing";
 
-import { MAX_MUTATION_BYTES } from "./generated";
+import { MAX_INPUT_BYTES, MAX_MUTATION_BYTES } from "./generated";
 import {
   CanvasFrameSink,
   createDefaultRasterCache,
   type CoreClient,
   type FrameReport,
+  type VirtualRefillRange,
 } from "./main-thread";
 import {
   detectHostCapabilities,
@@ -23,7 +26,7 @@ import {
   type HostTransportPolicy,
 } from "./capabilities";
 import { PostMessageMutationTransport, type PostMessageTransportMetrics } from "./post-message";
-import { SabMutationRing } from "./sab-ring";
+import { SabMutationRing, type SabMutationRingMetrics } from "./sab-ring";
 import { SabMutationTransport, type SabMutationTransportMetrics } from "./sab-transport";
 import { MutationSceneSnapshot } from "./scene-snapshot";
 import { MutationTransportBackpressureError } from "./transport-errors";
@@ -45,11 +48,22 @@ interface MutationTransport {
 export type HostMutationTransportMetrics =
   PostMessageTransportMetrics | SabMutationTransportMetrics;
 
+/** Snapshot of the low-latency Input Stream path selected by the Host. */
+export interface HostInputTransportMetrics {
+  readonly directFrames: number;
+  readonly mode: HostTransportMode;
+  readonly ring?: SabMutationRingMetrics;
+  readonly sabFallbackFrames: number;
+}
+
 export interface ClockAnchorDriver {
   cancel(handle: number): void;
   readonly timeOrigin: number;
   request(callback: (timestamp: number) => void): number;
 }
+
+/** Generation-bearing scroll target accepted from a JSX ref or raw host handle. */
+export type ScrollTarget = number | { readonly nodeId: number };
 
 export interface HostedCanvasRootOptions extends RootOptions {
   readonly capabilities?: HostCapabilities;
@@ -64,6 +78,7 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly onFrame?: (report: FrameReport) => void;
   readonly onHostError?: (error: Error) => void;
   readonly onModeChange?: (mode: HostTransportMode, decision: HostTransportDecision) => void;
+  readonly onVirtualRefills?: (requests: readonly VirtualRefillRange[]) => void;
   readonly rasterCache?: boolean;
   readonly transport?: HostTransportPolicy;
   readonly workerFactory?: () => Worker;
@@ -75,6 +90,12 @@ export interface HostedCanvasRoot extends DoperRoot {
   readonly decision: HostTransportDecision;
   readonly mode: HostTransportMode;
   close(): Promise<void>;
+  dispatchInput(bytes: Uint8Array): void;
+  beginScroll(target: ScrollTarget): void;
+  scrollBy(target: ScrollTarget, deltaX: number, deltaY: number, elapsedMs: number): void;
+  endScroll(target: ScrollTarget): void;
+  cancelScroll(target: ScrollTarget): void;
+  inputTransportMetrics(): HostInputTransportMetrics;
   transportMetrics(): HostMutationTransportMetrics | undefined;
 }
 
@@ -98,11 +119,18 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #closing = false;
   #core: CoreClient | undefined;
   #decision: HostTransportDecision;
+  #frameSink: CanvasFrameSink | undefined;
+  #inputSequence = 1;
+  #inputDirectFrames = 0;
+  #inputRing: SabMutationRing | undefined;
+  #inputSabFallbackFrames = 0;
+  #lastInputRingMetrics: SabMutationRingMetrics | undefined;
   #mode: HostTransportMode = "main-thread";
   #lastTransportMetrics: HostMutationTransportMetrics | undefined;
+  #mainFrameTimestamp: number | undefined;
   #recovery: Promise<void> | undefined;
   #recovering = false;
-  #root: DoperRoot | undefined;
+  #root: CoreDrivenDoperRoot | undefined;
   #transferred = false;
   #transport: MutationTransport | undefined;
   #unmounted = false;
@@ -136,6 +164,84 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   /** Current Worker queue state, or the final snapshot retained after runtime fallback. */
   public transportMetrics(): HostMutationTransportMetrics | undefined {
     return this.#transport?.metrics() ?? this.#lastTransportMetrics;
+  }
+
+  public inputTransportMetrics(): HostInputTransportMetrics {
+    const ring = this.#inputRing?.metrics() ?? this.#lastInputRingMetrics;
+    return {
+      directFrames: this.#inputDirectFrames,
+      mode: this.#mode,
+      ...(ring === undefined ? {} : { ring }),
+      sabFallbackFrames: this.#inputSabFallbackFrames,
+    };
+  }
+
+  /** Routes one versioned Input Stream transaction to the current Core owner. */
+  public dispatchInput(bytes: Uint8Array): void {
+    if (!(bytes instanceof Uint8Array)) throw new TypeError("input must be Uint8Array");
+    if (bytes.byteLength > MAX_INPUT_BYTES) throw new RangeError("input exceeds protocol limit");
+    const { frameSeq } = decodeInputBatch(bytes);
+    if (this.#closing || this.#unmounted) throw new Error("hosted root is closed");
+    if (this.#recovering) throw new Error("hosted root is recovering");
+    if (this.#mode === "main-thread") {
+      const sink = this.#frameSink;
+      if (sink === undefined) throw new Error("main-thread Core is not initialized");
+      sink.input(bytes);
+      this.#inputDirectFrames += 1;
+      this.#inputSequence = nextSequence(frameSeq);
+      return;
+    }
+    const client = this.#client;
+    if (client === undefined) throw new Error("render Worker is not initialized");
+    const inputRing = this.#inputRing;
+    if (this.#mode === "sab" && inputRing !== undefined) {
+      if (bytes.byteLength <= inputRing.payloadBytes && inputRing.tryPublish(frameSeq, bytes)) {
+        client.postInputWake();
+      } else {
+        // Preserve sequence order: the wake is posted before the copied
+        // fallback, so the Worker drains older shared slots first.
+        client.postInputWake();
+        client.postInput(bytes);
+        this.#inputDirectFrames += 1;
+        this.#inputSabFallbackFrames += 1;
+      }
+    } else {
+      client.postInput(bytes);
+      this.#inputDirectFrames += 1;
+    }
+    this.#inputSequence = nextSequence(frameSeq);
+  }
+
+  /** Starts direct manipulation and cancels an existing fling. */
+  public beginScroll(target: ScrollTarget): void {
+    this.sendScroll([{ type: "scrollBegin", nodeId: scrollNodeId(target) }]);
+  }
+
+  /** Applies one timed logical content-offset sample. */
+  public scrollBy(target: ScrollTarget, deltaX: number, deltaY: number, elapsedMs: number): void {
+    if (!Number.isFinite(elapsedMs) || elapsedMs <= 0 || elapsedMs > 1000) {
+      throw new RangeError("elapsedMs must be greater than zero and at most 1000");
+    }
+    const elapsedMicros = Math.max(1, Math.min(1_000_000, Math.round(elapsedMs * 1000)));
+    this.sendScroll([
+      {
+        type: "scrollDelta",
+        nodeId: scrollNodeId(target),
+        deltaX,
+        deltaY,
+        elapsedMicros,
+      },
+    ]);
+  }
+
+  /** Ends direct manipulation and starts the Core-estimated fling. */
+  public endScroll(target: ScrollTarget): void {
+    this.sendScroll([{ type: "scrollEnd", nodeId: scrollNodeId(target) }]);
+  }
+
+  /** Cancels direct manipulation and retains only edge rebound. */
+  public cancelScroll(target: ScrollTarget): void {
+    this.sendScroll([{ type: "scrollCancel", nodeId: scrollNodeId(target) }]);
   }
 
   public async initialize(): Promise<void> {
@@ -193,6 +299,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
         : { onClockMetrics: this.#options.onClockMetrics }),
       onFatal: (error) => this.handleWorkerFatal(error),
       ...(this.#options.onFrame === undefined ? {} : { onFrame: this.#options.onFrame }),
+      onVirtualRefills: (requests) => this.deferVirtualRefills(requests),
       sessionId: nextSessionId(),
     };
     const client = new RenderWorkerClient(workerFactory(), clientOptions);
@@ -222,6 +329,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#transferred = true;
     let transport: MutationTransport;
     let ringBuffer: SharedArrayBuffer | undefined;
+    let inputRingBuffer: SharedArrayBuffer | undefined;
     if (selectedMode === "sab") {
       const allocation = SabMutationRing.create(2, MAX_MUTATION_BYTES);
       ringBuffer = allocation.buffer;
@@ -235,6 +343,9 @@ class HostedCanvasRootController implements HostedCanvasRoot {
           : { maxBufferedBytes: this.#options.mutationBufferBytes }),
         sessionId: client.sessionId,
       });
+      const inputAllocation = SabMutationRing.create(INPUT_RING_CAPACITY, INPUT_RING_PAYLOAD_BYTES);
+      this.#inputRing = inputAllocation.ring;
+      inputRingBuffer = inputAllocation.buffer;
     } else {
       transport = new PostMessageMutationTransport(client.endpoint, {
         ...(this.#options.mutationAcknowledgementTimeoutMs === undefined
@@ -253,6 +364,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       height: positiveDimension(this.#canvas.height, "canvas height"),
       mode: selectedMode,
       rasterCache: this.#options.rasterCache !== false,
+      ...(inputRingBuffer === undefined ? {} : { inputRingBuffer }),
       ...(ringBuffer === undefined ? {} : { ringBuffer }),
       width: positiveDimension(this.#canvas.width, "canvas width"),
     });
@@ -266,6 +378,11 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#options.onModeChange?.(this.#mode, this.#decision);
   }
 
+  private sendScroll(commands: readonly InputCommand[]): void {
+    const frameSeq = this.#inputSequence;
+    this.dispatchInput(encodeInputBatch({ frameSeq, commands }));
+  }
+
   private async initializeMainThread(canvas: HTMLCanvasElement): Promise<void> {
     const width = positiveDimension(canvas.width, "canvas width");
     const height = positiveDimension(canvas.height, "canvas height");
@@ -277,10 +394,18 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       this.#options.rasterCache === false
         ? undefined
         : createDefaultRasterCache(context, this.#options.onHostError);
-    const sink = new CanvasFrameSink(context, core, this.#options.onFrame, rasterCache);
+    const sink = new CanvasFrameSink(
+      context,
+      core,
+      this.#options.onFrame,
+      rasterCache,
+      (requests) => this.deferVirtualRefills(requests),
+    );
+    this.#frameSink = sink;
     this.#recoverableSink.install(sink);
     this.#root ??= createRoot(this.#recoverableSink, this.#options);
     this.#mode = "main-thread";
+    this.startMainThreadClock(sink);
     this.#options.onModeChange?.(this.#mode, this.#decision);
   }
 
@@ -297,6 +422,20 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#recovery = this.recoverToMainThread(error).finally(() => {
       this.#recovering = false;
       this.#recovery = undefined;
+    });
+  }
+
+  private deferVirtualRefills(requests: readonly VirtualRefillRange[]): void {
+    if (requests.length === 0) return;
+    const owned = requests.map(({ end, nodeId, start }) => ({ end, nodeId, start }));
+    queueMicrotask(() => {
+      if (this.#closing || this.#unmounted) return;
+      try {
+        this.#root?.refillVirtualRanges(owned);
+        this.#options.onVirtualRefills?.(owned);
+      } catch (cause) {
+        this.#options.onHostError?.(toError(cause, "virtual refill handler failed"));
+      }
     });
   }
 
@@ -325,6 +464,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     }
     const client = this.#client;
     this.#client = undefined;
+    this.closeInputRing();
     client?.terminate();
   }
 
@@ -341,9 +481,25 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#anchorHandle = driver.request(frame);
   }
 
+  private startMainThreadClock(sink: CanvasFrameSink): void {
+    const driver = this.#options.clockAnchorDriver ?? defaultClockAnchorDriver();
+    if (driver === null) return;
+    this.#mainFrameTimestamp = undefined;
+    const frame = (timestamp: number): void => {
+      if (this.#closing || this.#mode !== "main-thread") return;
+      const absolute = driver.timeOrigin + timestamp;
+      const previous = this.#mainFrameTimestamp;
+      this.#mainFrameTimestamp = absolute;
+      sink.advance(previous === undefined ? 0 : Math.max(0, absolute - previous) / 1000);
+      this.#anchorHandle = driver.request(frame);
+    };
+    this.#anchorHandle = driver.request(frame);
+  }
+
   private stopClockAnchors(): void {
     const handle = this.#anchorHandle;
     this.#anchorHandle = undefined;
+    this.#mainFrameTimestamp = undefined;
     const driver = this.#options.clockAnchorDriver ?? defaultClockAnchorDriver();
     if (handle !== undefined && driver !== null) driver.cancel(handle);
   }
@@ -365,8 +521,18 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     const client = this.#client;
     this.#client = undefined;
     if (client !== undefined) await client.close();
+    this.closeInputRing();
     this.#core?.free?.();
     this.#core = undefined;
+    this.#frameSink = undefined;
+  }
+
+  private closeInputRing(): void {
+    const ring = this.#inputRing;
+    this.#inputRing = undefined;
+    if (ring === undefined) return;
+    this.#lastInputRingMetrics = ring.metrics();
+    ring.close();
   }
 
   private requireRoot(): DoperRoot {
@@ -427,6 +593,9 @@ class RecoverableMutationSink implements MutationSink {
 
 let sessionSequence = 1;
 
+const INPUT_RING_CAPACITY = 64;
+const INPUT_RING_PAYLOAD_BYTES = 4 * 1024;
+
 function nextSessionId(): number {
   const result = sessionSequence;
   sessionSequence = nextSequence(sessionSequence);
@@ -441,6 +610,14 @@ function nextSequence(value: number): number {
 function positiveDimension(value: number, label: string): number {
   if (!Number.isInteger(value) || value <= 0) throw new RangeError(`${label} must be positive`);
   return value;
+}
+
+function scrollNodeId(target: ScrollTarget): number {
+  const nodeId = typeof target === "number" ? target : target.nodeId;
+  if (!Number.isInteger(nodeId) || nodeId < 0 || nodeId > 0xffff_ffff) {
+    throw new RangeError("scroll target nodeId must be a u32");
+  }
+  return nodeId;
 }
 
 function runtimeFallbackDecision(

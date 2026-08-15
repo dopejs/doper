@@ -9,6 +9,32 @@ pub trait IntrinsicMeasurer {
     fn measure(&mut self, scene: &Scene, node: NodeId, constraints: BoxConstraints) -> Size;
 }
 
+/// Supplies variable-height virtual-list geometry owned by the scrolling subsystem.
+///
+/// Returning `None` uses the Scene's validated uniform-height estimate. This keeps
+/// the reference layout path deterministic before a Core scroll state is created.
+pub trait VirtualLayoutProvider {
+    /// Returns the leading logical offset for one item in its virtual list.
+    fn item_offset(&self, list: NodeId, item_index: u32) -> Option<f32>;
+
+    /// Returns the current total logical content height for one virtual list.
+    fn content_height(&self, list: NodeId) -> Option<f32>;
+}
+
+/// Uniform-estimate virtual geometry used by standalone layout callers.
+#[derive(Default)]
+pub struct EstimatedVirtualLayout;
+
+impl VirtualLayoutProvider for EstimatedVirtualLayout {
+    fn item_offset(&self, _list: NodeId, _item_index: u32) -> Option<f32> {
+        None
+    }
+
+    fn content_height(&self, _list: NodeId) -> Option<f32> {
+        None
+    }
+}
+
 /// A measurer that gives every leaf an empty intrinsic size.
 #[derive(Default)]
 pub struct ZeroIntrinsicMeasurer;
@@ -100,6 +126,7 @@ pub struct LayoutEngine {
     stack: Vec<Frame>,
     candidate_roots: Vec<NodeId>,
     boundary_roots: Vec<NodeId>,
+    external_roots: Vec<NodeId>,
     metrics: LayoutMetrics,
 }
 
@@ -122,6 +149,16 @@ impl LayoutEngine {
         self.metrics
     }
 
+    /// Schedules a corrective pass for virtual lists whose external height index changed.
+    ///
+    /// These roots replace Scene dirty bits for the next pass because those bits
+    /// were already consumed by the immediately preceding layout. Fixed-size
+    /// lists remain localized; non-fixed lists expand to their safe ancestor.
+    pub fn mark_virtual_measurements_changed(&mut self, lists: &[NodeId]) {
+        self.external_roots.clear();
+        self.external_roots.extend_from_slice(lists);
+    }
+
     /// Computes and atomically commits geometry for the Scene.
     pub fn layout(
         &mut self,
@@ -129,12 +166,24 @@ impl LayoutEngine {
         constraints: BoxConstraints,
         measurer: &mut impl IntrinsicMeasurer,
     ) -> Result<LayoutOutcome, LayoutError> {
+        self.layout_with_virtual(scene, constraints, measurer, &EstimatedVirtualLayout)
+    }
+
+    /// Computes geometry using current Core-owned variable-height virtual offsets.
+    pub fn layout_with_virtual(
+        &mut self,
+        scene: &Scene,
+        constraints: BoxConstraints,
+        measurer: &mut impl IntrinsicMeasurer,
+        virtual_layout: &impl VirtualLayoutProvider,
+    ) -> Result<LayoutOutcome, LayoutError> {
         if scene.is_empty() {
             let changed = changed_geometry(&self.front, &LayoutSnapshot::default());
             self.front = LayoutSnapshot::default();
             self.back = LayoutSnapshot::default();
             self.last_constraints = Some(constraints);
             self.last_topology_compactions = scene.metrics().topology_compactions;
+            self.external_roots.clear();
             self.metrics.geometry_changes += changed.iter_ones().count() as u64;
             return Ok(LayoutOutcome {
                 changed,
@@ -145,11 +194,12 @@ impl LayoutEngine {
 
         let topology_unchanged = self.front.ids == scene.ids()
             && self.last_topology_compactions == scene.metrics().topology_compactions;
-        let clean = scene
-            .dirty(DirtyDomain::Layout)
-            .iter_ones()
-            .next()
-            .is_none();
+        let clean = self.external_roots.is_empty()
+            && scene
+                .dirty(DirtyDomain::Layout)
+                .iter_ones()
+                .next()
+                .is_none();
         if topology_unchanged && clean && self.last_constraints == Some(constraints) {
             self.metrics.clean_skips += 1;
             return Ok(LayoutOutcome {
@@ -183,6 +233,7 @@ impl LayoutEngine {
                     boundary,
                     boundary_constraints,
                     measurer,
+                    virtual_layout,
                     &mut self.back,
                     &mut self.stack,
                 )?;
@@ -204,6 +255,7 @@ impl LayoutEngine {
                 root,
                 constraints,
                 measurer,
+                virtual_layout,
                 &mut self.back,
                 &mut self.stack,
             )?;
@@ -214,6 +266,7 @@ impl LayoutEngine {
         core::mem::swap(&mut self.front, &mut self.back);
         self.last_constraints = Some(constraints);
         self.last_topology_compactions = scene.metrics().topology_compactions;
+        self.external_roots.clear();
         self.metrics.passes += 1;
         if full {
             self.metrics.full_passes += 1;
@@ -251,20 +304,19 @@ impl LayoutEngine {
             .first()
             .ok_or(LayoutError::SceneInvariant("non-empty Scene has no root"))?;
         self.candidate_roots.clear();
-        for index in scene.dirty(DirtyDomain::Layout).iter_ones() {
-            let dirty = *scene.ids().get(index).ok_or(LayoutError::SceneInvariant(
-                "dirty layout index is out of bounds",
-            ))?;
-            let mut candidate = root;
-            let mut cursor = scene.parent(dirty);
-            while let Some(ancestor) = cursor {
-                if is_fixed_boundary(scene, ancestor) {
-                    candidate = ancestor;
-                    break;
-                }
-                cursor = scene.parent(ancestor);
+        if self.external_roots.is_empty() {
+            for index in scene.dirty(DirtyDomain::Layout).iter_ones() {
+                let dirty = *scene.ids().get(index).ok_or(LayoutError::SceneInvariant(
+                    "dirty layout index is out of bounds",
+                ))?;
+                self.candidate_roots
+                    .push(relayout_boundary(scene, root, dirty, false)?);
             }
-            self.candidate_roots.push(candidate);
+        } else {
+            for dirty in self.external_roots.iter().copied() {
+                self.candidate_roots
+                    .push(relayout_boundary(scene, root, dirty, true)?);
+            }
         }
         self.candidate_roots
             .sort_unstable_by_key(|node| scene.resolve(*node).unwrap_or(usize::MAX));
@@ -282,6 +334,30 @@ impl LayoutEngine {
         }
         Ok(())
     }
+}
+
+fn relayout_boundary(
+    scene: &Scene,
+    root: NodeId,
+    dirty: NodeId,
+    include_self: bool,
+) -> Result<NodeId, LayoutError> {
+    if scene.resolve(dirty).is_none() {
+        return Err(LayoutError::SceneInvariant("relayout root is stale"));
+    }
+    if include_self && is_fixed_boundary(scene, dirty) {
+        return Ok(dirty);
+    }
+    let mut candidate = root;
+    let mut cursor = scene.parent(dirty);
+    while let Some(ancestor) = cursor {
+        if is_fixed_boundary(scene, ancestor) {
+            candidate = ancestor;
+            break;
+        }
+        cursor = scene.parent(ancestor);
+    }
+    Ok(candidate)
 }
 
 #[derive(Clone, Copy)]
@@ -323,6 +399,7 @@ fn compute_subtree(
     root: NodeId,
     constraints: BoxConstraints,
     measurer: &mut impl IntrinsicMeasurer,
+    virtual_layout: &impl VirtualLayoutProvider,
     output: &mut LayoutSnapshot,
     stack: &mut Vec<Frame>,
 ) -> Result<(), LayoutError> {
@@ -331,11 +408,11 @@ fn compute_subtree(
     }
 
     stack.clear();
-    stack.push(make_frame(scene, root, constraints)?);
+    stack.push(make_frame(scene, root, constraints, virtual_layout)?);
     while let Some(frame) = stack.last_mut() {
         if let Some(child) = frame.next_child {
             frame.next_child = scene.next_sibling(child);
-            let child_frame = make_frame(scene, child, frame.child_constraints)?;
+            let child_frame = make_frame(scene, child, frame.child_constraints, virtual_layout)?;
             stack.push(child_frame);
             continue;
         }
@@ -366,8 +443,16 @@ fn compute_subtree(
         output.sizes[frame.index] = size;
 
         if let Some(parent) = stack.last_mut() {
-            output.offsets[frame.index] = Point::new(parent.padding.left, parent.content_y);
-            parent.content_y += size.height;
+            if let Some(item_index) = scene.virtual_item_index(frame.node)
+                && scene.virtual_list(parent.node).is_some()
+            {
+                let offset = virtual_item_offset(scene, parent.node, item_index, virtual_layout)?;
+                output.offsets[frame.index] =
+                    Point::new(parent.padding.left, parent.padding.top + offset);
+            } else {
+                output.offsets[frame.index] = Point::new(parent.padding.left, parent.content_y);
+                parent.content_y += size.height;
+            }
             parent.content_width = parent.content_width.max(size.width);
         }
     }
@@ -421,7 +506,12 @@ fn subtree_len(scene: &Scene, root: NodeId) -> Result<usize, LayoutError> {
     Ok(end - start)
 }
 
-fn make_frame(scene: &Scene, node: NodeId, incoming: BoxConstraints) -> Result<Frame, LayoutError> {
+fn make_frame(
+    scene: &Scene,
+    node: NodeId,
+    incoming: BoxConstraints,
+    virtual_layout: &impl VirtualLayoutProvider,
+) -> Result<Frame, LayoutError> {
     let index = scene.resolve(node).ok_or(LayoutError::SceneInvariant(
         "layout encountered a stale node",
     ))?;
@@ -458,6 +548,14 @@ fn make_frame(scene: &Scene, node: NodeId, incoming: BoxConstraints) -> Result<F
             .width;
         child_constraints.max_width = (outer_width - padding.horizontal()).max(0.0);
     }
+    if scene.kind(node) == Some(NodeKind::Scroll) {
+        child_constraints.max_width = f32::INFINITY;
+        child_constraints.max_height = f32::INFINITY;
+    }
+    let content_y = match scene.virtual_list(node) {
+        Some(_) => padding.top + virtual_content_height(scene, node, virtual_layout)?,
+        None => padding.top,
+    };
     Ok(Frame {
         node,
         index,
@@ -467,9 +565,49 @@ fn make_frame(scene: &Scene, node: NodeId, incoming: BoxConstraints) -> Result<F
         padding,
         fixed_width,
         fixed_height,
-        content_y: padding.top,
+        content_y,
         content_width: 0.0,
     })
+}
+
+fn virtual_item_offset(
+    scene: &Scene,
+    list: NodeId,
+    item_index: u32,
+    virtual_layout: &impl VirtualLayoutProvider,
+) -> Result<f32, LayoutError> {
+    if let Some(offset) = virtual_layout.item_offset(list, item_index) {
+        return validate_virtual_dimension(list, offset);
+    }
+    let config = scene.virtual_list(list).ok_or(LayoutError::SceneInvariant(
+        "virtual item parent lost its configuration",
+    ))?;
+    validate_virtual_dimension(list, config.estimated_item_height * item_index as f32)
+}
+
+fn virtual_content_height(
+    scene: &Scene,
+    list: NodeId,
+    virtual_layout: &impl VirtualLayoutProvider,
+) -> Result<f32, LayoutError> {
+    if let Some(height) = virtual_layout.content_height(list) {
+        return validate_virtual_dimension(list, height);
+    }
+    let config = scene.virtual_list(list).ok_or(LayoutError::SceneInvariant(
+        "virtual list lost its configuration",
+    ))?;
+    validate_virtual_dimension(
+        list,
+        config.estimated_item_height * config.item_count as f32,
+    )
+}
+
+fn validate_virtual_dimension(node: NodeId, value: f32) -> Result<f32, LayoutError> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(LayoutError::InvalidVirtualGeometry { node, value })
+    }
 }
 
 fn intersect_constraints(
@@ -621,6 +759,112 @@ mod tests {
         assert_eq!(
             engine.snapshot().geometry(second),
             Some((Point::new(5.0, 30.0), Size::new(60.0, 30.0)))
+        );
+    }
+
+    #[test]
+    fn scroll_viewport_does_not_constrain_its_content_extent() {
+        let root = id(0);
+        let scroll = id(1);
+        let content = id(2);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(scroll, NodeKind::Scroll, Some(root)),
+                create(content, NodeKind::Container, Some(scroll)),
+                set_f32(scroll, Prop::Width, 100.0),
+                set_f32(scroll, Prop::Height, 80.0),
+                set_f32(content, Prop::Width, 500.0),
+                set_f32(content, Prop::Height, 1_000.0),
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(320.0, 240.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        assert_eq!(
+            engine.snapshot().geometry(scroll),
+            Some((Point::ZERO, Size::new(100.0, 80.0)))
+        );
+        assert_eq!(
+            engine.snapshot().geometry(content),
+            Some((Point::ZERO, Size::new(500.0, 1_000.0)))
+        );
+    }
+
+    #[test]
+    fn virtual_items_use_provider_offsets_instead_of_materialized_sibling_order() {
+        struct VirtualGeometry;
+
+        impl VirtualLayoutProvider for VirtualGeometry {
+            fn item_offset(&self, list: NodeId, item_index: u32) -> Option<f32> {
+                (list == id(1)).then_some(item_index as f32 * 30.0)
+            }
+
+            fn content_height(&self, list: NodeId) -> Option<f32> {
+                (list == id(1)).then_some(300.0)
+            }
+        }
+
+        let root = id(0);
+        let list = id(1);
+        let seventh = id(2);
+        let ninth = id(3);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(list, NodeKind::Scroll, Some(root)),
+                create(seventh, NodeKind::Container, Some(list)),
+                create(ninth, NodeKind::Container, Some(list)),
+                set_f32(list, Prop::Width, 100.0),
+                set_f32(list, Prop::Height, 80.0),
+                set_f32(seventh, Prop::Height, 30.0),
+                set_f32(ninth, Prop::Height, 30.0),
+                Mutation::ConfigureVirtualList {
+                    node_id: list.raw(),
+                    item_count: 10,
+                    estimated_item_height: 20.0,
+                    base_overscan_viewports: 1.0,
+                    velocity_horizon_seconds: 0.25,
+                    maximum_ahead_viewports: 4.0,
+                },
+                Mutation::SetVirtualItem {
+                    node_id: seventh.raw(),
+                    item_index: 7,
+                },
+                Mutation::SetVirtualItem {
+                    node_id: ninth.raw(),
+                    item_index: 9,
+                },
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout_with_virtual(
+                &scene,
+                BoxConstraints::tight(Size::new(100.0, 80.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+                &VirtualGeometry,
+            )
+            .expect("layout");
+
+        assert_eq!(
+            engine.snapshot().geometry(seventh),
+            Some((Point::new(0.0, 210.0), Size::new(0.0, 30.0)))
+        );
+        assert_eq!(
+            engine.snapshot().geometry(ninth),
+            Some((Point::new(0.0, 270.0), Size::new(0.0, 30.0)))
         );
     }
 

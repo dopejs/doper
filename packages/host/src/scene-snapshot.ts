@@ -24,6 +24,16 @@ interface SnapshotNode {
   scroll: { behavior: number; x: number; y: number } | undefined;
   textRun: { stringId: number; styleId: number } | undefined;
   readonly vec4: Map<Prop, readonly [number, number, number, number]>;
+  virtualItemIndex: number | undefined;
+  virtualList:
+    | {
+        itemCount: number;
+        estimatedItemHeight: number;
+        baseOverscanViewports: number;
+        velocityHorizonSeconds: number;
+        maximumAheadViewports: number;
+      }
+    | undefined;
 }
 
 /** Compact current-state oracle used to reconstruct a fresh Core after Worker loss. */
@@ -149,6 +159,12 @@ export class MutationSceneSnapshot {
       if (node.scroll !== undefined) {
         mutations.push({ nodeId, type: "scrollTo", ...node.scroll });
       }
+      if (node.virtualList !== undefined) {
+        mutations.push({ nodeId, type: "configureVirtualList", ...node.virtualList });
+      }
+      if (node.virtualItemIndex !== undefined) {
+        mutations.push({ nodeId, itemIndex: node.virtualItemIndex, type: "setVirtualItem" });
+      }
     }
     return encodeMutationBatch({ frameSeq, mutations });
   }
@@ -254,6 +270,18 @@ export class MutationSceneSnapshot {
           x: mutation.x,
           y: mutation.y,
         };
+        return;
+      case "configureVirtualList":
+        touchNode(mutation.nodeId).virtualList = {
+          itemCount: mutation.itemCount,
+          estimatedItemHeight: mutation.estimatedItemHeight,
+          baseOverscanViewports: mutation.baseOverscanViewports,
+          velocityHorizonSeconds: mutation.velocityHorizonSeconds,
+          maximumAheadViewports: mutation.maximumAheadViewports,
+        };
+        return;
+      case "setVirtualItem":
+        touchNode(mutation.nodeId).virtualItemIndex = mutation.itemIndex;
     }
   }
 
@@ -305,6 +333,8 @@ function emptyNode(kind: NodeKind, parent: number): SnapshotNode {
     scroll: undefined,
     textRun: undefined,
     vec4: new Map(),
+    virtualItemIndex: undefined,
+    virtualList: undefined,
   };
 }
 
@@ -319,6 +349,8 @@ function cloneNode(node: SnapshotNode): SnapshotNode {
     scroll: node.scroll === undefined ? undefined : { ...node.scroll },
     textRun: node.textRun === undefined ? undefined : { ...node.textRun },
     vec4: new Map(node.vec4),
+    virtualItemIndex: node.virtualItemIndex,
+    virtualList: node.virtualList === undefined ? undefined : { ...node.virtualList },
   };
 }
 

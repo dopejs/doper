@@ -106,6 +106,22 @@ pub enum SceneError {
         kind: NodeKind,
         operation: &'static str,
     },
+    InvalidVirtualListConfig {
+        node: NodeId,
+        field: &'static str,
+    },
+    MissingVirtualListParent {
+        node: NodeId,
+    },
+    InvalidVirtualItemIndex {
+        node: NodeId,
+        index: u32,
+        item_count: u32,
+    },
+    DuplicateVirtualItemIndex {
+        list: NodeId,
+        index: u32,
+    },
     InternalInvariant(&'static str),
 }
 

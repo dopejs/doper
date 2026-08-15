@@ -15,6 +15,7 @@ doper-abi = { path = "../doper-abi" }
 doper-layout = { path = "../doper-layout" }
 doper-paint = { path = "../doper-paint" }
 doper-scene = { path = "../doper-scene" }
+doper-scroll = { path = "../doper-scroll" }
 
 [dev-dependencies]
 doper-edit = { path = "../doper-edit" }

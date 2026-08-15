@@ -1,5 +1,7 @@
 use wasm_bindgen::prelude::*;
 
+use doper_abi::{VIRTUAL_REFILL_HEADER_WORDS, VIRTUAL_REFILL_RECORD_WORDS, VIRTUAL_REFILL_VERSION};
+
 use crate::{CoreEngine, FrameDiagnostics};
 
 /// JavaScript-facing owner for one single-threaded Core instance.
@@ -29,11 +31,55 @@ impl WasmCore {
         Ok(output.display_list.to_vec())
     }
 
+    /// Atomically consumes one Input Stream transaction.
+    pub fn input(&mut self, bytes: &[u8]) -> Result<Option<Vec<u8>>, JsValue> {
+        let output = self.inner.input(bytes).map_err(js_error)?;
+        if let Some(output) = output {
+            self.last_diagnostics = Some(output.diagnostics);
+            Ok(Some(output.display_list.to_vec()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Advances Core-owned animation from an injectable elapsed duration.
+    pub fn advance(&mut self, elapsed_seconds: f64) -> Result<Option<Vec<u8>>, JsValue> {
+        let output = self.inner.advance(elapsed_seconds).map_err(js_error)?;
+        if let Some(output) = output {
+            self.last_diagnostics = Some(output.diagnostics);
+            Ok(Some(output.display_list.to_vec()))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Returns versioned u32 diagnostics for the most recently accepted frame.
     pub fn frame_diagnostics(&self) -> Result<Vec<u32>, JsValue> {
         self.last_diagnostics
             .map(|diagnostics| diagnostics.to_words().to_vec())
             .ok_or_else(|| JsValue::from_str("no doper frame has committed"))
+    }
+
+    /// Drains versioned virtual-list refill requests for asynchronous Shell work.
+    pub fn take_virtual_refills(&mut self) -> Result<Vec<u32>, JsValue> {
+        let requests = self.inner.take_virtual_refills();
+        let count = u32::try_from(requests.len())
+            .map_err(|_| JsValue::from_str("virtual refill request count exceeds u32"))?;
+        let capacity = VIRTUAL_REFILL_HEADER_WORDS
+            .checked_add(
+                requests
+                    .len()
+                    .checked_mul(VIRTUAL_REFILL_RECORD_WORDS)
+                    .ok_or_else(|| JsValue::from_str("virtual refill buffer overflow"))?,
+            )
+            .ok_or_else(|| JsValue::from_str("virtual refill buffer overflow"))?;
+        let mut words = Vec::with_capacity(capacity);
+        words.push(VIRTUAL_REFILL_VERSION);
+        words.push(count);
+        for request in requests {
+            words.extend_from_slice(&[request.node_id, request.start, request.end]);
+        }
+        Ok(words)
     }
 
     /// Applies logical viewport bounds to the next frame.

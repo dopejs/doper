@@ -3,7 +3,11 @@ import {
   createHostedCanvasRoot,
   type FrameReport,
   type HostTransportMode,
+  type NodeHandle,
   type RenderClockMetrics,
+  type ScrollProps,
+  type VirtualListProps,
+  type VirtualRefillRange,
 } from "@dopejs/doper";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -104,6 +108,164 @@ describe("M2 production transport matrix", () => {
       roots.pop();
     }
   });
+
+  it("drives Core-owned drag and inertia without Shell commits in every fallback mode", async () => {
+    for (const preference of ["main-thread", "post-message", "sab"] as const) {
+      const canvas = createCanvas();
+      const mutationFrame = deferred<FrameReport>();
+      const inputFrame = deferred<FrameReport>();
+      const animationFrame = deferred<FrameReport>();
+      let handle: NodeHandle | null = null;
+      const root = await createHostedCanvasRoot(canvas, {
+        onFrame: (report) => {
+          if (report.cause === "mutation") mutationFrame.resolve(report);
+          if (report.cause === "input") inputFrame.resolve(report);
+          if (report.cause === "animation") animationFrame.resolve(report);
+        },
+        transport: { preference, strict: true },
+      });
+      roots.push(root);
+      const scrollProps = {
+        height: 80,
+        ref: (value: NodeHandle | null) => {
+          handle = value;
+        },
+        width: 160,
+        children: createElement("container", {
+          backgroundColor: "#1a73e8",
+          height: 1_000,
+          width: 160,
+        }),
+      } satisfies ScrollProps;
+      root.render(createElement<typeof scrollProps>("scroll", scrollProps));
+      const initial = await withTimeout(
+        mutationFrame.promise,
+        3_000,
+        `${preference} scroll mutation`,
+      );
+      if (handle === null) throw new Error("scroll ref was not attached");
+      root.beginScroll(handle);
+      root.scrollBy(handle, 0, 40, 16.667);
+      root.endScroll(handle);
+      const dragged = await withTimeout(inputFrame.promise, 3_000, `${preference} scroll input`);
+      const coasted = await withTimeout(
+        animationFrame.promise,
+        3_000,
+        `${preference} scroll animation`,
+      );
+      expect(dragged.inputBytes).toBeGreaterThan(0);
+      expect(dragged.mutationBytes).toBe(0);
+      expect(dragged.core?.pictureHash).not.toBe(initial.core?.pictureHash);
+      expect(coasted.animationDeltaMs).toBeGreaterThan(0);
+      expect(coasted.core?.pictureHash).not.toBe(dragged.core?.pictureHash);
+      expect(root.mode).toBe(preference);
+      await root.close();
+      roots.pop();
+    }
+  });
+
+  it("keeps million-item virtual windows bounded and equivalent in every fallback mode", async () => {
+    const results: Array<{
+      readonly inputHash: bigint | undefined;
+      readonly mode: HostTransportMode;
+      readonly pictureHash: bigint | undefined;
+      readonly rasterCache: boolean;
+      readonly rasterMetricsPresent: boolean;
+    }> = [];
+    for (const [preference, rasterCache] of [
+      ["main-thread", true],
+      ["post-message", true],
+      ["post-message", false],
+      ["sab", true],
+    ] as const) {
+      const canvas = createCanvas();
+      const inputFrame = deferred<FrameReport>();
+      const reports: FrameReport[] = [];
+      const refills: VirtualRefillRange[][] = [];
+      let handle: NodeHandle | null = null;
+      let renderCalls = 0;
+      const root = await createHostedCanvasRoot(canvas, {
+        onFrame: (report) => {
+          reports.push(report);
+          if (report.cause === "input") inputFrame.resolve(report);
+        },
+        onVirtualRefills: (requests) => refills.push([...requests]),
+        rasterCache,
+        transport: { preference, strict: true },
+      });
+      roots.push(root);
+      const props = {
+        height: 80,
+        width: 160,
+        itemCount: 1_000_000,
+        estimatedItemHeight: 20,
+        ref: (value: NodeHandle | null) => {
+          handle = value;
+        },
+        renderItem: (index: number) => {
+          renderCalls += 1;
+          return createElement("text", { value: `item ${index}` });
+        },
+      } satisfies VirtualListProps;
+      root.render(createElement<typeof props>("virtualList", props));
+
+      await withTimeout(
+        waitUntil(
+          () => refills.length >= 1 && reports.some((report) => (report.core?.sceneNodes ?? 0) > 2),
+        ),
+        3_000,
+        `${preference} initial virtual materialization`,
+      );
+      const initialRange = refills.at(-1)?.[0];
+      expect(initialRange).toBeDefined();
+      expect((initialRange?.end ?? 0) - (initialRange?.start ?? 0)).toBeLessThan(100);
+      expect(renderCalls).toBeGreaterThan(0);
+      expect(renderCalls).toBeLessThan(100);
+      if (handle === null) throw new Error("virtual list ref was not attached");
+
+      root.beginScroll(handle);
+      root.scrollBy(handle, 0, 400, 16.667);
+      root.endScroll(handle);
+      const input = await withTimeout(inputFrame.promise, 3_000, `${preference} virtual input`);
+      await withTimeout(
+        waitUntil(
+          () =>
+            refills.some((batch) => batch.some((request) => request.start > 0)) &&
+            reports.filter((report) => report.cause === "mutation").length >= 3,
+        ),
+        3_000,
+        `${preference} scrolled virtual materialization`,
+      );
+
+      const movedRange = refills
+        .filter((batch) => batch.some((request) => request.start > 0))
+        .at(-1)?.[0];
+      const finalReport = reports.filter((report) => report.cause === "mutation").at(-1);
+      const finalItems = (movedRange?.end ?? 0) - (movedRange?.start ?? 0);
+      expect(input.mutationBytes).toBe(0);
+      expect(movedRange?.start).toBeGreaterThan(0);
+      expect(finalItems).toBeLessThan(100);
+      expect(finalReport?.core?.sceneNodes).toBe(2 + finalItems * 2);
+      expect(root.mode).toBe(preference);
+      results.push({
+        inputHash: input.core?.pictureHash,
+        mode: root.mode,
+        pictureHash: finalReport?.core?.pictureHash,
+        rasterCache,
+        rasterMetricsPresent: finalReport?.rasterCache !== undefined,
+      });
+      await root.close();
+      roots.pop();
+    }
+    const cached = results.find((result) => result.mode === "post-message" && result.rasterCache);
+    const uncached = results.find(
+      (result) => result.mode === "post-message" && !result.rasterCache,
+    );
+    expect(cached?.rasterMetricsPresent).toBe(true);
+    expect(uncached?.rasterMetricsPresent).toBe(false);
+    expect(uncached?.inputHash).toBe(cached?.inputHash);
+    expect(uncached?.pictureHash).toBe(cached?.pictureHash);
+  });
 });
 
 async function renderMode(
@@ -175,4 +337,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  while (!predicate()) await new Promise<void>((resolve) => window.setTimeout(resolve, 1));
 }

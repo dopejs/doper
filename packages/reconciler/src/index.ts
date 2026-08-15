@@ -15,4 +15,11 @@ export {
   type MutationBatch,
 } from "./mutation-stream";
 export { NodeIdAllocator, NodeIdError, decodeNodeId, type DecodedNodeId } from "./node-id";
-export { createRoot, type DoperRoot, type MutationSink, type RootOptions } from "./reconciler";
+export {
+  createRoot,
+  type CoreDrivenDoperRoot,
+  type DoperRoot,
+  type MutationSink,
+  type RootOptions,
+  type VirtualRangeRequest,
+} from "./reconciler";

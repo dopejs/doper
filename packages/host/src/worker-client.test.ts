@@ -7,9 +7,11 @@ describe("RenderWorkerClient", () => {
     const worker = new FakeWorker();
     const onFrame = vi.fn();
     const onClockMetrics = vi.fn();
+    const onVirtualRefills = vi.fn();
     const client = new RenderWorkerClient(worker, {
       onClockMetrics,
       onFrame,
+      onVirtualRefills,
       sessionId: 9,
     });
     worker.onPost = (message) => {
@@ -64,10 +66,21 @@ describe("RenderWorkerClient", () => {
       },
       sessionId: 9,
     });
+    worker.emitMessage({
+      kind: "doper:virtual-refill",
+      requests: [{ nodeId: 0x0010_0001, start: 4, end: 8 }],
+      sessionId: 9,
+    });
     expect(onFrame).toHaveBeenCalledOnce();
     expect(onClockMetrics).toHaveBeenCalledOnce();
+    expect(onVirtualRefills).toHaveBeenCalledWith([{ nodeId: 0x0010_0001, start: 4, end: 8 }]);
     client.postClockAnchor(1, 123);
     expect(worker.posts.at(-1)).toMatchObject({ kind: "doper:clock-anchor", sequence: 1 });
+    const input = Uint8Array.of(1, 2, 3, 4);
+    client.postInput(input);
+    expect(worker.posts.at(-1)).toMatchObject({ kind: "doper:input", bytes: input });
+    expect((worker.posts.at(-1) as { bytes: Uint8Array }).bytes).not.toBe(input);
+    expect(input).toEqual(Uint8Array.of(1, 2, 3, 4));
     await client.close();
     expect(client.state).toBe("closed");
     expect(worker.terminated).toBe(true);
@@ -107,6 +120,7 @@ describe("RenderWorkerClient", () => {
         height: 1,
         mode: "sab",
         rasterCache: true,
+        inputRingBuffer: new SharedArrayBuffer(64),
         ringBuffer: new SharedArrayBuffer(64),
         width: 1,
       }),

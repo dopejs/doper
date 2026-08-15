@@ -297,11 +297,25 @@ web 字体 shaping、复杂排版和 glyph atlas 属于 M3。M1 的“像素对�
 
 ### M3：原生虚拟滚动与文本
 
+> 当前状态：**M3-A Scroll 已完成（2026-08-15），M3-B Text 待实施**。M3-A 已交付
+> `doper-scroll` 的 iOS/Android 物理、Fenwick HeightIndex、变量高度锚点纠偏、方向
+> 预热、占位/补建指标，以及 Shell 的 `<virtualList>` 有界窗口物化。独立 SAB Input
+> ring、postMessage 和主线程三路径均通过真实 Chromium；cache 开关、朴素前缀和、
+> native/wasm32 DisplayList 与补建窗口均严格差分一致。`pnpm m3:scroll:check` 全绿：
+> 170 项 TS、123 项 Rust、7 项 Chromium；TS/Rust 行覆盖率 85.87%/93.04%，
+> ABI/Scene/Scroll 为 95.43%/95.22%/99.39%；百万 item、20,000 帧 benchmark 的
+> P95/P99 为 0.542/0.666µs，保留堆 12,250,008 bytes；30 分钟 120Hz 加速 soak 后
+> 堆容量不增长；产品 WASM gzip 103,992 bytes。M3 整体仍未完成，不能把上述状态
+> 解读为文本体系或完整编辑能力已交付。
+
 目标：在代表性百万行场景中达到移动端滚动指标，并完成首个可用文本体系。
 
 该阶段包含两个高风险子项目，应独立推进并定期集成验证：
 
 #### M3-A Scroll
+
+状态：**已完成**。自动出口命令为 `pnpm m3:scroll:check`；物理设备 P95/P99 继续
+作为平台资格，不阻塞工程完成。
 
 - 惯性、回弹和 iOS/Android 参数体系。
 - 前缀和树、不定高 item、可见区间求解和测量修正。
@@ -309,6 +323,8 @@ web 字体 shaping、复杂排版和 glyph atlas 属于 M3。M1 的“像素对�
 - 百万行 fixture、快速 fling、反向滚动和高度突变压力测试。
 
 #### M3-B Text
+
+状态：**待实施**。
 
 - 显式 web 字体加载、LTR、基础换行和 Text Shape Cache。
 - 系统字体 `measureText`/`fillText` fallback 及缓存失效。

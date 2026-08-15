@@ -138,6 +138,39 @@ describe("MutationSceneSnapshot", () => {
     snapshot.applyAfterAccepted(batch(2, [create(2, NodeKind.Container, 1)]), () => undefined);
     expect(snapshot).toMatchObject({ frameSeq: 2, nodeCount: 2 });
   });
+
+  it("preserves virtual-list configuration and materialized item identity during recovery", () => {
+    const snapshot = new MutationSceneSnapshot();
+    snapshot.apply(
+      batch(1, [
+        create(1, NodeKind.Root, NULL_NODE_ID),
+        create(2, NodeKind.Scroll, 1),
+        create(3, NodeKind.Container, 2),
+        {
+          type: "configureVirtualList",
+          nodeId: 2,
+          itemCount: 1_000_000,
+          estimatedItemHeight: 24,
+          baseOverscanViewports: 1,
+          velocityHorizonSeconds: 0.25,
+          maximumAheadViewports: 4,
+        },
+        { type: "setVirtualItem", nodeId: 3, itemIndex: 456_789 },
+      ]),
+    );
+
+    const mutations = decodeMutationBatch(snapshot.encode()).mutations;
+    expect(mutations).toContainEqual({
+      type: "configureVirtualList",
+      nodeId: 2,
+      itemCount: 1_000_000,
+      estimatedItemHeight: 24,
+      baseOverscanViewports: 1,
+      velocityHorizonSeconds: 0.25,
+      maximumAheadViewports: 4,
+    });
+    expect(mutations).toContainEqual({ type: "setVirtualItem", nodeId: 3, itemIndex: 456_789 });
+  });
 });
 
 function batch(frameSeq: number, mutations: readonly Mutation[]): Uint8Array {

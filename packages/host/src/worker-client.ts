@@ -1,5 +1,6 @@
 import { ABI_VERSION } from "./generated";
 import type { FrameReport } from "./main-thread";
+import type { VirtualRefillRange } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
 import {
@@ -9,6 +10,8 @@ import {
   type RenderWorkerCapabilities,
   type WorkerActivateMessage,
   type WorkerClockAnchorMessage,
+  type WorkerInputMessage,
+  type WorkerInputWakeMessage,
   type WorkerPrepareMessage,
   type WorkerShutdownMessage,
 } from "./worker-protocol";
@@ -32,6 +35,7 @@ export interface RenderWorkerClientOptions {
   readonly onClockMetrics?: (metrics: RenderClockMetrics) => void;
   readonly onFatal?: (error: Error) => void;
   readonly onFrame?: (report: FrameReport) => void;
+  readonly onVirtualRefills?: (requests: readonly VirtualRefillRange[]) => void;
   readonly sessionId: number;
 }
 
@@ -40,6 +44,7 @@ export interface RenderWorkerActivation {
   readonly height: number;
   readonly mode: Exclude<HostTransportMode, "main-thread">;
   readonly rasterCache: boolean;
+  readonly inputRingBuffer?: SharedArrayBuffer;
   readonly ringBuffer?: SharedArrayBuffer;
   readonly width: number;
 }
@@ -50,6 +55,7 @@ export class RenderWorkerClient {
   readonly #onClockMetrics: ((metrics: RenderClockMetrics) => void) | undefined;
   readonly #onFatal: ((error: Error) => void) | undefined;
   readonly #onFrame: ((report: FrameReport) => void) | undefined;
+  readonly #onVirtualRefills: ((requests: readonly VirtualRefillRange[]) => void) | undefined;
   readonly #sessionId: number;
   readonly #worker: WorkerLike;
   #capabilities: RenderWorkerCapabilities | undefined;
@@ -72,6 +78,7 @@ export class RenderWorkerClient {
     this.#onClockMetrics = options.onClockMetrics;
     this.#onFatal = options.onFatal;
     this.#onFrame = options.onFrame;
+    this.#onVirtualRefills = options.onVirtualRefills;
     worker.addEventListener("message", this.#handleMessage);
     worker.addEventListener("error", this.#handleError);
     worker.addEventListener("messageerror", this.#handleMessageError);
@@ -123,8 +130,11 @@ export class RenderWorkerClient {
     this.requireState("prepared");
     const width = positiveFinite(activation.width, "Worker viewport width");
     const height = positiveFinite(activation.height, "Worker viewport height");
-    if (activation.mode === "sab" && activation.ringBuffer === undefined) {
-      throw new Error("SAB Worker activation requires a ring buffer");
+    if (
+      activation.mode === "sab" &&
+      (activation.ringBuffer === undefined || activation.inputRingBuffer === undefined)
+    ) {
+      throw new Error("SAB Worker activation requires mutation and input ring buffers");
     }
     this.#state = "activating";
     this.#readyMode = undefined;
@@ -134,6 +144,9 @@ export class RenderWorkerClient {
       kind: "doper:activate",
       mode: activation.mode,
       rasterCache: activation.rasterCache,
+      ...(activation.inputRingBuffer === undefined
+        ? {}
+        : { inputRingBuffer: activation.inputRingBuffer }),
       ...(activation.ringBuffer === undefined ? {} : { ringBuffer: activation.ringBuffer }),
       sessionId: this.#sessionId,
       width,
@@ -161,6 +174,28 @@ export class RenderWorkerClient {
       sequence: positiveU32(sequence, "clock anchor sequence"),
       sessionId: this.#sessionId,
       timestamp: finite(timestamp, "clock anchor timestamp"),
+    };
+    this.#worker.postMessage(message);
+  }
+
+  /** Transfers one immutable Input Stream transaction to the active Worker. */
+  public postInput(bytes: Uint8Array): void {
+    this.requireState("ready");
+    const owned = bytes.slice();
+    const message: WorkerInputMessage = {
+      bytes: owned,
+      kind: "doper:input",
+      sessionId: this.#sessionId,
+    };
+    this.#worker.postMessage(message, [owned.buffer]);
+  }
+
+  /** Wakes the Worker to drain committed Input Stream slots without copying payload bytes. */
+  public postInputWake(): void {
+    this.requireState("ready");
+    const message: WorkerInputWakeMessage = {
+      kind: "doper:input-wake",
+      sessionId: this.#sessionId,
     };
     this.#worker.postMessage(message);
   }
@@ -227,6 +262,9 @@ export class RenderWorkerClient {
         return;
       case "doper:clock-metrics":
         if (this.#state === "ready") this.#onClockMetrics?.(message.metrics);
+        return;
+      case "doper:virtual-refill":
+        if (this.#state === "ready") this.#onVirtualRefills?.(message.requests);
         return;
       case "doper:fatal":
         this.fail(new Error(`render Worker failed: ${message.error}`));

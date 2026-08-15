@@ -1,8 +1,11 @@
-import { ABI_VERSION } from "@dopejs/doper-reconciler";
+import { ABI_VERSION, decodeMutationBatch } from "@dopejs/doper-reconciler";
+import { decodeInputBatch, encodeInputBatch } from "@dopejs/doper-editing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedCanvasRoot } from "./hosted-root";
+import { VIRTUAL_REFILL_VERSION } from "./generated";
 import type { CoreClient } from "./main-thread";
+import { SabMutationRing } from "./sab-ring";
 
 const DISPLAY_LIST_MAGIC = 0x4450_4f44;
 
@@ -27,6 +30,165 @@ describe("createHostedCanvasRoot", () => {
     expect(core.commits).toHaveLength(2);
     expect(core.freed).toBe(true);
     expect(onModeChange).toHaveBeenCalledWith("main-thread", expect.any(Object));
+  });
+
+  it("encodes high-level scroll samples with monotonic Input Stream sequences", async () => {
+    installCanvasGlobal();
+    const core = fakeCore();
+    const root = await createHostedCanvasRoot(new FakeCanvas() as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+    root.beginScroll({ nodeId: 0x0010_0001 });
+    root.scrollBy({ nodeId: 0x0010_0001 }, -2.5, 30, 16.667);
+    root.endScroll(0x0010_0001);
+
+    expect(core.inputs.map((bytes) => decodeInputBatch(bytes))).toEqual([
+      { frameSeq: 1, commands: [{ type: "scrollBegin", nodeId: 0x0010_0001 }] },
+      {
+        frameSeq: 2,
+        commands: [
+          {
+            type: "scrollDelta",
+            nodeId: 0x0010_0001,
+            deltaX: -2.5,
+            deltaY: 30,
+            elapsedMicros: 16_667,
+          },
+        ],
+      },
+      { frameSeq: 3, commands: [{ type: "scrollEnd", nodeId: 0x0010_0001 }] },
+    ]);
+    expect(() => root.scrollBy(0x0010_0001, 0, 1, 0)).toThrow(/elapsedMs/u);
+    await root.close();
+  });
+
+  it("materializes Core-requested virtual windows without an application callback", async () => {
+    installCanvasGlobal();
+    const core = fakeCore() as FakeCore & { take_virtual_refills(): Uint32Array };
+    const renderItem = vi.fn((index: number) => hostElement("text", { value: `item ${index}` }));
+    const onVirtualRefills = vi.fn();
+    let emitted = false;
+    core.take_virtual_refills = () => {
+      if (emitted || core.commits.length === 0) return new Uint32Array([VIRTUAL_REFILL_VERSION, 0]);
+      const configuration = decodeMutationBatch(core.commits[0] ?? new Uint8Array()).mutations.find(
+        (mutation) => mutation.type === "configureVirtualList",
+      );
+      if (configuration === undefined) return new Uint32Array([VIRTUAL_REFILL_VERSION, 0]);
+      emitted = true;
+      return new Uint32Array([VIRTUAL_REFILL_VERSION, 1, configuration.nodeId, 0, 3]);
+    };
+    const root = await createHostedCanvasRoot(new FakeCanvas() as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      onVirtualRefills,
+      transport: { pageWorkerEnabled: false },
+    });
+
+    root.render(
+      hostElement("virtualList", {
+        height: 80,
+        itemCount: 1_000_000,
+        estimatedItemHeight: 20,
+        renderItem,
+      }),
+    );
+    expect(renderItem).not.toHaveBeenCalled();
+    await Promise.resolve();
+
+    expect(renderItem.mock.calls.map(([index]) => index)).toEqual([0, 1, 2]);
+    expect(core.commits).toHaveLength(2);
+    expect(
+      decodeMutationBatch(core.commits[1] ?? new Uint8Array())
+        .mutations.filter((mutation) => mutation.type === "setVirtualItem")
+        .map((mutation) => mutation.itemIndex),
+    ).toEqual([0, 1, 2]);
+    expect(onVirtualRefills).toHaveBeenCalledWith([expect.objectContaining({ start: 0, end: 3 })]);
+    await root.close();
+  });
+
+  it("routes scroll input to the active Worker without a mutation round trip", async () => {
+    installCanvasGlobal();
+    const worker = readyWorker();
+    const root = await createHostedCanvasRoot(new FakeCanvas() as unknown as HTMLCanvasElement, {
+      capabilities: { ...allCapabilities(), crossOriginIsolated: false },
+      clockAnchorDriver: null,
+      workerFactory: () => worker as unknown as Worker,
+    });
+    root.beginScroll(0x0010_0001);
+    const message = worker.posts.findLast((candidate) => hasKind(candidate, "doper:input"));
+    expect(message).toMatchObject({ kind: "doper:input" });
+    expect(decodeInputBatch((message as { bytes: Uint8Array }).bytes)).toEqual({
+      frameSeq: 1,
+      commands: [{ type: "scrollBegin", nodeId: 0x0010_0001 }],
+    });
+    await root.close();
+  });
+
+  it("publishes scroll input through the dedicated SAB ring and exposes pressure metrics", async () => {
+    installCanvasGlobal();
+    const worker = readyWorker();
+    const root = await createHostedCanvasRoot(new FakeCanvas() as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      clockAnchorDriver: null,
+      transport: { preference: "sab", strict: true },
+      workerFactory: () => worker as unknown as Worker,
+    });
+    const activation = worker.posts.find((candidate) => hasKind(candidate, "doper:activate")) as {
+      inputRingBuffer: SharedArrayBuffer;
+    };
+    const inputRing = SabMutationRing.attach(activation.inputRingBuffer);
+
+    root.beginScroll(0x0010_0001);
+
+    expect(worker.posts.some((candidate) => hasKind(candidate, "doper:input"))).toBe(false);
+    expect(worker.posts.some((candidate) => hasKind(candidate, "doper:input-wake"))).toBe(true);
+    const frame = inputRing.take();
+    expect(frame?.frameSeq).toBe(1);
+    expect(decodeInputBatch(frame?.bytes ?? new Uint8Array())).toEqual({
+      frameSeq: 1,
+      commands: [{ type: "scrollBegin", nodeId: 0x0010_0001 }],
+    });
+    expect(root.inputTransportMetrics()).toMatchObject({
+      directFrames: 0,
+      mode: "sab",
+      ring: { consumed: 1, published: 1 },
+      sabFallbackFrames: 0,
+    });
+    await root.close();
+  });
+
+  it("orders a wake before the bounded SAB input fallback", async () => {
+    installCanvasGlobal();
+    const worker = readyWorker();
+    const root = await createHostedCanvasRoot(new FakeCanvas() as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      clockAnchorDriver: null,
+      transport: { preference: "sab", strict: true },
+      workerFactory: () => worker as unknown as Worker,
+    });
+    const oversized = encodeInputBatch({
+      frameSeq: 1,
+      commands: Array.from({ length: 600 }, () => ({
+        type: "scrollBegin" as const,
+        nodeId: 0x0010_0001,
+      })),
+    });
+    expect(oversized.byteLength).toBeGreaterThan(4 * 1024);
+
+    root.dispatchInput(oversized);
+
+    const wakeIndex = worker.posts.findIndex((candidate) => hasKind(candidate, "doper:input-wake"));
+    const directIndex = worker.posts.findIndex((candidate) => hasKind(candidate, "doper:input"));
+    expect(wakeIndex).toBeGreaterThanOrEqual(0);
+    expect(directIndex).toBeGreaterThan(wakeIndex);
+    expect(root.inputTransportMetrics()).toMatchObject({
+      directFrames: 1,
+      mode: "sab",
+      sabFallbackFrames: 1,
+    });
+    await root.close();
   });
 
   it("falls back before canvas transfer when Worker preparation fails", async () => {
@@ -173,17 +335,24 @@ class FakeCanvas {
 
 interface FakeCore extends CoreClient {
   readonly commits: Uint8Array[];
+  readonly inputs: Uint8Array[];
   freed: boolean;
 }
 
 function fakeCore(): FakeCore {
   const commits: Uint8Array[] = [];
+  const inputs: Uint8Array[] = [];
   return {
     commit: (bytes) => {
       commits.push(bytes.slice());
       return emptyDisplayList();
     },
     commits,
+    input: (bytes) => {
+      inputs.push(bytes.slice());
+      return undefined;
+    },
+    inputs,
     free() {
       this.freed = true;
     },
@@ -200,6 +369,7 @@ class FakeWorker {
     messageerror: new Set<Listener>(),
   };
   public onPost: ((message: unknown) => void) | undefined;
+  public readonly posts: unknown[] = [];
   public terminated = false;
 
   public addEventListener(type: "error" | "message" | "messageerror", listener: Listener): void {
@@ -211,6 +381,7 @@ class FakeWorker {
   }
 
   public postMessage(message: unknown): void {
+    this.posts.push(message);
     this.onPost?.(message);
   }
 
@@ -292,6 +463,15 @@ function emptyDisplayList(): Uint8Array {
 
 function hasKind(value: unknown, kind: string): boolean {
   return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === kind;
+}
+
+function hostElement(type: "text" | "virtualList", props: Readonly<Record<string, unknown>>) {
+  return {
+    $$typeof: Symbol.for("dopejs.doper.element"),
+    key: null,
+    props,
+    type,
+  } as const;
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {

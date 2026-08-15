@@ -21,6 +21,15 @@ export const MAX_MUTATION_INSTRUCTIONS = 262144 as const;
 export const MAX_INPUT_INSTRUCTIONS = 262144 as const;
 export const MAX_DISPLAY_INSTRUCTIONS = 1048576 as const;
 export const MAX_RECORDING_RECORDS = 1048576 as const;
+export const MAX_VIRTUAL_ITEMS = 4000000 as const;
+export const VIRTUAL_REFILL_VERSION = 1 as const;
+export const VIRTUAL_REFILL_HEADER_WORDS = 2 as const;
+export const VIRTUAL_REFILL_RECORD_WORDS = 3 as const;
+export const VIRTUAL_REFILL_HEADER_VERSION_INDEX = 0 as const;
+export const VIRTUAL_REFILL_HEADER_REQUEST_COUNT_INDEX = 1 as const;
+export const VIRTUAL_REFILL_RECORD_NODE_ID_INDEX = 0 as const;
+export const VIRTUAL_REFILL_RECORD_START_INDEX = 1 as const;
+export const VIRTUAL_REFILL_RECORD_END_INDEX = 2 as const;
 export const FRAME_DIAGNOSTICS_VERSION = 2 as const;
 export const FRAME_DIAGNOSTICS_WORDS = 19 as const;
 export const FRAME_DIAGNOSTICS_VERSION_INDEX = 0 as const;
@@ -93,6 +102,8 @@ export enum MutationOpcode {
   DefineResource = 48,
   ReleaseResource = 49,
   ScrollTo = 64,
+  ConfigureVirtualList = 65,
+  SetVirtualItem = 66,
   Commit = 240,
 }
 
@@ -109,6 +120,8 @@ export const MUTATION_LAYOUTS = {
   [MutationOpcode.DefineResource]: { fixedBytes: null, minimumBytes: 16 },
   [MutationOpcode.ReleaseResource]: { fixedBytes: 8, minimumBytes: 8 },
   [MutationOpcode.ScrollTo]: { fixedBytes: 20, minimumBytes: 20 },
+  [MutationOpcode.ConfigureVirtualList]: { fixedBytes: 28, minimumBytes: 28 },
+  [MutationOpcode.SetVirtualItem]: { fixedBytes: 12, minimumBytes: 12 },
   [MutationOpcode.Commit]: { fixedBytes: 8, minimumBytes: 8 },
 } as const;
 
@@ -124,6 +137,10 @@ export enum InputOpcode {
   CancelComposition = 9,
   Undo = 10,
   Redo = 11,
+  ScrollBegin = 32,
+  ScrollDelta = 33,
+  ScrollEnd = 34,
+  ScrollCancel = 35,
   Commit = 240,
 }
 
@@ -139,6 +156,10 @@ export const INPUT_LAYOUTS = {
   [InputOpcode.CancelComposition]: { fixedBytes: 16, minimumBytes: 16 },
   [InputOpcode.Undo]: { fixedBytes: 16, minimumBytes: 16 },
   [InputOpcode.Redo]: { fixedBytes: 16, minimumBytes: 16 },
+  [InputOpcode.ScrollBegin]: { fixedBytes: 8, minimumBytes: 8 },
+  [InputOpcode.ScrollDelta]: { fixedBytes: 20, minimumBytes: 20 },
+  [InputOpcode.ScrollEnd]: { fixedBytes: 8, minimumBytes: 8 },
+  [InputOpcode.ScrollCancel]: { fixedBytes: 8, minimumBytes: 8 },
   [InputOpcode.Commit]: { fixedBytes: 8, minimumBytes: 8 },
 } as const;
 

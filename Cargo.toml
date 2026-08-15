@@ -8,6 +8,7 @@ members = [
   "core/doper-layout",
   "core/doper-paint",
   "core/doper-scene",
+  "core/doper-scroll",
   "probes/wasm-budget",
   "probes/wasm-cold-start",
 ]

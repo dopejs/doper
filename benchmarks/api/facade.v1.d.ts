@@ -32,6 +32,7 @@ export {
   type Ref,
   type ScrollProps,
   type TextProps,
+  type VirtualListProps,
 } from "@dopejs/doper-jsx";
 export { type DoperRoot } from "@dopejs/doper-reconciler";
 export {
@@ -45,12 +46,15 @@ export {
   type FrameReport,
   type HostCapabilities,
   type HostMutationTransportMetrics,
+  type HostInputTransportMetrics,
   type HostTransportDecision,
   type HostTransportMode,
   type HostTransportPolicy,
   type HostTransportPreference,
   type HostedCanvasRoot,
   type HostedCanvasRootOptions,
+  type ScrollTarget,
   type RenderClockMetrics,
   type WasmCoreInput,
+  type VirtualRefillRange,
 } from "@dopejs/doper-host";
