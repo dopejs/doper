@@ -522,6 +522,14 @@ Shell 的最新 durable value 获胜：部分重叠请求裁到新边界，完�
 - bidi：`unicode-bidi`
 - glyph atlas：Core 维护，Canvas2D 后端以 `ImageBitmap` 贴图，WebGPU 后端直接采样纹理
 
+实现状态（2026-08-16）：`doper-text` 已建立独立的无 unsafe Core 基础，使用
+`rustybuzz` 完成显式 SFNT 字体的 LTR shaping，使用 UAX #14 数据完成基础换行，
+并输出 UTF-8/UTF-16、grapheme、cluster、glyph、line 与 caret 映射；Text Shape
+Cache 使用可观测的字节预算 LRU。该 crate 尚未接入公开字体 ABI、glyph atlas
+回传和 Canvas2D 贴图，因此仍属于 M3-B 内部基础，不能视为公开文本路径完成。
+当前 Core 输入只接受解码后的 TTF/OTF/TTC SFNT；WOFF/WOFF2 解码放在显式字体
+加载器边界，接入时必须与失败回退、格式能力矩阵和体积门禁一起交付。
+
 ### 风险
 
 文本是本项目工程量与风险最大的单一模块，也是最容易低估的。建议 M1 只做「web 字体 + LTR + 简单换行」，把 bidi、复杂脚本、避头尾放到 M3。
