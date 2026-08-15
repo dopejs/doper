@@ -18,7 +18,7 @@
     "ime:replay": "node scripts/replay-ime.mjs",
     "lint": "eslint .",
     "m0:check": "node scripts/run-with-rust-target-cleanup.mjs pnpm m0:check:run",
-    "m0:check:run": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm contracts:check && pnpm build && pnpm rust:check",
+    "m0:check:run": "pnpm format:check && pnpm build && pnpm lint && pnpm typecheck && pnpm test && pnpm contracts:check && pnpm rust:check",
     "m1:check": "node scripts/run-with-rust-target-cleanup.mjs pnpm m1:check:run",
     "m1:check:run": "pnpm m0:check && pnpm coverage:ts && pnpm coverage:rust && pnpm test:browser && pnpm m1:perf",
     "m1:perf": "node scripts/run-with-rust-target-cleanup.mjs pnpm m1:perf:run",
