@@ -157,6 +157,45 @@ impl TextIndex {
     }
 }
 
+/// Returns the double-click word selection for one grapheme-safe UTF-16 offset.
+///
+/// Offsets inside or at the trailing edge of a Unicode word select that word;
+/// whitespace and punctuation select the containing grapheme so a double click
+/// always produces a visible, cluster-aligned range.
+///
+/// # Errors
+///
+/// Returns an offset error when the clamped offset does not map to a grapheme
+/// boundary of `text`.
+pub fn word_range_utf16(text: &str, offset: u32) -> Result<(u32, u32), EditError> {
+    let index = TextIndex::new(text)?;
+    if index.utf16_len() == 0 {
+        return Ok((0, 0));
+    }
+    let clamped = offset.min(index.utf16_len());
+    let byte = index.utf16_to_utf8(clamped, OffsetBias::Backward)?;
+    let mut trailing_match = None;
+    for (start, word) in text.unicode_word_indices() {
+        let end = start + word.len();
+        if byte >= start && byte < end {
+            return Ok((index.utf8_to_utf16(start)?, index.utf8_to_utf16(end)?));
+        }
+        if byte == end {
+            trailing_match = Some((start, end));
+        }
+    }
+    if let Some((start, end)) = trailing_match {
+        return Ok((index.utf8_to_utf16(start)?, index.utf8_to_utf16(end)?));
+    }
+    let boundary = index.utf8_to_utf16(byte)?;
+    let start = if boundary == index.utf16_len() {
+        index.previous(boundary)?
+    } else {
+        boundary
+    };
+    Ok((start, index.next(start)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +217,21 @@ mod tests {
             index.utf8_to_utf16(1),
             Err(EditError::InvalidUtf8Boundary { offset: 1 })
         );
+    }
+
+    #[test]
+    fn word_ranges_cover_words_trailing_edges_whitespace_and_clusters() {
+        assert_eq!(word_range_utf16("ab cd", 1).expect("inside"), (0, 2));
+        assert_eq!(word_range_utf16("ab cd", 2).expect("trailing"), (0, 2));
+        assert_eq!(word_range_utf16("ab cd", 4).expect("second"), (3, 5));
+        assert_eq!(word_range_utf16("ab cd", 5).expect("end"), (3, 5));
+        assert_eq!(word_range_utf16("ab cd", 99).expect("clamped"), (3, 5));
+        assert_eq!(word_range_utf16("a  b", 2).expect("whitespace"), (2, 3));
+        assert_eq!(word_range_utf16("", 0).expect("empty"), (0, 0));
+        // A split-surrogate click may never produce a selection inside the emoji.
+        assert_eq!(word_range_utf16("😀", 1).expect("emoji"), (0, 2));
+        // Dictionary-less UAX #29 segments ideographs one character at a time.
+        assert_eq!(word_range_utf16("中文 词", 0).expect("cjk first"), (0, 1));
+        assert_eq!(word_range_utf16("中文 词", 1).expect("cjk second"), (1, 2));
     }
 }

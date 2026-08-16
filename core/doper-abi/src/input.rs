@@ -199,6 +199,15 @@ pub enum InputCommand {
         /// Exclusive requested UTF-16 end.
         end: u32,
     },
+    /// Places or extends the caret from a canvas-local logical point.
+    PlaceCaret {
+        /// Generation-bearing editable node.
+        node_id: u32,
+        /// Canvas-local logical coordinates.
+        position: [f32; 2],
+        /// Bit 0 extends the current anchor; bit 1 selects the word.
+        flags: u32,
+    },
     /// Starts direct manipulation of a Core-owned scroll node.
     ScrollBegin {
         /// Generation-bearing target scroll node.
@@ -474,6 +483,17 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
                 end,
             }
         }
+        InputOpcode::PlaceCaret => {
+            let node_id = reader.read_u32()?;
+            let position = [reader.read_f32()?, reader.read_f32()?];
+            let flags = reader.read_u32()?;
+            validate_place_caret_fields(position, flags)?;
+            InputCommand::PlaceCaret {
+                node_id,
+                position,
+                flags,
+            }
+        }
         InputOpcode::ScrollBegin => InputCommand::ScrollBegin {
             node_id: reader.read_u32()?,
         },
@@ -605,6 +625,17 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             writer.u32(*start);
             writer.u32(*end);
         }
+        InputCommand::PlaceCaret {
+            node_id,
+            position,
+            flags,
+        } => {
+            validate_place_caret_fields(*position, *flags)?;
+            writer.u32(*node_id);
+            writer.f32(position[0])?;
+            writer.f32(position[1])?;
+            writer.u32(*flags);
+        }
         InputCommand::ScrollDelta {
             node_id,
             delta_x,
@@ -701,12 +732,28 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::FocusEditable { .. } => InputOpcode::FocusEditable,
         InputCommand::BlurEditable { .. } => InputOpcode::BlurEditable,
         InputCommand::RequestCharacterBounds { .. } => InputOpcode::RequestCharacterBounds,
+        InputCommand::PlaceCaret { .. } => InputOpcode::PlaceCaret,
         InputCommand::ScrollBegin { .. } => InputOpcode::ScrollBegin,
         InputCommand::ScrollDelta { .. } => InputOpcode::ScrollDelta,
         InputCommand::ScrollEnd { .. } => InputOpcode::ScrollEnd,
         InputCommand::ScrollCancel { .. } => InputOpcode::ScrollCancel,
         InputCommand::DispatchEvent { .. } => InputOpcode::DispatchEvent,
     }
+}
+
+fn validate_place_caret_fields(position: [f32; 2], flags: u32) -> Result<(), AbiError> {
+    if position
+        .iter()
+        .any(|value| !value.is_finite() || value.abs() > 1_000_000_000.0)
+    {
+        return Err(AbiError::InvalidValue(
+            "caret placement coordinate is invalid",
+        ));
+    }
+    if flags & !0x03 != 0 {
+        return Err(AbiError::InvalidValue("caret placement flags are reserved"));
+    }
+    Ok(())
 }
 
 fn validate_event_fields(

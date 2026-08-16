@@ -9,22 +9,58 @@
     "null": 4294967295
   },
   "streamHeader": [
-    { "name": "magic", "type": "u32" },
-    { "name": "abiVersion", "type": "u16" },
-    { "name": "headerBytes", "type": "u16" },
-    { "name": "streamBytes", "type": "u32" },
-    { "name": "instructionCount", "type": "u32" }
+    {
+      "name": "magic",
+      "type": "u32"
+    },
+    {
+      "name": "abiVersion",
+      "type": "u16"
+    },
+    {
+      "name": "headerBytes",
+      "type": "u16"
+    },
+    {
+      "name": "streamBytes",
+      "type": "u32"
+    },
+    {
+      "name": "instructionCount",
+      "type": "u32"
+    }
   ],
   "instructionHeader": [
-    { "name": "opcode", "type": "u8" },
-    { "name": "flags", "type": "u8" },
-    { "name": "reserved", "type": "u16" }
+    {
+      "name": "opcode",
+      "type": "u8"
+    },
+    {
+      "name": "flags",
+      "type": "u8"
+    },
+    {
+      "name": "reserved",
+      "type": "u16"
+    }
   ],
   "recordHeader": [
-    { "name": "kind", "type": "u8" },
-    { "name": "flags", "type": "u8" },
-    { "name": "reserved", "type": "u16" },
-    { "name": "payloadBytes", "type": "u32" }
+    {
+      "name": "kind",
+      "type": "u8"
+    },
+    {
+      "name": "flags",
+      "type": "u8"
+    },
+    {
+      "name": "reserved",
+      "type": "u16"
+    },
+    {
+      "name": "payloadBytes",
+      "type": "u32"
+    }
   ],
   "limits": {
     "resourceBytes": 8388608,
@@ -44,83 +80,230 @@
     "magic": "DOPR",
     "maxBytes": 67108864,
     "recordKinds": [
-      { "name": "Mutation", "id": 1 },
-      { "name": "Input", "id": 2 },
-      { "name": "SystemTextMetrics", "id": 3 }
+      {
+        "name": "Mutation",
+        "id": 1
+      },
+      {
+        "name": "Input",
+        "id": 2
+      },
+      {
+        "name": "SystemTextMetrics",
+        "id": 3
+      }
     ]
   },
   "frameDiagnostics": {
     "version": 2,
     "fields": [
-      { "name": "version", "type": "u32" },
-      { "name": "frameSeq", "type": "u32" },
-      { "name": "sceneNodes", "type": "u32" },
-      { "name": "dirtyLayoutNodes", "type": "u32" },
-      { "name": "dirtyPaintNodes", "type": "u32" },
-      { "name": "dirtyPaintSelfNodes", "type": "u32" },
-      { "name": "dirtyHitNodes", "type": "u32" },
-      { "name": "dirtySemanticsNodes", "type": "u32" },
-      { "name": "layoutChangedNodes", "type": "u32" },
-      { "name": "layoutVisitedNodes", "type": "u32" },
-      { "name": "displayCommands", "type": "u32" },
-      { "name": "paintRebuilt", "type": "u32" },
-      { "name": "pictureBuilds", "type": "u32" },
-      { "name": "pictureCacheHits", "type": "u32" },
-      { "name": "pictureSubtreeBuilds", "type": "u32" },
-      { "name": "pictureSubtreeCacheHits", "type": "u32" },
-      { "name": "overInvalidatedFrames", "type": "u32" },
-      { "name": "pictureHashLow", "type": "u32" },
-      { "name": "pictureHashHigh", "type": "u32" }
+      {
+        "name": "version",
+        "type": "u32"
+      },
+      {
+        "name": "frameSeq",
+        "type": "u32"
+      },
+      {
+        "name": "sceneNodes",
+        "type": "u32"
+      },
+      {
+        "name": "dirtyLayoutNodes",
+        "type": "u32"
+      },
+      {
+        "name": "dirtyPaintNodes",
+        "type": "u32"
+      },
+      {
+        "name": "dirtyPaintSelfNodes",
+        "type": "u32"
+      },
+      {
+        "name": "dirtyHitNodes",
+        "type": "u32"
+      },
+      {
+        "name": "dirtySemanticsNodes",
+        "type": "u32"
+      },
+      {
+        "name": "layoutChangedNodes",
+        "type": "u32"
+      },
+      {
+        "name": "layoutVisitedNodes",
+        "type": "u32"
+      },
+      {
+        "name": "displayCommands",
+        "type": "u32"
+      },
+      {
+        "name": "paintRebuilt",
+        "type": "u32"
+      },
+      {
+        "name": "pictureBuilds",
+        "type": "u32"
+      },
+      {
+        "name": "pictureCacheHits",
+        "type": "u32"
+      },
+      {
+        "name": "pictureSubtreeBuilds",
+        "type": "u32"
+      },
+      {
+        "name": "pictureSubtreeCacheHits",
+        "type": "u32"
+      },
+      {
+        "name": "overInvalidatedFrames",
+        "type": "u32"
+      },
+      {
+        "name": "pictureHashLow",
+        "type": "u32"
+      },
+      {
+        "name": "pictureHashHigh",
+        "type": "u32"
+      }
     ]
   },
   "virtualRefillBatch": {
     "version": 1,
     "headerFields": [
-      { "name": "version", "type": "u32" },
-      { "name": "requestCount", "type": "u32" }
+      {
+        "name": "version",
+        "type": "u32"
+      },
+      {
+        "name": "requestCount",
+        "type": "u32"
+      }
     ],
     "recordFields": [
-      { "name": "nodeId", "type": "u32" },
-      { "name": "start", "type": "u32" },
-      { "name": "end", "type": "u32" }
+      {
+        "name": "nodeId",
+        "type": "u32"
+      },
+      {
+        "name": "start",
+        "type": "u32"
+      },
+      {
+        "name": "end",
+        "type": "u32"
+      }
     ]
   },
   "nonPassiveRegionBatch": {
     "version": 1,
     "headerFields": [
-      { "name": "version", "type": "u32" },
-      { "name": "regionCount", "type": "u32" }
+      {
+        "name": "version",
+        "type": "u32"
+      },
+      {
+        "name": "regionCount",
+        "type": "u32"
+      }
     ],
     "recordFields": [
-      { "name": "flags", "type": "u32" },
-      { "name": "leftBits", "type": "u32" },
-      { "name": "topBits", "type": "u32" },
-      { "name": "rightBits", "type": "u32" },
-      { "name": "bottomBits", "type": "u32" }
+      {
+        "name": "flags",
+        "type": "u32"
+      },
+      {
+        "name": "leftBits",
+        "type": "u32"
+      },
+      {
+        "name": "topBits",
+        "type": "u32"
+      },
+      {
+        "name": "rightBits",
+        "type": "u32"
+      },
+      {
+        "name": "bottomBits",
+        "type": "u32"
+      }
     ]
   },
   "editingGeometryBatch": {
     "version": 1,
     "headerFields": [
-      { "name": "version", "type": "u32" },
-      { "name": "nodeId", "type": "u32" },
-      { "name": "selectionStart", "type": "u32" },
-      { "name": "selectionEnd", "type": "u32" },
-      { "name": "characterCount", "type": "u32" }
+      {
+        "name": "version",
+        "type": "u32"
+      },
+      {
+        "name": "nodeId",
+        "type": "u32"
+      },
+      {
+        "name": "selectionStart",
+        "type": "u32"
+      },
+      {
+        "name": "selectionEnd",
+        "type": "u32"
+      },
+      {
+        "name": "characterCount",
+        "type": "u32"
+      }
     ],
     "rectFields": [
-      { "name": "leftBits", "type": "u32" },
-      { "name": "topBits", "type": "u32" },
-      { "name": "widthBits", "type": "u32" },
-      { "name": "heightBits", "type": "u32" }
+      {
+        "name": "leftBits",
+        "type": "u32"
+      },
+      {
+        "name": "topBits",
+        "type": "u32"
+      },
+      {
+        "name": "widthBits",
+        "type": "u32"
+      },
+      {
+        "name": "heightBits",
+        "type": "u32"
+      }
     ],
     "characterFields": [
-      { "name": "start", "type": "u32" },
-      { "name": "end", "type": "u32" },
-      { "name": "leftBits", "type": "u32" },
-      { "name": "topBits", "type": "u32" },
-      { "name": "widthBits", "type": "u32" },
-      { "name": "heightBits", "type": "u32" }
+      {
+        "name": "start",
+        "type": "u32"
+      },
+      {
+        "name": "end",
+        "type": "u32"
+      },
+      {
+        "name": "leftBits",
+        "type": "u32"
+      },
+      {
+        "name": "topBits",
+        "type": "u32"
+      },
+      {
+        "name": "widthBits",
+        "type": "u32"
+      },
+      {
+        "name": "heightBits",
+        "type": "u32"
+      }
     ]
   },
   "streams": {
@@ -133,8 +316,16 @@
           "opcode": 1,
           "fields": ["u32", "u16", "pad16", "u32", "u32"]
         },
-        { "name": "RemoveNode", "opcode": 2, "fields": ["u32"] },
-        { "name": "Reparent", "opcode": 3, "fields": ["u32", "u32", "u32"] },
+        {
+          "name": "RemoveNode",
+          "opcode": 2,
+          "fields": ["u32"]
+        },
+        {
+          "name": "Reparent",
+          "opcode": 3,
+          "fields": ["u32", "u32", "u32"]
+        },
         {
           "name": "SetF32",
           "opcode": 16,
@@ -150,15 +341,31 @@
           "opcode": 18,
           "fields": ["u32", "u16", "pad16", "u32"]
         },
-        { "name": "SetFlags", "opcode": 19, "fields": ["u32", "u32", "u32"] },
-        { "name": "ClearProp", "opcode": 20, "fields": ["u32", "u16", "pad16"] },
-        { "name": "SetTextRun", "opcode": 32, "fields": ["u32", "u32", "u32"] },
+        {
+          "name": "SetFlags",
+          "opcode": 19,
+          "fields": ["u32", "u32", "u32"]
+        },
+        {
+          "name": "ClearProp",
+          "opcode": 20,
+          "fields": ["u32", "u16", "pad16"]
+        },
+        {
+          "name": "SetTextRun",
+          "opcode": 32,
+          "fields": ["u32", "u32", "u32"]
+        },
         {
           "name": "DefineResource",
           "opcode": 48,
           "fields": ["u32", "u16", "pad16", "u32", "bytes", "align4"]
         },
-        { "name": "ReleaseResource", "opcode": 49, "fields": ["u32"] },
+        {
+          "name": "ReleaseResource",
+          "opcode": 49,
+          "fields": ["u32"]
+        },
         {
           "name": "ScrollTo",
           "opcode": 64,
@@ -179,7 +386,11 @@
           "opcode": 80,
           "fields": ["u32", "u32", "u32", "u32", "u32"]
         },
-        { "name": "Commit", "opcode": 240, "fields": ["u32"] }
+        {
+          "name": "Commit",
+          "opcode": 240,
+          "fields": ["u32"]
+        }
       ]
     },
     "input": {
@@ -196,14 +407,26 @@
           "opcode": 2,
           "fields": ["u32", "u32", "u32", "u32", "bytes", "align4"]
         },
-        { "name": "DeleteBackward", "opcode": 3, "fields": ["u32", "u32", "u32"] },
-        { "name": "DeleteForward", "opcode": 4, "fields": ["u32", "u32", "u32"] },
+        {
+          "name": "DeleteBackward",
+          "opcode": 3,
+          "fields": ["u32", "u32", "u32"]
+        },
+        {
+          "name": "DeleteForward",
+          "opcode": 4,
+          "fields": ["u32", "u32", "u32"]
+        },
         {
           "name": "SetSelection",
           "opcode": 5,
           "fields": ["u32", "u32", "u32", "u32", "u32", "u8", "u8", "pad16"]
         },
-        { "name": "BeginComposition", "opcode": 6, "fields": ["u32", "u32", "u32"] },
+        {
+          "name": "BeginComposition",
+          "opcode": 6,
+          "fields": ["u32", "u32", "u32"]
+        },
         {
           "name": "UpdateComposition",
           "opcode": 7,
@@ -214,41 +437,102 @@
           "opcode": 8,
           "fields": ["u32", "u32", "u32", "u8", "u8", "pad16", "u32", "bytes", "align4"]
         },
-        { "name": "CancelComposition", "opcode": 9, "fields": ["u32", "u32", "u32"] },
-        { "name": "Undo", "opcode": 10, "fields": ["u32", "u32", "u32"] },
-        { "name": "Redo", "opcode": 11, "fields": ["u32", "u32", "u32"] },
-        { "name": "FocusEditable", "opcode": 12, "fields": ["u32"] },
-        { "name": "BlurEditable", "opcode": 13, "fields": ["u32"] },
-        { "name": "RequestCharacterBounds", "opcode": 14, "fields": ["u32", "u32", "u32"] },
-        { "name": "ScrollBegin", "opcode": 32, "fields": ["u32"] },
+        {
+          "name": "CancelComposition",
+          "opcode": 9,
+          "fields": ["u32", "u32", "u32"]
+        },
+        {
+          "name": "Undo",
+          "opcode": 10,
+          "fields": ["u32", "u32", "u32"]
+        },
+        {
+          "name": "Redo",
+          "opcode": 11,
+          "fields": ["u32", "u32", "u32"]
+        },
+        {
+          "name": "FocusEditable",
+          "opcode": 12,
+          "fields": ["u32"]
+        },
+        {
+          "name": "BlurEditable",
+          "opcode": 13,
+          "fields": ["u32"]
+        },
+        {
+          "name": "RequestCharacterBounds",
+          "opcode": 14,
+          "fields": ["u32", "u32", "u32"]
+        },
+        {
+          "name": "PlaceCaret",
+          "opcode": 15,
+          "fields": ["u32", "f32", "f32", "u32"]
+        },
+        {
+          "name": "ScrollBegin",
+          "opcode": 32,
+          "fields": ["u32"]
+        },
         {
           "name": "ScrollDelta",
           "opcode": 33,
           "fields": ["u32", "f32", "f32", "u32"]
         },
-        { "name": "ScrollEnd", "opcode": 34, "fields": ["u32"] },
-        { "name": "ScrollCancel", "opcode": 35, "fields": ["u32"] },
+        {
+          "name": "ScrollEnd",
+          "opcode": 34,
+          "fields": ["u32"]
+        },
+        {
+          "name": "ScrollCancel",
+          "opcode": 35,
+          "fields": ["u32"]
+        },
         {
           "name": "DispatchEvent",
           "opcode": 48,
           "fields": ["u32", "u16", "pad16", "f32", "f32", "f32", "f32", "u32", "u32", "u32", "u32"]
         },
-        { "name": "Commit", "opcode": 240, "fields": ["u32"] }
+        {
+          "name": "Commit",
+          "opcode": 240,
+          "fields": ["u32"]
+        }
       ]
     },
     "displayList": {
       "magic": "DOPD",
       "maxBytes": 33554432,
       "commands": [
-        { "name": "Save", "opcode": 1, "fields": [] },
-        { "name": "Restore", "opcode": 2, "fields": [] },
+        {
+          "name": "Save",
+          "opcode": 1,
+          "fields": []
+        },
+        {
+          "name": "Restore",
+          "opcode": 2,
+          "fields": []
+        },
         {
           "name": "Transform",
           "opcode": 3,
           "fields": ["f32", "f32", "f32", "f32", "f32", "f32"]
         },
-        { "name": "ClipRect", "opcode": 4, "fields": ["f32", "f32", "f32", "f32"] },
-        { "name": "Alpha", "opcode": 5, "fields": ["f32"] },
+        {
+          "name": "ClipRect",
+          "opcode": 4,
+          "fields": ["f32", "f32", "f32", "f32"]
+        },
+        {
+          "name": "Alpha",
+          "opcode": 5,
+          "fields": ["f32"]
+        },
         {
           "name": "FillRect",
           "opcode": 16,
@@ -259,7 +543,11 @@
           "opcode": 17,
           "fields": ["f32", "f32", "f32", "f32", "f32", "f32", "f32", "f32", "u32"]
         },
-        { "name": "FillPath", "opcode": 18, "fields": ["u32", "u32"] },
+        {
+          "name": "FillPath",
+          "opcode": 18,
+          "fields": ["u32", "u32"]
+        },
         {
           "name": "DrawGlyphRun",
           "opcode": 32,
@@ -285,7 +573,11 @@
           "opcode": 34,
           "fields": ["u32", "f32", "f32", "f32", "f32", "f32", "f32", "f32", "f32"]
         },
-        { "name": "DrawPicture", "opcode": 35, "fields": ["u32", "f32", "f32"] }
+        {
+          "name": "DrawPicture",
+          "opcode": 35,
+          "fields": ["u32", "f32", "f32"]
+        }
       ]
     },
     "glyphResources": {
@@ -296,19 +588,42 @@
           "name": "DefineGlyphSpan",
           "opcode": 1,
           "fields": [
-            { "name": "spanId", "type": "u32" },
-            { "name": "paintId", "type": "u32" },
-            { "name": "bitmapCount", "type": "u32" },
-            { "name": "glyphCount", "type": "u32" },
-            { "name": "payloadBytes", "type": "u32" },
-            { "name": "payload", "type": "bytes" },
+            {
+              "name": "spanId",
+              "type": "u32"
+            },
+            {
+              "name": "paintId",
+              "type": "u32"
+            },
+            {
+              "name": "bitmapCount",
+              "type": "u32"
+            },
+            {
+              "name": "glyphCount",
+              "type": "u32"
+            },
+            {
+              "name": "payloadBytes",
+              "type": "u32"
+            },
+            {
+              "name": "payload",
+              "type": "bytes"
+            },
             "align4"
           ]
         },
         {
           "name": "ReleaseGlyphSpan",
           "opcode": 2,
-          "fields": [{ "name": "spanId", "type": "u32" }]
+          "fields": [
+            {
+              "name": "spanId",
+              "type": "u32"
+            }
+          ]
         }
       ]
     },
@@ -320,18 +635,36 @@
           "name": "UpsertSystemTextMetric",
           "opcode": 1,
           "fields": [
-            { "name": "stringId", "type": "u32" },
-            { "name": "styleId", "type": "u32" },
-            { "name": "maxLineWidth", "type": "f32" },
-            { "name": "lineCount", "type": "u32" }
+            {
+              "name": "stringId",
+              "type": "u32"
+            },
+            {
+              "name": "styleId",
+              "type": "u32"
+            },
+            {
+              "name": "maxLineWidth",
+              "type": "f32"
+            },
+            {
+              "name": "lineCount",
+              "type": "u32"
+            }
           ]
         },
         {
           "name": "ReleaseSystemTextMetric",
           "opcode": 2,
           "fields": [
-            { "name": "stringId", "type": "u32" },
-            { "name": "styleId", "type": "u32" }
+            {
+              "name": "stringId",
+              "type": "u32"
+            },
+            {
+              "name": "styleId",
+              "type": "u32"
+            }
           ]
         }
       ]
@@ -396,40 +729,115 @@
   },
   "glyphSpanPayload": {
     "bitmapFields": [
-      { "name": "glyphId", "type": "u16" },
+      {
+        "name": "glyphId",
+        "type": "u16"
+      },
       "pad16",
-      { "name": "left", "type": "f32" },
-      { "name": "top", "type": "f32" },
-      { "name": "width", "type": "u32" },
-      { "name": "height", "type": "u32" },
-      { "name": "devicePixelRatio", "type": "f32" },
-      { "name": "dataBytes", "type": "u32" },
-      { "name": "data", "type": "bytes" },
+      {
+        "name": "left",
+        "type": "f32"
+      },
+      {
+        "name": "top",
+        "type": "f32"
+      },
+      {
+        "name": "width",
+        "type": "u32"
+      },
+      {
+        "name": "height",
+        "type": "u32"
+      },
+      {
+        "name": "devicePixelRatio",
+        "type": "f32"
+      },
+      {
+        "name": "dataBytes",
+        "type": "u32"
+      },
+      {
+        "name": "data",
+        "type": "bytes"
+      },
       "align4"
     ],
     "placementFields": [
-      { "name": "bitmapIndex", "type": "u32" },
-      { "name": "x", "type": "f32" },
-      { "name": "y", "type": "f32" }
+      {
+        "name": "bitmapIndex",
+        "type": "u32"
+      },
+      {
+        "name": "x",
+        "type": "f32"
+      },
+      {
+        "name": "y",
+        "type": "f32"
+      }
     ]
   },
   "nodeKinds": [
-    { "name": "Root", "id": 1 },
-    { "name": "Container", "id": 2 },
-    { "name": "Text", "id": 3 },
-    { "name": "Image", "id": 4 },
-    { "name": "EditableText", "id": 5 },
-    { "name": "Scroll", "id": 6 }
+    {
+      "name": "Root",
+      "id": 1
+    },
+    {
+      "name": "Container",
+      "id": 2
+    },
+    {
+      "name": "Text",
+      "id": 3
+    },
+    {
+      "name": "Image",
+      "id": 4
+    },
+    {
+      "name": "EditableText",
+      "id": 5
+    },
+    {
+      "name": "Scroll",
+      "id": 6
+    }
   ],
   "resourceKinds": [
-    { "name": "Utf8String", "id": 1 },
-    { "name": "Image", "id": 2 },
-    { "name": "Path", "id": 3 },
-    { "name": "Font", "id": 4 },
-    { "name": "GlyphSpan", "id": 5 },
-    { "name": "Paint", "id": 6 },
-    { "name": "TextStyle", "id": 7 },
-    { "name": "Affine", "id": 8 }
+    {
+      "name": "Utf8String",
+      "id": 1
+    },
+    {
+      "name": "Image",
+      "id": 2
+    },
+    {
+      "name": "Path",
+      "id": 3
+    },
+    {
+      "name": "Font",
+      "id": 4
+    },
+    {
+      "name": "GlyphSpan",
+      "id": 5
+    },
+    {
+      "name": "Paint",
+      "id": 6
+    },
+    {
+      "name": "TextStyle",
+      "id": 7
+    },
+    {
+      "name": "Affine",
+      "id": 8
+    }
   ],
   "resourceLayouts": {
     "version": 1,
@@ -439,13 +847,31 @@
         "resourceKind": "Paint",
         "variant": 1,
         "fields": [
-          { "name": "version", "type": "u8" },
-          { "name": "variant", "type": "u8" },
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "variant",
+            "type": "u8"
+          },
           "pad16",
-          { "name": "red", "type": "u8" },
-          { "name": "green", "type": "u8" },
-          { "name": "blue", "type": "u8" },
-          { "name": "alpha", "type": "u8" }
+          {
+            "name": "red",
+            "type": "u8"
+          },
+          {
+            "name": "green",
+            "type": "u8"
+          },
+          {
+            "name": "blue",
+            "type": "u8"
+          },
+          {
+            "name": "alpha",
+            "type": "u8"
+          }
         ]
       },
       {
@@ -453,16 +879,40 @@
         "resourceKind": "TextStyle",
         "variant": 1,
         "fields": [
-          { "name": "version", "type": "u8" },
-          { "name": "variant", "type": "u8" },
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "variant",
+            "type": "u8"
+          },
           "pad16",
-          { "name": "paintId", "type": "u32" },
-          { "name": "fontSize", "type": "f32" },
-          { "name": "lineHeight", "type": "f32" },
-          { "name": "weight", "type": "u16" },
+          {
+            "name": "paintId",
+            "type": "u32"
+          },
+          {
+            "name": "fontSize",
+            "type": "f32"
+          },
+          {
+            "name": "lineHeight",
+            "type": "f32"
+          },
+          {
+            "name": "weight",
+            "type": "u16"
+          },
           "pad16",
-          { "name": "familyBytes", "type": "u32" },
-          { "name": "family", "type": "bytes" },
+          {
+            "name": "familyBytes",
+            "type": "u32"
+          },
+          {
+            "name": "family",
+            "type": "bytes"
+          },
           "align4"
         ]
       },
@@ -471,12 +921,27 @@
         "resourceKind": "Font",
         "variant": 1,
         "fields": [
-          { "name": "version", "type": "u8" },
-          { "name": "variant", "type": "u8" },
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "variant",
+            "type": "u8"
+          },
           "pad16",
-          { "name": "faceIndex", "type": "u32" },
-          { "name": "dataBytes", "type": "u32" },
-          { "name": "data", "type": "bytes" },
+          {
+            "name": "faceIndex",
+            "type": "u32"
+          },
+          {
+            "name": "dataBytes",
+            "type": "u32"
+          },
+          {
+            "name": "data",
+            "type": "bytes"
+          },
           "align4"
         ]
       },
@@ -485,27 +950,86 @@
         "resourceKind": "Affine",
         "variant": 1,
         "fields": [
-          { "name": "version", "type": "u8" },
-          { "name": "variant", "type": "u8" },
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "variant",
+            "type": "u8"
+          },
           "pad16",
-          { "name": "a", "type": "f32" },
-          { "name": "b", "type": "f32" },
-          { "name": "c", "type": "f32" },
-          { "name": "d", "type": "f32" },
-          { "name": "e", "type": "f32" },
-          { "name": "f", "type": "f32" }
+          {
+            "name": "a",
+            "type": "f32"
+          },
+          {
+            "name": "b",
+            "type": "f32"
+          },
+          {
+            "name": "c",
+            "type": "f32"
+          },
+          {
+            "name": "d",
+            "type": "f32"
+          },
+          {
+            "name": "e",
+            "type": "f32"
+          },
+          {
+            "name": "f",
+            "type": "f32"
+          }
         ]
       }
     ]
   },
   "props": [
-    { "name": "Width", "id": 1, "valueType": "f32", "invalidation": ["layout", "paint"] },
-    { "name": "Height", "id": 2, "valueType": "f32", "invalidation": ["layout", "paint"] },
-    { "name": "MinWidth", "id": 3, "valueType": "f32", "invalidation": ["layout", "paint"] },
-    { "name": "MinHeight", "id": 4, "valueType": "f32", "invalidation": ["layout", "paint"] },
-    { "name": "MaxWidth", "id": 5, "valueType": "f32", "invalidation": ["layout", "paint"] },
-    { "name": "MaxHeight", "id": 6, "valueType": "f32", "invalidation": ["layout", "paint"] },
-    { "name": "Padding", "id": 7, "valueType": "vec4", "invalidation": ["layout", "paint"] },
+    {
+      "name": "Width",
+      "id": 1,
+      "valueType": "f32",
+      "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "Height",
+      "id": 2,
+      "valueType": "f32",
+      "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "MinWidth",
+      "id": 3,
+      "valueType": "f32",
+      "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "MinHeight",
+      "id": 4,
+      "valueType": "f32",
+      "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "MaxWidth",
+      "id": 5,
+      "valueType": "f32",
+      "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "MaxHeight",
+      "id": 6,
+      "valueType": "f32",
+      "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "Padding",
+      "id": 7,
+      "valueType": "vec4",
+      "invalidation": ["layout", "paint"]
+    },
     {
       "name": "Color",
       "id": 16,
@@ -520,7 +1044,12 @@
       "resourceKind": "Paint",
       "invalidation": ["paint"]
     },
-    { "name": "Opacity", "id": 18, "valueType": "f32", "invalidation": ["paintSelf"] },
+    {
+      "name": "Opacity",
+      "id": 18,
+      "valueType": "f32",
+      "invalidation": ["paintSelf"]
+    },
     {
       "name": "Transform",
       "id": 19,
@@ -535,7 +1064,12 @@
       "resourceKind": "Utf8String",
       "invalidation": ["layout", "paint", "semantics"]
     },
-    { "name": "FontSize", "id": 33, "valueType": "f32", "invalidation": ["layout", "paint"] },
+    {
+      "name": "FontSize",
+      "id": 33,
+      "valueType": "f32",
+      "invalidation": ["layout", "paint"]
+    },
     {
       "name": "Font",
       "id": 34,
@@ -543,7 +1077,12 @@
       "resourceKind": "Font",
       "invalidation": ["layout", "paint"]
     },
-    { "name": "OnTap", "id": 48, "valueType": "ref", "invalidation": [] },
+    {
+      "name": "OnTap",
+      "id": 48,
+      "valueType": "ref",
+      "invalidation": []
+    },
     {
       "name": "SemanticRole",
       "id": 64,

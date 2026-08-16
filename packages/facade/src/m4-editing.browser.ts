@@ -120,6 +120,82 @@ describe("M4 native editing vertical slice", () => {
     }
   });
 
+  it("focuses, places the caret, drag-selects, and word-selects from pointer input", async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 180;
+    canvas.height = 60;
+    document.body.append(canvas);
+    const frames: FrameReport[] = [];
+    const errors: Error[] = [];
+    const root = await createHostedCanvasRoot(canvas, {
+      onFrame: (report) => frames.push(report),
+      onHostError: (error) => errors.push(error),
+      transport: { preference: "main-thread", strict: true },
+    });
+    roots.push(root);
+    root.render(
+      createElement("editableText", {
+        height: 40,
+        revision: 1n,
+        value: "ab cd",
+        width: 160,
+      }),
+    );
+    await withTimeout(
+      waitUntil(() => frames.some((frame) => frame.cause === "mutation")),
+      3_000,
+      "pointer editing initial frame",
+    );
+    const rect = canvas.getBoundingClientRect();
+    const pointer = (type: string, x: number, y: number, buttons: number): void => {
+      canvas.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          buttons,
+          clientX: rect.left + x,
+          clientY: rect.top + y,
+          pointerId: 5,
+        }),
+      );
+    };
+
+    // Clicking an unfocused editable activates it and places the caret.
+    pointer("pointerdown", 150, 20, 1);
+    const context = (): BrowserEditContext =>
+      Reflect.get(canvas, "editContext") as BrowserEditContext;
+    await withTimeout(
+      waitUntil(() => context().text === "ab cd" && context().selectionStart === 5),
+      3_000,
+      "click to caret",
+    );
+    pointer("pointerup", 150, 20, 0);
+
+    // Dragging from the end to the left extends the selection.
+    pointer("pointerdown", 150, 20, 1);
+    pointer("pointermove", 2, 20, 1);
+    await withTimeout(
+      waitUntil(() => context().selectionStart === 0 && context().selectionEnd === 5),
+      3_000,
+      "drag selection",
+    );
+    pointer("pointerup", 2, 20, 0);
+
+    // Double-clicking near the end selects the trailing word.
+    canvas.dispatchEvent(
+      new MouseEvent("dblclick", {
+        bubbles: true,
+        clientX: rect.left + 150,
+        clientY: rect.top + 20,
+      }),
+    );
+    await withTimeout(
+      waitUntil(() => context().selectionStart === 3 && context().selectionEnd === 5),
+      3_000,
+      "double-click word selection",
+    );
+    expect(errors).toEqual([]);
+  });
+
   it("feeds Core editor geometry to the IME surface and answers character queries", async () => {
     const canvas = document.createElement("canvas");
     canvas.width = 180;

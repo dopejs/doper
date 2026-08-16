@@ -47,6 +47,8 @@ function sampleBatch(): InputBatch {
       { type: "cancelComposition", nodeId: 1, baseRevision: REVISION + 9n },
       { type: "undo", nodeId: 1, baseRevision: REVISION + 10n },
       { type: "redo", nodeId: 1, baseRevision: REVISION + 11n },
+      { type: "placeCaret", nodeId: 1, x: 42.5, y: 11, extend: true, word: false },
+      { type: "placeCaret", nodeId: 1, x: -3, y: 0.25, extend: false, word: true },
       { type: "scrollBegin", nodeId: 2 },
       { type: "scrollDelta", nodeId: 2, deltaX: -3.5, deltaY: 24.25, elapsedMicros: 16_667 },
       { type: "scrollEnd", nodeId: 2 },
@@ -117,6 +119,21 @@ describe("Input Stream", () => {
     });
     new DataView(invalid.buffer).setFloat32(24, Number.POSITIVE_INFINITY, true);
     expect(() => decodeInputBatch(invalid)).toThrow(/non-finite f32/u);
+  });
+
+  it("rejects non-finite caret placement coordinates and reserved flag bits", () => {
+    const place = (x: number, y: number) =>
+      encodeInputBatch({
+        frameSeq: 1,
+        commands: [{ type: "placeCaret", nodeId: 1, x, y, extend: false, word: false }],
+      });
+    expect(() => place(Number.NaN, 0)).toThrow(/coordinate/u);
+    expect(() => place(0, Number.POSITIVE_INFINITY)).toThrow(/coordinate/u);
+    const bytes = place(4, 8);
+    const view = new DataView(bytes.buffer);
+    // The flags word is the final field before the 8-byte Commit instruction.
+    view.setUint32(bytes.byteLength - 12, 0xff, true);
+    expect(() => decodeInputBatch(bytes)).toThrow(/reserved/u);
   });
 
   it("rejects invalid event coordinates and reserved flag bits", () => {

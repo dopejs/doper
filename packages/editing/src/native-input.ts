@@ -152,7 +152,9 @@ export class NativeTextInputBridge {
       throw new Error("edit transaction is out of order for the native input bridge");
     }
     if (transaction.revision > this.#sentRevision) {
-      throw new Error("edit transaction acknowledges an unsent native input revision");
+      // Core-initiated transitions (caret placement, corrections) fast-forward
+      // the optimistic counter so later local input uses the right base.
+      this.#sentRevision = transaction.revision;
     }
     if (transaction.delta !== undefined) {
       this.#value = applyUtf16Replacement(

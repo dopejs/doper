@@ -277,7 +277,6 @@ impl EditingController {
         .encode()
     }
 
-    #[cfg(test)]
     pub(crate) fn session(&self, node: NodeId) -> Option<&EditSession> {
         self.sessions.get(&node).map(|active| &active.session)
     }

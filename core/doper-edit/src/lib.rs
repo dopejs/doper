@@ -10,7 +10,7 @@ mod session;
 mod types;
 
 pub use error::EditError;
-pub use index::{OffsetBias, TextIndex};
+pub use index::{OffsetBias, TextIndex, word_range_utf16};
 pub use input::{InputReplayError, InputReplayOutcome, edit_command_from_input};
 pub use session::EditSession;
 pub use types::{

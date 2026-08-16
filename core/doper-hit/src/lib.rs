@@ -81,6 +81,12 @@ impl WorldGeometry {
         Affine(self.transform).point(point)
     }
 
+    /// Transforms a world point into local coordinates when invertible.
+    #[must_use]
+    pub fn to_local(self, point: HitPoint) -> Option<HitPoint> {
+        Some(Affine(self.transform).inverse()?.point(point))
+    }
+
     fn contains_precise(self, point: HitPoint) -> bool {
         let Some(inverse) = Affine(self.transform).inverse() else {
             return false;

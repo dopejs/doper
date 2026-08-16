@@ -162,6 +162,7 @@ pub fn edit_command_from_input(
         } => (node_id, base_revision, EditIntent::Redo),
         InputCommand::FocusEditable { .. }
         | InputCommand::BlurEditable { .. }
+        | InputCommand::PlaceCaret { .. }
         | InputCommand::RequestCharacterBounds { .. }
         | InputCommand::ScrollBegin { .. }
         | InputCommand::ScrollDelta { .. }

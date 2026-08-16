@@ -150,6 +150,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #mode: HostTransportMode = "main-thread";
   #lastTransportMetrics: HostMutationTransportMetrics | undefined;
   #nonPassiveRegions: readonly NonPassiveRegion[] = [];
+  #editingGeometry: EditingGeometryFrame | undefined;
+  #textDragPointer: number | undefined;
   #mainFrameTimestamp: number | undefined;
   #recovery: Promise<void> | undefined;
   #recovering = false;
@@ -211,9 +213,10 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (this.#mode === "main-thread") {
       const sink = this.#frameSink;
       if (sink === undefined) throw new Error("main-thread Core is not initialized");
+      // Advance first: reverse-stream handlers may reentrantly send new input.
+      this.#inputSequence = nextSequence(frameSeq);
       sink.input(bytes);
       this.#inputDirectFrames += 1;
-      this.#inputSequence = nextSequence(frameSeq);
       return;
     }
     const client = this.#client;
@@ -525,6 +528,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       previousTimestamp === undefined || timestamp <= previousTimestamp
         ? 1000 / 60
         : Math.min(1000, timestamp - previousTimestamp);
+    this.synthesizeTextSelection(kind, x, y, pointerId, event.shiftKey);
     const eventId = this.#eventSequence;
     this.#eventSequence = nextSequence(eventId);
     try {
@@ -548,6 +552,80 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     }
   }
 
+  /** Turns raw pointer input over the active editor into caret placement. */
+  private synthesizeTextSelection(
+    kind: "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel",
+    x: number,
+    y: number,
+    pointerId: number,
+    shiftKey: boolean,
+  ): void {
+    const activeNodeId = this.#inputBridge.activeNodeId;
+    if (activeNodeId === undefined) {
+      this.#textDragPointer = undefined;
+      return;
+    }
+    const send = (extend: boolean, word: boolean): void => {
+      try {
+        this.sendInputCommands([{ type: "placeCaret", nodeId: activeNodeId, x, y, extend, word }]);
+      } catch (cause) {
+        this.#options.onHostError?.(toError(cause, "caret placement failed"));
+      }
+    };
+    switch (kind) {
+      case "pointerdown": {
+        const geometry = this.#editingGeometry;
+        const inside =
+          geometry !== undefined &&
+          geometry.nodeId === activeNodeId &&
+          x >= geometry.controlBounds.left &&
+          x < geometry.controlBounds.left + geometry.controlBounds.width &&
+          y >= geometry.controlBounds.top &&
+          y < geometry.controlBounds.top + geometry.controlBounds.height;
+        if (!inside) return;
+        this.#textDragPointer = pointerId;
+        send(shiftKey, false);
+        return;
+      }
+      case "pointermove":
+        if (this.#textDragPointer === pointerId) send(true, false);
+        return;
+      case "pointerup":
+      case "pointercancel":
+        if (this.#textDragPointer === pointerId) this.#textDragPointer = undefined;
+        return;
+      default:
+    }
+  }
+
+  private readonly handleCanvasDoubleClick = (event: Event): void => {
+    const mouse = event as MouseEvent;
+    const activeNodeId = this.#inputBridge.activeNodeId;
+    const geometry = this.#editingGeometry;
+    if (activeNodeId === undefined || geometry === undefined || geometry.nodeId !== activeNodeId) {
+      return;
+    }
+    const rect = this.#canvas.getBoundingClientRect();
+    if (!(rect.width > 0) || !(rect.height > 0)) return;
+    const x = ((mouse.clientX - rect.left) * this.#canvas.width) / rect.width;
+    const y = ((mouse.clientY - rect.top) * this.#canvas.height) / rect.height;
+    if (
+      x < geometry.controlBounds.left ||
+      x >= geometry.controlBounds.left + geometry.controlBounds.width ||
+      y < geometry.controlBounds.top ||
+      y >= geometry.controlBounds.top + geometry.controlBounds.height
+    ) {
+      return;
+    }
+    try {
+      this.sendInputCommands([
+        { type: "placeCaret", nodeId: activeNodeId, x, y, extend: false, word: true },
+      ]);
+    } catch (cause) {
+      this.#options.onHostError?.(toError(cause, "word selection failed"));
+    }
+  };
+
   private attachCanvasEventListeners(): void {
     if (this.#eventListenersAttached) return;
     if (typeof this.#canvas.addEventListener !== "function") return;
@@ -566,6 +644,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       passive: pointerPassive,
     });
     this.#canvas.addEventListener("click", this.handleCanvasClick, { passive: true });
+    this.#canvas.addEventListener("dblclick", this.handleCanvasDoubleClick, { passive: true });
     this.#canvas.addEventListener("wheel", this.handleCanvasWheel, { passive: wheelPassive });
     this.#eventListenersAttached = true;
   }
@@ -578,6 +657,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#canvas.removeEventListener("pointermove", this.handleCanvasPointerEvent);
     this.#canvas.removeEventListener("pointercancel", this.handleCanvasPointerEvent);
     this.#canvas.removeEventListener("click", this.handleCanvasClick);
+    this.#canvas.removeEventListener("dblclick", this.handleCanvasDoubleClick);
     this.#canvas.removeEventListener("wheel", this.handleCanvasWheel);
     this.#eventListenersAttached = false;
   }
@@ -640,6 +720,31 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       this.#options.onEventTransaction?.(transaction);
     } catch (cause) {
       this.#options.onHostError?.(toError(cause, "event transaction handler failed"));
+    }
+    this.autoFocusEditableTarget(transaction);
+  }
+
+  /** Clicking a mounted editable activates native text services engine-side. */
+  private autoFocusEditableTarget(transaction: EventTransaction): void {
+    if (transaction.kind !== "pointerdown") return;
+    if (this.#inputBridge.activeNodeId === transaction.target) return;
+    const state = this.#root?.editableState(transaction.target);
+    if (state === undefined) return;
+    try {
+      this.focusEditable(transaction.target);
+      this.#textDragPointer = transaction.pointerId;
+      this.sendInputCommands([
+        {
+          type: "placeCaret",
+          nodeId: transaction.target,
+          x: transaction.x,
+          y: transaction.y,
+          extend: (transaction.modifiers & 1) !== 0,
+          word: false,
+        },
+      ]);
+    } catch (cause) {
+      this.#options.onHostError?.(new Error(`editable auto-focus failed: ${String(cause)}`));
     }
   }
 
@@ -821,6 +926,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
 
   /** Feeds Core-computed editor geometry to the IME bridge automatically. */
   private handleEditingGeometry(frame: EditingGeometryFrame): void {
+    this.#editingGeometry = frame;
     if (this.#inputBridge.activeNodeId !== frame.nodeId) return;
     const toDomRect = (rect: EditingGeometryRect): DOMRect =>
       new DOMRect(rect.left, rect.top, rect.width, rect.height);

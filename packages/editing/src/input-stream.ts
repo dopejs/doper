@@ -71,6 +71,14 @@ export type InputCommand =
       readonly start: number;
       readonly end: number;
     }
+  | {
+      readonly type: "placeCaret";
+      readonly nodeId: number;
+      readonly x: number;
+      readonly y: number;
+      readonly extend: boolean;
+      readonly word: boolean;
+    }
   | { readonly type: "scrollBegin"; readonly nodeId: number }
   | {
       readonly type: "scrollDelta";
@@ -204,6 +212,16 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
       writer.u32(command.start);
       writer.u32(command.end);
       return;
+    case "placeCaret":
+      assertU32(command.nodeId, "editable nodeId");
+      if (!Number.isFinite(command.x) || !Number.isFinite(command.y)) {
+        fail("caret placement coordinate is invalid");
+      }
+      writer.u32(command.nodeId);
+      writer.f32(command.x);
+      writer.f32(command.y);
+      writer.u32((command.extend ? 1 : 0) | (command.word ? 2 : 0));
+      return;
     case "dispatchEvent":
       assertU32(command.eventId, "eventId");
       validateEventFields(command);
@@ -314,6 +332,22 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
       if (start > end) fail("character bounds range is reversed");
       return { type: "requestCharacterBounds", nodeId, start, end };
     }
+    case InputOpcode.PlaceCaret: {
+      const nodeId = reader.u32();
+      const x = reader.f32();
+      const y = reader.f32();
+      const flags = reader.u32();
+      if (!Number.isFinite(x) || !Number.isFinite(y)) fail("caret placement coordinate is invalid");
+      if ((flags & ~0x03) !== 0) fail("caret placement flags are reserved");
+      return {
+        type: "placeCaret",
+        nodeId,
+        x,
+        y,
+        extend: (flags & 1) !== 0,
+        word: (flags & 2) !== 0,
+      };
+    }
     case InputOpcode.ScrollBegin:
       return { type: "scrollBegin", nodeId: reader.u32() };
     case InputOpcode.ScrollDelta: {
@@ -387,6 +421,8 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.BlurEditable;
     case "requestCharacterBounds":
       return InputOpcode.RequestCharacterBounds;
+    case "placeCaret":
+      return InputOpcode.PlaceCaret;
     case "scrollBegin":
       return InputOpcode.ScrollBegin;
     case "scrollDelta":

@@ -16,8 +16,9 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
-    InputBatch, InputCommand, InputEventKind, Mutation, MutationBatch, NON_PASSIVE_REGION_VERSION,
-    NULL_NODE_ID, NodeKind, SystemTextMetricBatch,
+    InputAffinity, InputBatch, InputCommand, InputEventKind, InputPosition, InputSelection,
+    Mutation, MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind,
+    SystemTextMetricBatch,
 };
 use doper_hit::{HitIndex, HitPoint, WorldGeometry, WorldRect};
 use doper_layout::{BoxConstraints, LayoutEngine};
@@ -254,18 +255,48 @@ fn collect_event_commands(batch: &InputBatch) -> Vec<EventCommand> {
         .collect()
 }
 
+/// Picks the caret stop nearest to a local point: best line first, then X.
+fn nearest_caret_offset(carets: &[doper_text::CaretStop], local: HitPoint) -> u32 {
+    let line_distance = |caret: &doper_text::CaretStop| -> f32 {
+        if local.y >= caret.y && local.y < caret.y + caret.height {
+            0.0
+        } else if local.y < caret.y {
+            caret.y - local.y
+        } else {
+            local.y - (caret.y + caret.height)
+        }
+    };
+    let mut best: Option<(&doper_text::CaretStop, f32, f32)> = None;
+    for caret in carets {
+        let vertical = line_distance(caret);
+        let horizontal = (caret.x - local.x).abs();
+        let better = match best {
+            None => true,
+            Some((_, best_vertical, best_horizontal)) => {
+                vertical < best_vertical
+                    || (vertical <= best_vertical && horizontal < best_horizontal)
+            }
+        };
+        if better {
+            best = Some((caret, vertical, horizontal));
+        }
+    }
+    best.map_or(0, |(caret, _, _)| caret.utf16_offset)
+}
+
 /// Feeds one hit-tested event into candidate scroll state; returns pixel change.
 fn apply_event_scroll(
     candidate_scene: &mut Scene,
     candidate_scroll: &mut ScrollController,
     candidate_gesture: &mut Option<PointerGesture>,
     command: &EventCommand,
-    hit_scroll_node: Option<NodeId>,
+    wheel_scroll_node: Option<NodeId>,
+    drag_scroll_node: Option<NodeId>,
 ) -> Result<bool, CoreError> {
     let mut scroll_changed = false;
     match command.kind {
         InputEventKind::Wheel => {
-            if let Some(scroll_node) = hit_scroll_node {
+            if let Some(scroll_node) = wheel_scroll_node {
                 scroll_changed |= candidate_scroll
                     .apply_wheel(
                         candidate_scene,
@@ -280,7 +311,7 @@ fn apply_event_scroll(
             if let Some(previous) = candidate_gesture.take() {
                 candidate_scroll.end_direct(previous.scroll_node, false)?;
             }
-            if let Some(scroll_node) = hit_scroll_node {
+            if let Some(scroll_node) = drag_scroll_node {
                 candidate_scroll.begin_direct(scroll_node)?;
                 *candidate_gesture = Some(PointerGesture {
                     pointer_id: command.pointer_id,
@@ -591,6 +622,57 @@ impl CoreEngine {
         Ok(None)
     }
 
+    /// Resolves a canvas-local caret placement into an authoritative selection.
+    fn resolve_place_caret(
+        &self,
+        node_id: u32,
+        position: [f32; 2],
+        flags: u32,
+    ) -> Result<InputCommand, CoreError> {
+        let node = NodeId::from_raw(node_id)?;
+        let session = self
+            .editing
+            .session(node)
+            .ok_or(CoreError::InvalidEditableTarget { node })?;
+        let geometry = self
+            .hit
+            .geometry(node)
+            .ok_or(CoreError::InvalidEditableTarget { node })?;
+        let carets = self
+            .text
+            .editor_caret_stops(&self.scene, node)
+            .filter(|carets| !carets.is_empty())
+            .ok_or(CoreError::InvalidEditableTarget { node })?;
+        let local = geometry
+            .to_local(HitPoint {
+                x: position[0],
+                y: position[1],
+            })
+            .ok_or(CoreError::InvalidEditableTarget { node })?;
+        let offset = nearest_caret_offset(&carets, local);
+        let (anchor, focus) = if flags & 0x02 != 0 {
+            doper_edit::word_range_utf16(session.text(), offset).map_err(CoreError::Edit)?
+        } else if flags & 0x01 != 0 {
+            (session.selection().anchor.offset, offset)
+        } else {
+            (offset, offset)
+        };
+        Ok(InputCommand::SetSelection {
+            node_id,
+            base_revision: session.revision(),
+            selection: InputSelection {
+                anchor: InputPosition {
+                    offset: anchor,
+                    affinity: InputAffinity::Downstream,
+                },
+                focus: InputPosition {
+                    offset: focus,
+                    affinity: InputAffinity::Downstream,
+                },
+            },
+        })
+    }
+
     /// Applies one isolated hit-tested event batch against candidate state.
     fn input_events(
         &mut self,
@@ -617,12 +699,33 @@ impl CoreEngine {
                     .copied()
                     .find(|node| self.scene.kind(*node) == Some(NodeKind::Scroll))
             });
+            // Text selection wins over scroll dragging when the editable is deeper.
+            let editable_is_deeper = hit.as_ref().is_some_and(|hit| {
+                let scroll = hit
+                    .path
+                    .iter()
+                    .rposition(|node| self.scene.kind(*node) == Some(NodeKind::Scroll));
+                let editable = hit
+                    .path
+                    .iter()
+                    .rposition(|node| self.scene.kind(*node) == Some(NodeKind::EditableText));
+                match (scroll, editable) {
+                    (Some(scroll), Some(editable)) => editable > scroll,
+                    (None, Some(_)) => true,
+                    _ => false,
+                }
+            });
             scroll_changed |= apply_event_scroll(
                 &mut candidate_scene,
                 &mut candidate_scroll,
                 &mut candidate_gesture,
                 command,
                 hit_scroll_node,
+                if editable_is_deeper {
+                    None
+                } else {
+                    hit_scroll_node
+                },
             )?;
             let Some(hit) = hit else {
                 continue;
@@ -678,12 +781,30 @@ impl CoreEngine {
             .filter(|instruction| is_scroll_command(&instruction.command))
             .cloned()
             .collect::<Vec<_>>();
-        let edit_commands = batch
+        let mut edit_commands = Vec::new();
+        for instruction in batch
             .instructions
             .iter()
             .filter(|instruction| !is_scroll_command(&instruction.command))
-            .map(|instruction| instruction.command.clone())
-            .collect::<Vec<_>>();
+        {
+            if let InputCommand::PlaceCaret {
+                node_id,
+                position,
+                flags,
+            } = instruction.command
+            {
+                match self.resolve_place_caret(node_id, position, flags) {
+                    Ok(command) => edit_commands.push(command),
+                    Err(error) => {
+                        self.metrics.input_rejections =
+                            self.metrics.input_rejections.saturating_add(1);
+                        return Err(error);
+                    }
+                }
+            } else {
+                edit_commands.push(instruction.command.clone());
+            }
+        }
         let mut candidate_scene = self.scene.clone();
         let mut candidate_scroll = self.scroll.clone();
         let mut candidate_editing = self.editing.clone();
@@ -1651,6 +1772,56 @@ mod tests {
     }
 
     fn editable_text_tree(flags: u32) -> Vec<u8> {
+        editable_tree_with_text(flags, "a")
+    }
+
+    fn editable_resource_mutations(text: &str) -> Vec<Mutation> {
+        vec![
+            Mutation::DefineResource {
+                resource_id: 1,
+                kind: ResourceKind::Paint,
+                bytes: SolidPaint {
+                    red: 12,
+                    green: 34,
+                    blue: 56,
+                    alpha: 255,
+                }
+                .encode()
+                .to_vec(),
+            },
+            Mutation::DefineResource {
+                resource_id: 2,
+                kind: ResourceKind::TextStyle,
+                bytes: TextStyleResource {
+                    paint_id: 1,
+                    font_size: 16.0,
+                    line_height: 20.0,
+                    weight: 400,
+                    family: "sans-serif".to_owned(),
+                }
+                .encode()
+                .expect("text style"),
+            },
+            Mutation::DefineResource {
+                resource_id: 3,
+                kind: ResourceKind::Utf8String,
+                bytes: text.as_bytes().to_vec(),
+            },
+            Mutation::SetTextRun {
+                node_id: id(2),
+                string_id: 3,
+                style_id: 2,
+            },
+            Mutation::ConfigureEditable {
+                node_id: id(2),
+                revision: 0,
+                flags: 1,
+                max_graphemes: 100,
+            },
+        ]
+    }
+
+    fn editable_tree_with_text(flags: u32, text: &str) -> Vec<u8> {
         frame(
             1,
             vec![
@@ -1694,7 +1865,7 @@ mod tests {
                 Mutation::DefineResource {
                     resource_id: 3,
                     kind: ResourceKind::Utf8String,
-                    bytes: b"a".to_vec(),
+                    bytes: text.as_bytes().to_vec(),
                 },
                 Mutation::SetTextRun {
                     node_id: id(1),
@@ -2162,6 +2333,161 @@ mod tests {
         let session = engine.editing.session(node).expect("editing session");
         assert_eq!(session.text(), "a你🙂");
         assert_eq!(session.revision(), 1);
+    }
+
+    #[test]
+    fn place_caret_maps_points_to_caret_extension_and_word_selection() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit(&editable_tree_with_text(1, "ab cd"))
+            .expect("frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+
+        let place = |position: [f32; 2], flags: u32| InputCommand::PlaceCaret {
+            node_id: id(1),
+            position,
+            flags,
+        };
+        let selection_after = |engine: &mut CoreEngine| -> [u32; 2] {
+            let bytes = engine.take_edit_transactions().expect("edit bytes");
+            let batch = doper_abi::EditTransactionBatch::decode(&bytes).expect("decode");
+            batch.records.last().expect("record").selection
+        };
+
+        engine
+            .input(&input(2, vec![place([1_000.0, 0.0], 0)]))
+            .expect("place far right");
+        assert_eq!(selection_after(&mut engine), [5, 5]);
+
+        engine
+            .input(&input(3, vec![place([-10.0, 0.0], 1)]))
+            .expect("extend to start");
+        assert_eq!(selection_after(&mut engine), [5, 0]);
+
+        engine
+            .input(&input(4, vec![place([1_000.0, 0.0], 2)]))
+            .expect("word at end");
+        assert_eq!(selection_after(&mut engine), [3, 5]);
+
+        let missing = engine
+            .input(&input(
+                5,
+                vec![InputCommand::PlaceCaret {
+                    node_id: id(9),
+                    position: [0.0, 0.0],
+                    flags: 0,
+                }],
+            ))
+            .expect_err("unknown editable");
+        assert!(matches!(missing, CoreError::InvalidEditableTarget { .. }));
+    }
+
+    #[test]
+    fn pointer_drag_prefers_text_selection_over_scroll_when_editable_is_deeper() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let mut mutations = vec![
+            Mutation::CreateNode {
+                node_id: id(0),
+                kind: NodeKind::Root,
+                parent: NULL_NODE_ID,
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::CreateNode {
+                node_id: id(1),
+                kind: NodeKind::Scroll,
+                parent: id(0),
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::CreateNode {
+                node_id: id(2),
+                kind: NodeKind::EditableText,
+                parent: id(1),
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::SetF32 {
+                node_id: id(1),
+                prop: Prop::Width,
+                value: 100.0,
+            },
+            Mutation::SetF32 {
+                node_id: id(1),
+                prop: Prop::Height,
+                value: 100.0,
+            },
+            Mutation::SetF32 {
+                node_id: id(2),
+                prop: Prop::Width,
+                value: 100.0,
+            },
+            Mutation::SetF32 {
+                node_id: id(2),
+                prop: Prop::Height,
+                value: 1_000.0,
+            },
+        ];
+        mutations.extend(editable_resource_mutations("ab cd"));
+        engine.commit(&frame(1, mutations)).expect("frame");
+
+        let pointer = |kind, position, buttons| InputCommand::DispatchEvent {
+            event_id: 11,
+            kind,
+            position,
+            delta: [0.0, 0.0],
+            buttons,
+            modifiers: 0,
+            pointer_id: 9,
+            elapsed_micros: 16_667,
+        };
+        engine
+            .input(&input(
+                1,
+                vec![pointer(InputEventKind::PointerDown, [20.0, 60.0], 1)],
+            ))
+            .expect("down");
+        engine.take_event_transactions().expect("down event");
+        assert!(
+            engine
+                .input(&input(
+                    2,
+                    vec![pointer(InputEventKind::PointerMove, [20.0, -20.0], 1)],
+                ))
+                .expect("move")
+                .is_none(),
+            "dragging over an editable must not scroll"
+        );
+        engine.take_event_transactions().expect("move event");
+        assert_eq!(
+            engine
+                .scene()
+                .scroll_position(NodeId::from_raw(id(1)).expect("scroll")),
+            Some([0.0, 0.0])
+        );
+
+        let wheel = InputCommand::DispatchEvent {
+            event_id: 12,
+            kind: InputEventKind::Wheel,
+            position: [20.0, 60.0],
+            delta: [0.0, 50.0],
+            buttons: 0,
+            modifiers: 0,
+            pointer_id: 0,
+            elapsed_micros: 16_667,
+        };
+        engine.input(&input(3, vec![wheel])).expect("wheel");
+        engine.take_event_transactions().expect("wheel event");
+        assert_ne!(
+            engine
+                .scene()
+                .scroll_position(NodeId::from_raw(id(1)).expect("scroll")),
+            Some([0.0, 0.0]),
+            "wheel over an editable still scrolls the ancestor"
+        );
     }
 
     #[test]
