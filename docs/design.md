@@ -542,11 +542,16 @@ UTF-8/UTF-16、grapheme、cluster、glyph、line 与 caret 映射；Text Shape C
 资源。Core 侧字体解析、缺字、栅格或批次预算失败时整段走系统字体 fallback；Host
 侧校验或 surface 准备失败则拒绝整个资源事务和该帧，不得保留半安装状态。
 
-当前 Core 输入仍只接受解码后的 SFNT；WOFF/WOFF2 解码放在显式字体加载器边界，
-接入时必须与失败回退、格式能力矩阵和体积门禁一起交付。系统字体的真实
-`measureText` 反馈和真实字体的浏览器端 Core→Canvas 像素 E2E 也尚未完成，因此 M3-B
-仍未达到出口。接入文本主链后的产品 Core WASM 为 278,929 bytes gzip，低于 300 KiB
-代表性文本包络和 400 KiB 产品上限。
+Core 输入仍只接受解码后的 SFNT；公开异步 `loadFont` 在宿主边界按 magic 处理
+TTF/OTF/TTC、WOFF1 与 WOFF2。网络响应和解码结果受同一 8 MiB 资源上限约束，WOFF1
+按照 W3C 容器目录进行完整范围/对齐/重叠检查并通过 `DecompressionStream` 有界解压，
+WOFF2 在头部预检后才动态加载 decoder-only WASM，也允许受控宿主注入等价 decoder。
+加载、解码、取消、格式与环境能力错误有稳定错误码；失败的 Promise 不会生成半有效
+`DoperFont`。decoder-only 模块不进入默认同步入口，也不计入产品 Core WASM。
+
+系统字体的真实 `measureText` 反馈和真实字体的浏览器端 Core→Canvas 像素 E2E 尚未
+完成，因此 M3-B 仍未达到出口。接入文本主链后的产品 Core WASM 为 278,929 bytes
+gzip，低于 300 KiB 代表性文本包络和 400 KiB 产品上限。
 
 栅格器选择以 WASM 体积门禁为准：同一 Rust 1.96.0、`opt-z`、LTO 探针中，
 `swash` 同时承担 shaping 与 raster 时为 308,835 bytes gzip，超过代表性文本包络的

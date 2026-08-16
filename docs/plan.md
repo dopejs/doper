@@ -297,7 +297,7 @@ web 字体 shaping、复杂排版和 glyph atlas 属于 M3。M1 的“像素对�
 
 ### M3：原生虚拟滚动与文本
 
-> 当前状态：**M3-A Scroll 已完成（2026-08-15），M3-B Text 待实施**。M3-A 已交付
+> 当前状态：**M3-A Scroll 已完成（2026-08-15），M3-B Text 实施中**。M3-A 已交付
 > `doper-scroll` 的 iOS/Android 物理、Fenwick HeightIndex、变量高度锚点纠偏、方向
 > 预热、占位/补建指标，以及 Shell 的 `<virtualList>` 有界窗口物化。独立 SAB Input
 > ring、postMessage 和主线程三路径均通过真实 Chromium；cache 开关、朴素前缀和、
@@ -330,8 +330,10 @@ WASM 体积门禁约束的灰度 outline glyph atlas 已完成；真实 SFNT 自
 `pnpm m3:text:foundation`。公开 `createFont`/`font` API、版本化 SFNT 资源、Core
 shaping/栅格、`DrawGlyphRun`、DOPG 回传、Host 普通资源+DOPG 原子安装、Canvas2D
 mask 着色贴图和 DPR 重建链路均已完成。接入后的产品 Core WASM 为 278,929 bytes
-gzip。WOFF/WOFF2 加载边界、系统字体测量反馈，以及真实字体经 WASM 到浏览器像素的
-E2E 尚未完成，因此 M3-B 尚未达到出口。
+gzip。宿主侧 `loadFont` 已以有界流读取、WOFF1 严格容器解码、WOFF2 头部预检和
+decoder-only 动态加载完成 TTF/OTF/TTC/WOFF/WOFF2 边界，并覆盖真实 WOFF2 往返与
+畸形输入。系统字体测量反馈，以及真实字体经 WASM 到浏览器像素的 E2E 尚未完成，
+因此 M3-B 尚未达到出口。
 
 - 显式 web 字体加载、LTR、基础换行和 Text Shape Cache。
 - 系统字体 `measureText`/`fillText` fallback 及缓存失效。

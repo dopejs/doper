@@ -1,6 +1,14 @@
 export { DOPER_ELEMENT_TYPE, createElement, isDoperElement, normalizeChildren } from "./element";
 export { DoperFont, createFont, type DoperFontOptions } from "./font";
 export {
+  DoperFontLoadError,
+  loadFont,
+  type DoperFontLoadErrorCode,
+  type DoperFontLoadOptions,
+  type DoperFontSource,
+  type Woff2Decoder,
+} from "./font-loader";
+export {
   Fragment,
   type AnyDoperElement,
   type Color,

@@ -18,14 +18,19 @@ export {
 export {
   Fragment,
   DoperFont,
+  DoperFontLoadError,
   createElement,
   createFont,
+  loadFont,
   type Color,
   type CommonProps,
   type ContainerProps,
   type DoperElement,
   type DoperNode,
   type EdgeInsets,
+  type DoperFontLoadErrorCode,
+  type DoperFontLoadOptions,
+  type DoperFontSource,
   type DoperFontOptions,
   type EditableTextProps,
   type FunctionComponent,
@@ -36,6 +41,7 @@ export {
   type ScrollProps,
   type TextProps,
   type VirtualListProps,
+  type Woff2Decoder,
 } from "@dopejs/doper-jsx";
 export { type DoperRoot } from "@dopejs/doper-reconciler";
 export {
