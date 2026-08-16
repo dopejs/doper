@@ -193,6 +193,29 @@ describe("M4 native editing vertical slice", () => {
       3_000,
       "double-click word selection",
     );
+
+    // Keyboard navigation flows through Core caret movement.
+    const press = (key: string, init: KeyboardEventInit = {}): void => {
+      canvas.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key, ...init }));
+    };
+    press("ArrowLeft");
+    await withTimeout(
+      waitUntil(() => context().selectionStart === 3 && context().selectionEnd === 3),
+      3_000,
+      "arrow collapses selection",
+    );
+    press("End", { shiftKey: true });
+    await withTimeout(
+      waitUntil(() => context().selectionStart === 3 && context().selectionEnd === 5),
+      3_000,
+      "shift-end extends to line end",
+    );
+    press("ArrowUp");
+    await withTimeout(
+      waitUntil(() => context().selectionStart === 0 && context().selectionEnd === 0),
+      3_000,
+      "arrow-up clamps to text start",
+    );
     expect(errors).toEqual([]);
   });
 

@@ -163,6 +163,7 @@ pub fn edit_command_from_input(
         InputCommand::FocusEditable { .. }
         | InputCommand::BlurEditable { .. }
         | InputCommand::PlaceCaret { .. }
+        | InputCommand::MoveCaret { .. }
         | InputCommand::RequestCharacterBounds { .. }
         | InputCommand::ScrollBegin { .. }
         | InputCommand::ScrollDelta { .. }

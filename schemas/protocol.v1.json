@@ -473,6 +473,11 @@
           "fields": ["u32", "f32", "f32", "u32"]
         },
         {
+          "name": "MoveCaret",
+          "opcode": 16,
+          "fields": ["u32", "u8", "u8", "u8", "u8"]
+        },
+        {
           "name": "ScrollBegin",
           "opcode": 32,
           "fields": ["u32"]

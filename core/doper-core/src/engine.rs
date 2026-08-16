@@ -4,16 +4,17 @@ use std::{
 };
 
 use doper_abi::{
-    EDITING_GEOMETRY_CHARACTER_WORDS, EDITING_GEOMETRY_HEADER_WORDS, EDITING_GEOMETRY_RECT_WORDS,
-    EDITING_GEOMETRY_VERSION, EventTransactionBatch, EventTransactionRecord,
-    FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_LAYOUT_NODES_INDEX,
-    FRAME_DIAGNOSTICS_DIRTY_PAINT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_PAINT_SELF_NODES_INDEX,
-    FRAME_DIAGNOSTICS_DIRTY_SEMANTICS_NODES_INDEX, FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX,
-    FRAME_DIAGNOSTICS_FRAME_SEQ_INDEX, FRAME_DIAGNOSTICS_LAYOUT_CHANGED_NODES_INDEX,
-    FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX, FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX,
-    FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX, FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
-    FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
-    FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
+    CaretDirection, CaretGranularity, EDITING_GEOMETRY_CHARACTER_WORDS,
+    EDITING_GEOMETRY_HEADER_WORDS, EDITING_GEOMETRY_RECT_WORDS, EDITING_GEOMETRY_VERSION,
+    EventTransactionBatch, EventTransactionRecord, FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX,
+    FRAME_DIAGNOSTICS_DIRTY_LAYOUT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_PAINT_NODES_INDEX,
+    FRAME_DIAGNOSTICS_DIRTY_PAINT_SELF_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_SEMANTICS_NODES_INDEX,
+    FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX, FRAME_DIAGNOSTICS_FRAME_SEQ_INDEX,
+    FRAME_DIAGNOSTICS_LAYOUT_CHANGED_NODES_INDEX, FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX,
+    FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX, FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX, FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
     InputAffinity, InputBatch, InputCommand, InputEventKind, InputPosition, InputSelection,
@@ -150,6 +151,7 @@ pub struct CoreEngine {
     hit: HitIndex,
     pending_events: Vec<u8>,
     pointer_gesture: Option<PointerGesture>,
+    caret_desired_x: Option<(NodeId, f32)>,
     requested_character_range: Option<(NodeId, [u32; 2])>,
     constraints: BoxConstraints,
     metrics: CoreMetrics,
@@ -253,6 +255,26 @@ fn collect_event_commands(batch: &InputBatch) -> Vec<EventCommand> {
             _ => None,
         })
         .collect()
+}
+
+/// Finds the caret stop matching a UTF-16 offset, or the nearest one.
+fn caret_stop_at(carets: &[doper_text::CaretStop], offset: u32) -> Option<&doper_text::CaretStop> {
+    carets
+        .iter()
+        .min_by_key(|caret| caret.utf16_offset.abs_diff(offset))
+}
+
+/// Picks the caret stop on one visual line whose X is nearest to a column.
+fn nearest_offset_in_line(
+    carets: &[doper_text::CaretStop],
+    line: usize,
+    column: f32,
+) -> Option<u32> {
+    carets
+        .iter()
+        .filter(|caret| caret.line == line)
+        .min_by(|left, right| (left.x - column).abs().total_cmp(&(right.x - column).abs()))
+        .map(|caret| caret.utf16_offset)
 }
 
 /// Picks the caret stop nearest to a local point: best line first, then X.
@@ -374,6 +396,7 @@ impl CoreEngine {
             hit: HitIndex::default(),
             pending_events: Vec::new(),
             pointer_gesture: None,
+            caret_desired_x: None,
             requested_character_range: None,
             constraints,
             metrics: CoreMetrics::default(),
@@ -673,6 +696,190 @@ impl CoreEngine {
         })
     }
 
+    /// Computes the minimal ancestor scroll jump revealing the active caret.
+    ///
+    /// Uses the last committed frame's world geometry; the subsequent relayout
+    /// clamps the jump against fresh extents, keeping the frame deterministic.
+    fn caret_reveal_target(&self) -> Option<(NodeId, [f32; 2])> {
+        let visual = self.editing.active_visual()?;
+        let node = visual.node;
+        let geometry = self.hit.geometry(node)?;
+        let carets = self
+            .text
+            .editor_caret_stops(&self.scene, node)
+            .filter(|carets| !carets.is_empty())?;
+        let focus = visual.selection[1];
+        let caret = editor_range_rect(&carets, [focus, focus], geometry)?;
+        let mut ancestor = self.scene.parent(node);
+        while let Some(candidate) = ancestor {
+            if self.scene.kind(candidate) == Some(NodeKind::Scroll) {
+                break;
+            }
+            ancestor = self.scene.parent(candidate);
+        }
+        let scroll_node = ancestor?;
+        let viewport = self.hit.geometry(scroll_node)?.aabb;
+        let dx = if caret.left < viewport.left {
+            caret.left - viewport.left
+        } else if caret.right > viewport.right {
+            caret.right - viewport.right
+        } else {
+            0.0
+        };
+        let dy = if caret.top < viewport.top {
+            caret.top - viewport.top
+        } else if caret.bottom > viewport.bottom {
+            caret.bottom - viewport.bottom
+        } else {
+            0.0
+        };
+        if dx.abs() <= f32::EPSILON && dy.abs() <= f32::EPSILON {
+            return None;
+        }
+        let position = self.scene.scroll_position(scroll_node).unwrap_or([0.0; 2]);
+        Some((scroll_node, [position[0] + dx, position[1] + dy]))
+    }
+
+    /// Resolves caret placement/movement into concrete editing commands.
+    fn resolve_edit_commands(
+        &self,
+        batch: &InputBatch,
+        desired_x: &mut Option<(NodeId, f32)>,
+    ) -> Result<Vec<InputCommand>, CoreError> {
+        let mut edit_commands = Vec::new();
+        for instruction in batch
+            .instructions
+            .iter()
+            .filter(|instruction| !is_scroll_command(&instruction.command))
+        {
+            let resolved = match instruction.command {
+                InputCommand::PlaceCaret {
+                    node_id,
+                    position,
+                    flags,
+                } => {
+                    *desired_x = None;
+                    self.resolve_place_caret(node_id, position, flags)?
+                }
+                InputCommand::MoveCaret {
+                    node_id,
+                    direction,
+                    granularity,
+                    extend,
+                } => self.resolve_move_caret(node_id, direction, granularity, extend, desired_x)?,
+                ref command => {
+                    if !matches!(command, InputCommand::RequestCharacterBounds { .. }) {
+                        *desired_x = None;
+                    }
+                    command.clone()
+                }
+            };
+            edit_commands.push(resolved);
+        }
+        Ok(edit_commands)
+    }
+
+    /// Resolves a keyboard caret movement into an authoritative selection.
+    fn resolve_move_caret(
+        &self,
+        node_id: u32,
+        direction: CaretDirection,
+        granularity: CaretGranularity,
+        extend: bool,
+        desired_x: &mut Option<(NodeId, f32)>,
+    ) -> Result<InputCommand, CoreError> {
+        let node = NodeId::from_raw(node_id)?;
+        let session = self
+            .editing
+            .session(node)
+            .ok_or(CoreError::InvalidEditableTarget { node })?;
+        let carets = self
+            .text
+            .editor_caret_stops(&self.scene, node)
+            .filter(|carets| !carets.is_empty())
+            .ok_or(CoreError::InvalidEditableTarget { node })?;
+        let selection = session.selection();
+        let anchor = selection.anchor.offset;
+        let focus = selection.focus.offset;
+        let text = session.text();
+        let mut vertical_column = None;
+        let target = match direction {
+            CaretDirection::Backward | CaretDirection::Forward => {
+                let forward = direction == CaretDirection::Forward;
+                if !extend && anchor != focus && granularity == CaretGranularity::Grapheme {
+                    // A plain arrow with a selection collapses to its edge.
+                    if forward {
+                        anchor.max(focus)
+                    } else {
+                        anchor.min(focus)
+                    }
+                } else {
+                    match granularity {
+                        CaretGranularity::Grapheme => {
+                            let index =
+                                doper_edit::TextIndex::new(text).map_err(CoreError::Edit)?;
+                            if forward {
+                                index.next(focus).map_err(CoreError::Edit)?
+                            } else {
+                                index.previous(focus).map_err(CoreError::Edit)?
+                            }
+                        }
+                        CaretGranularity::Word => {
+                            doper_edit::word_boundary_utf16(text, focus, forward)
+                                .map_err(CoreError::Edit)?
+                        }
+                    }
+                }
+            }
+            CaretDirection::Up | CaretDirection::Down => {
+                let current = caret_stop_at(&carets, focus)
+                    .ok_or(CoreError::InvalidEditableTarget { node })?;
+                let column = desired_x
+                    .filter(|(desired_node, _)| *desired_node == node)
+                    .map_or(current.x, |(_, x)| x);
+                vertical_column = Some(column);
+                let target_line = if direction == CaretDirection::Up {
+                    current.line.checked_sub(1)
+                } else {
+                    Some(current.line + 1)
+                };
+                match target_line.and_then(|line| nearest_offset_in_line(&carets, line, column)) {
+                    Some(offset) => offset,
+                    None if direction == CaretDirection::Up => 0,
+                    None => carets.last().map_or(focus, |caret| caret.utf16_offset),
+                }
+            }
+            CaretDirection::LineStart | CaretDirection::LineEnd => {
+                let current = caret_stop_at(&carets, focus)
+                    .ok_or(CoreError::InvalidEditableTarget { node })?;
+                let offsets = carets
+                    .iter()
+                    .filter(|caret| caret.line == current.line)
+                    .map(|caret| caret.utf16_offset);
+                if direction == CaretDirection::LineStart {
+                    offsets.min().unwrap_or(focus)
+                } else {
+                    offsets.max().unwrap_or(focus)
+                }
+            }
+        };
+        *desired_x = vertical_column.map(|column| (node, column));
+        Ok(InputCommand::SetSelection {
+            node_id,
+            base_revision: session.revision(),
+            selection: InputSelection {
+                anchor: InputPosition {
+                    offset: if extend { anchor } else { target },
+                    affinity: InputAffinity::Downstream,
+                },
+                focus: InputPosition {
+                    offset: target,
+                    affinity: InputAffinity::Downstream,
+                },
+            },
+        })
+    }
+
     /// Applies one isolated hit-tested event batch against candidate state.
     fn input_events(
         &mut self,
@@ -781,30 +988,14 @@ impl CoreEngine {
             .filter(|instruction| is_scroll_command(&instruction.command))
             .cloned()
             .collect::<Vec<_>>();
-        let mut edit_commands = Vec::new();
-        for instruction in batch
-            .instructions
-            .iter()
-            .filter(|instruction| !is_scroll_command(&instruction.command))
-        {
-            if let InputCommand::PlaceCaret {
-                node_id,
-                position,
-                flags,
-            } = instruction.command
-            {
-                match self.resolve_place_caret(node_id, position, flags) {
-                    Ok(command) => edit_commands.push(command),
-                    Err(error) => {
-                        self.metrics.input_rejections =
-                            self.metrics.input_rejections.saturating_add(1);
-                        return Err(error);
-                    }
-                }
-            } else {
-                edit_commands.push(instruction.command.clone());
+        let mut desired_x = self.caret_desired_x;
+        let edit_commands = match self.resolve_edit_commands(batch, &mut desired_x) {
+            Ok(commands) => commands,
+            Err(error) => {
+                self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
+                return Err(error);
             }
-        }
+        };
         let mut candidate_scene = self.scene.clone();
         let mut candidate_scroll = self.scroll.clone();
         let mut candidate_editing = self.editing.clone();
@@ -840,6 +1031,7 @@ impl CoreEngine {
         self.scene = candidate_scene;
         self.scroll = candidate_scroll;
         self.editing = candidate_editing;
+        self.caret_desired_x = desired_x;
         if edit_outcome.accepted_commands > 0 {
             self.requested_character_range = None;
             self.caret_elapsed_seconds = 0.0;
@@ -860,15 +1052,33 @@ impl CoreEngine {
                 self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, false)?;
             return Ok(Some(output));
         }
-        let output = self.repaint_after_edit(&edit_outcome.changed_nodes)?;
+        let reveal = if edit_outcome.accepted_commands > 0 {
+            self.caret_reveal_target()
+        } else {
+            None
+        };
+        let output = self.repaint_after_edit(&edit_outcome.changed_nodes, reveal)?;
         Ok(Some(output))
     }
 
     /// Relays out and repaints after accepted editing commands changed text.
-    fn repaint_after_edit(&mut self, changed_nodes: &[NodeId]) -> Result<FrameOutput, CoreError> {
+    fn repaint_after_edit(
+        &mut self,
+        changed_nodes: &[NodeId],
+        reveal: Option<(NodeId, [f32; 2])>,
+    ) -> Result<FrameOutput, CoreError> {
         let frame_seq = self
             .last_frame_seq
             .ok_or(CoreError::MissingCommittedFrame)?;
+        let mut programmatic = BTreeSet::new();
+        if let Some((scroll_node, position)) = reveal
+            && self
+                .scene
+                .apply_scroll_position(scroll_node, position)
+                .unwrap_or(false)
+        {
+            programmatic.insert(scroll_node.raw());
+        }
         self.layout.mark_text_measurements_changed(changed_nodes);
         self.text.begin_frame();
         let mut geometry = match self.layout.layout_with_virtual(
@@ -883,7 +1093,7 @@ impl CoreEngine {
         let corrected =
             match self
                 .scroll
-                .synchronize(&mut self.scene, self.layout.snapshot(), &BTreeSet::new())
+                .synchronize(&mut self.scene, self.layout.snapshot(), &programmatic)
             {
                 Ok(corrected) => corrected,
                 Err(error) => return self.poison(error),
@@ -2386,6 +2596,159 @@ mod tests {
             ))
             .expect_err("unknown editable");
         assert!(matches!(missing, CoreError::InvalidEditableTarget { .. }));
+    }
+
+    #[test]
+    fn move_caret_navigates_graphemes_words_lines_and_desired_column() {
+        use doper_abi::{CaretDirection as D, CaretGranularity as G};
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit(&editable_tree_with_text(1, "ab\ncd"))
+            .expect("frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+
+        let move_caret = |direction, granularity, extend| InputCommand::MoveCaret {
+            node_id: id(1),
+            direction,
+            granularity,
+            extend,
+        };
+        let mut seq = 1_u32;
+        let mut apply = |engine: &mut CoreEngine, command: InputCommand| -> [u32; 2] {
+            seq += 1;
+            engine.input(&input(seq, vec![command])).expect("move");
+            let bytes = engine.take_edit_transactions().expect("edit bytes");
+            let batch = doper_abi::EditTransactionBatch::decode(&bytes).expect("decode");
+            batch.records.last().expect("record").selection
+        };
+
+        assert_eq!(
+            apply(
+                &mut engine,
+                InputCommand::PlaceCaret {
+                    node_id: id(1),
+                    position: [-10.0, -10.0],
+                    flags: 0,
+                },
+            ),
+            [0, 0]
+        );
+        assert_eq!(
+            apply(&mut engine, move_caret(D::Forward, G::Grapheme, false)),
+            [1, 1]
+        );
+        assert_eq!(
+            apply(&mut engine, move_caret(D::Down, G::Grapheme, false)),
+            [4, 4]
+        );
+        assert_eq!(
+            apply(&mut engine, move_caret(D::LineEnd, G::Grapheme, false)),
+            [5, 5]
+        );
+        assert_eq!(
+            apply(&mut engine, move_caret(D::Backward, G::Word, false)),
+            [3, 3]
+        );
+        assert_eq!(
+            apply(&mut engine, move_caret(D::LineStart, G::Grapheme, false)),
+            [3, 3]
+        );
+        assert_eq!(
+            apply(&mut engine, move_caret(D::Up, G::Grapheme, false)),
+            [0, 0]
+        );
+        assert_eq!(
+            apply(&mut engine, move_caret(D::Forward, G::Word, true)),
+            [0, 2]
+        );
+        // A plain arrow collapses an active selection to its edge.
+        assert_eq!(
+            apply(&mut engine, move_caret(D::Backward, G::Grapheme, false)),
+            [0, 0]
+        );
+        // Up from the first line clamps to the text start; down past the last line to the end.
+        assert_eq!(
+            apply(&mut engine, move_caret(D::Up, G::Grapheme, false)),
+            [0, 0]
+        );
+    }
+
+    #[test]
+    fn editing_reveals_the_caret_through_the_nearest_scroll_ancestor() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let mut mutations = vec![
+            Mutation::CreateNode {
+                node_id: id(0),
+                kind: NodeKind::Root,
+                parent: NULL_NODE_ID,
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::CreateNode {
+                node_id: id(1),
+                kind: NodeKind::Scroll,
+                parent: id(0),
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::CreateNode {
+                node_id: id(2),
+                kind: NodeKind::EditableText,
+                parent: id(1),
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::SetF32 {
+                node_id: id(1),
+                prop: Prop::Width,
+                value: 100.0,
+            },
+            Mutation::SetF32 {
+                node_id: id(1),
+                prop: Prop::Height,
+                value: 100.0,
+            },
+            Mutation::SetF32 {
+                node_id: id(2),
+                prop: Prop::Width,
+                value: 100.0,
+            },
+            Mutation::SetF32 {
+                node_id: id(2),
+                prop: Prop::Height,
+                value: 1_000.0,
+            },
+        ];
+        let long_text = (0..25).map(|line| format!("l{line}")).collect::<Vec<_>>();
+        mutations.extend(editable_resource_mutations(&long_text.join("\n")));
+        engine.commit(&frame(1, mutations)).expect("frame");
+        assert_eq!(
+            engine
+                .scene()
+                .scroll_position(NodeId::from_raw(id(1)).expect("scroll")),
+            Some([0.0, 0.0])
+        );
+
+        // Focusing collapses the caret to the end of the text, far below the
+        // 100px viewport; the accepted edit command must reveal it.
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(2) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+        let scrolled = engine
+            .scene()
+            .scroll_position(NodeId::from_raw(id(1)).expect("scroll"))
+            .expect("position");
+        assert!(
+            scrolled[1] > 100.0,
+            "caret reveal must scroll the viewport, got {scrolled:?}"
+        );
     }
 
     #[test]

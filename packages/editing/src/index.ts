@@ -3,6 +3,8 @@ export {
   InputStreamError,
   decodeInputBatch,
   encodeInputBatch,
+  type CaretMoveDirection,
+  type CaretMoveGranularity,
   type InputBatch,
   type InputCommand,
   type InputEventKind,

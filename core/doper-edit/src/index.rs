@@ -157,6 +157,46 @@ impl TextIndex {
     }
 }
 
+/// Returns the previous or next word boundary for keyboard caret movement.
+///
+/// Forward movement stops after the end of the word containing or following
+/// the offset; backward movement stops at the start of the word containing or
+/// preceding it. Both ends clamp to the text bounds.
+///
+/// # Errors
+///
+/// Returns an offset error when the clamped offset does not map to a grapheme
+/// boundary of `text`.
+pub fn word_boundary_utf16(text: &str, offset: u32, forward: bool) -> Result<u32, EditError> {
+    let index = TextIndex::new(text)?;
+    let clamped = offset.min(index.utf16_len());
+    let bias = if forward {
+        OffsetBias::Forward
+    } else {
+        OffsetBias::Backward
+    };
+    let byte = index.utf16_to_utf8(clamped, bias)?;
+    if forward {
+        for (start, word) in text.unicode_word_indices() {
+            let end = start + word.len();
+            if end > byte {
+                return index.utf8_to_utf16(end);
+            }
+        }
+        Ok(index.utf16_len())
+    } else {
+        let mut best = 0;
+        for (start, _) in text.unicode_word_indices() {
+            if start < byte {
+                best = start;
+            } else {
+                break;
+            }
+        }
+        index.utf8_to_utf16(best)
+    }
+}
+
 /// Returns the double-click word selection for one grapheme-safe UTF-16 offset.
 ///
 /// Offsets inside or at the trailing edge of a Unicode word select that word;

@@ -410,17 +410,28 @@ M4-B 稳定后并行推进。
 
 #### M4-B 编辑交互闭环
 
-状态：**未开始**（协议位已就位）。
+状态：**已完成（2026-08-17）**。
 
-- 闭合 editing geometry 回路：Host 消费 `editing_geometry()`，自动回传
-  control/selection/character bounds 供 IME 候选窗定位；打通
-  `requestCharacterBounds` → `RequestCharacterBounds` 请求链。
-- 文本 point→offset 命中：点击置 caret、拖选、双击选词；复用 M3 的
-  grapheme/cluster/glyph/line/caret 映射，不拆 grapheme。
-- 键盘导航：输入桥接管 keydown，Core 侧新增 caret 移动 intent（字符/词/行首尾/
-  跨行含 desired-x），caret affinity 语义落地。
-- active editor 的 scroll-into-view：经 Core 滚动模型最小幅度滚动，不走 DOM。
-- 软键盘：`inputMode` 透传与 VirtualKeyboard API 能力探测。
+- editing geometry 回路已闭合：Host 在 commit/input/advance 后消费
+  `editing_geometry()` 自动回传 control/selection/character bounds；
+  `characterboundsupdate` 本地不足时经 `RequestCharacterBounds` 请求并由下一
+  次 geometry 回传应答；Worker 协议 v5 新增 `doper:editing-geometry` 消息。
+- 文本 point→offset 命中：`PlaceCaret`（opcode 15）在 Core 把点映射到最近
+  caret stop（先行后列），支持 shift 扩展与 UAX #29 双击选词
+  （`word_range_utf16`）；Host 在活动编辑器 bounds 内合成点击/拖选/双击，
+  事件事务回传时自动聚焦非活动 editable；editable 深于 scroll 时指针拖动
+  归文本选择、wheel 仍滚动祖先。
+- 键盘导航：`MoveCaret`（opcode 16）支持 grapheme/word 前后移动、行首尾、
+  跨行 up/down 含 desired-x 保持、普通方向键塌缩选区；EditContext 模式由
+  bridge 接管 keydown。Bidi 视觉导航随 bidi 文本能力延后（见范围澄清）。
+- scroll-into-view：接受编辑命令后 Core 经最近 Scroll 祖先最小幅度跳转揭示
+  caret，走 `synchronize` programmatic 路径并受内容边界钳制，不走 DOM。
+- 软键盘：`inputMode` 从 `EditableTextProps` 经 editableState 透传到
+  textarea 代理 / canvas `inputmode` 属性，失活时恢复 `none`。
+
+已验证：Rust 170 项（含 place/move/reveal/拖拽优先级引擎测试与
+word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦置 caret、
+拖选、双击选词、键盘导航、IME geometry 回路端到端）。
 
 范围澄清：Bidi 视觉导航依赖 bidi 文本能力（M3 已明确延后）。M4-B 交付 LTR
 键盘导航并保留 logical/visual 映射接口位置；bidi 导航随 bidi 文本进入时一并

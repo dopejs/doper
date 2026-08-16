@@ -31,8 +31,8 @@ pub use glyph_resources::{
     GlyphResourceInstruction, GlyphSpanResource,
 };
 pub use input::{
-    InputAffinity, InputBatch, InputCommand, InputEventKind, InputInstruction, InputPosition,
-    InputSelection,
+    CaretDirection, CaretGranularity, InputAffinity, InputBatch, InputCommand, InputEventKind,
+    InputInstruction, InputPosition, InputSelection,
 };
 pub use mutation::{Mutation, MutationBatch, MutationInstruction};
 pub use recording::{ReplayRecord, ReplayRecording};

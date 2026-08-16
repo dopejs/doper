@@ -1,5 +1,11 @@
 import type { EditTransaction } from "./edit-transactions";
-import { InputAffinity, type InputCommand, type InputSelection } from "./input-stream";
+import {
+  InputAffinity,
+  type CaretMoveDirection,
+  type CaretMoveGranularity,
+  type InputCommand,
+  type InputSelection,
+} from "./input-stream";
 
 interface EditContextLike extends EventTarget {
   readonly selectionEnd: number;
@@ -37,6 +43,8 @@ export interface EditingSelection {
 }
 
 export interface EditingTargetState {
+  /** Soft-keyboard layout hint; defaults to plain text. */
+  readonly inputMode?: string;
   readonly multiline: boolean;
   readonly nodeId: number;
   readonly password: boolean;
@@ -105,6 +113,7 @@ export class NativeTextInputBridge {
       this.listen(this.#editContext, "compositionstart", this.handleCompositionStart);
       this.listen(this.#editContext, "compositionend", this.handleCompositionEnd);
       this.listen(this.#editContext, "characterboundsupdate", this.handleCharacterBoundsUpdate);
+      this.listen(canvas, "keydown", this.handleKeyDown);
     } else {
       this.mode = "textarea-proxy";
       this.#proxy = createProxy(ownerDocument);
@@ -134,6 +143,7 @@ export class NativeTextInputBridge {
     this.#composing = false;
     this.#pendingCharacterBounds = undefined;
     this.syncSurface();
+    this.applyInputMode(target.inputMode ?? "text");
     this.#canvas.focus({ preventScroll: true });
     this.#proxy?.focus({ preventScroll: true });
   }
@@ -141,7 +151,19 @@ export class NativeTextInputBridge {
   public deactivate(): void {
     this.#target = undefined;
     this.#composing = false;
+    this.applyInputMode("none");
     this.#proxy?.blur();
+  }
+
+  /** Forwards the soft-keyboard hint to whichever surface owns OS input. */
+  private applyInputMode(inputMode: string): void {
+    if (this.#proxy !== undefined) {
+      this.#proxy.inputMode = inputMode;
+      return;
+    }
+    if (typeof this.#canvas.setAttribute === "function") {
+      this.#canvas.setAttribute("inputmode", inputMode);
+    }
   }
 
   public applyTransaction(transaction: EditTransaction): void {
@@ -320,6 +342,52 @@ export class NativeTextInputBridge {
     if (clipboard === null || target === undefined || target.readOnly) return;
     event.preventDefault();
     this.emit({ type: "insert", text: clipboard.getData("text/plain") });
+  };
+
+  /** EditContext leaves navigation keys to the app; map them to Core moves. */
+  private readonly handleKeyDown = (event: Event): void => {
+    const key = event as KeyboardEvent;
+    const target = this.#target;
+    if (target === undefined || this.#composing) return;
+    const word = key.ctrlKey || key.altKey;
+    let direction: CaretMoveDirection;
+    let granularity: CaretMoveGranularity = "grapheme";
+    switch (key.key) {
+      case "ArrowLeft":
+        direction = key.metaKey ? "lineStart" : "backward";
+        granularity = word ? "word" : "grapheme";
+        break;
+      case "ArrowRight":
+        direction = key.metaKey ? "lineEnd" : "forward";
+        granularity = word ? "word" : "grapheme";
+        break;
+      case "ArrowUp":
+        direction = "up";
+        break;
+      case "ArrowDown":
+        direction = "down";
+        break;
+      case "Home":
+        direction = "lineStart";
+        break;
+      case "End":
+        direction = "lineEnd";
+        break;
+      default:
+        return;
+    }
+    if (key.cancelable) key.preventDefault();
+    try {
+      this.#dispatch({
+        type: "moveCaret",
+        nodeId: target.nodeId,
+        direction,
+        granularity,
+        extend: key.shiftKey,
+      });
+    } catch (cause) {
+      this.#onError?.(toError(cause, "caret movement dispatch failed"));
+    }
   };
 
   private readonly handleCharacterBoundsUpdate = (event: Event): void => {

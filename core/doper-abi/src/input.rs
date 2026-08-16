@@ -30,6 +30,64 @@ impl InputAffinity {
     }
 }
 
+/// Caret movement direction shared by keyboard navigation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum CaretDirection {
+    /// Toward the preceding boundary.
+    Backward = 1,
+    /// Toward the following boundary.
+    Forward = 2,
+    /// One visual line up, preserving the desired column.
+    Up = 3,
+    /// One visual line down, preserving the desired column.
+    Down = 4,
+    /// Start of the current visual line.
+    LineStart = 5,
+    /// End of the current visual line.
+    LineEnd = 6,
+}
+
+impl CaretDirection {
+    fn decode(value: u8) -> Result<Self, AbiError> {
+        match value {
+            1 => Ok(Self::Backward),
+            2 => Ok(Self::Forward),
+            3 => Ok(Self::Up),
+            4 => Ok(Self::Down),
+            5 => Ok(Self::LineStart),
+            6 => Ok(Self::LineEnd),
+            _ => Err(AbiError::UnknownIdentifier {
+                category: "caret direction",
+                value: u32::from(value),
+            }),
+        }
+    }
+}
+
+/// Caret movement granularity for horizontal directions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum CaretGranularity {
+    /// One grapheme cluster.
+    Grapheme = 0,
+    /// One Unicode word.
+    Word = 1,
+}
+
+impl CaretGranularity {
+    fn decode(value: u8) -> Result<Self, AbiError> {
+        match value {
+            0 => Ok(Self::Grapheme),
+            1 => Ok(Self::Word),
+            _ => Err(AbiError::UnknownIdentifier {
+                category: "caret granularity",
+                value: u32::from(value),
+            }),
+        }
+    }
+}
+
 /// One UTF-16 input position and its visual affinity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InputPosition {
@@ -207,6 +265,17 @@ pub enum InputCommand {
         position: [f32; 2],
         /// Bit 0 extends the current anchor; bit 1 selects the word.
         flags: u32,
+    },
+    /// Moves the caret relative to the current selection focus.
+    MoveCaret {
+        /// Generation-bearing editable node.
+        node_id: u32,
+        /// Movement direction.
+        direction: CaretDirection,
+        /// Movement granularity for horizontal directions.
+        granularity: CaretGranularity,
+        /// Extends the selection anchor instead of collapsing.
+        extend: bool,
     },
     /// Starts direct manipulation of a Core-owned scroll node.
     ScrollBegin {
@@ -494,6 +563,28 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
                 flags,
             }
         }
+        InputOpcode::MoveCaret => {
+            let node_id = reader.read_u32()?;
+            let direction = CaretDirection::decode(reader.read_u8()?)?;
+            let granularity = CaretGranularity::decode(reader.read_u8()?)?;
+            let extend = match reader.read_u8()? {
+                0 => false,
+                1 => true,
+                value => {
+                    return Err(AbiError::UnknownIdentifier {
+                        category: "caret extend flag",
+                        value: u32::from(value),
+                    });
+                }
+            };
+            reader.read_zeroes(1)?;
+            InputCommand::MoveCaret {
+                node_id,
+                direction,
+                granularity,
+                extend,
+            }
+        }
         InputOpcode::ScrollBegin => InputCommand::ScrollBegin {
             node_id: reader.read_u32()?,
         },
@@ -625,6 +716,18 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             writer.u32(*start);
             writer.u32(*end);
         }
+        InputCommand::MoveCaret {
+            node_id,
+            direction,
+            granularity,
+            extend,
+        } => {
+            writer.u32(*node_id);
+            writer.u8(*direction as u8);
+            writer.u8(*granularity as u8);
+            writer.u8(u8::from(*extend));
+            writer.u8(0);
+        }
         InputCommand::PlaceCaret {
             node_id,
             position,
@@ -733,6 +836,7 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::BlurEditable { .. } => InputOpcode::BlurEditable,
         InputCommand::RequestCharacterBounds { .. } => InputOpcode::RequestCharacterBounds,
         InputCommand::PlaceCaret { .. } => InputOpcode::PlaceCaret,
+        InputCommand::MoveCaret { .. } => InputOpcode::MoveCaret,
         InputCommand::ScrollBegin { .. } => InputOpcode::ScrollBegin,
         InputCommand::ScrollDelta { .. } => InputOpcode::ScrollDelta,
         InputCommand::ScrollEnd { .. } => InputOpcode::ScrollEnd,

@@ -65,6 +65,7 @@ export interface CoreDrivenDoperRoot extends DoperRoot {
 
 /** Shell-owned durable state used to activate one native editing surface. */
 export interface EditableStateSnapshot {
+  readonly inputMode: string;
   readonly multiline: boolean;
   readonly nodeId: number;
   readonly password: boolean;
@@ -160,6 +161,7 @@ interface NormalizedEditable {
   readonly revision: bigint;
   readonly flags: number;
   readonly maxGraphemes: number;
+  readonly inputMode: string;
   readonly value: string;
   readonly onTransaction: ((transaction: EditTransaction) => void) | undefined;
   readonly onSubmit: (() => void) | undefined;
@@ -448,6 +450,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
       focus: editable.value.length,
     };
     return Object.freeze({
+      inputMode: editable.inputMode,
       multiline: (editable.flags & 1) !== 0,
       nodeId,
       password: (editable.flags & 4) !== 0,
@@ -1361,6 +1364,7 @@ function normalizeHostProps(
         1_000_000,
         "maxGraphemes",
       ),
+      inputMode: requireInputMode(editableProps.inputMode),
       value:
         controller === undefined
           ? requireString(editableProps.value, "EditableText value")
@@ -1834,6 +1838,25 @@ function isUtf16Boundary(value: string, offset: number): boolean {
 
 function assertU32(value: unknown, label: string): asserts value is number {
   requireBoundedInteger(value, 0, 0xffff_ffff, label);
+}
+
+const INPUT_MODES = new Set([
+  "decimal",
+  "email",
+  "none",
+  "numeric",
+  "search",
+  "tel",
+  "text",
+  "url",
+]);
+
+function requireInputMode(value: unknown): string {
+  if (value === undefined) return "text";
+  if (typeof value !== "string" || !INPUT_MODES.has(value)) {
+    throw new TypeError("EditableText inputMode is not a supported keyboard hint");
+  }
+  return value;
 }
 
 function requireBoundedInteger(

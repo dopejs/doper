@@ -126,6 +126,10 @@ export interface TextProps extends Omit<CommonProps, "children"> {
   readonly lineHeight?: number;
 }
 
+/** Soft-keyboard hint forwarded to the host input surface. */
+export type EditableInputMode =
+  "decimal" | "email" | "none" | "numeric" | "search" | "tel" | "text" | "url";
+
 /** Engine-native editable-text primitive; browser bridging is owned by the host. */
 export interface EditableTextProps extends Omit<TextProps, "children"> {
   /** Stable local controller; mutually exclusive with value/revision. */
@@ -137,6 +141,8 @@ export interface EditableTextProps extends Omit<TextProps, "children"> {
   readonly readOnly?: boolean;
   readonly password?: boolean;
   readonly maxGraphemes?: number;
+  /** Soft-keyboard layout hint; defaults to plain text. */
+  readonly inputMode?: EditableInputMode;
   readonly onTransaction?: (transaction: EditTransaction) => void;
   readonly onSubmit?: () => void;
 }

@@ -37,6 +37,12 @@ export interface InputSelection {
   readonly focus: InputPosition;
 }
 
+/** Keyboard caret movement direction resolved by Core text layout. */
+export type CaretMoveDirection = "backward" | "down" | "forward" | "lineEnd" | "lineStart" | "up";
+
+/** Horizontal caret movement granularity. */
+export type CaretMoveGranularity = "grapheme" | "word";
+
 export type InputEventKind =
   "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel";
 
@@ -78,6 +84,13 @@ export type InputCommand =
       readonly y: number;
       readonly extend: boolean;
       readonly word: boolean;
+    }
+  | {
+      readonly type: "moveCaret";
+      readonly nodeId: number;
+      readonly direction: CaretMoveDirection;
+      readonly granularity: CaretMoveGranularity;
+      readonly extend: boolean;
     }
   | { readonly type: "scrollBegin"; readonly nodeId: number }
   | {
@@ -222,6 +235,14 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
       writer.f32(command.y);
       writer.u32((command.extend ? 1 : 0) | (command.word ? 2 : 0));
       return;
+    case "moveCaret":
+      assertU32(command.nodeId, "editable nodeId");
+      writer.u32(command.nodeId);
+      writer.u8(caretDirectionCode(command.direction));
+      writer.u8(command.granularity === "word" ? 1 : 0);
+      writer.u8(command.extend ? 1 : 0);
+      writer.u8(0);
+      return;
     case "dispatchEvent":
       assertU32(command.eventId, "eventId");
       validateEventFields(command);
@@ -332,6 +353,22 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
       if (start > end) fail("character bounds range is reversed");
       return { type: "requestCharacterBounds", nodeId, start, end };
     }
+    case InputOpcode.MoveCaret: {
+      const nodeId = reader.u32();
+      const direction = caretDirectionName(reader.u8());
+      const granularityCode = reader.u8();
+      if (granularityCode > 1) fail("caret movement granularity is unknown");
+      const extendCode = reader.u8();
+      if (extendCode > 1) fail("caret extend flag is unknown");
+      if (reader.u8() !== 0) fail("caret movement padding must be zero");
+      return {
+        type: "moveCaret",
+        nodeId,
+        direction,
+        granularity: granularityCode === 1 ? "word" : "grapheme",
+        extend: extendCode === 1,
+      };
+    }
     case InputOpcode.PlaceCaret: {
       const nodeId = reader.u32();
       const x = reader.f32();
@@ -423,6 +460,8 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.RequestCharacterBounds;
     case "placeCaret":
       return InputOpcode.PlaceCaret;
+    case "moveCaret":
+      return InputOpcode.MoveCaret;
     case "scrollBegin":
       return InputOpcode.ScrollBegin;
     case "scrollDelta":
@@ -433,6 +472,42 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.ScrollCancel;
     case "dispatchEvent":
       return InputOpcode.DispatchEvent;
+  }
+}
+
+function caretDirectionCode(direction: CaretMoveDirection): number {
+  switch (direction) {
+    case "backward":
+      return 1;
+    case "forward":
+      return 2;
+    case "up":
+      return 3;
+    case "down":
+      return 4;
+    case "lineStart":
+      return 5;
+    case "lineEnd":
+      return 6;
+  }
+}
+
+function caretDirectionName(code: number): CaretMoveDirection {
+  switch (code) {
+    case 1:
+      return "backward";
+    case 2:
+      return "forward";
+    case 3:
+      return "up";
+    case 4:
+      return "down";
+    case 5:
+      return "lineStart";
+    case 6:
+      return "lineEnd";
+    default:
+      return fail("caret movement direction is unknown");
   }
 }
 
