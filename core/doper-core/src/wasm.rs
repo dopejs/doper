@@ -82,9 +82,31 @@ impl WasmCore {
         Ok(words)
     }
 
+    /// Drains the glyph-span resource delta required before replaying the latest DisplayList.
+    pub fn take_glyph_resources(&mut self) -> Vec<u8> {
+        self.inner.take_glyph_resources()
+    }
+
     /// Applies logical viewport bounds to the next frame.
     pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<(), JsValue> {
         self.inner.set_viewport(width, height).map_err(js_error)
+    }
+
+    /// Rebuilds DPR-sensitive glyph resources and returns a replacement DisplayList when needed.
+    pub fn set_device_pixel_ratio(
+        &mut self,
+        device_pixel_ratio: f32,
+    ) -> Result<Option<Vec<u8>>, JsValue> {
+        let output = self
+            .inner
+            .set_device_pixel_ratio(device_pixel_ratio)
+            .map_err(js_error)?;
+        if let Some(output) = output {
+            self.last_diagnostics = Some(output.diagnostics);
+            Ok(Some(output.display_list.to_vec()))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Reports whether this instance must be discarded after a fatal derivation failure.

@@ -1,4 +1,5 @@
 export { DOPER_ELEMENT_TYPE, createElement, isDoperElement, normalizeChildren } from "./element";
+export { DoperFont, createFont, type DoperFontOptions } from "./font";
 export {
   Fragment,
   type AnyDoperElement,

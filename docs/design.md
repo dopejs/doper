@@ -533,12 +533,20 @@ fallback，不允许一半 atlas、一半 fallback 造成 caret/advance 分歧�
 实现状态（2026-08-16）：`doper-text` 已建立独立的无 unsafe Core 基础，使用
 `swash` 完成显式 SFNT 字体的 LTR shaping，使用 UAX #14 数据完成基础换行，并输出
 UTF-8/UTF-16、grapheme、cluster、glyph、line 与 caret 映射；Text Shape Cache 和
-灰度 outline glyph atlas 均使用可观测的字节预算 LRU。公开字体 ABI、glyph 资源
-回传和 Canvas2D 贴图仍未接入，因此这仍属于 M3-B 内部基础，不能视为公开文本路径
-完成。当前 Core 输入只接受解码后的 TTF/OTF/TTC SFNT；WOFF/WOFF2 解码放在显式
-字体加载器边界，接入时必须与失败回退、格式能力矩阵和体积门禁一起交付。`DOPG`
-批次的 schema、Rust/TypeScript 安全 codec、golden 和跨语言 round-trip 已落地，但
-Core 尚未产生真实 span，Host 也尚未执行 bitmap 贴图。
+灰度 outline glyph atlas 均使用可观测的字节预算 LRU。公开 `createFont` 会复制并冻结
+解码后的 TTF/OTF/TTC SFNT 输入，`Text`/`EditableText` 通过独立 `Font` Scene 属性选择
+显式路径，不改变既有 `TextStyle` ABI。Core 已在布局阶段生成真实 span 和
+`DrawGlyphRun`，WASM 暴露 drain-only `take_glyph_resources`；Host 将同一帧的普通资源
+与 `DOPG` 完整预检后原子安装，Canvas2D 在资源安装阶段把灰度 mask 着色到独立 surface
+再回放。未 drain 的 DOPG 会阻止下一帧，DPR 变化会释放旧 span、清空 atlas 并生成新
+资源。Core 侧字体解析、缺字、栅格或批次预算失败时整段走系统字体 fallback；Host
+侧校验或 surface 准备失败则拒绝整个资源事务和该帧，不得保留半安装状态。
+
+当前 Core 输入仍只接受解码后的 SFNT；WOFF/WOFF2 解码放在显式字体加载器边界，
+接入时必须与失败回退、格式能力矩阵和体积门禁一起交付。系统字体的真实
+`measureText` 反馈和真实字体的浏览器端 Core→Canvas 像素 E2E 也尚未完成，因此 M3-B
+仍未达到出口。接入文本主链后的产品 Core WASM 为 278,929 bytes gzip，低于 300 KiB
+代表性文本包络和 400 KiB 产品上限。
 
 栅格器选择以 WASM 体积门禁为准：同一 Rust 1.96.0、`opt-z`、LTO 探针中，
 `swash` 同时承担 shaping 与 raster 时为 308,835 bytes gzip，超过代表性文本包络的

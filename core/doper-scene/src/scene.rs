@@ -5,7 +5,9 @@ use doper_abi::{
     AFFINE_A_OFFSET, AFFINE_RESOURCE_FIXED_BYTES, AFFINE_RESOURCE_VARIANT, AFFINE_VARIANT_OFFSET,
     AFFINE_VERSION_OFFSET, Invalidation, MAX_RESOURCE_BYTES, MAX_VIRTUAL_ITEMS, Mutation,
     MutationBatch, NULL_NODE_ID, NodeKind, Prop, PropValueType, RESOURCE_ENCODING_VERSION,
-    ResourceKind, SOLID_PAINT_RED_OFFSET, SOLID_PAINT_RESOURCE_FIXED_BYTES,
+    ResourceKind, SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
+    SFNT_FONT_RESOURCE_MINIMUM_BYTES, SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET,
+    SFNT_FONT_VERSION_OFFSET, SOLID_PAINT_RED_OFFSET, SOLID_PAINT_RESOURCE_FIXED_BYTES,
     SOLID_PAINT_RESOURCE_VARIANT, SOLID_PAINT_VARIANT_OFFSET, SOLID_PAINT_VERSION_OFFSET,
     TEXT_STYLE_FAMILY_BYTES_OFFSET, TEXT_STYLE_FAMILY_OFFSET, TEXT_STYLE_FONT_SIZE_OFFSET,
     TEXT_STYLE_LINE_HEIGHT_OFFSET, TEXT_STYLE_PAINT_ID_OFFSET, TEXT_STYLE_RESOURCE_MINIMUM_BYTES,
@@ -972,8 +974,8 @@ fn validate_resource(resource_id: u32, kind: ResourceKind, bytes: &[u8]) -> Resu
             }
         }
         ResourceKind::TextStyle => validate_text_style_resource(resource_id, bytes)?,
-        ResourceKind::Image | ResourceKind::Path | ResourceKind::Font | ResourceKind::GlyphSpan => {
-        }
+        ResourceKind::Font => validate_sfnt_font_resource(resource_id, bytes)?,
+        ResourceKind::Image | ResourceKind::Path | ResourceKind::GlyphSpan => {}
     }
     Ok(())
 }
@@ -1042,6 +1044,41 @@ fn validate_text_style_resource(resource_id: u32, bytes: &[u8]) -> Result<(), Sc
         return Err(SceneError::InvalidResourceEncoding { resource_id });
     }
     Ok(())
+}
+
+fn validate_sfnt_font_resource(resource_id: u32, bytes: &[u8]) -> Result<(), SceneError> {
+    validate_portable_header(
+        resource_id,
+        bytes,
+        None,
+        SFNT_FONT_RESOURCE_VARIANT,
+        SFNT_FONT_VERSION_OFFSET,
+        SFNT_FONT_VARIANT_OFFSET,
+        SFNT_FONT_FACE_INDEX_OFFSET,
+    )?;
+    if bytes.len() < SFNT_FONT_RESOURCE_MINIMUM_BYTES || !bytes.len().is_multiple_of(4) {
+        return Err(SceneError::InvalidResourceEncoding { resource_id });
+    }
+    let data_len = usize::try_from(read_resource_u32(bytes, SFNT_FONT_DATA_BYTES_OFFSET))
+        .map_err(|_| SceneError::InvalidResourceEncoding { resource_id })?;
+    let data_end = SFNT_FONT_DATA_OFFSET
+        .checked_add(data_len)
+        .ok_or(SceneError::InvalidResourceEncoding { resource_id })?;
+    if data_len == 0
+        || data_end > bytes.len()
+        || bytes[data_end..].iter().any(|padding| *padding != 0)
+        || !is_sfnt(&bytes[SFNT_FONT_DATA_OFFSET..data_end])
+    {
+        return Err(SceneError::InvalidResourceEncoding { resource_id });
+    }
+    Ok(())
+}
+
+fn is_sfnt(bytes: &[u8]) -> bool {
+    matches!(
+        bytes.get(..4),
+        Some([0x00, 0x01, 0x00, 0x00] | b"OTTO" | b"true" | b"typ1" | b"ttcf")
+    )
 }
 
 fn read_resource_u32(bytes: &[u8], offset: usize) -> u32 {

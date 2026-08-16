@@ -268,6 +268,7 @@ mod tests {
             Prop::Transform,
             Prop::Text,
             Prop::FontSize,
+            Prop::Font,
             Prop::OnTap,
             Prop::SemanticRole,
             Prop::SemanticLabel,

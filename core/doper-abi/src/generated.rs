@@ -91,6 +91,14 @@ pub const TEXT_STYLE_LINE_HEIGHT_OFFSET: usize = 12;
 pub const TEXT_STYLE_WEIGHT_OFFSET: usize = 16;
 pub const TEXT_STYLE_FAMILY_BYTES_OFFSET: usize = 20;
 pub const TEXT_STYLE_FAMILY_OFFSET: usize = 24;
+pub const SFNT_FONT_RESOURCE_VARIANT: u8 = 1;
+pub const SFNT_FONT_RESOURCE_FIXED_BYTES: Option<usize> = None;
+pub const SFNT_FONT_RESOURCE_MINIMUM_BYTES: usize = 12;
+pub const SFNT_FONT_VERSION_OFFSET: usize = 0;
+pub const SFNT_FONT_VARIANT_OFFSET: usize = 1;
+pub const SFNT_FONT_FACE_INDEX_OFFSET: usize = 4;
+pub const SFNT_FONT_DATA_BYTES_OFFSET: usize = 8;
+pub const SFNT_FONT_DATA_OFFSET: usize = 12;
 pub const AFFINE_RESOURCE_VARIANT: u8 = 1;
 pub const AFFINE_RESOURCE_FIXED_BYTES: Option<usize> = Some(28);
 pub const AFFINE_RESOURCE_MINIMUM_BYTES: usize = 28;
@@ -485,6 +493,7 @@ pub enum Prop {
     Transform = 19,
     Text = 32,
     FontSize = 33,
+    Font = 34,
     OnTap = 48,
     SemanticRole = 64,
     SemanticLabel = 65,
@@ -508,6 +517,7 @@ impl Prop {
             19 => Some(Self::Transform),
             32 => Some(Self::Text),
             33 => Some(Self::FontSize),
+            34 => Some(Self::Font),
             48 => Some(Self::OnTap),
             64 => Some(Self::SemanticRole),
             65 => Some(Self::SemanticLabel),
@@ -534,6 +544,7 @@ impl Prop {
             Self::Transform => Invalidation::from_bits(10),
             Self::Text => Invalidation::from_bits(19),
             Self::FontSize => Invalidation::from_bits(3),
+            Self::Font => Invalidation::from_bits(3),
             Self::OnTap => Invalidation::from_bits(0),
             Self::SemanticRole => Invalidation::from_bits(16),
             Self::SemanticLabel => Invalidation::from_bits(16),
@@ -557,6 +568,7 @@ impl Prop {
             Self::Transform => PropValueType::Ref,
             Self::Text => PropValueType::Ref,
             Self::FontSize => PropValueType::F32,
+            Self::Font => PropValueType::Ref,
             Self::OnTap => PropValueType::Ref,
             Self::SemanticRole => PropValueType::Ref,
             Self::SemanticLabel => PropValueType::Ref,
@@ -580,6 +592,7 @@ impl Prop {
             Self::Transform => Some(ResourceKind::Affine),
             Self::Text => Some(ResourceKind::Utf8String),
             Self::FontSize => None,
+            Self::Font => Some(ResourceKind::Font),
             Self::OnTap => None,
             Self::SemanticRole => Some(ResourceKind::Utf8String),
             Self::SemanticLabel => Some(ResourceKind::Utf8String),

@@ -43,6 +43,17 @@ describe("Canvas2DResourceRegistry", () => {
     );
   });
 
+  it("does not install ordinary resources when the same frame has an invalid glyph batch", () => {
+    const resources = new Canvas2DResourceRegistry();
+    expect(() =>
+      resources.applyResourceTransaction(
+        [{ type: "define", id: 1, kind: ResourceKind.Paint, bytes: solidPaint() }],
+        Uint8Array.of(1, 2, 3, 4),
+      ),
+    ).toThrow();
+    expect(resources.getPaint(1)).toBeUndefined();
+  });
+
   it("releases encoded backing values with exact kind validation", () => {
     const resources = new Canvas2DResourceRegistry();
     resources.defineEncodedResource(1, ResourceKind.Paint, solidPaint());
@@ -58,6 +69,11 @@ describe("Canvas2DResourceRegistry", () => {
     view.setFloat32(16, 1, true);
     resources.defineEncodedResource(2, ResourceKind.Affine, affine);
     resources.releaseEncodedResource(2, ResourceKind.Affine);
+
+    resources.defineEncodedResource(3, ResourceKind.Font, sfntFont());
+    expect(resources.getFont(3)).toEqual({ faceIndex: 0, byteLength: 8 });
+    resources.releaseEncodedResource(3, ResourceKind.Font);
+    expect(resources.getFont(3)).toBeUndefined();
   });
 });
 
@@ -84,5 +100,16 @@ function textStyle(
   view.setUint16(16, weight, true);
   view.setUint32(20, encodedFamily.length, true);
   bytes.set(encodedFamily, 24);
+  return bytes;
+}
+
+function sfntFont(): Uint8Array {
+  const bytes = new Uint8Array(20);
+  const view = new DataView(bytes.buffer);
+  bytes[0] = RESOURCE_ENCODING_VERSION;
+  bytes[1] = 1;
+  view.setUint32(4, 0, true);
+  view.setUint32(8, 8, true);
+  bytes.set([0x4f, 0x54, 0x54, 0x4f, 0, 0, 0, 0], 12);
   return bytes;
 }

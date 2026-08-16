@@ -8,6 +8,13 @@ import {
   AFFINE_VERSION_OFFSET,
   RESOURCE_ENCODING_VERSION,
   ResourceKind,
+  SFNT_FONT_DATA_BYTES_OFFSET,
+  SFNT_FONT_DATA_OFFSET,
+  SFNT_FONT_FACE_INDEX_OFFSET,
+  SFNT_FONT_RESOURCE_MINIMUM_BYTES,
+  SFNT_FONT_RESOURCE_VARIANT,
+  SFNT_FONT_VARIANT_OFFSET,
+  SFNT_FONT_VERSION_OFFSET,
   SOLID_PAINT_ALPHA_OFFSET,
   SOLID_PAINT_BLUE_OFFSET,
   SOLID_PAINT_GREEN_OFFSET,
@@ -30,20 +37,71 @@ import {
 
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
+/** Host-side metadata for one validated explicit SFNT font resource. */
+export interface CanvasFontResource {
+  readonly faceIndex: number;
+  readonly byteLength: number;
+}
+
+type Rgba = readonly [number, number, number, number];
+
+interface PreparedGlyphSpan {
+  readonly span: CanvasGlyphSpan;
+  readonly sources: readonly CanvasImageSource[];
+}
+
+/** One portable resource lifecycle action accepted by an atomic backend transaction. */
+export type CanvasEncodedResourceAction =
+  | {
+      readonly type: "define";
+      readonly id: number;
+      readonly kind: ResourceKind;
+      readonly bytes: Uint8Array;
+    }
+  | { readonly type: "release"; readonly id: number; readonly kind: ResourceKind };
+
 /** Mutable setup-time registry; replay observes stable synchronous snapshots. */
 export class Canvas2DResourceRegistry implements Canvas2DResources {
   readonly #paints = new Map<number, string | CanvasGradient | CanvasPattern>();
+  readonly #solidPaints = new Map<number, Rgba>();
   readonly #paths = new Map<number, Path2D>();
   readonly #images = new Map<number, CanvasImageSource>();
   readonly #texts = new Map<number, string>();
   readonly #textStyles = new Map<number, CanvasTextStyle>();
-  readonly #fonts = new Map<number, object>();
+  readonly #fonts = new Map<number, CanvasFontResource>();
   readonly #glyphSpans = new Map<number, CanvasGlyphSpan>();
+  readonly #glyphRasters = new Map<number, PreparedGlyphSpan>();
   readonly #pictures = new Map<number, Uint8Array>();
   readonly #encodedKinds = new Map<number, ResourceKind>();
 
-  /** Optional shaped-glyph renderer installed by the text backend. */
-  public drawGlyphRun: Canvas2DResources["drawGlyphRun"] = undefined;
+  /** Shaped-glyph renderer when the environment can create raster surfaces. */
+  public drawGlyphRun: Canvas2DResources["drawGlyphRun"];
+
+  public constructor() {
+    this.drawGlyphRun = canCreateGlyphSurface()
+      ? (context, _fontId, _size, x, y, glyphSpanId) => {
+          const prepared = this.#glyphRasters.get(glyphSpanId);
+          if (prepared === undefined) {
+            throw new Error(`glyph span ${String(glyphSpanId)} is not prepared`);
+          }
+          for (const placement of prepared.span.placements) {
+            const bitmap = prepared.span.bitmaps[placement.bitmapIndex];
+            const source = prepared.sources[placement.bitmapIndex];
+            if (bitmap === undefined || source === undefined) {
+              throw new Error("glyph placement references an unavailable raster");
+            }
+            const ratio = bitmap.devicePixelRatio;
+            context.drawImage(
+              source,
+              x + placement.x + bitmap.left / ratio,
+              y + placement.y - bitmap.top / ratio,
+              bitmap.width / ratio,
+              bitmap.height / ratio,
+            );
+          }
+        }
+      : undefined;
+  }
 
   /** Defines a fill style exactly once. */
   public definePaint(id: number, value: string | CanvasGradient | CanvasPattern): void {
@@ -71,7 +129,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
   }
 
   /** Defines a text-backend font resource exactly once. */
-  public defineFont(id: number, value: object): void {
+  public defineFont(id: number, value: CanvasFontResource): void {
     define(this.#fonts, id, value, "font");
   }
 
@@ -82,25 +140,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
 
   /** Atomically applies a fully validated Core-owned glyph-span delta batch. */
   public applyGlyphResourceBatch(bytes: Uint8Array): void {
-    const deltas = decodeGlyphResourceBatch(bytes);
-    const next = new Map(this.#glyphSpans);
-    for (const delta of deltas) {
-      if (delta.type === "define") {
-        if (next.has(delta.span.spanId)) {
-          throw new Error(`glyph span ${String(delta.span.spanId)} is already defined`);
-        }
-        if (!this.#paints.has(delta.span.paintId)) {
-          throw new Error(
-            `glyph span ${String(delta.span.spanId)} references missing paint ${String(delta.span.paintId)}`,
-          );
-        }
-        next.set(delta.span.spanId, delta.span);
-      } else if (!next.delete(delta.spanId)) {
-        throw new Error(`glyph span ${String(delta.spanId)} is not defined`);
-      }
-    }
-    this.#glyphSpans.clear();
-    for (const [id, span] of next) this.#glyphSpans.set(id, span);
+    this.applyResourceTransaction([], bytes);
   }
 
   /** Defines a copied immutable picture payload exactly once. */
@@ -110,66 +150,137 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
 
   /** Decodes a portable Core resource whose Canvas representation is deterministic. */
   public defineEncodedResource(id: number, kind: ResourceKind, bytes: Uint8Array): void {
-    if (this.#encodedKinds.has(id)) {
-      throw new Error(`encoded resource ${String(id)} is already defined`);
-    }
-    switch (kind) {
-      case ResourceKind.Utf8String:
-        this.defineText(id, decodeUtf8(bytes, "UTF-8 string"));
-        break;
-      case ResourceKind.Paint:
-        this.definePaint(id, decodeSolidPaint(bytes));
-        break;
-      case ResourceKind.TextStyle: {
-        const decoded = decodeTextStyle(bytes);
-        const fillStyle = this.getPaint(decoded.paintId);
-        if (fillStyle === undefined) {
-          throw new Error(
-            `text style references missing paint resource ${String(decoded.paintId)}`,
-          );
-        }
-        this.defineTextStyle(id, {
-          font: `${String(decoded.weight)} ${String(decoded.fontSize)}px ${JSON.stringify(decoded.family)}`,
-          fillStyle,
-          textBaseline: "alphabetic",
-        });
-        break;
-      }
-      case ResourceKind.Affine:
-        // Paint resolves affine resources into DisplayList transforms, so the
-        // Canvas backend only tracks their lifetime.
-        validateAffine(bytes);
-        break;
-      default:
-        throw new Error(`resource kind ${String(kind)} requires a host-specific resolver`);
-    }
-    this.#encodedKinds.set(id, kind);
+    this.applyResourceTransaction([{ type: "define", id, kind, bytes }]);
   }
 
   /** Releases one portable resource after Core accepted the same transaction. */
   public releaseEncodedResource(id: number, kind: ResourceKind): void {
-    const actual = this.#encodedKinds.get(id);
-    if (actual !== kind) {
-      throw new Error(
-        `encoded resource ${String(id)} has kind ${String(actual)} instead of ${String(kind)}`,
-      );
-    }
-    this.#encodedKinds.delete(id);
-    const removed = (() => {
-      switch (kind) {
-        case ResourceKind.Utf8String:
-          return this.#texts.delete(id);
-        case ResourceKind.Paint:
-          return this.#paints.delete(id);
-        case ResourceKind.TextStyle:
-          return this.#textStyles.delete(id);
-        case ResourceKind.Affine:
-          return true;
-        default:
-          return false;
+    this.applyResourceTransaction([{ type: "release", id, kind }]);
+  }
+
+  /** Preflights and atomically installs one complete frame's portable resources. */
+  public applyResourceTransaction(
+    actions: readonly CanvasEncodedResourceAction[],
+    glyphBytes?: Uint8Array,
+  ): void {
+    const paints = new Map(this.#paints);
+    const solidPaints = new Map(this.#solidPaints);
+    const texts = new Map(this.#texts);
+    const textStyles = new Map(this.#textStyles);
+    const fonts = new Map(this.#fonts);
+    const encodedKinds = new Map(this.#encodedKinds);
+    const glyphSpans = new Map(this.#glyphSpans);
+    const glyphRasters = new Map(this.#glyphRasters);
+
+    for (const action of actions) {
+      if (action.type === "define") {
+        if (encodedKinds.has(action.id)) {
+          throw new Error(`encoded resource ${String(action.id)} is already defined`);
+        }
+        switch (action.kind) {
+          case ResourceKind.Utf8String:
+            define(texts, action.id, decodeUtf8(action.bytes, "UTF-8 string"), "text");
+            break;
+          case ResourceKind.Paint: {
+            const paint = decodeSolidPaint(action.bytes);
+            define(paints, action.id, paint.style, "paint");
+            solidPaints.set(action.id, paint.rgba);
+            break;
+          }
+          case ResourceKind.TextStyle: {
+            const decoded = decodeTextStyle(action.bytes);
+            const fillStyle = paints.get(decoded.paintId);
+            if (fillStyle === undefined) {
+              throw new Error(
+                `text style references missing paint resource ${String(decoded.paintId)}`,
+              );
+            }
+            define(
+              textStyles,
+              action.id,
+              Object.freeze({
+                font: `${String(decoded.weight)} ${String(decoded.fontSize)}px ${JSON.stringify(decoded.family)}`,
+                fillStyle,
+                textBaseline: "alphabetic" as const,
+              }),
+              "text style",
+            );
+            break;
+          }
+          case ResourceKind.Font:
+            define(fonts, action.id, decodeSfntFont(action.bytes), "font");
+            break;
+          case ResourceKind.Affine:
+            validateAffine(action.bytes);
+            break;
+          default:
+            throw new Error(
+              `resource kind ${String(action.kind)} requires a host-specific resolver`,
+            );
+        }
+        encodedKinds.set(action.id, action.kind);
+      } else {
+        const actual = encodedKinds.get(action.id);
+        if (actual !== action.kind) {
+          throw new Error(
+            `encoded resource ${String(action.id)} has kind ${String(actual)} instead of ${String(action.kind)}`,
+          );
+        }
+        encodedKinds.delete(action.id);
+        const removed = (() => {
+          switch (action.kind) {
+            case ResourceKind.Utf8String:
+              return texts.delete(action.id);
+            case ResourceKind.Paint:
+              solidPaints.delete(action.id);
+              return paints.delete(action.id);
+            case ResourceKind.TextStyle:
+              return textStyles.delete(action.id);
+            case ResourceKind.Font:
+              return fonts.delete(action.id);
+            case ResourceKind.Affine:
+              return true;
+            default:
+              return false;
+          }
+        })();
+        if (!removed) {
+          throw new Error(`encoded resource ${String(action.id)} backing value is missing`);
+        }
       }
-    })();
-    if (!removed) throw new Error(`encoded resource ${String(id)} backing value is missing`);
+    }
+
+    const deltas = glyphBytes === undefined ? [] : decodeGlyphResourceBatch(glyphBytes);
+    for (const delta of deltas) {
+      if (delta.type === "define") {
+        if (glyphSpans.has(delta.span.spanId)) {
+          throw new Error(`glyph span ${String(delta.span.spanId)} is already defined`);
+        }
+        const paint = solidPaints.get(delta.span.paintId);
+        if (paint === undefined) {
+          throw new Error(
+            `glyph span ${String(delta.span.spanId)} references missing paint ${String(delta.span.paintId)} or the paint is not solid`,
+          );
+        }
+        glyphSpans.set(delta.span.spanId, delta.span);
+        if (this.drawGlyphRun !== undefined) {
+          glyphRasters.set(delta.span.spanId, prepareGlyphSpan(delta.span, paint));
+        }
+      } else if (!glyphSpans.delete(delta.spanId)) {
+        throw new Error(`glyph span ${String(delta.spanId)} is not defined`);
+      } else {
+        glyphRasters.delete(delta.spanId);
+      }
+    }
+
+    replaceMap(this.#paints, paints);
+    replaceMap(this.#solidPaints, solidPaints);
+    replaceMap(this.#texts, texts);
+    replaceMap(this.#textStyles, textStyles);
+    replaceMap(this.#fonts, fonts);
+    replaceMap(this.#encodedKinds, encodedKinds);
+    replaceMap(this.#glyphSpans, glyphSpans);
+    replaceMap(this.#glyphRasters, glyphRasters);
   }
 
   public getPaint(id: number): string | CanvasGradient | CanvasPattern | undefined {
@@ -192,7 +303,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
     return this.#textStyles.get(id);
   }
 
-  public getFont(id: number): object | undefined {
+  public getFont(id: number): CanvasFontResource | undefined {
     return this.#fonts.get(id);
   }
 
@@ -205,7 +316,45 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
   }
 }
 
-function decodeSolidPaint(bytes: Uint8Array): string {
+function decodeSfntFont(bytes: Uint8Array): CanvasFontResource {
+  validateHeader(
+    bytes,
+    SFNT_FONT_RESOURCE_VARIANT,
+    SFNT_FONT_VERSION_OFFSET,
+    SFNT_FONT_VARIANT_OFFSET,
+    SFNT_FONT_FACE_INDEX_OFFSET,
+    undefined,
+    SFNT_FONT_RESOURCE_MINIMUM_BYTES,
+  );
+  if (bytes.byteLength % 4 !== 0) throw new Error("SFNT font resource must be aligned");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const faceIndex = view.getUint32(SFNT_FONT_FACE_INDEX_OFFSET, true);
+  const dataBytes = view.getUint32(SFNT_FONT_DATA_BYTES_OFFSET, true);
+  const dataEnd = SFNT_FONT_DATA_OFFSET + dataBytes;
+  if (dataBytes === 0 || dataEnd > bytes.byteLength) {
+    throw new Error("SFNT font resource has an invalid data length");
+  }
+  for (let index = dataEnd; index < bytes.byteLength; index += 1) {
+    if (bytes[index] !== 0) throw new Error("SFNT font resource padding must be zero");
+  }
+  const data = bytes.subarray(SFNT_FONT_DATA_OFFSET, dataEnd);
+  if (!hasSfntSignature(data)) throw new Error("font resource is not decoded SFNT data");
+  return Object.freeze({ faceIndex, byteLength: dataBytes });
+}
+
+function hasSfntSignature(bytes: Uint8Array): boolean {
+  if (bytes.byteLength < 4) return false;
+  const signature = String.fromCharCode(bytes[0] ?? 0, bytes[1] ?? 0, bytes[2] ?? 0, bytes[3] ?? 0);
+  return (
+    signature === "\u0000\u0001\u0000\u0000" ||
+    signature === "OTTO" ||
+    signature === "true" ||
+    signature === "typ1" ||
+    signature === "ttcf"
+  );
+}
+
+function decodeSolidPaint(bytes: Uint8Array): { readonly style: string; readonly rgba: Rgba } {
   validateHeader(
     bytes,
     SOLID_PAINT_RESOURCE_VARIANT,
@@ -214,7 +363,48 @@ function decodeSolidPaint(bytes: Uint8Array): string {
     SOLID_PAINT_RED_OFFSET,
     SOLID_PAINT_RESOURCE_FIXED_BYTES,
   );
-  return `#${hex(bytes[SOLID_PAINT_RED_OFFSET])}${hex(bytes[SOLID_PAINT_GREEN_OFFSET])}${hex(bytes[SOLID_PAINT_BLUE_OFFSET])}${hex(bytes[SOLID_PAINT_ALPHA_OFFSET])}`;
+  const rgba = [
+    requiredByte(bytes, SOLID_PAINT_RED_OFFSET),
+    requiredByte(bytes, SOLID_PAINT_GREEN_OFFSET),
+    requiredByte(bytes, SOLID_PAINT_BLUE_OFFSET),
+    requiredByte(bytes, SOLID_PAINT_ALPHA_OFFSET),
+  ] as const;
+  return {
+    style: `#${hex(rgba[0])}${hex(rgba[1])}${hex(rgba[2])}${hex(rgba[3])}`,
+    rgba,
+  };
+}
+
+function prepareGlyphSpan(span: CanvasGlyphSpan, paint: Rgba): PreparedGlyphSpan {
+  const sources = span.bitmaps.map((bitmap) => {
+    const surface = createGlyphSurface(bitmap.width, bitmap.height);
+    const context = surface.getContext("2d");
+    if (context === null) throw new Error("glyph raster surface has no Canvas2D context");
+    const image = context.createImageData(bitmap.width, bitmap.height);
+    for (let pixel = 0; pixel < bitmap.data.length; pixel += 1) {
+      const target = pixel * 4;
+      image.data[target] = paint[0];
+      image.data[target + 1] = paint[1];
+      image.data[target + 2] = paint[2];
+      image.data[target + 3] = Math.round((bitmap.data[pixel] ?? 0) * (paint[3] / 255));
+    }
+    context.putImageData(image, 0, 0);
+    return surface;
+  });
+  return Object.freeze({ span, sources: Object.freeze(sources) });
+}
+
+function canCreateGlyphSurface(): boolean {
+  return typeof OffscreenCanvas === "function" || typeof document !== "undefined";
+}
+
+function createGlyphSurface(width: number, height: number): OffscreenCanvas | HTMLCanvasElement {
+  if (typeof OffscreenCanvas === "function") return new OffscreenCanvas(width, height);
+  if (typeof document === "undefined") throw new Error("glyph raster surfaces are unavailable");
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
 }
 
 function validateAffine(bytes: Uint8Array): void {
@@ -319,10 +509,21 @@ function hex(value: number | undefined): string {
   return value.toString(16).padStart(2, "0");
 }
 
+function requiredByte(bytes: Uint8Array, offset: number): number {
+  const value = bytes[offset];
+  if (value === undefined) throw new Error("solid paint resource is truncated");
+  return value;
+}
+
 function define<T>(map: Map<number, T>, id: number, value: T, kind: string): void {
   if (!Number.isInteger(id) || id < 0 || id > 0xffff_ffff) {
     throw new RangeError(`${kind} resource id must be an unsigned 32-bit integer`);
   }
   if (map.has(id)) throw new Error(`${kind} resource ${String(id)} is already defined`);
   map.set(id, value);
+}
+
+function replaceMap<T>(target: Map<number, T>, source: ReadonlyMap<number, T>): void {
+  target.clear();
+  for (const [id, value] of source) target.set(id, value);
 }

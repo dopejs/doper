@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { GlyphResourceError, decodeGlyphResourceBatch } from "./glyph-resources";
-import { ABI_VERSION, GLYPH_RESOURCES_MAGIC, GlyphResourceOpcode } from "./generated";
+import {
+  ABI_VERSION,
+  GLYPH_RESOURCES_MAGIC,
+  GlyphResourceOpcode,
+  RESOURCE_ENCODING_VERSION,
+  ResourceKind,
+} from "./generated";
 import { Canvas2DResourceRegistry } from "./resources";
 
 describe("glyph resource batches", () => {
@@ -33,7 +39,11 @@ describe("glyph resource batches", () => {
 
   it("rejects malformed bytes and leaves the registry unchanged", () => {
     const registry = new Canvas2DResourceRegistry();
-    registry.definePaint(3, "#fff");
+    registry.defineEncodedResource(
+      3,
+      ResourceKind.Paint,
+      Uint8Array.of(RESOURCE_ENCODING_VERSION, 1, 0, 0, 255, 255, 255, 255),
+    );
     const valid = defineOnlyBatch();
     registry.applyGlyphResourceBatch(valid);
     expect(registry.getGlyphSpan(7)?.placements).toHaveLength(1);

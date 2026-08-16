@@ -17,13 +17,16 @@ export {
 } from "@dopejs/doper-runtime";
 export {
   Fragment,
+  DoperFont,
   createElement,
+  createFont,
   type Color,
   type CommonProps,
   type ContainerProps,
   type DoperElement,
   type DoperNode,
   type EdgeInsets,
+  type DoperFontOptions,
   type EditableTextProps,
   type FunctionComponent,
   type HostType,

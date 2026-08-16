@@ -320,6 +320,20 @@
         ]
       },
       {
+        "name": "SfntFont",
+        "resourceKind": "Font",
+        "variant": 1,
+        "fields": [
+          { "name": "version", "type": "u8" },
+          { "name": "variant", "type": "u8" },
+          "pad16",
+          { "name": "faceIndex", "type": "u32" },
+          { "name": "dataBytes", "type": "u32" },
+          { "name": "data", "type": "bytes" },
+          "align4"
+        ]
+      },
+      {
         "name": "Affine",
         "resourceKind": "Affine",
         "variant": 1,
@@ -375,6 +389,13 @@
       "invalidation": ["layout", "paint", "semantics"]
     },
     { "name": "FontSize", "id": 33, "valueType": "f32", "invalidation": ["layout", "paint"] },
+    {
+      "name": "Font",
+      "id": 34,
+      "valueType": "ref",
+      "resourceKind": "Font",
+      "invalidation": ["layout", "paint"]
+    },
     { "name": "OnTap", "id": 48, "valueType": "ref", "invalidation": [] },
     {
       "name": "SemanticRole",

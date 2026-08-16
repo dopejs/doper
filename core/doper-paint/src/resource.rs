@@ -92,7 +92,12 @@ impl AffineResource {
         bytes
     }
 
-    pub(crate) fn decode(resource_id: u32, resource: &Resource) -> Result<Self, PaintError> {
+    /// Decodes a validated affine transform for layout and paint consumers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PaintError::InvalidResource`] for malformed or unsupported payloads.
+    pub fn decode(resource_id: u32, resource: &Resource) -> Result<Self, PaintError> {
         let bytes = resource.bytes.as_ref();
         validate_header(
             resource_id,
@@ -189,7 +194,12 @@ impl TextStyleResource {
         Ok(bytes)
     }
 
-    pub(crate) fn decode(resource_id: u32, resource: &Resource) -> Result<Self, PaintError> {
+    /// Decodes a validated fallback style for layout and paint consumers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PaintError::InvalidResource`] for malformed or unsupported payloads.
+    pub fn decode(resource_id: u32, resource: &Resource) -> Result<Self, PaintError> {
         let bytes = resource.bytes.as_ref();
         validate_header(
             resource_id,

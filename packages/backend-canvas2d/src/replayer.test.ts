@@ -96,7 +96,7 @@ describe("Canvas2DReplayer", () => {
     const imageValue = {} as CanvasImageSource;
     resources.definePaint(1, "#123456");
     resources.definePath(2, pathValue);
-    resources.defineFont(3, {});
+    resources.defineFont(3, { faceIndex: 0, byteLength: 4 });
     resources.defineGlyphSpan(4, glyphSpan(4));
     resources.defineText(5, "hello");
     resources.defineTextStyle(6, {
@@ -164,7 +164,7 @@ describe("Canvas2DReplayer", () => {
   it("rejects invalid numeric commands before touching canvas", () => {
     const resources = new Canvas2DResourceRegistry();
     resources.definePaint(1, "red");
-    resources.defineFont(2, {});
+    resources.defineFont(2, { faceIndex: 0, byteLength: 4 });
     resources.defineGlyphSpan(3, glyphSpan(3));
     const cases = [
       command(DisplayOpcode.Alpha, 4, (view) => view.setFloat32(4, 1.1, true)),

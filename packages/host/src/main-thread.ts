@@ -56,7 +56,9 @@ export interface CoreClient {
   frame_diagnostics?(): Uint32Array;
   free?(): void;
   set_viewport?(width: number, height: number): void;
+  set_device_pixel_ratio?(value: number): Uint8Array | undefined;
   is_poisoned?(): boolean;
+  take_glyph_resources?(): Uint8Array;
   take_virtual_refills?(): Uint32Array;
 }
 
@@ -143,6 +145,7 @@ export class CanvasFrameSink implements MutationSink {
     this.#onVirtualRefills = onVirtualRefills;
     this.#resources = new Canvas2DResourceRegistry();
     this.#replayer = new Canvas2DReplayer();
+    this.setDevicePixelRatio(runtimeDevicePixelRatio());
   }
 
   /** Commits Core before mutating backend state or touching Canvas pixels. */
@@ -158,16 +161,13 @@ export class CanvasFrameSink implements MutationSink {
       this.#core.frame_diagnostics === undefined
         ? undefined
         : parseCoreFrameDiagnostics(this.#core.frame_diagnostics(), frameSeq);
-    for (const action of actions) {
-      if (action.type === "define") {
-        this.#resources.defineEncodedResource(action.id, action.kind, action.bytes);
-      } else {
-        this.#resources.releaseEncodedResource(action.id, action.kind);
-      }
+    const glyphResources = this.takeGlyphResources();
+    if (actions.length > 0 || glyphResources !== undefined) {
+      this.#resources.applyResourceTransaction(actions, glyphResources);
     }
     this.#resourceKinds.clear();
     for (const [id, kind] of nextKinds) this.#resourceKinds.set(id, kind);
-    if (actions.length > 0) {
+    if (actions.length > 0 || glyphResources !== undefined) {
       this.#resourceRevision = nextSequence(this.#resourceRevision);
       this.#rasterCache?.clear();
     }
@@ -197,6 +197,7 @@ export class CanvasFrameSink implements MutationSink {
     const displayList = core.input(bytes);
     this.emitVirtualRefills();
     if (displayList === undefined) return null;
+    this.applyDynamicGlyphResources();
     return this.acceptDynamicFrame(displayList, {
       cause: "input",
       inputBytes: bytes.byteLength,
@@ -214,6 +215,7 @@ export class CanvasFrameSink implements MutationSink {
     const displayList = core.advance(elapsedSeconds);
     this.emitVirtualRefills();
     if (displayList === undefined) return this.replayLastFrame();
+    this.applyDynamicGlyphResources();
     return this.acceptDynamicFrame(displayList, {
       animationDeltaMs: elapsedSeconds * 1000,
       cause: "animation",
@@ -240,6 +242,15 @@ export class CanvasFrameSink implements MutationSink {
     if (value === this.#devicePixelRatio) return;
     this.#devicePixelRatio = value;
     this.#rasterCache?.clear();
+    const displayList = this.#core.set_device_pixel_ratio?.(value);
+    if (displayList === undefined) return;
+    this.applyDynamicGlyphResources();
+    this.acceptDynamicFrame(displayList, {
+      animationDeltaMs: 0,
+      cause: "animation",
+      inputBytes: 0,
+      mutationBytes: 0,
+    });
   }
 
   private replay(
@@ -338,6 +349,23 @@ export class CanvasFrameSink implements MutationSink {
     const requests = parseVirtualRefills(core.take_virtual_refills());
     if (requests.length > 0) this.#onVirtualRefills?.(requests);
   }
+
+  private takeGlyphResources(): Uint8Array | undefined {
+    if (this.#core.take_glyph_resources === undefined) return undefined;
+    const bytes = this.#core.take_glyph_resources();
+    if (!(bytes instanceof Uint8Array)) {
+      throw new TypeError("Core glyph resources must be Uint8Array bytes");
+    }
+    return bytes.byteLength === 0 ? undefined : bytes;
+  }
+
+  private applyDynamicGlyphResources(): void {
+    const bytes = this.takeGlyphResources();
+    if (bytes === undefined) return;
+    this.#resources.applyResourceTransaction([], bytes);
+    this.#resourceRevision = nextSequence(this.#resourceRevision);
+    this.#rasterCache?.clear();
+  }
 }
 
 /** Four-screen default budget; callers can replace it for device-specific policy. */
@@ -356,6 +384,11 @@ export function createDefaultRasterCache(
 function nextSequence(value: number): number {
   const next = (value + 1) >>> 0;
   return next === 0 ? 1 : next;
+}
+
+function runtimeDevicePixelRatio(): number {
+  const value = (globalThis as { readonly devicePixelRatio?: unknown }).devicePixelRatio;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
 }
 
 function parseCoreFrameDiagnostics(

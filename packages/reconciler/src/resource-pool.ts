@@ -1,4 +1,4 @@
-import type { Color } from "@dopejs/doper-jsx";
+import type { Color, DoperFont } from "@dopejs/doper-jsx";
 
 import {
   AFFINE_A_OFFSET,
@@ -13,6 +13,13 @@ import {
   AFFINE_VERSION_OFFSET,
   MAX_RESOURCE_BYTES,
   RESOURCE_ENCODING_VERSION,
+  SFNT_FONT_DATA_BYTES_OFFSET,
+  SFNT_FONT_DATA_OFFSET,
+  SFNT_FONT_FACE_INDEX_OFFSET,
+  SFNT_FONT_RESOURCE_MINIMUM_BYTES,
+  SFNT_FONT_RESOURCE_VARIANT,
+  SFNT_FONT_VARIANT_OFFSET,
+  SFNT_FONT_VERSION_OFFSET,
   SOLID_PAINT_ALPHA_OFFSET,
   SOLID_PAINT_BLUE_OFFSET,
   SOLID_PAINT_GREEN_OFFSET,
@@ -201,6 +208,27 @@ export function encodeTextStyle(
   view.setUint16(TEXT_STYLE_WEIGHT_OFFSET, weight, true);
   view.setUint32(TEXT_STYLE_FAMILY_BYTES_OFFSET, encodedFamily.length, true);
   bytes.set(encodedFamily, TEXT_STYLE_FAMILY_OFFSET);
+  return bytes;
+}
+
+/** Encodes one copied, decoded SFNT font face for Core-owned shaping. */
+export function encodeSfntFont(font: DoperFont): Uint8Array {
+  const data = font.copyBytes();
+  if (data.byteLength === 0 || data.byteLength > MAX_RESOURCE_BYTES) {
+    throw new RangeError("font resource is empty or exceeds the resource byte budget");
+  }
+  const byteLength = align4(SFNT_FONT_DATA_OFFSET + data.byteLength);
+  if (byteLength > MAX_RESOURCE_BYTES) throw new RangeError("font resource is too large");
+  const bytes = new Uint8Array(byteLength);
+  const view = new DataView(bytes.buffer);
+  bytes[SFNT_FONT_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
+  bytes[SFNT_FONT_VARIANT_OFFSET] = SFNT_FONT_RESOURCE_VARIANT;
+  view.setUint32(SFNT_FONT_FACE_INDEX_OFFSET, font.faceIndex, true);
+  view.setUint32(SFNT_FONT_DATA_BYTES_OFFSET, data.byteLength, true);
+  bytes.set(data, SFNT_FONT_DATA_OFFSET);
+  if (bytes.byteLength < SFNT_FONT_RESOURCE_MINIMUM_BYTES) {
+    throw new Error("generated SFNT font layout is inconsistent");
+  }
   return bytes;
 }
 

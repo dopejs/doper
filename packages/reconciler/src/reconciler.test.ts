@@ -1,8 +1,8 @@
-import { createElement, type DoperNode, type NodeHandle } from "@dopejs/doper-jsx";
+import { createElement, createFont, type DoperNode, type NodeHandle } from "@dopejs/doper-jsx";
 import { signal, useEffect } from "@dopejs/doper-runtime";
 import { describe, expect, it, vi } from "vitest";
 
-import { NodeKind, Prop } from "./generated";
+import { NodeKind, Prop, ResourceKind } from "./generated";
 import { decodeMutationBatch, type Mutation, type MutationBatch } from "./mutation-stream";
 import { createRoot, type MutationSink } from "./reconciler";
 
@@ -44,6 +44,28 @@ describe("reconciler", () => {
       expect.objectContaining({ prop: Prop.BackgroundColor }),
     );
     expect(mutationsOfType(sink.batches[1], "releaseResource")).toHaveLength(1);
+  });
+
+  it("binds an explicit immutable font independently from fallback text style", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    const font = createFont(Uint8Array.of(0x4f, 0x54, 0x54, 0x4f, 0, 0, 0, 0), {
+      fallbackFamily: "Fixture",
+    });
+    root.render(createElement("text", { value: "hello", font }));
+
+    const batch = sink.batches[0];
+    expect(mutationsOfType(batch, "defineResource")).toContainEqual(
+      expect.objectContaining({ kind: ResourceKind.Font }),
+    );
+    expect(mutationsOfType(batch, "setRef")).toContainEqual(
+      expect.objectContaining({ prop: Prop.Font }),
+    );
+
+    root.render(createElement("text", { value: "hello" }));
+    expect(mutationsOfType(sink.batches[1], "clearProp")).toContainEqual(
+      expect.objectContaining({ prop: Prop.Font }),
+    );
   });
 
   it("preserves keyed host identity while reordering siblings", () => {

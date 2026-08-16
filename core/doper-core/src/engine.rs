@@ -11,14 +11,15 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
-    InputBatch, Mutation, MutationBatch, ResourceKind, TEXT_STYLE_FONT_SIZE_OFFSET,
-    TEXT_STYLE_LINE_HEIGHT_OFFSET,
+    InputBatch, Mutation, MutationBatch,
 };
-use doper_layout::{BoxConstraints, IntrinsicMeasurer, LayoutEngine, Size};
+use doper_layout::{BoxConstraints, LayoutEngine};
 use doper_paint::{PaintEngine, PaintMetrics};
-use doper_scene::{BitSet, DirtyDomain, NodeId, Scene, SceneMetrics};
+use doper_scene::{BitSet, DirtyDomain, Scene, SceneMetrics};
 
-use crate::{CoreError, CoreScrollMetrics, scroll::ScrollController};
+use crate::{
+    CoreError, CoreScrollMetrics, CoreTextMetrics, scroll::ScrollController, text::CoreTextSystem,
+};
 
 /// Cumulative top-level frame and failure counters.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -133,6 +134,7 @@ pub struct CoreEngine {
     layout: LayoutEngine,
     paint: PaintEngine,
     scroll: ScrollController,
+    text: CoreTextSystem,
     constraints: BoxConstraints,
     metrics: CoreMetrics,
     last_frame_seq: Option<u32>,
@@ -152,6 +154,7 @@ impl CoreEngine {
             layout: LayoutEngine::new(),
             paint: PaintEngine::new(),
             scroll: ScrollController::default(),
+            text: CoreTextSystem::default(),
             constraints,
             metrics: CoreMetrics::default(),
             last_frame_seq: None,
@@ -169,6 +172,9 @@ impl CoreEngine {
     pub fn commit(&mut self, bytes: &[u8]) -> Result<FrameOutput, CoreError> {
         if self.poisoned {
             return Err(CoreError::Poisoned);
+        }
+        if self.text.has_pending_resources() {
+            return Err(CoreError::GlyphResourcesNotDrained);
         }
         let batch = match MutationBatch::decode(bytes) {
             Ok(batch) => batch,
@@ -191,11 +197,11 @@ impl CoreEngine {
             return Err(CoreError::Scene(error));
         }
 
-        let mut measurer = FallbackTextMeasurer;
+        self.text.begin_frame();
         let mut geometry = match self.layout.layout_with_virtual(
             &self.scene,
             self.constraints,
-            &mut measurer,
+            &mut self.text,
             &self.scroll,
         ) {
             Ok(outcome) => outcome,
@@ -214,7 +220,7 @@ impl CoreEngine {
             let corrected_geometry = match self.layout.layout_with_virtual(
                 &self.scene,
                 self.constraints,
-                &mut measurer,
+                &mut self.text,
                 &self.scroll,
             ) {
                 Ok(outcome) => outcome,
@@ -225,7 +231,13 @@ impl CoreEngine {
             }
             geometry.visited = geometry.visited.saturating_add(corrected_geometry.visited);
         }
-        let output = self.paint_frame(frame_seq, &geometry.changed, geometry.visited)?;
+        self.text.prepare_resources(&self.scene);
+        let text_changed = self.text.has_staged_changes();
+        let output =
+            self.paint_frame(frame_seq, &geometry.changed, geometry.visited, text_changed)?;
+        if let Err(error) = self.text.commit_frame() {
+            return self.poison(CoreError::GlyphResources(error));
+        }
         self.metrics.committed_frames += 1;
         self.last_frame_seq = Some(frame_seq);
         Ok(output)
@@ -244,6 +256,9 @@ impl CoreEngine {
     pub fn input(&mut self, bytes: &[u8]) -> Result<Option<FrameOutput>, CoreError> {
         if self.poisoned {
             return Err(CoreError::Poisoned);
+        }
+        if self.text.has_pending_resources() {
+            return Err(CoreError::GlyphResourcesNotDrained);
         }
         let batch = match InputBatch::decode(bytes) {
             Ok(batch) => batch,
@@ -269,7 +284,7 @@ impl CoreEngine {
         let frame_seq = self
             .last_frame_seq
             .ok_or(CoreError::MissingCommittedFrame)?;
-        let output = self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0)?;
+        let output = self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, false)?;
         Ok(Some(output))
     }
 
@@ -286,6 +301,9 @@ impl CoreEngine {
         if self.poisoned {
             return Err(CoreError::Poisoned);
         }
+        if self.text.has_pending_resources() {
+            return Err(CoreError::GlyphResourcesNotDrained);
+        }
         let outcome = self.scroll.advance(&mut self.scene, elapsed_seconds)?;
         if let Err(error) = self.scroll.plan_virtual_frames() {
             return self.poison(error);
@@ -296,7 +314,7 @@ impl CoreEngine {
         let frame_seq = self
             .last_frame_seq
             .ok_or(CoreError::MissingCommittedFrame)?;
-        let output = self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0)?;
+        let output = self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, false)?;
         self.metrics.scroll_frames = self.metrics.scroll_frames.saturating_add(1);
         Ok(Some(output))
     }
@@ -311,8 +329,50 @@ impl CoreEngine {
         if self.poisoned {
             return Err(CoreError::Poisoned);
         }
+        if self.text.has_pending_resources() {
+            return Err(CoreError::GlyphResourcesNotDrained);
+        }
         self.constraints = viewport_constraints(width, height)?;
         Ok(())
+    }
+
+    /// Updates DPR-sensitive glyph resources and returns a replacement frame when needed.
+    ///
+    /// # Errors
+    ///
+    /// Rejects non-positive or non-finite ratios. Derived failures poison the instance.
+    pub fn set_device_pixel_ratio(
+        &mut self,
+        device_pixel_ratio: f32,
+    ) -> Result<Option<FrameOutput>, CoreError> {
+        if self.poisoned {
+            return Err(CoreError::Poisoned);
+        }
+        if self.text.has_pending_resources() {
+            return Err(CoreError::GlyphResourcesNotDrained);
+        }
+        if !device_pixel_ratio.is_finite() || device_pixel_ratio <= 0.0 {
+            return Err(CoreError::InvalidDevicePixelRatio(device_pixel_ratio));
+        }
+        if !self.text.set_device_pixel_ratio(device_pixel_ratio) {
+            return Ok(None);
+        }
+        let Some(frame_seq) = self.last_frame_seq else {
+            return Ok(None);
+        };
+        self.text.begin_frame();
+        self.text.prepare_resources(&self.scene);
+        if !self.text.has_staged_changes() {
+            self.text
+                .commit_frame()
+                .map_err(CoreError::GlyphResources)?;
+            return Ok(None);
+        }
+        let output = self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, true)?;
+        if let Err(error) = self.text.commit_frame() {
+            return self.poison(CoreError::GlyphResources(error));
+        }
+        Ok(Some(output))
     }
 
     /// Returns whether a derived-state failure requires creating a new instance.
@@ -351,6 +411,17 @@ impl CoreEngine {
         self.scroll.metrics()
     }
 
+    /// Returns Core shaping and derived glyph-resource counters.
+    #[must_use]
+    pub const fn text_metrics(&self) -> CoreTextMetrics {
+        self.text.metrics()
+    }
+
+    /// Drains the glyph-resource deltas required by the latest `DisplayList`.
+    pub fn take_glyph_resources(&mut self) -> Vec<u8> {
+        self.text.take_glyph_resources()
+    }
+
     /// Drains coalesced virtual-list refill requests produced by accepted frames.
     ///
     /// Requests are emitted after rendering and never invoke Shell code from the
@@ -364,6 +435,7 @@ impl CoreEngine {
         frame_seq: u32,
         geometry_changed: &BitSet,
         layout_visited_nodes: usize,
+        force_full_paint: bool,
     ) -> Result<FrameOutput, CoreError> {
         let scene_nodes = self.scene.len();
         let dirty_layout_nodes = dirty_count(&self.scene, DirtyDomain::Layout);
@@ -371,14 +443,16 @@ impl CoreEngine {
         let dirty_paint_self_nodes = dirty_count(&self.scene, DirtyDomain::PaintSelf);
         let dirty_hit_nodes = dirty_count(&self.scene, DirtyDomain::Hit);
         let dirty_semantics_nodes = dirty_count(&self.scene, DirtyDomain::Semantics);
-        let painted =
-            match self
-                .paint
-                .paint(&self.scene, self.layout.snapshot(), geometry_changed, false)
-            {
-                Ok(outcome) => outcome,
-                Err(error) => return self.poison(CoreError::Paint(error)),
-            };
+        let painted = match self.paint.paint_with_text(
+            &self.scene,
+            self.layout.snapshot(),
+            geometry_changed,
+            force_full_paint,
+            &self.text,
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => return self.poison(CoreError::Paint(error)),
+        };
         let paint_metrics = self.paint.metrics();
         let diagnostics = FrameDiagnostics {
             frame_seq,
@@ -435,62 +509,20 @@ fn viewport_constraints(width: f32, height: f32) -> Result<BoxConstraints, CoreE
         .map_err(|_| CoreError::InvalidViewport { width, height })
 }
 
-struct FallbackTextMeasurer;
-
-impl IntrinsicMeasurer for FallbackTextMeasurer {
-    fn measure(&mut self, scene: &Scene, node: NodeId, constraints: BoxConstraints) -> Size {
-        let Some(run) = scene.text_run(node) else {
-            return Size::ZERO;
-        };
-        let Some(string) = scene
-            .resource(run.string_id)
-            .filter(|resource| resource.kind == ResourceKind::Utf8String)
-            .and_then(|resource| std::str::from_utf8(&resource.bytes).ok())
-        else {
-            return Size::ZERO;
-        };
-        let Some(style) = scene
-            .resource(run.style_id)
-            .filter(|resource| resource.kind == ResourceKind::TextStyle)
-        else {
-            return Size::ZERO;
-        };
-        let font_size = read_f32(&style.bytes, TEXT_STYLE_FONT_SIZE_OFFSET).unwrap_or(0.0);
-        let line_height = read_f32(&style.bytes, TEXT_STYLE_LINE_HEIGHT_OFFSET).unwrap_or(0.0);
-        let mut line_count = 0_usize;
-        let mut longest_line = 0_usize;
-        for line in string.split('\n') {
-            line_count += 1;
-            longest_line = longest_line.max(line.chars().count());
-        }
-        let width = usize_to_f32(longest_line) * font_size * 0.6;
-        let height = usize_to_f32(line_count) * line_height;
-        constraints.constrain(Size::new(width, height))
-    }
-}
-
-fn read_f32(bytes: &[u8], offset: usize) -> Option<f32> {
-    let field = bytes.get(offset..offset.checked_add(4)?)?;
-    Some(f32::from_le_bytes(field.try_into().ok()?))
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn usize_to_f32(value: usize) -> f32 {
-    // Resource limits keep normal input below this exact-integer boundary. The
-    // clamp also makes hostile platform-sized values deterministic.
-    value.min(1 << f32::MANTISSA_DIGITS) as f32
-}
-
 #[cfg(test)]
 mod tests {
+    use std::{fs, path::PathBuf};
+
     use doper_abi::{
-        DisplayCommand, DisplayList, InputBatch, InputCommand, InputInstruction, Mutation,
-        MutationBatch, MutationInstruction, NULL_NODE_ID, NodeKind, Prop, ReplayRecord,
-        ReplayRecording, ResourceKind,
+        DisplayCommand, DisplayList, GlyphResourceBatch, GlyphResourceCommand, InputBatch,
+        InputCommand, InputInstruction, Mutation, MutationBatch, MutationInstruction, NULL_NODE_ID,
+        NodeKind, Prop, RESOURCE_ENCODING_VERSION, ReplayRecord, ReplayRecording, ResourceKind,
+        SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
+        SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET, SFNT_FONT_VERSION_OFFSET,
     };
     use doper_edit::{EditConfig, EditSession, Selection};
     use doper_headless::HeadlessRenderer;
-    use doper_paint::SolidPaint;
+    use doper_paint::{SolidPaint, TextStyleResource};
     use doper_scene::NodeId;
 
     use super::CoreEngine;
@@ -558,6 +590,116 @@ mod tests {
                 },
             ],
         )
+    }
+
+    fn explicit_text_tree() -> Vec<u8> {
+        let font_bytes = test_font_bytes();
+        let font = sfnt_font_resource(&font_bytes);
+        frame(
+            1,
+            vec![
+                Mutation::CreateNode {
+                    node_id: id(0),
+                    kind: NodeKind::Root,
+                    parent: NULL_NODE_ID,
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::CreateNode {
+                    node_id: id(1),
+                    kind: NodeKind::Text,
+                    parent: id(0),
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: ResourceKind::Paint,
+                    bytes: SolidPaint {
+                        red: 12,
+                        green: 34,
+                        blue: 56,
+                        alpha: 255,
+                    }
+                    .encode()
+                    .to_vec(),
+                },
+                Mutation::DefineResource {
+                    resource_id: 2,
+                    kind: ResourceKind::TextStyle,
+                    bytes: TextStyleResource {
+                        paint_id: 1,
+                        font_size: 18.0,
+                        line_height: 24.0,
+                        weight: 400,
+                        family: "sans-serif".to_owned(),
+                    }
+                    .encode()
+                    .expect("text style"),
+                },
+                Mutation::DefineResource {
+                    resource_id: 3,
+                    kind: ResourceKind::Utf8String,
+                    bytes: "\u{ea60}\u{ea61}".as_bytes().to_vec(),
+                },
+                Mutation::DefineResource {
+                    resource_id: 4,
+                    kind: ResourceKind::Font,
+                    bytes: font,
+                },
+                Mutation::SetRef {
+                    node_id: id(1),
+                    prop: Prop::Font,
+                    resource_id: 4,
+                },
+                Mutation::SetTextRun {
+                    node_id: id(1),
+                    string_id: 3,
+                    style_id: 2,
+                },
+            ],
+        )
+    }
+
+    fn sfnt_font_resource(data: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0_u8; (SFNT_FONT_DATA_OFFSET + data.len()).next_multiple_of(4)];
+        bytes[SFNT_FONT_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
+        bytes[SFNT_FONT_VARIANT_OFFSET] = SFNT_FONT_RESOURCE_VARIANT;
+        bytes[SFNT_FONT_FACE_INDEX_OFFSET..SFNT_FONT_FACE_INDEX_OFFSET + 4]
+            .copy_from_slice(&0_u32.to_le_bytes());
+        bytes[SFNT_FONT_DATA_BYTES_OFFSET..SFNT_FONT_DATA_BYTES_OFFSET + 4].copy_from_slice(
+            &u32::try_from(data.len())
+                .expect("fixture length")
+                .to_le_bytes(),
+        );
+        bytes[SFNT_FONT_DATA_OFFSET..SFNT_FONT_DATA_OFFSET + data.len()].copy_from_slice(data);
+        bytes
+    }
+
+    fn test_font_bytes() -> Vec<u8> {
+        let store = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../node_modules/.pnpm");
+        let package = fs::read_dir(&store)
+            .expect("run pnpm install before the Rust suite")
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("playwright-core@")
+            })
+            .max_by_key(std::fs::DirEntry::file_name)
+            .expect("playwright-core package");
+        let directory = package
+            .path()
+            .join("node_modules/playwright-core/lib/vite/traceViewer");
+        let font = fs::read_dir(directory)
+            .expect("trace-viewer assets")
+            .filter_map(Result::ok)
+            .find(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                name.starts_with("codicon.") && name.ends_with(".ttf")
+            })
+            .expect("SFNT fixture");
+        fs::read(font.path()).expect("read font fixture")
     }
 
     fn scroll_tree() -> Vec<u8> {
@@ -697,6 +839,85 @@ mod tests {
             .expect("headless pixels");
         let filled = (10 * 100 + 10) * 4;
         assert_eq!(&image.pixels()[filled..filled + 4], &[12, 34, 56, 255]);
+    }
+
+    #[test]
+    fn explicit_font_produces_glyph_run_and_transactional_resources() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let output = engine.commit(&explicit_text_tree()).expect("text frame");
+        let display = DisplayList::decode(&output.display_list).expect("DisplayList");
+        let glyph_run = display.instructions.iter().find_map(|instruction| {
+            if let DisplayCommand::DrawGlyphRun {
+                font_id,
+                size,
+                glyph_span_id,
+                ..
+            } = instruction.command
+            {
+                Some((font_id, size, glyph_span_id))
+            } else {
+                None
+            }
+        });
+        let (font_id, size, glyph_span_id) = glyph_run.expect("shaped glyph run");
+        assert_eq!(font_id, 4);
+        assert!((size - 18.0).abs() < f32::EPSILON);
+        assert!(!display.instructions.iter().any(|instruction| matches!(
+            instruction.command,
+            DisplayCommand::DrawTextFallback { .. }
+        )));
+
+        assert_eq!(
+            engine.commit(&frame(2, Vec::new())),
+            Err(CoreError::GlyphResourcesNotDrained)
+        );
+
+        let resources =
+            GlyphResourceBatch::decode(&engine.take_glyph_resources()).expect("glyph resources");
+        assert_eq!(resources.instructions.len(), 1);
+        let GlyphResourceCommand::Define(span) = &resources.instructions[0].command else {
+            panic!("expected span definition");
+        };
+        assert_eq!(span.span_id, glyph_span_id);
+        assert_eq!(span.paint_id, 1);
+        assert!(!span.bitmaps.is_empty());
+        assert_eq!(span.placements.len(), 2);
+        assert_eq!(engine.text_metrics().spans_defined, 1);
+
+        let clean = engine.commit(&frame(2, Vec::new())).expect("clean frame");
+        assert!(!clean.rebuilt);
+        assert!(engine.take_glyph_resources().is_empty());
+
+        let scaled = engine
+            .set_device_pixel_ratio(2.0)
+            .expect("valid DPR")
+            .expect("replacement frame");
+        assert!(scaled.rebuilt);
+        let resources = GlyphResourceBatch::decode(&engine.take_glyph_resources())
+            .expect("replacement glyph resources");
+        assert_eq!(resources.instructions.len(), 2);
+        assert!(resources.instructions.iter().any(|instruction| matches!(
+            instruction.command,
+            GlyphResourceCommand::Release { span_id } if span_id == glyph_span_id
+        )));
+        let replacement = resources.instructions.iter().find_map(|instruction| {
+            if let GlyphResourceCommand::Define(span) = &instruction.command {
+                Some(span)
+            } else {
+                None
+            }
+        });
+        assert!(
+            replacement
+                .expect("replacement definition")
+                .bitmaps
+                .iter()
+                .all(|bitmap| (bitmap.device_pixel_ratio - 2.0).abs() < f32::EPSILON)
+        );
+        assert!(matches!(
+            engine.set_device_pixel_ratio(0.0),
+            Err(CoreError::InvalidDevicePixelRatio(0.0))
+        ));
     }
 
     #[test]

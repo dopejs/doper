@@ -1,3 +1,5 @@
+import type { DoperFont } from "./font";
+
 /** Stable list identity used by localized reconciliation. */
 export type Key = string | number;
 
@@ -74,6 +76,8 @@ export interface TextProps extends Omit<CommonProps, "children"> {
   readonly children?: string | number;
   readonly color?: Color;
   readonly fontFamily?: string;
+  /** Explicit immutable SFNT font; unsupported input falls back as a whole run. */
+  readonly font?: DoperFont;
   readonly fontSize?: number;
   readonly fontWeight?: number;
   readonly lineHeight?: number;

@@ -19,6 +19,8 @@ pub enum CoreError {
         /// Requested logical height.
         height: f32,
     },
+    /// Device pixel ratio was zero, negative, NaN, or infinite.
+    InvalidDevicePixelRatio(f32),
     /// Mutation bytes failed trust-boundary validation.
     Abi(AbiError),
     /// A decoded transaction violated Scene invariants and was not committed.
@@ -27,6 +29,10 @@ pub enum CoreError {
     Layout(LayoutError),
     /// Paint failed after Scene accepted the transaction; the instance is poisoned.
     Paint(PaintError),
+    /// Core produced an invalid glyph-resource batch; the instance is poisoned.
+    GlyphResources(AbiError),
+    /// The caller requested another resource-producing frame before draining DOPG.
+    GlyphResourcesNotDrained,
     /// A scrolling coefficient, extent, or physics operation was invalid.
     Scroll(ScrollError),
     /// An Input Stream transaction was not strictly newer than the accepted sequence.

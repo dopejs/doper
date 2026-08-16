@@ -4,7 +4,11 @@ export {
   type DisplayCommand,
   type DisplayList,
 } from "./display-list";
-export { Canvas2DResourceRegistry } from "./resources";
+export {
+  Canvas2DResourceRegistry,
+  type CanvasEncodedResourceAction,
+  type CanvasFontResource,
+} from "./resources";
 export {
   GlyphResourceError,
   decodeGlyphResourceBatch,

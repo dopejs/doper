@@ -91,6 +91,14 @@ export const TEXT_STYLE_LINE_HEIGHT_OFFSET = 12 as const;
 export const TEXT_STYLE_WEIGHT_OFFSET = 16 as const;
 export const TEXT_STYLE_FAMILY_BYTES_OFFSET = 20 as const;
 export const TEXT_STYLE_FAMILY_OFFSET = 24 as const;
+export const SFNT_FONT_RESOURCE_VARIANT = 1 as const;
+export const SFNT_FONT_RESOURCE_FIXED_BYTES = null;
+export const SFNT_FONT_RESOURCE_MINIMUM_BYTES = 12 as const;
+export const SFNT_FONT_VERSION_OFFSET = 0 as const;
+export const SFNT_FONT_VARIANT_OFFSET = 1 as const;
+export const SFNT_FONT_FACE_INDEX_OFFSET = 4 as const;
+export const SFNT_FONT_DATA_BYTES_OFFSET = 8 as const;
+export const SFNT_FONT_DATA_OFFSET = 12 as const;
 export const AFFINE_RESOURCE_VARIANT = 1 as const;
 export const AFFINE_RESOURCE_FIXED_BYTES = 28 as const;
 export const AFFINE_RESOURCE_MINIMUM_BYTES = 28 as const;
@@ -256,6 +264,7 @@ export enum Prop {
   Transform = 19,
   Text = 32,
   FontSize = 33,
+  Font = 34,
   OnTap = 48,
   SemanticRole = 64,
   SemanticLabel = 65,
@@ -338,6 +347,12 @@ export const PROP_METADATA = {
     name: "FontSize",
     valueType: "f32",
     resourceKind: null,
+    invalidation: 3,
+  },
+  34: {
+    name: "Font",
+    valueType: "ref",
+    resourceKind: ResourceKind.Font,
     invalidation: 3,
   },
   48: { name: "OnTap", valueType: "ref", resourceKind: null, invalidation: 0 },

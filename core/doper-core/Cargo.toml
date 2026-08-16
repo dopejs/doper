@@ -16,6 +16,7 @@ doper-layout = { path = "../doper-layout" }
 doper-paint = { path = "../doper-paint" }
 doper-scene = { path = "../doper-scene" }
 doper-scroll = { path = "../doper-scroll" }
+doper-text = { path = "../doper-text" }
 
 [dev-dependencies]
 doper-edit = { path = "../doper-edit" }

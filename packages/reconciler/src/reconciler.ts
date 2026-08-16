@@ -1,5 +1,6 @@
 import {
   Fragment,
+  DoperFont,
   createElement,
   isDoperElement,
   normalizeChildren,
@@ -22,6 +23,7 @@ import { NodeIdAllocator } from "./node-id";
 import {
   ResourcePool,
   encodeAffine,
+  encodeSfntFont,
   encodeSolidPaint,
   encodeTextStyle,
   encodeUtf8,
@@ -115,6 +117,7 @@ interface NormalizedHostProps {
         readonly value: string;
         readonly paint: Uint8Array;
         readonly fontFamily: string;
+        readonly font: Uint8Array | undefined;
         readonly fontSize: number;
         readonly lineHeight: number;
         readonly fontWeight: number;
@@ -162,6 +165,7 @@ const COMMON_KEYS = new Set([
 const TEXT_KEYS = new Set([
   ...COMMON_KEYS,
   "color",
+  "font",
   "fontFamily",
   "fontSize",
   "fontWeight",
@@ -697,6 +701,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
       }
     }
     this.replaceCallback(instance, next.onTap);
+    this.replaceResourceProp(instance, "text:font", Prop.Font, ResourceKind.Font, next.text?.font);
     if (next.text !== undefined) this.replaceTextRun(instance, next.text);
     if (next.scrollPosition !== undefined) {
       if (!equalPair(instance.scrollPosition, next.scrollPosition)) {
@@ -1081,15 +1086,20 @@ function normalizeHostProps(
     const fontSize = optionalPositive(props.fontSize, 16, "fontSize");
     const lineHeight = optionalPositive(props.lineHeight, fontSize * 1.2, "lineHeight");
     const fontWeight = optionalWeight(props.fontWeight);
+    const font = props.font;
+    if (font !== undefined && !(font instanceof DoperFont)) {
+      throw new TypeError("font must be created by createFont");
+    }
     const fontFamily =
       props.fontFamily === undefined
-        ? "sans-serif"
+        ? (font?.fallbackFamily ?? "sans-serif")
         : requireNonEmptyString(props.fontFamily, "fontFamily");
     const color = (props.color ?? "#000000") as Color;
     scalars.set(Prop.FontSize, fontSize);
     text = {
       value,
       paint: encodeSolidPaint(color),
+      font: font === undefined ? undefined : encodeSfntFont(font),
       fontFamily,
       fontSize,
       lineHeight,

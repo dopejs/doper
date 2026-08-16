@@ -53,6 +53,31 @@ pub struct PaintOutcome {
     pub rebuilt: bool,
 }
 
+/// Core-owned shaped text reference installed before DisplayList replay.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShapedGlyphRun {
+    /// Explicit SFNT font resource referenced by the Scene node.
+    pub font_id: u32,
+    /// Logical font size used for shaping and rasterization.
+    pub font_size: f32,
+    /// Derived glyph-span resource emitted through the glyph batch protocol.
+    pub span_id: u32,
+}
+
+/// Read-only bridge from the text subsystem into paint.
+pub trait TextPaintResolver {
+    /// Returns a complete shaped run, or `None` to use the whole-run fallback.
+    fn glyph_run(&self, node: NodeId) -> Option<ShapedGlyphRun>;
+}
+
+struct FallbackTextPaint;
+
+impl TextPaintResolver for FallbackTextPaint {
+    fn glyph_run(&self, _node: NodeId) -> Option<ShapedGlyphRun> {
+        None
+    }
+}
+
 /// Deterministic Scene/Layout-to-DisplayList builder.
 #[derive(Default)]
 pub struct PaintEngine {
@@ -90,6 +115,24 @@ impl PaintEngine {
         geometry_changed: &BitSet,
         force_full: bool,
     ) -> Result<PaintOutcome, PaintError> {
+        self.paint_with_text(
+            scene,
+            layout,
+            geometry_changed,
+            force_full,
+            &FallbackTextPaint,
+        )
+    }
+
+    /// Builds or reuses a Picture with optional Core-shaped glyph runs.
+    pub fn paint_with_text(
+        &mut self,
+        scene: &Scene,
+        layout: &LayoutSnapshot,
+        geometry_changed: &BitSet,
+        force_full: bool,
+        text: &impl TextPaintResolver,
+    ) -> Result<PaintOutcome, PaintError> {
         if scene.ids() != layout.ids() {
             return Err(PaintError::LayoutTopologyMismatch);
         }
@@ -117,7 +160,7 @@ impl PaintEngine {
 
         let rebuild = rebuild_subtrees(scene, geometry_changed, topology_unchanged, force_full);
         let (display_list, updates, subtree_builds, subtree_cache_hits) =
-            build_display_list(scene, layout, &self.subtrees, &rebuild)?;
+            build_display_list(scene, layout, &self.subtrees, &rebuild, text)?;
         let command_count = display_list.instructions.len();
         let bytes = display_list.encode()?;
         let picture = Picture {
@@ -193,6 +236,7 @@ fn build_display_list(
     layout: &LayoutSnapshot,
     current: &HashMap<NodeId, Arc<CachedSubtree>>,
     rebuild: &[bool],
+    text: &impl TextPaintResolver,
 ) -> Result<SubtreeBuild, PaintError> {
     let mut updates = HashMap::new();
     let mut subtree_builds = 0_u64;
@@ -201,7 +245,8 @@ fn build_display_list(
         if !rebuild.get(index).copied().unwrap_or(true) && current.contains_key(&node) {
             continue;
         }
-        let local: Arc<[DisplayInstruction]> = Arc::from(build_node(scene, layout, index, node)?);
+        let local: Arc<[DisplayInstruction]> =
+            Arc::from(build_node(scene, layout, index, node, text)?);
         let mut children = Vec::new();
         let mut command_count = local.len().checked_add(1).ok_or_else(overflow)?;
         let mut child = scene.first_child(node);
@@ -282,6 +327,7 @@ fn build_node(
     layout: &LayoutSnapshot,
     index: usize,
     node: NodeId,
+    text: &impl TextPaintResolver,
 ) -> Result<Vec<DisplayInstruction>, PaintError> {
     let (offset, size) = layout
         .geometry_at(index)
@@ -327,14 +373,26 @@ fn build_node(
         let style = TextStyleResource::decode(text_run.style_id, style_resource)?;
         let paint_resource = typed_resource(scene, style.paint_id, ResourceKind::Paint)?;
         SolidPaint::decode(style.paint_id, paint_resource)?;
-        push(
-            &mut instructions,
-            DisplayCommand::DrawTextFallback {
-                string_id: text_run.string_id,
-                font_description_id: text_run.style_id,
-                origin: [0.0, style.font_size],
-            },
-        );
+        if let Some(glyph_run) = text.glyph_run(node) {
+            push(
+                &mut instructions,
+                DisplayCommand::DrawGlyphRun {
+                    font_id: glyph_run.font_id,
+                    size: glyph_run.font_size,
+                    origin: [0.0, 0.0],
+                    glyph_span_id: glyph_run.span_id,
+                },
+            );
+        } else {
+            push(
+                &mut instructions,
+                DisplayCommand::DrawTextFallback {
+                    string_id: text_run.string_id,
+                    font_description_id: text_run.style_id,
+                    origin: [0.0, style.font_size],
+                },
+            );
+        }
     }
     if scene.kind(node) == Some(NodeKind::Scroll) {
         let [scroll_x, scroll_y] = scene.scroll_position(node).unwrap_or([0.0, 0.0]);
