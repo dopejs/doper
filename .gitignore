@@ -13,3 +13,7 @@ target/
 apps/platform-probe/public/wasm/*.wasm
 apps/platform-probe/public/wasm/manifest.json
 apps/platform-probe/public/wasm/budget-manifest.json
+
+# Vitest browser artifacts
+.vitest-attachments/
+**/__screenshots__/

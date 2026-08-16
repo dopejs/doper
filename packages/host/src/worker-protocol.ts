@@ -1,10 +1,11 @@
 import type { FrameReport } from "./main-thread";
 import type { VirtualRefillRange } from "./main-thread";
+import type { NonPassiveRegion } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
-import type { EditTransaction } from "@dopejs/doper-editing";
+import type { EditTransaction, EventTransaction } from "@dopejs/doper-editing";
 
-export const WORKER_PROTOCOL_VERSION = 3 as const;
+export const WORKER_PROTOCOL_VERSION = 4 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
@@ -97,6 +98,18 @@ export interface WorkerEditTransactionMessage {
   readonly transaction: EditTransaction;
 }
 
+export interface WorkerEventTransactionMessage {
+  readonly kind: "doper:event-transaction";
+  readonly sessionId: number;
+  readonly transaction: EventTransaction;
+}
+
+export interface WorkerNonPassiveRegionsMessage {
+  readonly kind: "doper:non-passive-regions";
+  readonly regions: readonly NonPassiveRegion[];
+  readonly sessionId: number;
+}
+
 export interface WorkerFatalMessage {
   readonly error: string;
   readonly kind: "doper:fatal";
@@ -111,6 +124,8 @@ export interface WorkerShutdownCompleteMessage {
 export type RenderWorkerOutboundMessage =
   | WorkerClockMetricsMessage
   | WorkerEditTransactionMessage
+  | WorkerEventTransactionMessage
+  | WorkerNonPassiveRegionsMessage
   | WorkerFatalMessage
   | WorkerFrameMessage
   | WorkerPreparedMessage
@@ -179,6 +194,10 @@ export function isRenderWorkerOutboundMessage(
       return Array.isArray(value.requests) && value.requests.every(isVirtualRefillRange);
     case "doper:edit-transaction":
       return isEditTransaction(value.transaction);
+    case "doper:event-transaction":
+      return isEventTransaction(value.transaction);
+    case "doper:non-passive-regions":
+      return Array.isArray(value.regions) && value.regions.every(isNonPassiveRegion);
     case "doper:fatal":
       return typeof value.error === "string";
     case "doper:shutdown-complete":
@@ -197,8 +216,62 @@ export function isRenderWorkerOutboundEnvelope(value: unknown): boolean {
     value.kind === "doper:clock-metrics" ||
     value.kind === "doper:virtual-refill" ||
     value.kind === "doper:edit-transaction" ||
+    value.kind === "doper:event-transaction" ||
+    value.kind === "doper:non-passive-regions" ||
     value.kind === "doper:fatal" ||
     value.kind === "doper:shutdown-complete"
+  );
+}
+
+function isNonPassiveRegion(value: unknown): value is NonPassiveRegion {
+  return (
+    isRecord(value) &&
+    isU32(value.flags) &&
+    value.flags >= 1 &&
+    value.flags <= 3 &&
+    isFiniteNumber(value.left) &&
+    isFiniteNumber(value.top) &&
+    isFiniteNumber(value.right) &&
+    isFiniteNumber(value.bottom) &&
+    value.left < value.right &&
+    value.top < value.bottom
+  );
+}
+
+function isEventTransaction(value: unknown): value is EventTransaction {
+  return (
+    isRecord(value) &&
+    isU32(value.eventId) &&
+    isInputEventKind(value.kind) &&
+    isU32(value.target) &&
+    isFiniteNumber(value.x) &&
+    isFiniteNumber(value.y) &&
+    isFiniteNumber(value.deltaX) &&
+    isFiniteNumber(value.deltaY) &&
+    isU32(value.buttons) &&
+    value.buttons <= 0xffff &&
+    isU32(value.modifiers) &&
+    value.modifiers <= 0x0f &&
+    isU32(value.pointerId) &&
+    isU32(value.elapsedMicros) &&
+    value.elapsedMicros >= 1 &&
+    value.elapsedMicros <= 1_000_000 &&
+    Array.isArray(value.path) &&
+    value.path.length > 0 &&
+    value.path.every(isU32) &&
+    new Set(value.path).size === value.path.length &&
+    value.path.at(-1) === value.target
+  );
+}
+
+function isInputEventKind(value: unknown): boolean {
+  return (
+    value === "pointerdown" ||
+    value === "pointerup" ||
+    value === "pointermove" ||
+    value === "pointercancel" ||
+    value === "click" ||
+    value === "wheel"
   );
 }
 

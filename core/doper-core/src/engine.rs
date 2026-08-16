@@ -4,6 +4,8 @@ use std::{
 };
 
 use doper_abi::{
+    EDITING_GEOMETRY_CHARACTER_WORDS, EDITING_GEOMETRY_HEADER_WORDS, EDITING_GEOMETRY_RECT_WORDS,
+    EDITING_GEOMETRY_VERSION, EventTransactionBatch, EventTransactionRecord,
     FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_LAYOUT_NODES_INDEX,
     FRAME_DIAGNOSTICS_DIRTY_PAINT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_PAINT_SELF_NODES_INDEX,
     FRAME_DIAGNOSTICS_DIRTY_SEMANTICS_NODES_INDEX, FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX,
@@ -14,16 +16,18 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
-    InputBatch, InputCommand, Mutation, MutationBatch, SystemTextMetricBatch,
+    InputBatch, InputCommand, InputEventKind, Mutation, MutationBatch, NON_PASSIVE_REGION_VERSION,
+    NULL_NODE_ID, NodeKind, SystemTextMetricBatch,
 };
+use doper_hit::{HitIndex, HitPoint, WorldGeometry, WorldRect};
 use doper_layout::{BoxConstraints, LayoutEngine};
 use doper_paint::{PaintEngine, PaintMetrics};
-use doper_scene::{BitSet, DirtyDomain, Scene, SceneMetrics};
+use doper_scene::{BitSet, DirtyDomain, NodeId, Scene, SceneMetrics};
 
 use crate::{
     CoreError, CoreScrollMetrics, CoreTextMetrics,
     editing::{EditableConfiguration, EditingController},
-    scroll::ScrollController,
+    scroll::{ScrollAdvance, ScrollController},
     text::CoreTextSystem,
 };
 
@@ -142,6 +146,10 @@ pub struct CoreEngine {
     scroll: ScrollController,
     text: CoreTextSystem,
     editing: EditingController,
+    hit: HitIndex,
+    pending_events: Vec<u8>,
+    pointer_gesture: Option<PointerGesture>,
+    requested_character_range: Option<(NodeId, [u32; 2])>,
     constraints: BoxConstraints,
     metrics: CoreMetrics,
     last_frame_seq: Option<u32>,
@@ -149,6 +157,172 @@ pub struct CoreEngine {
     caret_elapsed_seconds: f64,
     caret_visible: bool,
     poisoned: bool,
+}
+
+#[derive(Clone, Copy)]
+struct PointerGesture {
+    pointer_id: u32,
+    scroll_node: NodeId,
+    last_position: [f32; 2],
+}
+
+#[derive(Clone, Copy)]
+struct EventCommand {
+    event_id: u32,
+    kind: InputEventKind,
+    position: [f32; 2],
+    delta: [f32; 2],
+    buttons: u32,
+    modifiers: u32,
+    pointer_id: u32,
+    elapsed_micros: u32,
+}
+
+fn collect_editable_configurations(batch: &MutationBatch) -> Vec<EditableConfiguration> {
+    batch
+        .instructions
+        .iter()
+        .filter_map(|instruction| match instruction.mutation {
+            Mutation::ConfigureEditable {
+                node_id,
+                revision,
+                flags,
+                max_graphemes,
+            } => Some(EditableConfiguration {
+                node_id,
+                revision,
+                flags,
+                max_graphemes,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn collect_programmatic_scrolls(batch: &MutationBatch) -> BTreeSet<u32> {
+    batch
+        .instructions
+        .iter()
+        .filter_map(|instruction| match instruction.mutation {
+            Mutation::ScrollTo { node_id, .. } => Some(node_id),
+            _ => None,
+        })
+        .collect()
+}
+
+fn collect_geometry_requests(batch: &InputBatch) -> Vec<(u32, u32, u32)> {
+    batch
+        .instructions
+        .iter()
+        .filter_map(|instruction| match instruction.command {
+            InputCommand::RequestCharacterBounds {
+                node_id,
+                start,
+                end,
+            } => Some((node_id, start, end)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn collect_event_commands(batch: &InputBatch) -> Vec<EventCommand> {
+    batch
+        .instructions
+        .iter()
+        .filter_map(|instruction| match &instruction.command {
+            InputCommand::DispatchEvent {
+                event_id,
+                kind,
+                position,
+                delta,
+                buttons,
+                modifiers,
+                pointer_id,
+                elapsed_micros,
+            } => Some(EventCommand {
+                event_id: *event_id,
+                kind: *kind,
+                position: *position,
+                delta: *delta,
+                buttons: *buttons,
+                modifiers: *modifiers,
+                pointer_id: *pointer_id,
+                elapsed_micros: *elapsed_micros,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Feeds one hit-tested event into candidate scroll state; returns pixel change.
+fn apply_event_scroll(
+    candidate_scene: &mut Scene,
+    candidate_scroll: &mut ScrollController,
+    candidate_gesture: &mut Option<PointerGesture>,
+    command: &EventCommand,
+    hit_scroll_node: Option<NodeId>,
+) -> Result<bool, CoreError> {
+    let mut scroll_changed = false;
+    match command.kind {
+        InputEventKind::Wheel => {
+            if let Some(scroll_node) = hit_scroll_node {
+                scroll_changed |= candidate_scroll
+                    .apply_wheel(
+                        candidate_scene,
+                        scroll_node,
+                        command.delta,
+                        command.elapsed_micros,
+                    )?
+                    .changed;
+            }
+        }
+        InputEventKind::PointerDown if command.buttons & 1 != 0 => {
+            if let Some(previous) = candidate_gesture.take() {
+                candidate_scroll.end_direct(previous.scroll_node, false)?;
+            }
+            if let Some(scroll_node) = hit_scroll_node {
+                candidate_scroll.begin_direct(scroll_node)?;
+                *candidate_gesture = Some(PointerGesture {
+                    pointer_id: command.pointer_id,
+                    scroll_node,
+                    last_position: command.position,
+                });
+            }
+        }
+        InputEventKind::PointerMove => {
+            if let Some(mut gesture) = *candidate_gesture
+                && gesture.pointer_id == command.pointer_id
+            {
+                let drag_delta = [
+                    gesture.last_position[0] - command.position[0],
+                    gesture.last_position[1] - command.position[1],
+                ];
+                scroll_changed |= candidate_scroll
+                    .direct_delta(
+                        candidate_scene,
+                        gesture.scroll_node,
+                        drag_delta,
+                        command.elapsed_micros,
+                    )?
+                    .changed;
+                gesture.last_position = command.position;
+                *candidate_gesture = Some(gesture);
+            }
+        }
+        InputEventKind::PointerUp | InputEventKind::PointerCancel => {
+            if let Some(gesture) = *candidate_gesture
+                && gesture.pointer_id == command.pointer_id
+            {
+                candidate_scroll.end_direct(
+                    gesture.scroll_node,
+                    command.kind == InputEventKind::PointerUp,
+                )?;
+                *candidate_gesture = None;
+            }
+        }
+        _ => {}
+    }
+    Ok(scroll_changed)
 }
 
 impl CoreEngine {
@@ -166,6 +340,10 @@ impl CoreEngine {
             scroll: ScrollController::default(),
             text: CoreTextSystem::default(),
             editing: EditingController::default(),
+            hit: HitIndex::default(),
+            pending_events: Vec::new(),
+            pointer_gesture: None,
+            requested_character_range: None,
             constraints,
             metrics: CoreMetrics::default(),
             last_frame_seq: None,
@@ -200,15 +378,7 @@ impl CoreEngine {
         bytes: &[u8],
         system_text_metrics: Option<&[u8]>,
     ) -> Result<FrameOutput, CoreError> {
-        if self.poisoned {
-            return Err(CoreError::Poisoned);
-        }
-        if self.text.has_pending_resources() {
-            return Err(CoreError::GlyphResourcesNotDrained);
-        }
-        if self.editing.has_pending_transactions() {
-            return Err(CoreError::EditTransactionsNotDrained);
-        }
+        self.ensure_reverse_streams_drained()?;
         let batch = match MutationBatch::decode(bytes) {
             Ok(batch) => batch,
             Err(error) => {
@@ -216,48 +386,15 @@ impl CoreEngine {
                 return Err(CoreError::Abi(error));
             }
         };
-        let metric_batch = match system_text_metrics {
-            Some(bytes) => match SystemTextMetricBatch::decode(bytes) {
-                Ok(batch) => Some(batch),
-                Err(error) => {
-                    self.metrics.abi_rejections = self.metrics.abi_rejections.saturating_add(1);
-                    return Err(CoreError::Abi(error));
-                }
-            },
-            None => None,
-        };
+        let metric_batch = self.decode_metric_batch(system_text_metrics)?;
         if let Some(metric_batch) = &metric_batch {
             self.text
                 .validate_system_metrics(metric_batch)
                 .map_err(CoreError::SystemTextMetricsState)?;
         }
         let frame_seq = batch.frame_seq;
-        let editable_configurations = batch
-            .instructions
-            .iter()
-            .filter_map(|instruction| match instruction.mutation {
-                Mutation::ConfigureEditable {
-                    node_id,
-                    revision,
-                    flags,
-                    max_graphemes,
-                } => Some(EditableConfiguration {
-                    node_id,
-                    revision,
-                    flags,
-                    max_graphemes,
-                }),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let programmatic_scrolls: BTreeSet<u32> = batch
-            .instructions
-            .iter()
-            .filter_map(|instruction| match instruction.mutation {
-                Mutation::ScrollTo { node_id, .. } => Some(node_id),
-                _ => None,
-            })
-            .collect();
+        let editable_configurations = collect_editable_configurations(&batch);
+        let programmatic_scrolls = collect_programmatic_scrolls(&batch);
         if let Err(error) = self.scene.commit(batch) {
             self.metrics.scene_rejections += 1;
             return Err(CoreError::Scene(error));
@@ -350,15 +487,7 @@ impl CoreEngine {
         &mut self,
         bytes: &[u8],
     ) -> Result<Option<FrameOutput>, CoreError> {
-        if self.poisoned {
-            return Err(CoreError::Poisoned);
-        }
-        if self.text.has_pending_resources() {
-            return Err(CoreError::GlyphResourcesNotDrained);
-        }
-        if self.editing.has_pending_transactions() {
-            return Err(CoreError::EditTransactionsNotDrained);
-        }
+        self.ensure_reverse_streams_drained()?;
         let batch = SystemTextMetricBatch::decode(bytes).map_err(|error| {
             self.metrics.abi_rejections = self.metrics.abi_rejections.saturating_add(1);
             CoreError::Abi(error)
@@ -408,15 +537,7 @@ impl CoreEngine {
     /// Returns an ABI, sequence, target, or scroll validation error without
     /// partially applying the input batch.
     pub fn input(&mut self, bytes: &[u8]) -> Result<Option<FrameOutput>, CoreError> {
-        if self.poisoned {
-            return Err(CoreError::Poisoned);
-        }
-        if self.text.has_pending_resources() {
-            return Err(CoreError::GlyphResourcesNotDrained);
-        }
-        if self.editing.has_pending_transactions() {
-            return Err(CoreError::EditTransactionsNotDrained);
-        }
+        self.ensure_reverse_streams_drained()?;
         let batch = match InputBatch::decode(bytes) {
             Ok(batch) => batch,
             Err(error) => {
@@ -433,6 +554,124 @@ impl CoreEngine {
                 incoming: batch.frame_seq,
             });
         }
+        let geometry_requests = collect_geometry_requests(&batch);
+        if !geometry_requests.is_empty() {
+            return self.input_character_bounds(&batch, &geometry_requests);
+        }
+        let event_commands = collect_event_commands(&batch);
+        if !event_commands.is_empty() {
+            if event_commands.len() != batch.instructions.len() {
+                self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
+                return Err(CoreError::MixedEventInput);
+            }
+            return self.input_events(batch.frame_seq, &event_commands);
+        }
+        self.input_scroll_and_edit(&batch)
+    }
+
+    /// Applies one isolated `RequestCharacterBounds` batch to the editing session.
+    fn input_character_bounds(
+        &mut self,
+        batch: &InputBatch,
+        requests: &[(u32, u32, u32)],
+    ) -> Result<Option<FrameOutput>, CoreError> {
+        if requests.len() != 1 || batch.instructions.len() != 1 {
+            self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
+            return Err(CoreError::MixedEditingGeometryInput);
+        }
+        let (node_id, start, end) = requests[0];
+        let node = NodeId::from_raw(node_id)?;
+        if let Err(error) = self.editing.validate_character_range(node, start, end) {
+            self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
+            return Err(error);
+        }
+        self.requested_character_range = Some((node, [start, end]));
+        self.last_input_sequence = Some(batch.frame_seq);
+        self.metrics.accepted_input_batches = self.metrics.accepted_input_batches.saturating_add(1);
+        Ok(None)
+    }
+
+    /// Applies one isolated hit-tested event batch against candidate state.
+    fn input_events(
+        &mut self,
+        frame_seq: u32,
+        event_commands: &[EventCommand],
+    ) -> Result<Option<FrameOutput>, CoreError> {
+        let mut candidate_scene = self.scene.clone();
+        let mut candidate_scroll = self.scroll.clone();
+        let mut candidate_gesture = self.pointer_gesture;
+        let mut scroll_changed = false;
+        let mut records = Vec::with_capacity(event_commands.len());
+        for command in event_commands {
+            let hit = self.hit.hit(
+                &self.scene,
+                HitPoint {
+                    x: command.position[0],
+                    y: command.position[1],
+                },
+            );
+            let hit_scroll_node = hit.as_ref().and_then(|hit| {
+                hit.path
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|node| self.scene.kind(*node) == Some(NodeKind::Scroll))
+            });
+            scroll_changed |= apply_event_scroll(
+                &mut candidate_scene,
+                &mut candidate_scroll,
+                &mut candidate_gesture,
+                command,
+                hit_scroll_node,
+            )?;
+            let Some(hit) = hit else {
+                continue;
+            };
+            records.push(EventTransactionRecord {
+                event_id: command.event_id,
+                kind: command.kind,
+                target: hit.target.raw(),
+                position: command.position,
+                delta: command.delta,
+                buttons: command.buttons,
+                modifiers: command.modifiers,
+                pointer_id: command.pointer_id,
+                elapsed_micros: command.elapsed_micros,
+                path: hit.path.into_iter().map(NodeId::raw).collect(),
+            });
+        }
+        let encoded_events = if records.is_empty() {
+            Vec::new()
+        } else {
+            EventTransactionBatch { records }
+                .encode()
+                .map_err(CoreError::EventTransactions)?
+        };
+        if let Err(error) = candidate_scroll.plan_virtual_frames() {
+            return self.poison(error);
+        }
+        self.scene = candidate_scene;
+        self.scroll = candidate_scroll;
+        self.pointer_gesture = candidate_gesture;
+        self.last_input_sequence = Some(frame_seq);
+        self.metrics.accepted_input_batches = self.metrics.accepted_input_batches.saturating_add(1);
+        let output = if scroll_changed {
+            let frame_seq = self
+                .last_frame_seq
+                .ok_or(CoreError::MissingCommittedFrame)?;
+            Some(self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, false)?)
+        } else {
+            None
+        };
+        self.pending_events = encoded_events;
+        Ok(output)
+    }
+
+    /// Applies a mixed scroll/edit command batch transactionally.
+    fn input_scroll_and_edit(
+        &mut self,
+        batch: &InputBatch,
+    ) -> Result<Option<FrameOutput>, CoreError> {
         let scroll_instructions = batch
             .instructions
             .iter()
@@ -449,7 +688,7 @@ impl CoreEngine {
         let mut candidate_scroll = self.scroll.clone();
         let mut candidate_editing = self.editing.clone();
         let scroll_outcome = if scroll_instructions.is_empty() {
-            Default::default()
+            ScrollAdvance::default()
         } else {
             let scroll_batch = InputBatch {
                 frame_seq: batch.frame_seq,
@@ -481,6 +720,7 @@ impl CoreEngine {
         self.scroll = candidate_scroll;
         self.editing = candidate_editing;
         if edit_outcome.accepted_commands > 0 {
+            self.requested_character_range = None;
             self.caret_elapsed_seconds = 0.0;
             self.caret_visible = true;
         }
@@ -499,11 +739,16 @@ impl CoreEngine {
                 self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, false)?;
             return Ok(Some(output));
         }
+        let output = self.repaint_after_edit(&edit_outcome.changed_nodes)?;
+        Ok(Some(output))
+    }
+
+    /// Relays out and repaints after accepted editing commands changed text.
+    fn repaint_after_edit(&mut self, changed_nodes: &[NodeId]) -> Result<FrameOutput, CoreError> {
         let frame_seq = self
             .last_frame_seq
             .ok_or(CoreError::MissingCommittedFrame)?;
-        self.layout
-            .mark_text_measurements_changed(&edit_outcome.changed_nodes);
+        self.layout.mark_text_measurements_changed(changed_nodes);
         self.text.begin_frame();
         let mut geometry = match self.layout.layout_with_virtual(
             &self.scene,
@@ -550,7 +795,7 @@ impl CoreEngine {
         if let Err(error) = self.text.commit_frame() {
             return self.poison(CoreError::GlyphResources(error));
         }
-        Ok(Some(output))
+        Ok(output)
     }
 
     /// Advances Core-owned animation from an injectable Worker clock delta.
@@ -727,6 +972,97 @@ impl CoreEngine {
         Ok(bytes)
     }
 
+    /// Drains hit-tested event paths produced by the latest isolated event batch.
+    ///
+    /// # Errors
+    ///
+    /// Never fails today; the `Result` keeps the drain contract uniform across
+    /// the reverse streams so callers do not special-case this one.
+    pub fn take_event_transactions(&mut self) -> Result<Vec<u8>, CoreError> {
+        Ok(std::mem::take(&mut self.pending_events))
+    }
+
+    /// Returns the latest synchronous browser-default suppression regions.
+    #[must_use]
+    pub fn non_passive_regions(&self) -> Vec<u32> {
+        const WHEEL_AND_TOUCH_FLAGS: u32 = 3;
+        let regions = self
+            .hit
+            .geometries()
+            .filter(|(node, geometry)| {
+                self.scene.kind(*node) == Some(NodeKind::Scroll)
+                    && geometry.aabb.right > geometry.aabb.left
+                    && geometry.aabb.bottom > geometry.aabb.top
+            })
+            .map(|(_, geometry)| geometry.aabb)
+            .collect::<Vec<_>>();
+        let mut words = Vec::with_capacity(2_usize.saturating_add(regions.len().saturating_mul(5)));
+        words.push(NON_PASSIVE_REGION_VERSION);
+        words.push(u32::try_from(regions.len()).unwrap_or(u32::MAX));
+        for region in regions {
+            words.extend_from_slice(&[
+                WHEEL_AND_TOUCH_FLAGS,
+                region.left.to_bits(),
+                region.top.to_bits(),
+                region.right.to_bits(),
+                region.bottom.to_bits(),
+            ]);
+        }
+        words
+    }
+
+    /// Returns the latest active editor, selection, and requested character geometry.
+    #[must_use]
+    pub fn editing_geometry(&self) -> Vec<u32> {
+        let Some(visual) = self.editing.active_visual() else {
+            return empty_editing_geometry();
+        };
+        let Some(geometry) = self.hit.geometry(visual.node) else {
+            return empty_editing_geometry();
+        };
+        let Some(carets) = self.text.editor_caret_stops(&self.scene, visual.node) else {
+            return empty_editing_geometry();
+        };
+        let selection = [
+            visual.selection[0].min(visual.selection[1]),
+            visual.selection[0].max(visual.selection[1]),
+        ];
+        let control = geometry.aabb;
+        let selection_rect = editor_range_rect(&carets, selection, geometry).unwrap_or(WorldRect {
+            left: control.left,
+            top: control.top,
+            right: control.left,
+            bottom: control.top,
+        });
+        let requested = self
+            .requested_character_range
+            .filter(|(node, _)| *node == visual.node)
+            .map_or([0, 0], |(_, range)| range);
+        let characters = editor_character_rects(&carets, requested, geometry);
+        let capacity = EDITING_GEOMETRY_HEADER_WORDS
+            .saturating_add(EDITING_GEOMETRY_RECT_WORDS.saturating_mul(2))
+            .saturating_add(
+                characters
+                    .len()
+                    .saturating_mul(EDITING_GEOMETRY_CHARACTER_WORDS),
+            );
+        let mut words = Vec::with_capacity(capacity);
+        words.extend_from_slice(&[
+            EDITING_GEOMETRY_VERSION,
+            visual.node.raw(),
+            selection[0],
+            selection[1],
+            u32::try_from(characters.len()).unwrap_or(u32::MAX),
+        ]);
+        append_geometry_rect(&mut words, control);
+        append_geometry_rect(&mut words, selection_rect);
+        for (range, rect) in characters {
+            words.extend_from_slice(&[range[0], range[1]]);
+            append_geometry_rect(&mut words, rect);
+        }
+        words
+    }
+
     /// Drains coalesced virtual-list refill requests produced by accepted frames.
     ///
     /// Requests are emitted after rendering and never invoke Shell code from the
@@ -742,6 +1078,9 @@ impl CoreEngine {
         layout_visited_nodes: usize,
         force_full_paint: bool,
     ) -> Result<FrameOutput, CoreError> {
+        if let Err(error) = self.hit.update(&self.scene, self.layout.snapshot()) {
+            return self.poison(CoreError::Hit(error));
+        }
         self.text.update_editor_decorations(
             &self.scene,
             self.editing.active_visual(),
@@ -847,6 +1186,40 @@ impl CoreEngine {
         Ok(())
     }
 
+    /// Decodes an optional system-text metric stream, counting rejections.
+    fn decode_metric_batch(
+        &mut self,
+        system_text_metrics: Option<&[u8]>,
+    ) -> Result<Option<SystemTextMetricBatch>, CoreError> {
+        match system_text_metrics {
+            Some(bytes) => match SystemTextMetricBatch::decode(bytes) {
+                Ok(batch) => Ok(Some(batch)),
+                Err(error) => {
+                    self.metrics.abi_rejections = self.metrics.abi_rejections.saturating_add(1);
+                    Err(CoreError::Abi(error))
+                }
+            },
+            None => Ok(None),
+        }
+    }
+
+    /// Rejects new forward work while any reverse stream awaits draining.
+    fn ensure_reverse_streams_drained(&self) -> Result<(), CoreError> {
+        if self.poisoned {
+            return Err(CoreError::Poisoned);
+        }
+        if self.text.has_pending_resources() {
+            return Err(CoreError::GlyphResourcesNotDrained);
+        }
+        if self.editing.has_pending_transactions() {
+            return Err(CoreError::EditTransactionsNotDrained);
+        }
+        if !self.pending_events.is_empty() {
+            return Err(CoreError::EventTransactionsNotDrained);
+        }
+        Ok(())
+    }
+
     fn poison<T>(&mut self, error: CoreError) -> Result<T, CoreError> {
         self.poisoned = true;
         self.metrics.fatal_derivation_failures += 1;
@@ -902,6 +1275,153 @@ fn system_text_nodes(scene: &Scene, pairs: &[(u32, u32)]) -> Vec<doper_scene::No
         .collect()
 }
 
+fn empty_editing_geometry() -> Vec<u32> {
+    let mut words =
+        Vec::with_capacity(EDITING_GEOMETRY_HEADER_WORDS + EDITING_GEOMETRY_RECT_WORDS * 2);
+    words.extend_from_slice(&[EDITING_GEOMETRY_VERSION, NULL_NODE_ID, 0, 0, 0]);
+    words.extend_from_slice(&[0; EDITING_GEOMETRY_RECT_WORDS * 2]);
+    words
+}
+
+fn append_geometry_rect(words: &mut Vec<u32>, rect: WorldRect) {
+    words.extend_from_slice(&[
+        rect.left.to_bits(),
+        rect.top.to_bits(),
+        (rect.right - rect.left).max(0.0).to_bits(),
+        (rect.bottom - rect.top).max(0.0).to_bits(),
+    ]);
+}
+
+fn editor_range_rect(
+    carets: &[doper_text::CaretStop],
+    range: [u32; 2],
+    geometry: WorldGeometry,
+) -> Option<WorldRect> {
+    let first = closest_editor_caret(carets, range[0])?;
+    let last = closest_editor_caret(carets, range[1])?;
+    if range[0] == range[1] {
+        return Some(transform_local_rect(
+            geometry,
+            [first.x, first.y, 1.5, first.height],
+        ));
+    }
+    let mut result = None;
+    for line in first.line.min(last.line)..=first.line.max(last.line) {
+        let line_carets = carets
+            .iter()
+            .filter(|caret| caret.line == line)
+            .collect::<Vec<_>>();
+        let Some(sample) = line_carets.first() else {
+            continue;
+        };
+        let minimum_x = line_carets
+            .iter()
+            .map(|caret| caret.x)
+            .fold(f32::INFINITY, f32::min);
+        let maximum_x = line_carets
+            .iter()
+            .map(|caret| caret.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let edge_a = if line == first.line {
+            first.x
+        } else {
+            minimum_x
+        };
+        let edge_b = if line == last.line { last.x } else { maximum_x };
+        let local = [
+            edge_a.min(edge_b),
+            sample.y,
+            (edge_b - edge_a).abs().max(1.5),
+            sample.height,
+        ];
+        let world = transform_local_rect(geometry, local);
+        result = Some(result.map_or(world, |current: WorldRect| WorldRect {
+            left: current.left.min(world.left),
+            top: current.top.min(world.top),
+            right: current.right.max(world.right),
+            bottom: current.bottom.max(world.bottom),
+        }));
+    }
+    result
+}
+
+fn editor_character_rects(
+    carets: &[doper_text::CaretStop],
+    requested: [u32; 2],
+    geometry: WorldGeometry,
+) -> Vec<([u32; 2], WorldRect)> {
+    if requested[0] >= requested[1] {
+        return Vec::new();
+    }
+    let mut result = Vec::new();
+    for pair in carets.windows(2) {
+        let start = pair[0].utf16_offset.min(pair[1].utf16_offset);
+        let end = pair[0].utf16_offset.max(pair[1].utf16_offset);
+        if start == end || end <= requested[0] || start >= requested[1] {
+            continue;
+        }
+        let local = if pair[0].line == pair[1].line {
+            [
+                pair[0].x.min(pair[1].x),
+                pair[0].y.min(pair[1].y),
+                (pair[1].x - pair[0].x).abs().max(1.5),
+                pair[0].height.max(pair[1].height),
+            ]
+        } else {
+            [pair[0].x, pair[0].y, 1.5, pair[0].height]
+        };
+        result.push(([start, end], transform_local_rect(geometry, local)));
+    }
+    result
+}
+
+fn closest_editor_caret(
+    carets: &[doper_text::CaretStop],
+    offset: u32,
+) -> Option<doper_text::CaretStop> {
+    carets
+        .iter()
+        .copied()
+        .min_by_key(|caret| (i64::from(caret.utf16_offset) - i64::from(offset)).unsigned_abs())
+}
+
+fn transform_local_rect(geometry: WorldGeometry, rect: [f32; 4]) -> WorldRect {
+    let [left, top, width, height] = rect;
+    let points = [
+        geometry.transform_point(HitPoint { x: left, y: top }),
+        geometry.transform_point(HitPoint {
+            x: left + width,
+            y: top,
+        }),
+        geometry.transform_point(HitPoint {
+            x: left,
+            y: top + height,
+        }),
+        geometry.transform_point(HitPoint {
+            x: left + width,
+            y: top + height,
+        }),
+    ];
+    WorldRect {
+        left: points
+            .iter()
+            .map(|point| point.x)
+            .fold(f32::INFINITY, f32::min),
+        top: points
+            .iter()
+            .map(|point| point.y)
+            .fold(f32::INFINITY, f32::min),
+        right: points
+            .iter()
+            .map(|point| point.x)
+            .fold(f32::NEG_INFINITY, f32::max),
+        bottom: points
+            .iter()
+            .map(|point| point.y)
+            .fold(f32::NEG_INFINITY, f32::max),
+    }
+}
+
 fn count_word(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
@@ -923,13 +1443,18 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use doper_abi::{
-        DisplayCommand, DisplayList, EditTransactionBatch, GlyphResourceBatch,
-        GlyphResourceCommand, InputBatch, InputCommand, InputInstruction, Mutation, MutationBatch,
-        MutationInstruction, NULL_NODE_ID, NodeKind, Prop, RESOURCE_ENCODING_VERSION, ReplayRecord,
-        ReplayRecording, ResourceKind, SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET,
-        SFNT_FONT_FACE_INDEX_OFFSET, SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET,
-        SFNT_FONT_VERSION_OFFSET, SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand,
-        SystemTextMetricInstruction,
+        DisplayCommand, DisplayList, EditTransactionBatch, EventTransactionBatch,
+        GlyphResourceBatch, GlyphResourceCommand, InputBatch, InputCommand, InputEventKind,
+        InputInstruction, Mutation, MutationBatch, MutationInstruction,
+        NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX, NON_PASSIVE_REGION_HEADER_VERSION_INDEX,
+        NON_PASSIVE_REGION_HEADER_WORDS, NON_PASSIVE_REGION_RECORD_BOTTOM_BITS_INDEX,
+        NON_PASSIVE_REGION_RECORD_FLAGS_INDEX, NON_PASSIVE_REGION_RECORD_LEFT_BITS_INDEX,
+        NON_PASSIVE_REGION_RECORD_RIGHT_BITS_INDEX, NON_PASSIVE_REGION_RECORD_TOP_BITS_INDEX,
+        NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind, Prop, RESOURCE_ENCODING_VERSION,
+        ReplayRecord, ReplayRecording, ResourceKind, SFNT_FONT_DATA_BYTES_OFFSET,
+        SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET, SFNT_FONT_RESOURCE_VARIANT,
+        SFNT_FONT_VARIANT_OFFSET, SFNT_FONT_VERSION_OFFSET, SystemTextMetric,
+        SystemTextMetricBatch, SystemTextMetricCommand, SystemTextMetricInstruction,
     };
     use doper_edit::{EditConfig, EditSession, Selection};
     use doper_headless::HeadlessRenderer;
@@ -1374,6 +1899,209 @@ mod tests {
             .expect("headless pixels");
         let filled = (10 * 100 + 10) * 4;
         assert_eq!(&image.pixels()[filled..filled + 4], &[12, 34, 56, 255]);
+    }
+
+    #[test]
+    fn hit_tests_events_and_gates_later_work_until_the_path_is_drained() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&painted_tree()).expect("frame");
+
+        assert_eq!(
+            engine
+                .input(&input(
+                    1,
+                    vec![InputCommand::DispatchEvent {
+                        event_id: 41,
+                        kind: InputEventKind::PointerDown,
+                        position: [12.0, 8.0],
+                        delta: [0.0, 0.0],
+                        buttons: 1,
+                        modifiers: 4,
+                        pointer_id: 1,
+                        elapsed_micros: 16_667,
+                    }],
+                ))
+                .expect("event"),
+            None
+        );
+        assert_eq!(
+            engine.input(&input(2, Vec::new())),
+            Err(CoreError::EventTransactionsNotDrained)
+        );
+
+        let events = EventTransactionBatch::decode(
+            &engine.take_event_transactions().expect("reverse events"),
+        )
+        .expect("decode reverse events");
+        assert_eq!(events.records.len(), 1);
+        assert_eq!(events.records[0].event_id, 41);
+        assert_eq!(events.records[0].target, id(1));
+        assert_eq!(events.records[0].path, vec![id(0), id(1)]);
+        assert!(engine.take_event_transactions().expect("empty").is_empty());
+        assert_eq!(
+            engine.input(&input(2, Vec::new())).expect("next input"),
+            None
+        );
+    }
+
+    #[test]
+    fn event_misses_do_not_create_backpressure_and_mixed_batches_are_atomic() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&painted_tree()).expect("frame");
+        assert_eq!(
+            engine
+                .input(&input(
+                    1,
+                    vec![InputCommand::DispatchEvent {
+                        event_id: 1,
+                        kind: InputEventKind::Click,
+                        position: [200.0, 200.0],
+                        delta: [0.0, 0.0],
+                        buttons: 0,
+                        modifiers: 0,
+                        pointer_id: 0,
+                        elapsed_micros: 16_667,
+                    }],
+                ))
+                .expect("miss"),
+            None
+        );
+        assert!(engine.take_event_transactions().expect("empty").is_empty());
+
+        let mixed = input(
+            2,
+            vec![
+                InputCommand::DispatchEvent {
+                    event_id: 2,
+                    kind: InputEventKind::Wheel,
+                    position: [1.0, 1.0],
+                    delta: [0.0, 10.0],
+                    buttons: 0,
+                    modifiers: 0,
+                    pointer_id: 0,
+                    elapsed_micros: 16_667,
+                },
+                InputCommand::FocusEditable { node_id: id(1) },
+            ],
+        );
+        assert_eq!(engine.input(&mixed), Err(CoreError::MixedEventInput));
+        assert!(engine.take_event_transactions().expect("empty").is_empty());
+        assert_eq!(
+            engine
+                .input(&input(2, Vec::new()))
+                .expect("sequence retained"),
+            None
+        );
+    }
+
+    #[test]
+    fn publishes_scroll_bounds_for_synchronous_browser_default_suppression() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&scroll_tree()).expect("frame");
+        let words = engine.non_passive_regions();
+        assert_eq!(
+            words[NON_PASSIVE_REGION_HEADER_VERSION_INDEX],
+            NON_PASSIVE_REGION_VERSION
+        );
+        assert_eq!(words[NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX], 1);
+        let record = NON_PASSIVE_REGION_HEADER_WORDS;
+        assert_eq!(words[record + NON_PASSIVE_REGION_RECORD_FLAGS_INDEX], 3);
+        assert_eq!(
+            words[record + NON_PASSIVE_REGION_RECORD_LEFT_BITS_INDEX],
+            0.0f32.to_bits()
+        );
+        assert_eq!(
+            words[record + NON_PASSIVE_REGION_RECORD_TOP_BITS_INDEX],
+            0.0f32.to_bits()
+        );
+        assert_eq!(
+            words[record + NON_PASSIVE_REGION_RECORD_RIGHT_BITS_INDEX],
+            100.0f32.to_bits()
+        );
+        assert_eq!(
+            words[record + NON_PASSIVE_REGION_RECORD_BOTTOM_BITS_INDEX],
+            100.0f32.to_bits()
+        );
+    }
+
+    #[test]
+    fn wheel_events_scroll_the_nearest_hit_ancestor_before_returning_the_path() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&scroll_tree()).expect("frame");
+        let output = engine
+            .input(&input(
+                1,
+                vec![InputCommand::DispatchEvent {
+                    event_id: 3,
+                    kind: InputEventKind::Wheel,
+                    position: [20.0, 20.0],
+                    delta: [0.0, 30.0],
+                    buttons: 0,
+                    modifiers: 0,
+                    pointer_id: 0,
+                    elapsed_micros: 16_667,
+                }],
+            ))
+            .expect("wheel event");
+        assert!(output.is_some());
+        assert_eq!(
+            engine
+                .scene()
+                .scroll_position(NodeId::from_raw(id(1)).expect("scroll")),
+            Some([0.0, 30.0])
+        );
+        let events =
+            EventTransactionBatch::decode(&engine.take_event_transactions().expect("events"))
+                .expect("decode");
+        assert_eq!(events.records[0].path, vec![id(0), id(1), id(2)]);
+    }
+
+    #[test]
+    fn pointer_dragging_continues_outside_the_hit_region_and_ends_deterministically() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&scroll_tree()).expect("frame");
+        let pointer = |kind, position, buttons| InputCommand::DispatchEvent {
+            event_id: 10,
+            kind,
+            position,
+            delta: [0.0, 0.0],
+            buttons,
+            modifiers: 0,
+            pointer_id: 7,
+            elapsed_micros: 16_667,
+        };
+        assert_eq!(
+            engine
+                .input(&input(
+                    1,
+                    vec![pointer(InputEventKind::PointerDown, [20.0, 60.0], 1)],
+                ))
+                .expect("down"),
+            None
+        );
+        engine.take_event_transactions().expect("down event");
+        assert!(
+            engine
+                .input(&input(
+                    2,
+                    vec![pointer(InputEventKind::PointerMove, [20.0, -20.0], 1)],
+                ))
+                .expect("move")
+                .is_some()
+        );
+        engine.take_event_transactions().expect("move event");
+        engine
+            .input(&input(
+                3,
+                vec![pointer(InputEventKind::PointerUp, [20.0, -20.0], 0)],
+            ))
+            .expect("up");
+        assert_eq!(
+            engine
+                .scene()
+                .scroll_position(NodeId::from_raw(id(1)).expect("scroll")),
+            Some([0.0, 80.0])
+        );
     }
 
     #[test]

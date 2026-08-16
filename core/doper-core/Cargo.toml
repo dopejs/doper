@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 doper-abi = { path = "../doper-abi" }
 doper-edit = { path = "../doper-edit" }
+doper-hit = { path = "../doper-hit" }
 doper-layout = { path = "../doper-layout" }
 doper-paint = { path = "../doper-paint" }
 doper-scene = { path = "../doper-scene" }

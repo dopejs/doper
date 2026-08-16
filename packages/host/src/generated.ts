@@ -173,10 +173,12 @@ export enum InputOpcode {
   Redo = 11,
   FocusEditable = 12,
   BlurEditable = 13,
+  RequestCharacterBounds = 14,
   ScrollBegin = 32,
   ScrollDelta = 33,
   ScrollEnd = 34,
   ScrollCancel = 35,
+  DispatchEvent = 48,
   Commit = 240,
 }
 
@@ -194,10 +196,12 @@ export const INPUT_LAYOUTS = {
   [InputOpcode.Redo]: { fixedBytes: 16, minimumBytes: 16 },
   [InputOpcode.FocusEditable]: { fixedBytes: 8, minimumBytes: 8 },
   [InputOpcode.BlurEditable]: { fixedBytes: 8, minimumBytes: 8 },
+  [InputOpcode.RequestCharacterBounds]: { fixedBytes: 16, minimumBytes: 16 },
   [InputOpcode.ScrollBegin]: { fixedBytes: 8, minimumBytes: 8 },
   [InputOpcode.ScrollDelta]: { fixedBytes: 20, minimumBytes: 20 },
   [InputOpcode.ScrollEnd]: { fixedBytes: 8, minimumBytes: 8 },
   [InputOpcode.ScrollCancel]: { fixedBytes: 8, minimumBytes: 8 },
+  [InputOpcode.DispatchEvent]: { fixedBytes: 44, minimumBytes: 44 },
   [InputOpcode.Commit]: { fixedBytes: 8, minimumBytes: 8 },
 } as const;
 
@@ -409,6 +413,35 @@ export const PROP_METADATA = {
     invalidation: 16,
   },
 } as const;
+export const NON_PASSIVE_REGION_VERSION = 1 as const;
+export const NON_PASSIVE_REGION_HEADER_WORDS = 2 as const;
+export const NON_PASSIVE_REGION_RECORD_WORDS = 5 as const;
+export const NON_PASSIVE_REGION_HEADER_VERSION_INDEX = 0 as const;
+export const NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX = 1 as const;
+export const NON_PASSIVE_REGION_RECORD_FLAGS_INDEX = 0 as const;
+export const NON_PASSIVE_REGION_RECORD_LEFT_BITS_INDEX = 1 as const;
+export const NON_PASSIVE_REGION_RECORD_TOP_BITS_INDEX = 2 as const;
+export const NON_PASSIVE_REGION_RECORD_RIGHT_BITS_INDEX = 3 as const;
+export const NON_PASSIVE_REGION_RECORD_BOTTOM_BITS_INDEX = 4 as const;
+export const EDITING_GEOMETRY_VERSION = 1 as const;
+export const EDITING_GEOMETRY_HEADER_WORDS = 5 as const;
+export const EDITING_GEOMETRY_RECT_WORDS = 4 as const;
+export const EDITING_GEOMETRY_CHARACTER_WORDS = 6 as const;
+export const EDITING_GEOMETRY_HEADER_VERSION_INDEX = 0 as const;
+export const EDITING_GEOMETRY_HEADER_NODE_ID_INDEX = 1 as const;
+export const EDITING_GEOMETRY_HEADER_SELECTION_START_INDEX = 2 as const;
+export const EDITING_GEOMETRY_HEADER_SELECTION_END_INDEX = 3 as const;
+export const EDITING_GEOMETRY_HEADER_CHARACTER_COUNT_INDEX = 4 as const;
+export const EDITING_GEOMETRY_RECT_LEFT_BITS_INDEX = 0 as const;
+export const EDITING_GEOMETRY_RECT_TOP_BITS_INDEX = 1 as const;
+export const EDITING_GEOMETRY_RECT_WIDTH_BITS_INDEX = 2 as const;
+export const EDITING_GEOMETRY_RECT_HEIGHT_BITS_INDEX = 3 as const;
+export const EDITING_GEOMETRY_CHARACTER_START_INDEX = 0 as const;
+export const EDITING_GEOMETRY_CHARACTER_END_INDEX = 1 as const;
+export const EDITING_GEOMETRY_CHARACTER_LEFT_BITS_INDEX = 2 as const;
+export const EDITING_GEOMETRY_CHARACTER_TOP_BITS_INDEX = 3 as const;
+export const EDITING_GEOMETRY_CHARACTER_WIDTH_BITS_INDEX = 4 as const;
+export const EDITING_GEOMETRY_CHARACTER_HEIGHT_BITS_INDEX = 5 as const;
 export const EDIT_TRANSACTIONS_MAGIC = 1162891076 as const;
 export const MAX_EDIT_TRANSACTIONS_BYTES = 16777216 as const;
 export const MAX_EDIT_TRANSACTION_INSTRUCTIONS = 262144 as const;
@@ -418,4 +451,15 @@ export enum EditTransactionOpcode {
 
 export const EDIT_TRANSACTION_LAYOUTS = {
   [EditTransactionOpcode.Transaction]: { fixedBytes: null, minimumBytes: 56 },
+} as const;
+
+export const EVENT_TRANSACTIONS_MAGIC = 1448103748 as const;
+export const MAX_EVENT_TRANSACTIONS_BYTES = 16777216 as const;
+export const MAX_EVENT_TRANSACTION_INSTRUCTIONS = 262144 as const;
+export enum EventTransactionOpcode {
+  Event = 1,
+}
+
+export const EVENT_TRANSACTION_LAYOUTS = {
+  [EventTransactionOpcode.Event]: { fixedBytes: null, minimumBytes: 52 },
 } as const;

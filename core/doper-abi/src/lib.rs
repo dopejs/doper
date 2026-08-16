@@ -11,6 +11,7 @@ mod codec;
 mod display_list;
 mod edit_transactions;
 mod error;
+mod event_transactions;
 mod glyph_resources;
 mod input;
 mod mutation;
@@ -24,12 +25,14 @@ pub use edit_transactions::{
     EditTransactionBatch, EditTransactionKind, EditTransactionRecord, WireAffinity, WireRange,
 };
 pub use error::{AbiError, StreamKind};
+pub use event_transactions::{EventTransactionBatch, EventTransactionRecord};
 pub use glyph_resources::{
     GlyphBitmapResource, GlyphPlacementResource, GlyphResourceBatch, GlyphResourceCommand,
     GlyphResourceInstruction, GlyphSpanResource,
 };
 pub use input::{
-    InputAffinity, InputBatch, InputCommand, InputInstruction, InputPosition, InputSelection,
+    InputAffinity, InputBatch, InputCommand, InputEventKind, InputInstruction, InputPosition,
+    InputSelection,
 };
 pub use mutation::{Mutation, MutationBatch, MutationInstruction};
 pub use recording::{ReplayRecord, ReplayRecording};

@@ -17,7 +17,12 @@ import {
   type ResourceKind,
   type RootOptions,
 } from "@dopejs/doper-reconciler";
-import { decodeEditTransactionBatch, type EditTransaction } from "@dopejs/doper-editing";
+import {
+  decodeEditTransactionBatch,
+  decodeEventTransactionBatch,
+  type EditTransaction,
+  type EventTransaction,
+} from "@dopejs/doper-editing";
 
 import { encodeSystemTextMetricBatch } from "./system-text-metrics";
 
@@ -51,6 +56,16 @@ import {
   VIRTUAL_REFILL_RECORD_START_INDEX,
   VIRTUAL_REFILL_RECORD_WORDS,
   VIRTUAL_REFILL_VERSION,
+  NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX,
+  NON_PASSIVE_REGION_HEADER_VERSION_INDEX,
+  NON_PASSIVE_REGION_HEADER_WORDS,
+  NON_PASSIVE_REGION_RECORD_BOTTOM_BITS_INDEX,
+  NON_PASSIVE_REGION_RECORD_FLAGS_INDEX,
+  NON_PASSIVE_REGION_RECORD_LEFT_BITS_INDEX,
+  NON_PASSIVE_REGION_RECORD_RIGHT_BITS_INDEX,
+  NON_PASSIVE_REGION_RECORD_TOP_BITS_INDEX,
+  NON_PASSIVE_REGION_RECORD_WORDS,
+  NON_PASSIVE_REGION_VERSION,
 } from "./generated";
 
 /** Minimal binding implemented by the generated WASM Core wrapper. */
@@ -66,6 +81,8 @@ export interface CoreClient {
   is_poisoned?(): boolean;
   take_glyph_resources?(): Uint8Array;
   take_edit_transactions?(): Uint8Array;
+  take_event_transactions?(): Uint8Array;
+  non_passive_regions?(): Uint32Array;
   take_virtual_refills?(): Uint32Array;
 }
 
@@ -74,6 +91,15 @@ export interface VirtualRefillRange {
   readonly end: number;
   readonly nodeId: number;
   readonly start: number;
+}
+
+/** World-space region whose browser default must be decided synchronously. */
+export interface NonPassiveRegion {
+  readonly bottom: number;
+  readonly flags: number;
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
 }
 
 /** Deterministic Core phase-work and invalidation diagnostics. */
@@ -113,6 +139,8 @@ export interface FrameReport extends ReplayStats {
 export interface CanvasRootOptions extends RootOptions {
   readonly onFrame?: (report: FrameReport) => void;
   readonly onEditTransaction?: (transaction: EditTransaction) => void;
+  readonly onEventTransaction?: (transaction: EventTransaction) => void;
+  readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
 }
 
 type ResourceAction =
@@ -143,6 +171,8 @@ export class CanvasFrameSink implements MutationSink {
   readonly #rasterCache: RasterTileCache<ReplayStats> | undefined;
   readonly #onAsyncError: ((error: Error) => void) | undefined;
   readonly #onEditTransaction: ((transaction: EditTransaction) => void) | undefined;
+  readonly #onEventTransaction: ((transaction: EventTransaction) => void) | undefined;
+  readonly #onNonPassiveRegions: ((regions: readonly NonPassiveRegion[]) => void) | undefined;
   readonly #fontSet: FontFaceSet | undefined;
   readonly #fontLoadingDone: (() => void) | undefined;
   #devicePixelRatio = 1;
@@ -158,6 +188,8 @@ export class CanvasFrameSink implements MutationSink {
     onVirtualRefills?: (requests: readonly VirtualRefillRange[]) => void,
     onAsyncError?: (error: Error) => void,
     onEditTransaction?: (transaction: EditTransaction) => void,
+    onEventTransaction?: (transaction: EventTransaction) => void,
+    onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void,
   ) {
     this.#context = context;
     this.#core = core;
@@ -166,6 +198,8 @@ export class CanvasFrameSink implements MutationSink {
     this.#onVirtualRefills = onVirtualRefills;
     this.#onAsyncError = onAsyncError;
     this.#onEditTransaction = onEditTransaction;
+    this.#onEventTransaction = onEventTransaction;
+    this.#onNonPassiveRegions = onNonPassiveRegions;
     this.#resources = new Canvas2DResourceRegistry();
     this.#replayer = new Canvas2DReplayer();
     this.#fontSet = runtimeFontSet();
@@ -204,6 +238,7 @@ export class CanvasFrameSink implements MutationSink {
           ]);
     const displayList = this.#core.commit(bytes, metricBytes);
     this.emitVirtualRefills();
+    this.emitNonPassiveRegions();
     if (!(displayList instanceof Uint8Array)) {
       throw new TypeError("Core commit must return Uint8Array DisplayList bytes");
     }
@@ -251,6 +286,8 @@ export class CanvasFrameSink implements MutationSink {
     if (core.input === undefined) throw new Error("Core does not implement Input Stream dispatch");
     const displayList = core.input(bytes);
     this.emitVirtualRefills();
+    this.emitNonPassiveRegions();
+    this.emitEventTransactions(this.takeEventTransactions());
     if (displayList === undefined) {
       this.emitEditTransactions(this.takeEditTransactions());
       return null;
@@ -274,6 +311,7 @@ export class CanvasFrameSink implements MutationSink {
     if (core.advance === undefined) return this.replayLastFrame();
     const displayList = core.advance(elapsedSeconds);
     this.emitVirtualRefills();
+    this.emitNonPassiveRegions();
     if (displayList === undefined) return this.replayLastFrame();
     this.applyDynamicGlyphResources();
     return this.acceptDynamicFrame(displayList, {
@@ -509,6 +547,26 @@ export class CanvasFrameSink implements MutationSink {
   private emitEditTransactions(transactions: readonly EditTransaction[]): void {
     for (const transaction of transactions) this.#onEditTransaction?.(transaction);
   }
+
+  private takeEventTransactions(): readonly EventTransaction[] {
+    if (this.#core.take_event_transactions === undefined) return [];
+    const bytes = this.#core.take_event_transactions();
+    if (!(bytes instanceof Uint8Array)) {
+      throw new TypeError("Core event transactions must be Uint8Array bytes");
+    }
+    return bytes.byteLength === 0 ? [] : decodeEventTransactionBatch(bytes);
+  }
+
+  private emitEventTransactions(transactions: readonly EventTransaction[]): void {
+    for (const transaction of transactions) this.#onEventTransaction?.(transaction);
+  }
+
+  private emitNonPassiveRegions(): void {
+    const snapshot = this.#core.non_passive_regions?.();
+    if (snapshot === undefined) return;
+    const regions = parseNonPassiveRegions(snapshot);
+    this.#onNonPassiveRegions?.(regions);
+  }
 }
 
 /** Four-screen default budget; callers can replace it for device-specific policy. */
@@ -700,6 +758,40 @@ function parseVirtualRefills(words: Uint32Array): VirtualRefillRange[] {
   return requests;
 }
 
+function parseNonPassiveRegions(words: Uint32Array): NonPassiveRegion[] {
+  if (!(words instanceof Uint32Array) || words.length < NON_PASSIVE_REGION_HEADER_WORDS) {
+    throw new TypeError("Core non-passive regions must use the generated Uint32Array layout");
+  }
+  if (words[NON_PASSIVE_REGION_HEADER_VERSION_INDEX] !== NON_PASSIVE_REGION_VERSION) {
+    throw new Error("Core non-passive region version is incompatible with Host");
+  }
+  const count = requiredWord(words, NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX);
+  const expected = NON_PASSIVE_REGION_HEADER_WORDS + count * NON_PASSIVE_REGION_RECORD_WORDS;
+  if (!Number.isSafeInteger(expected) || words.length !== expected) {
+    throw new TypeError("Core non-passive region count does not match its payload");
+  }
+  const scratch = new DataView(new ArrayBuffer(4));
+  const float = (bits: number): number => {
+    scratch.setUint32(0, bits, true);
+    return scratch.getFloat32(0, true);
+  };
+  const regions: NonPassiveRegion[] = [];
+  for (let record = 0; record < count; record += 1) {
+    const offset = NON_PASSIVE_REGION_HEADER_WORDS + record * NON_PASSIVE_REGION_RECORD_WORDS;
+    const flags = requiredWord(words, offset + NON_PASSIVE_REGION_RECORD_FLAGS_INDEX);
+    const left = float(requiredWord(words, offset + NON_PASSIVE_REGION_RECORD_LEFT_BITS_INDEX));
+    const top = float(requiredWord(words, offset + NON_PASSIVE_REGION_RECORD_TOP_BITS_INDEX));
+    const right = float(requiredWord(words, offset + NON_PASSIVE_REGION_RECORD_RIGHT_BITS_INDEX));
+    const bottom = float(requiredWord(words, offset + NON_PASSIVE_REGION_RECORD_BOTTOM_BITS_INDEX));
+    if (flags === 0 || flags > 3) throw new RangeError("Core non-passive flags are invalid");
+    if (![left, top, right, bottom].every(Number.isFinite) || left >= right || top >= bottom) {
+      throw new RangeError("Core non-passive region bounds are invalid");
+    }
+    regions.push({ bottom, flags, left, right, top });
+  }
+  return regions;
+}
+
 /** Creates the deterministic main-thread M1 fallback rendering root. */
 export function createCanvasRoot(
   context: Canvas2DContext,
@@ -718,6 +810,11 @@ export function createCanvasRoot(
       coreRoot.current?.applyEditTransaction(transaction);
       options.onEditTransaction?.(transaction);
     },
+    (transaction) => {
+      coreRoot.current?.applyEventTransaction(transaction);
+      options.onEventTransaction?.(transaction);
+    },
+    options.onNonPassiveRegions,
   );
   const root = createRoot(sink, options);
   coreRoot.current = root;

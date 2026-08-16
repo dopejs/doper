@@ -1,0 +1,15 @@
+[package]
+name = "doper-hit"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+doper-abi = { path = "../doper-abi" }
+doper-layout = { path = "../doper-layout" }
+doper-scene = { path = "../doper-scene" }
+
+[dev-dependencies]
+proptest = "1.6"

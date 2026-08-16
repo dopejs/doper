@@ -113,6 +113,21 @@ impl WasmCore {
         self.inner.take_edit_transactions().map_err(js_error)
     }
 
+    /// Drains Core-hit-tested event propagation paths.
+    pub fn take_event_transactions(&mut self) -> Result<Vec<u8>, JsValue> {
+        self.inner.take_event_transactions().map_err(js_error)
+    }
+
+    /// Returns latest non-passive browser-input region words.
+    pub fn non_passive_regions(&self) -> Vec<u32> {
+        self.inner.non_passive_regions()
+    }
+
+    /// Returns latest active editor and requested character geometry words.
+    pub fn editing_geometry(&self) -> Vec<u32> {
+        self.inner.editing_geometry()
+    }
+
     /// Applies logical viewport bounds to the next frame.
     pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<(), JsValue> {
         self.inner.set_viewport(width, height).map_err(js_error)

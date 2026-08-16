@@ -74,6 +74,7 @@ function validateSchema(value) {
     "glyphResourceInstructions",
     "systemTextMetricInstructions",
     "editTransactionInstructions",
+    "eventTransactionInstructions",
     "glyphBitmapPixels",
     "systemTextLines",
     "recordingRecords",
@@ -89,6 +90,7 @@ function validateSchema(value) {
   validateEntries(value.streams.glyphResources.commands, "glyph-resource opcode", 0xff);
   validateEntries(value.streams.systemTextMetrics.commands, "system-text-metric opcode", 0xff);
   validateEntries(value.streams.editTransactions.commands, "edit-transaction opcode", 0xff);
+  validateEntries(value.streams.eventTransactions.commands, "event-transaction opcode", 0xff);
   validateEntries(value.nodeKinds, "node kind", 0xffff);
   validateEntries(value.resourceKinds, "resource kind", 0xffff);
   validateEntries(value.props, "prop", 0xffff);
@@ -129,6 +131,46 @@ function validateSchema(value) {
     )
   ) {
     throw new Error("virtual refill batch must be a two-word header and three-word records");
+  }
+  if (
+    !Number.isInteger(value.nonPassiveRegionBatch.version) ||
+    value.nonPassiveRegionBatch.version < 1 ||
+    value.nonPassiveRegionBatch.version > 0xffff_ffff
+  ) {
+    throw new Error("non-passive region batch must declare a positive u32 encoding version");
+  }
+  validateNamedFields(value.nonPassiveRegionBatch.headerFields, "non-passive region header");
+  validateNamedFields(value.nonPassiveRegionBatch.recordFields, "non-passive region record");
+  if (
+    value.nonPassiveRegionBatch.headerFields.length !== 2 ||
+    value.nonPassiveRegionBatch.recordFields.length !== 5 ||
+    [...value.nonPassiveRegionBatch.headerFields, ...value.nonPassiveRegionBatch.recordFields].some(
+      (field) => field.type !== "u32",
+    )
+  ) {
+    throw new Error("non-passive region batch must be a two-word header and five-word records");
+  }
+  if (
+    !Number.isInteger(value.editingGeometryBatch.version) ||
+    value.editingGeometryBatch.version < 1 ||
+    value.editingGeometryBatch.version > 0xffff_ffff
+  ) {
+    throw new Error("editing geometry batch must declare a positive u32 encoding version");
+  }
+  validateNamedFields(value.editingGeometryBatch.headerFields, "editing geometry header");
+  validateNamedFields(value.editingGeometryBatch.rectFields, "editing geometry rect");
+  validateNamedFields(value.editingGeometryBatch.characterFields, "editing geometry character");
+  if (
+    value.editingGeometryBatch.headerFields.length !== 5 ||
+    value.editingGeometryBatch.rectFields.length !== 4 ||
+    value.editingGeometryBatch.characterFields.length !== 6 ||
+    [
+      ...value.editingGeometryBatch.headerFields,
+      ...value.editingGeometryBatch.rectFields,
+      ...value.editingGeometryBatch.characterFields,
+    ].some((field) => field.type !== "u32")
+  ) {
+    throw new Error("editing geometry batch has an invalid packed-u32 layout");
   }
 
   const domains = new Set(["layout", "paint", "paintSelf", "hit", "semantics"]);
@@ -179,6 +221,7 @@ function validateSchema(value) {
     ...value.streams.glyphResources.commands,
     ...value.streams.systemTextMetrics.commands,
     ...value.streams.editTransactions.commands,
+    ...value.streams.eventTransactions.commands,
   ]) {
     validateNamedFields(command.fields, command.name);
   }
@@ -285,10 +328,15 @@ function renderRustBase(value) {
 
 function renderRust(value) {
   const instructionHeaderBytes = wireSize(value.instructionHeader.map((field) => field.type));
-  return `${renderRustBase(value)}pub const EDIT_TRANSACTIONS_MAGIC: u32 = ${magicNumber(value.streams.editTransactions.magic)};
+  return `${renderRustBase(value)}${renderRustNonPassiveRegionLayout(value.nonPassiveRegionBatch)}
+${renderRustEditingGeometryLayout(value.editingGeometryBatch)}
+pub const EDIT_TRANSACTIONS_MAGIC: u32 = ${magicNumber(value.streams.editTransactions.magic)};
 pub const MAX_EDIT_TRANSACTIONS_BYTES: usize = ${value.streams.editTransactions.maxBytes};
 pub const MAX_EDIT_TRANSACTION_INSTRUCTIONS: u32 = ${value.limits.editTransactionInstructions};
-${renderRustEnum("EditTransactionOpcode", value.streams.editTransactions.commands, "u8", "opcode")}${renderRustLayouts("EditTransactionOpcode", value.streams.editTransactions.commands, instructionHeaderBytes)}`;
+${renderRustEnum("EditTransactionOpcode", value.streams.editTransactions.commands, "u8", "opcode")}${renderRustLayouts("EditTransactionOpcode", value.streams.editTransactions.commands, instructionHeaderBytes)}pub const EVENT_TRANSACTIONS_MAGIC: u32 = ${magicNumber(value.streams.eventTransactions.magic)};
+pub const MAX_EVENT_TRANSACTIONS_BYTES: usize = ${value.streams.eventTransactions.maxBytes};
+pub const MAX_EVENT_TRANSACTION_INSTRUCTIONS: u32 = ${value.limits.eventTransactionInstructions};
+${renderRustEnum("EventTransactionOpcode", value.streams.eventTransactions.commands, "u8", "opcode")}${renderRustLayouts("EventTransactionOpcode", value.streams.eventTransactions.commands, instructionHeaderBytes)}`;
 }
 
 function renderRustByteLayout(prefix, fields) {
@@ -316,6 +364,33 @@ function renderRustVirtualRefillLayout(layout) {
     )
     .join("\n");
   return `pub const VIRTUAL_REFILL_VERSION: u32 = ${layout.version};\npub const VIRTUAL_REFILL_HEADER_WORDS: usize = ${layout.headerFields.length};\npub const VIRTUAL_REFILL_RECORD_WORDS: usize = ${layout.recordFields.length};\n${header}\n${records}`;
+}
+
+function renderRustNonPassiveRegionLayout(layout) {
+  const header = layout.headerFields
+    .map(
+      (field, index) =>
+        `pub const NON_PASSIVE_REGION_HEADER_${screamingSnake(field.name)}_INDEX: usize = ${index};`,
+    )
+    .join("\n");
+  const records = layout.recordFields
+    .map(
+      (field, index) =>
+        `pub const NON_PASSIVE_REGION_RECORD_${screamingSnake(field.name)}_INDEX: usize = ${index};`,
+    )
+    .join("\n");
+  return `pub const NON_PASSIVE_REGION_VERSION: u32 = ${layout.version};\npub const NON_PASSIVE_REGION_HEADER_WORDS: usize = ${layout.headerFields.length};\npub const NON_PASSIVE_REGION_RECORD_WORDS: usize = ${layout.recordFields.length};\n${header}\n${records}`;
+}
+
+function renderRustEditingGeometryLayout(layout) {
+  const fields = (prefix, entries) =>
+    entries
+      .map(
+        (field, index) =>
+          `pub const EDITING_GEOMETRY_${prefix}_${screamingSnake(field.name)}_INDEX: usize = ${index};`,
+      )
+      .join("\n");
+  return `pub const EDITING_GEOMETRY_VERSION: u32 = ${layout.version};\npub const EDITING_GEOMETRY_HEADER_WORDS: usize = ${layout.headerFields.length};\npub const EDITING_GEOMETRY_RECT_WORDS: usize = ${layout.rectFields.length};\npub const EDITING_GEOMETRY_CHARACTER_WORDS: usize = ${layout.characterFields.length};\n${fields("HEADER", layout.headerFields)}\n${fields("RECT", layout.rectFields)}\n${fields("CHARACTER", layout.characterFields)}`;
 }
 
 function renderRustPackedU32Layout(prefix, layout) {
@@ -385,10 +460,15 @@ function renderTypeScriptBase(value) {
 
 function renderTypeScript(value) {
   const instructionHeaderBytes = wireSize(value.instructionHeader.map((field) => field.type));
-  return `${renderTypeScriptBase(value)}export const EDIT_TRANSACTIONS_MAGIC = ${magicNumber(value.streams.editTransactions.magic)} as const;
+  return `${renderTypeScriptBase(value)}${renderTsNonPassiveRegionLayout(value.nonPassiveRegionBatch)}
+${renderTsEditingGeometryLayout(value.editingGeometryBatch)}
+export const EDIT_TRANSACTIONS_MAGIC = ${magicNumber(value.streams.editTransactions.magic)} as const;
 export const MAX_EDIT_TRANSACTIONS_BYTES = ${value.streams.editTransactions.maxBytes} as const;
 export const MAX_EDIT_TRANSACTION_INSTRUCTIONS = ${value.limits.editTransactionInstructions} as const;
-${renderTsEnum("EditTransactionOpcode", value.streams.editTransactions.commands, "opcode")}${renderTsLayouts("EDIT_TRANSACTION_LAYOUTS", "EditTransactionOpcode", value.streams.editTransactions.commands, instructionHeaderBytes)}`;
+${renderTsEnum("EditTransactionOpcode", value.streams.editTransactions.commands, "opcode")}${renderTsLayouts("EDIT_TRANSACTION_LAYOUTS", "EditTransactionOpcode", value.streams.editTransactions.commands, instructionHeaderBytes)}export const EVENT_TRANSACTIONS_MAGIC = ${magicNumber(value.streams.eventTransactions.magic)} as const;
+export const MAX_EVENT_TRANSACTIONS_BYTES = ${value.streams.eventTransactions.maxBytes} as const;
+export const MAX_EVENT_TRANSACTION_INSTRUCTIONS = ${value.limits.eventTransactionInstructions} as const;
+${renderTsEnum("EventTransactionOpcode", value.streams.eventTransactions.commands, "opcode")}${renderTsLayouts("EVENT_TRANSACTION_LAYOUTS", "EventTransactionOpcode", value.streams.eventTransactions.commands, instructionHeaderBytes)}`;
 }
 
 function renderTsByteLayout(prefix, fields) {
@@ -417,6 +497,33 @@ function renderTsVirtualRefillLayout(layout) {
     )
     .join("\n");
   return `export const VIRTUAL_REFILL_VERSION = ${layout.version} as const;\nexport const VIRTUAL_REFILL_HEADER_WORDS = ${layout.headerFields.length} as const;\nexport const VIRTUAL_REFILL_RECORD_WORDS = ${layout.recordFields.length} as const;\n${header}\n${records}`;
+}
+
+function renderTsNonPassiveRegionLayout(layout) {
+  const header = layout.headerFields
+    .map(
+      (field, index) =>
+        `export const NON_PASSIVE_REGION_HEADER_${screamingSnake(field.name)}_INDEX = ${index} as const;`,
+    )
+    .join("\n");
+  const records = layout.recordFields
+    .map(
+      (field, index) =>
+        `export const NON_PASSIVE_REGION_RECORD_${screamingSnake(field.name)}_INDEX = ${index} as const;`,
+    )
+    .join("\n");
+  return `export const NON_PASSIVE_REGION_VERSION = ${layout.version} as const;\nexport const NON_PASSIVE_REGION_HEADER_WORDS = ${layout.headerFields.length} as const;\nexport const NON_PASSIVE_REGION_RECORD_WORDS = ${layout.recordFields.length} as const;\n${header}\n${records}`;
+}
+
+function renderTsEditingGeometryLayout(layout) {
+  const fields = (prefix, entries) =>
+    entries
+      .map(
+        (field, index) =>
+          `export const EDITING_GEOMETRY_${prefix}_${screamingSnake(field.name)}_INDEX = ${index} as const;`,
+      )
+      .join("\n");
+  return `export const EDITING_GEOMETRY_VERSION = ${layout.version} as const;\nexport const EDITING_GEOMETRY_HEADER_WORDS = ${layout.headerFields.length} as const;\nexport const EDITING_GEOMETRY_RECT_WORDS = ${layout.rectFields.length} as const;\nexport const EDITING_GEOMETRY_CHARACTER_WORDS = ${layout.characterFields.length} as const;\n${fields("HEADER", layout.headerFields)}\n${fields("RECT", layout.rectFields)}\n${fields("CHARACTER", layout.characterFields)}`;
 }
 
 function renderTsPackedU32Layout(prefix, layout) {

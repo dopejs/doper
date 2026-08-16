@@ -98,6 +98,24 @@ impl Default for CoreTextSystem {
 }
 
 impl CoreTextSystem {
+    pub(crate) fn editor_caret_stops(&self, scene: &Scene, node: NodeId) -> Option<Vec<CaretStop>> {
+        let source = self.candidate.as_ref().unwrap_or(&self.active);
+        if let Some(run) = source.get(&node) {
+            return Some(run.layout.carets.clone());
+        }
+        let text_run = scene.text_run(node)?;
+        let style = scene
+            .resource(text_run.style_id)
+            .filter(|resource| resource.kind == ResourceKind::TextStyle)
+            .and_then(|resource| TextStyleResource::decode(text_run.style_id, resource).ok())?;
+        let value = self.text_value(scene, node)?;
+        Some(approximate_caret_stops(
+            &value,
+            style.font_size,
+            style.line_height,
+        ))
+    }
+
     pub(crate) fn set_edit_overrides(&mut self, overrides: HashMap<NodeId, Arc<str>>) {
         self.edit_overrides = overrides;
     }

@@ -58,6 +58,7 @@ export interface NativeTextInputBridgeOptions {
   readonly ownerDocument?: Document;
   readonly onSubmit?: (nodeId: number) => void;
   readonly onError?: (error: Error) => void;
+  readonly requestCharacterBounds?: (nodeId: number, start: number, end: number) => void;
 }
 
 /** One canvas-wide OS input bridge shared by every editable Scene node. */
@@ -67,6 +68,8 @@ export class NativeTextInputBridge {
   readonly #editContext: EditContextLike | undefined;
   readonly #onSubmit: ((nodeId: number) => void) | undefined;
   readonly #onError: ((error: Error) => void) | undefined;
+  readonly #requestCharacterBounds:
+    ((nodeId: number, start: number, end: number) => void) | undefined;
   readonly #proxy: HTMLTextAreaElement | undefined;
   readonly #removeListeners: Array<() => void> = [];
   readonly mode: NativeTextInputMode;
@@ -75,6 +78,7 @@ export class NativeTextInputBridge {
   #composing = false;
   #disposed = false;
   #geometry: EditingGeometry | undefined;
+  #pendingCharacterBounds: readonly [number, number] | undefined;
   #selection: EditingSelection = { anchor: 0, focus: 0 };
   #sentRevision = 0n;
   #syncingSurface = false;
@@ -86,6 +90,7 @@ export class NativeTextInputBridge {
     this.#dispatch = options.dispatch;
     this.#onSubmit = options.onSubmit;
     this.#onError = options.onError;
+    this.#requestCharacterBounds = options.requestCharacterBounds;
     const ownerDocument = options.ownerDocument ?? canvas.ownerDocument;
     const constructor =
       options.editContext === undefined
@@ -127,6 +132,7 @@ export class NativeTextInputBridge {
     this.#appliedRevision = target.revision;
     this.#sentRevision = target.revision;
     this.#composing = false;
+    this.#pendingCharacterBounds = undefined;
     this.syncSurface();
     this.#canvas.focus({ preventScroll: true });
     this.#proxy?.focus({ preventScroll: true });
@@ -170,6 +176,7 @@ export class NativeTextInputBridge {
     this.#geometry = geometry;
     this.#editContext?.updateControlBounds(geometry.controlBounds);
     this.#editContext?.updateSelectionBounds(geometry.selectionBounds);
+    this.fulfillCharacterBoundsRequest();
   }
 
   public dispose(): void {
@@ -236,13 +243,17 @@ export class NativeTextInputBridge {
     const update = event as TextUpdateEventLike;
     if (this.#composing) {
       this.emit({ type: "updateComposition", text: update.text });
-    } else {
-      this.emit({
-        type: "replace",
-        start: update.updateRangeStart,
-        end: update.updateRangeEnd,
-        text: update.text,
-      });
+      return;
+    }
+    this.emit({
+      type: "replace",
+      start: update.updateRangeStart,
+      end: update.updateRangeEnd,
+      text: update.text,
+    });
+    const naturalCaret = update.updateRangeStart + update.text.length;
+    if (update.selectionStart !== naturalCaret || update.selectionEnd !== naturalCaret) {
+      this.emitSelection(update.selectionStart, update.selectionEnd);
     }
   };
 
@@ -311,9 +322,23 @@ export class NativeTextInputBridge {
 
   private readonly handleCharacterBoundsUpdate = (event: Event): void => {
     const request = event as CharacterBoundsUpdateEventLike;
-    const bounds = this.#geometry?.characterBounds?.(request.rangeStart, request.rangeEnd) ?? [];
-    this.#editContext?.updateCharacterBounds(request.rangeStart, bounds);
+    this.#pendingCharacterBounds = [request.rangeStart, request.rangeEnd];
+    if (this.fulfillCharacterBoundsRequest()) return;
+    const nodeId = this.#target?.nodeId;
+    if (nodeId !== undefined) {
+      this.#requestCharacterBounds?.(nodeId, request.rangeStart, request.rangeEnd);
+    }
   };
+
+  private fulfillCharacterBoundsRequest(): boolean {
+    const request = this.#pendingCharacterBounds;
+    if (request === undefined || this.#editContext === undefined) return false;
+    const bounds = this.#geometry?.characterBounds?.(request[0], request[1]);
+    if (bounds === undefined || bounds.length !== request[1] - request[0]) return false;
+    this.#editContext.updateCharacterBounds(request[0], bounds);
+    this.#pendingCharacterBounds = undefined;
+    return true;
+  }
 
   private listen(target: EventTarget, type: string, listener: EventListener): void {
     const guarded: EventListener = (event) => {

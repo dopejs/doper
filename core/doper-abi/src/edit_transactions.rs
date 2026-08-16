@@ -174,8 +174,8 @@ impl EditTransactionBatch {
             writer.u32(composition.start);
             writer.u32(composition.end);
             writer.u8(record.kind as u8);
-            writer.u8(u8::from(record.delta.is_some()) * HAS_DELTA
-                | u8::from(record.composition.is_some()) * HAS_COMPOSITION);
+            writer.u8((u8::from(record.delta.is_some()) * HAS_DELTA)
+                | (u8::from(record.composition.is_some()) * HAS_COMPOSITION));
             writer.u8(record.affinities[0] as u8);
             writer.u8(record.affinities[1] as u8);
             writer.u32(u32::try_from(text.len()).map_err(|_| AbiError::ArithmeticOverflow)?);

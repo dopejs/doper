@@ -51,6 +51,19 @@ function sampleBatch(): InputBatch {
       { type: "scrollDelta", nodeId: 2, deltaX: -3.5, deltaY: 24.25, elapsedMicros: 16_667 },
       { type: "scrollEnd", nodeId: 2 },
       { type: "scrollCancel", nodeId: 2 },
+      {
+        type: "dispatchEvent",
+        eventId: 19,
+        kind: "wheel",
+        x: 12.5,
+        y: 24,
+        deltaX: -3,
+        deltaY: 40,
+        buttons: 1,
+        modifiers: 9,
+        pointerId: 0,
+        elapsedMicros: 16_667,
+      },
     ],
   };
 }
@@ -104,6 +117,33 @@ describe("Input Stream", () => {
     });
     new DataView(invalid.buffer).setFloat32(24, Number.POSITIVE_INFINITY, true);
     expect(() => decodeInputBatch(invalid)).toThrow(/non-finite f32/u);
+  });
+
+  it("rejects invalid event coordinates and reserved flag bits", () => {
+    const valid = {
+      type: "dispatchEvent" as const,
+      eventId: 1,
+      kind: "pointerdown" as const,
+      x: 0,
+      y: 0,
+      deltaX: 0,
+      deltaY: 0,
+      buttons: 1,
+      modifiers: 0,
+      pointerId: 1,
+      elapsedMicros: 16_667,
+    };
+    for (const command of [
+      { ...valid, x: Number.NaN },
+      { ...valid, x: 1_000_000_001 },
+      { ...valid, deltaY: 1_000_001 },
+      { ...valid, buttons: 0x1_0000 },
+      { ...valid, modifiers: 0x10 },
+    ]) {
+      expect(() => encodeInputBatch({ frameSeq: 1, commands: [command] })).toThrow(
+        InputStreamError,
+      );
+    }
   });
 
   it("fails closed on unknown affinities, non-zero padding, and invalid UTF-8", () => {

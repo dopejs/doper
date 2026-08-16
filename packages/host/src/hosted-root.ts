@@ -12,6 +12,7 @@ import {
   NativeTextInputBridge,
   type EditTransaction,
   type EditingGeometry,
+  type EventTransaction,
   type InputCommand,
 } from "@dopejs/doper-editing";
 
@@ -21,6 +22,7 @@ import {
   createDefaultRasterCache,
   type CoreClient,
   type FrameReport,
+  type NonPassiveRegion,
   type VirtualRefillRange,
 } from "./main-thread";
 import {
@@ -89,6 +91,8 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly onModeChange?: (mode: HostTransportMode, decision: HostTransportDecision) => void;
   readonly onVirtualRefills?: (requests: readonly VirtualRefillRange[]) => void;
   readonly onEditTransaction?: (transaction: EditTransaction) => void;
+  readonly onEventTransaction?: (transaction: EventTransaction) => void;
+  readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
   readonly rasterCache?: boolean;
   readonly transport?: HostTransportPolicy;
   readonly workerFactory?: () => Worker;
@@ -134,6 +138,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #decision: HostTransportDecision;
   #frameSink: CanvasFrameSink | undefined;
   #inputSequence = 1;
+  #eventSequence = 1;
+  readonly #eventTimestamps = new Map<number, number>();
   #inputDirectFrames = 0;
   #inputRing: SabMutationRing | undefined;
   #inputSabFallbackFrames = 0;
@@ -141,6 +147,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #lastInputRingMetrics: SabMutationRingMetrics | undefined;
   #mode: HostTransportMode = "main-thread";
   #lastTransportMetrics: HostMutationTransportMetrics | undefined;
+  #nonPassiveRegions: readonly NonPassiveRegion[] = [];
   #mainFrameTimestamp: number | undefined;
   #recovery: Promise<void> | undefined;
   #recovering = false;
@@ -148,6 +155,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #transferred = false;
   #transport: MutationTransport | undefined;
   #unmounted = false;
+  #eventListenersAttached = false;
 
   public constructor(canvas: HTMLCanvasElement, options: HostedCanvasRootOptions) {
     if (!(canvas instanceof HTMLCanvasElement))
@@ -284,6 +292,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (this.#root !== undefined) throw new Error("hosted root is already initialized");
     if (this.#decision.mode === "main-thread") {
       await this.initializeMainThread(this.#canvas);
+      this.attachCanvasEventListeners();
       return;
     }
     try {
@@ -299,6 +308,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       this.#decision = runtimeFallbackDecision(this.#decision, error);
       await this.initializeMainThread(this.#canvas);
     }
+    this.attachCanvasEventListeners();
   }
 
   public render(node: Parameters<DoperRoot["render"]>[0]): void {
@@ -340,6 +350,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       ...(this.#options.onFrame === undefined ? {} : { onFrame: this.#options.onFrame }),
       onVirtualRefills: (requests) => this.deferVirtualRefills(requests),
       onEditTransaction: (transaction) => this.handleEditTransaction(transaction),
+      onEventTransaction: (transaction) => this.handleEventTransaction(transaction),
+      onNonPassiveRegions: (regions) => this.handleNonPassiveRegions(regions),
       sessionId: nextSessionId(),
     };
     const client = new RenderWorkerClient(workerFactory(), clientOptions);
@@ -427,6 +439,146 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.dispatchInput(encodeInputBatch({ frameSeq, commands }));
   }
 
+  private readonly handleCanvasPointerEvent = (event: PointerEvent): void => {
+    switch (event.type) {
+      case "pointerdown":
+      case "pointerup":
+      case "pointermove":
+      case "pointercancel":
+        this.dispatchCanvasEvent(event.type, event, 0, 0);
+    }
+  };
+
+  private readonly handleCanvasClick = (event: MouseEvent): void => {
+    this.dispatchCanvasEvent("click", event, 0, 0);
+  };
+
+  private readonly handleCanvasWheel = (event: WheelEvent): void => {
+    const scale =
+      event.deltaMode === 1
+        ? 16
+        : event.deltaMode === 2
+          ? Math.max(1, this.#canvas.clientHeight)
+          : 1;
+    this.dispatchCanvasEvent("wheel", event, event.deltaX * scale, event.deltaY * scale);
+  };
+
+  private dispatchCanvasEvent(
+    kind: "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel",
+    event: MouseEvent,
+    deltaX: number,
+    deltaY: number,
+  ): void {
+    if (this.#closing || this.#unmounted || this.#recovering) return;
+    const rect = this.#canvas.getBoundingClientRect();
+    if (!(rect.width > 0) || !(rect.height > 0)) return;
+    const x = ((event.clientX - rect.left) * this.#canvas.width) / rect.width;
+    const y = ((event.clientY - rect.top) * this.#canvas.height) / rect.height;
+    const pointerId = kind.startsWith("pointer") ? (event as PointerEvent).pointerId >>> 0 : 0;
+    const suppressionFlag =
+      kind === "wheel" ? 1 : (event as PointerEvent).pointerType === "touch" ? 2 : 0;
+    const suppressed =
+      suppressionFlag !== 0 &&
+      this.#nonPassiveRegions.some(
+        (region) =>
+          (region.flags & suppressionFlag) !== 0 &&
+          x >= region.left &&
+          x < region.right &&
+          y >= region.top &&
+          y < region.bottom,
+      );
+    if (suppressed) {
+      if (event.cancelable) event.preventDefault();
+      if (
+        kind === "pointerdown" &&
+        pointerId !== 0 &&
+        typeof this.#canvas.setPointerCapture === "function"
+      ) {
+        this.#canvas.setPointerCapture(pointerId);
+      }
+    }
+    if (
+      (kind === "pointerup" || kind === "pointercancel") &&
+      pointerId !== 0 &&
+      typeof this.#canvas.hasPointerCapture === "function" &&
+      this.#canvas.hasPointerCapture(pointerId)
+    ) {
+      this.#canvas.releasePointerCapture(pointerId);
+    }
+    const modifiers =
+      (event.shiftKey ? 1 : 0) |
+      (event.ctrlKey ? 2 : 0) |
+      (event.altKey ? 4 : 0) |
+      (event.metaKey ? 8 : 0);
+    const timestampKey = kind === "wheel" ? -1 : pointerId;
+    const timestamp = Number.isFinite(event.timeStamp) ? event.timeStamp : 0;
+    const previousTimestamp = this.#eventTimestamps.get(timestampKey);
+    if (kind === "pointerup" || kind === "pointercancel") {
+      this.#eventTimestamps.delete(timestampKey);
+    } else {
+      this.#eventTimestamps.set(timestampKey, timestamp);
+    }
+    const elapsedMs =
+      previousTimestamp === undefined || timestamp <= previousTimestamp
+        ? 1000 / 60
+        : Math.min(1000, timestamp - previousTimestamp);
+    const eventId = this.#eventSequence;
+    this.#eventSequence = nextSequence(eventId);
+    try {
+      this.sendInputCommands([
+        {
+          type: "dispatchEvent",
+          eventId,
+          kind,
+          x,
+          y,
+          deltaX,
+          deltaY,
+          buttons: event.buttons & 0xffff,
+          modifiers,
+          pointerId,
+          elapsedMicros: Math.max(1, Math.min(1_000_000, Math.round(elapsedMs * 1000))),
+        },
+      ]);
+    } catch (cause) {
+      this.#options.onHostError?.(toError(cause, `${kind} dispatch failed`));
+    }
+  }
+
+  private attachCanvasEventListeners(): void {
+    if (this.#eventListenersAttached) return;
+    if (typeof this.#canvas.addEventListener !== "function") return;
+    const pointerPassive = !this.#nonPassiveRegions.some((region) => (region.flags & 2) !== 0);
+    const wheelPassive = !this.#nonPassiveRegions.some((region) => (region.flags & 1) !== 0);
+    this.#canvas.addEventListener("pointerdown", this.handleCanvasPointerEvent, {
+      passive: pointerPassive,
+    });
+    this.#canvas.addEventListener("pointerup", this.handleCanvasPointerEvent, {
+      passive: pointerPassive,
+    });
+    this.#canvas.addEventListener("pointermove", this.handleCanvasPointerEvent, {
+      passive: pointerPassive,
+    });
+    this.#canvas.addEventListener("pointercancel", this.handleCanvasPointerEvent, {
+      passive: pointerPassive,
+    });
+    this.#canvas.addEventListener("click", this.handleCanvasClick, { passive: true });
+    this.#canvas.addEventListener("wheel", this.handleCanvasWheel, { passive: wheelPassive });
+    this.#eventListenersAttached = true;
+  }
+
+  private detachCanvasEventListeners(): void {
+    if (!this.#eventListenersAttached) return;
+    if (typeof this.#canvas.removeEventListener !== "function") return;
+    this.#canvas.removeEventListener("pointerdown", this.handleCanvasPointerEvent);
+    this.#canvas.removeEventListener("pointerup", this.handleCanvasPointerEvent);
+    this.#canvas.removeEventListener("pointermove", this.handleCanvasPointerEvent);
+    this.#canvas.removeEventListener("pointercancel", this.handleCanvasPointerEvent);
+    this.#canvas.removeEventListener("click", this.handleCanvasClick);
+    this.#canvas.removeEventListener("wheel", this.handleCanvasWheel);
+    this.#eventListenersAttached = false;
+  }
+
   private async initializeMainThread(canvas: HTMLCanvasElement): Promise<void> {
     const width = positiveDimension(canvas.width, "canvas width");
     const height = positiveDimension(canvas.height, "canvas height");
@@ -446,6 +598,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       (requests) => this.deferVirtualRefills(requests),
       this.#options.onHostError,
       (transaction) => this.handleEditTransaction(transaction),
+      (transaction) => this.handleEventTransaction(transaction),
+      (regions) => this.handleNonPassiveRegions(regions),
     );
     this.#frameSink = sink;
     this.#recoverableSink.install(sink);
@@ -456,9 +610,49 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   }
 
   private handleEditTransaction(transaction: EditTransaction): void {
-    this.#root?.applyEditTransaction(transaction);
-    this.#inputBridge.applyTransaction(transaction);
-    this.#options.onEditTransaction?.(transaction);
+    const errors: Error[] = [];
+    try {
+      this.#root?.applyEditTransaction(transaction);
+    } catch (cause) {
+      errors.push(toError(cause, "Shell edit transaction handler failed"));
+    }
+    try {
+      this.#inputBridge.applyTransaction(transaction);
+    } catch (cause) {
+      this.#inputBridge.deactivate();
+      errors.push(toError(cause, "native edit transaction synchronization failed"));
+    }
+    try {
+      this.#options.onEditTransaction?.(transaction);
+    } catch (cause) {
+      errors.push(toError(cause, "host edit transaction observer failed"));
+    }
+    for (const error of errors) this.#options.onHostError?.(error);
+  }
+
+  private handleEventTransaction(transaction: EventTransaction): void {
+    try {
+      this.#root?.applyEventTransaction(transaction);
+      this.#options.onEventTransaction?.(transaction);
+    } catch (cause) {
+      this.#options.onHostError?.(toError(cause, "event transaction handler failed"));
+    }
+  }
+
+  private handleNonPassiveRegions(regions: readonly NonPassiveRegion[]): void {
+    const previousPointer = this.#nonPassiveRegions.some((region) => (region.flags & 2) !== 0);
+    const previousWheel = this.#nonPassiveRegions.some((region) => (region.flags & 1) !== 0);
+    this.#nonPassiveRegions = regions.map((region) => Object.freeze({ ...region }));
+    const nextPointer = this.#nonPassiveRegions.some((region) => (region.flags & 2) !== 0);
+    const nextWheel = this.#nonPassiveRegions.some((region) => (region.flags & 1) !== 0);
+    if (
+      this.#eventListenersAttached &&
+      (previousPointer !== nextPointer || previousWheel !== nextWheel)
+    ) {
+      this.detachCanvasEventListeners();
+      this.attachCanvasEventListeners();
+    }
+    this.#options.onNonPassiveRegions?.(this.#nonPassiveRegions);
   }
 
   private handleWorkerFatal(error: Error): void {
@@ -495,6 +689,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     const activeEditor = this.#inputBridge.activeNodeId;
     this.#inputBridge.deactivate();
     this.#recoverableSink.beginRecovery();
+    this.detachCanvasEventListeners();
     this.disposeWorkerRuntime(error);
     this.#canvas = replaceTransferredCanvas(this.#canvas, this.#options);
     this.replaceInputBridge(this.#canvas);
@@ -502,6 +697,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#decision = runtimeFallbackDecision(this.#decision, error);
     try {
       await this.initializeMainThread(this.#canvas);
+      this.attachCanvasEventListeners();
       if (activeEditor !== undefined) {
         const state = this.#root?.editableState(activeEditor);
         if (state !== undefined) this.#inputBridge.activate(state);
@@ -565,6 +761,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
 
   private async closeOnce(): Promise<void> {
     this.#closing = true;
+    this.detachCanvasEventListeners();
     this.stopClockAnchors();
     if (!this.#unmounted && this.#root !== undefined) {
       this.#root.unmount();

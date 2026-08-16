@@ -8,10 +8,14 @@ describe("RenderWorkerClient", () => {
     const onFrame = vi.fn();
     const onClockMetrics = vi.fn();
     const onVirtualRefills = vi.fn();
+    const onEventTransaction = vi.fn();
+    const onNonPassiveRegions = vi.fn();
     const client = new RenderWorkerClient(worker, {
       onClockMetrics,
       onFrame,
       onVirtualRefills,
+      onEventTransaction,
+      onNonPassiveRegions,
       sessionId: 9,
     });
     worker.onPost = (message) => {
@@ -74,6 +78,33 @@ describe("RenderWorkerClient", () => {
     expect(onFrame).toHaveBeenCalledOnce();
     expect(onClockMetrics).toHaveBeenCalledOnce();
     expect(onVirtualRefills).toHaveBeenCalledWith([{ nodeId: 0x0010_0001, start: 4, end: 8 }]);
+    worker.emitMessage({
+      kind: "doper:event-transaction",
+      sessionId: 9,
+      transaction: {
+        eventId: 1,
+        kind: "click",
+        target: 2,
+        x: 1,
+        y: 2,
+        deltaX: 0,
+        deltaY: 0,
+        buttons: 0,
+        modifiers: 0,
+        pointerId: 0,
+        elapsedMicros: 16_667,
+        path: [1, 2],
+      },
+    });
+    expect(onEventTransaction).toHaveBeenCalledOnce();
+    worker.emitMessage({
+      kind: "doper:non-passive-regions",
+      regions: [{ flags: 1, left: 0, top: 0, right: 50, bottom: 40 }],
+      sessionId: 9,
+    });
+    expect(onNonPassiveRegions).toHaveBeenCalledWith([
+      { flags: 1, left: 0, top: 0, right: 50, bottom: 40 },
+    ]);
     client.postClockAnchor(1, 123);
     expect(worker.posts.at(-1)).toMatchObject({ kind: "doper:clock-anchor", sequence: 1 });
     const input = Uint8Array.of(1, 2, 3, 4);

@@ -115,6 +115,8 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
     (requests) => post({ kind: "doper:virtual-refill", requests, sessionId }),
     fatal,
     (transaction) => post({ kind: "doper:edit-transaction", transaction, sessionId }),
+    (transaction) => post({ kind: "doper:event-transaction", transaction, sessionId }),
+    (regions) => post({ kind: "doper:non-passive-regions", regions, sessionId }),
   );
   const consume = (frameSeq: number, bytes: Uint8Array): void => {
     const decoded = decodeMutationBatch(bytes);

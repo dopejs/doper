@@ -2,6 +2,7 @@ use core::fmt;
 
 use doper_abi::AbiError;
 use doper_edit::EditError;
+use doper_hit::HitError;
 use doper_layout::LayoutError;
 use doper_paint::PaintError;
 use doper_scene::NodeId;
@@ -30,33 +31,54 @@ pub enum CoreError {
     Layout(LayoutError),
     /// Paint failed after Scene accepted the transaction; the instance is poisoned.
     Paint(PaintError),
+    /// World geometry or BVH derivation failed after Scene acceptance.
+    Hit(HitError),
     /// Core produced an invalid glyph-resource batch; the instance is poisoned.
     GlyphResources(AbiError),
     /// Core could not encode its bounded reverse edit-transaction batch.
     EditTransactions(AbiError),
+    /// Core could not encode its bounded reverse event batch.
+    EventTransactions(AbiError),
     /// A metric delta disagreed with Core's active system-font metric cache.
     SystemTextMetricsState(&'static str),
     /// The caller requested another resource-producing frame before draining DOPG.
     GlyphResourcesNotDrained,
     /// A caller started another editable commit before draining the prior reverse batch.
     EditTransactionsNotDrained,
+    /// A caller started another commit before draining hit-tested event results.
+    EventTransactionsNotDrained,
+    /// Hit-tested events must be isolated so their Scene snapshot is unambiguous.
+    MixedEventInput,
+    /// Character-bound requests must be isolated to keep their response unambiguous.
+    MixedEditingGeometryInput,
     /// A scrolling coefficient, extent, or physics operation was invalid.
     Scroll(ScrollError),
     /// A revision, offset, composition, or edit resource invariant was rejected.
     Edit(EditError),
     /// Editable configuration used unknown flags or exceeded a hard policy limit.
     InvalidEditableConfiguration(&'static str),
-    /// An editing command did not target an active EditableText node.
+    /// An editing command did not target an active `EditableText` node.
     InvalidEditableTarget {
         /// Generation-bearing rejected node.
         node: NodeId,
+    },
+    /// An `EditContext` geometry request was outside the active UTF-16 text.
+    InvalidEditableCharacterRange {
+        /// Generation-bearing requested node.
+        node: NodeId,
+        /// Inclusive requested UTF-16 start.
+        start: u32,
+        /// Exclusive requested UTF-16 end.
+        end: u32,
+        /// Current active text length in UTF-16 code units.
+        length: u32,
     },
     /// A read-only editable node rejected a mutating input command.
     EditableReadOnly {
         /// Generation-bearing read-only node.
         node: NodeId,
     },
-    /// An EditableText node had no valid UTF-8 Scene text resource.
+    /// An `EditableText` node had no valid UTF-8 Scene text resource.
     MissingEditableText {
         /// Generation-bearing malformed node.
         node: NodeId,

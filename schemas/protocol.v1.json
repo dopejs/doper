@@ -34,6 +34,7 @@
     "glyphResourceInstructions": 262144,
     "systemTextMetricInstructions": 262144,
     "editTransactionInstructions": 262144,
+    "eventTransactionInstructions": 262144,
     "glyphBitmapPixels": 16777216,
     "systemTextLines": 1048576,
     "recordingRecords": 1048576,
@@ -82,6 +83,44 @@
       { "name": "nodeId", "type": "u32" },
       { "name": "start", "type": "u32" },
       { "name": "end", "type": "u32" }
+    ]
+  },
+  "nonPassiveRegionBatch": {
+    "version": 1,
+    "headerFields": [
+      { "name": "version", "type": "u32" },
+      { "name": "regionCount", "type": "u32" }
+    ],
+    "recordFields": [
+      { "name": "flags", "type": "u32" },
+      { "name": "leftBits", "type": "u32" },
+      { "name": "topBits", "type": "u32" },
+      { "name": "rightBits", "type": "u32" },
+      { "name": "bottomBits", "type": "u32" }
+    ]
+  },
+  "editingGeometryBatch": {
+    "version": 1,
+    "headerFields": [
+      { "name": "version", "type": "u32" },
+      { "name": "nodeId", "type": "u32" },
+      { "name": "selectionStart", "type": "u32" },
+      { "name": "selectionEnd", "type": "u32" },
+      { "name": "characterCount", "type": "u32" }
+    ],
+    "rectFields": [
+      { "name": "leftBits", "type": "u32" },
+      { "name": "topBits", "type": "u32" },
+      { "name": "widthBits", "type": "u32" },
+      { "name": "heightBits", "type": "u32" }
+    ],
+    "characterFields": [
+      { "name": "start", "type": "u32" },
+      { "name": "end", "type": "u32" },
+      { "name": "leftBits", "type": "u32" },
+      { "name": "topBits", "type": "u32" },
+      { "name": "widthBits", "type": "u32" },
+      { "name": "heightBits", "type": "u32" }
     ]
   },
   "streams": {
@@ -180,6 +219,7 @@
         { "name": "Redo", "opcode": 11, "fields": ["u32", "u32", "u32"] },
         { "name": "FocusEditable", "opcode": 12, "fields": ["u32"] },
         { "name": "BlurEditable", "opcode": 13, "fields": ["u32"] },
+        { "name": "RequestCharacterBounds", "opcode": 14, "fields": ["u32", "u32", "u32"] },
         { "name": "ScrollBegin", "opcode": 32, "fields": ["u32"] },
         {
           "name": "ScrollDelta",
@@ -188,6 +228,11 @@
         },
         { "name": "ScrollEnd", "opcode": 34, "fields": ["u32"] },
         { "name": "ScrollCancel", "opcode": 35, "fields": ["u32"] },
+        {
+          "name": "DispatchEvent",
+          "opcode": 48,
+          "fields": ["u32", "u16", "pad16", "f32", "f32", "f32", "f32", "u32", "u32", "u32", "u32"]
+        },
         { "name": "Commit", "opcode": 240, "fields": ["u32"] }
       ]
     },
@@ -314,6 +359,33 @@
             "u8",
             "u8",
             "u8",
+            "u32",
+            "bytes",
+            "align4"
+          ]
+        }
+      ]
+    },
+    "eventTransactions": {
+      "magic": "DOPV",
+      "maxBytes": 16777216,
+      "commands": [
+        {
+          "name": "Event",
+          "opcode": 1,
+          "fields": [
+            "u32",
+            "u16",
+            "pad16",
+            "u32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "u32",
+            "u32",
+            "u32",
+            "u32",
             "u32",
             "bytes",
             "align4"

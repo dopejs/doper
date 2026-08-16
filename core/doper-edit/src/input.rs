@@ -162,10 +162,14 @@ pub fn edit_command_from_input(
         } => (node_id, base_revision, EditIntent::Redo),
         InputCommand::FocusEditable { .. }
         | InputCommand::BlurEditable { .. }
+        | InputCommand::RequestCharacterBounds { .. }
         | InputCommand::ScrollBegin { .. }
         | InputCommand::ScrollDelta { .. }
         | InputCommand::ScrollEnd { .. }
-        | InputCommand::ScrollCancel { .. } => return Err(InputReplayError::UnsupportedCommand),
+        | InputCommand::ScrollCancel { .. }
+        | InputCommand::DispatchEvent { .. } => {
+            return Err(InputReplayError::UnsupportedCommand);
+        }
     };
     Ok((
         node_id,

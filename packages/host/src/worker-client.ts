@@ -1,9 +1,9 @@
 import { ABI_VERSION } from "./generated";
 import type { FrameReport } from "./main-thread";
-import type { VirtualRefillRange } from "./main-thread";
+import type { NonPassiveRegion, VirtualRefillRange } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
-import type { EditTransaction } from "@dopejs/doper-editing";
+import type { EditTransaction, EventTransaction } from "@dopejs/doper-editing";
 import {
   WORKER_PROTOCOL_VERSION,
   isRenderWorkerOutboundEnvelope,
@@ -38,6 +38,8 @@ export interface RenderWorkerClientOptions {
   readonly onFrame?: (report: FrameReport) => void;
   readonly onVirtualRefills?: (requests: readonly VirtualRefillRange[]) => void;
   readonly onEditTransaction?: (transaction: EditTransaction) => void;
+  readonly onEventTransaction?: (transaction: EventTransaction) => void;
+  readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
   readonly sessionId: number;
 }
 
@@ -59,6 +61,8 @@ export class RenderWorkerClient {
   readonly #onFrame: ((report: FrameReport) => void) | undefined;
   readonly #onVirtualRefills: ((requests: readonly VirtualRefillRange[]) => void) | undefined;
   readonly #onEditTransaction: ((transaction: EditTransaction) => void) | undefined;
+  readonly #onEventTransaction: ((transaction: EventTransaction) => void) | undefined;
+  readonly #onNonPassiveRegions: ((regions: readonly NonPassiveRegion[]) => void) | undefined;
   readonly #sessionId: number;
   readonly #worker: WorkerLike;
   #capabilities: RenderWorkerCapabilities | undefined;
@@ -83,6 +87,8 @@ export class RenderWorkerClient {
     this.#onFrame = options.onFrame;
     this.#onVirtualRefills = options.onVirtualRefills;
     this.#onEditTransaction = options.onEditTransaction;
+    this.#onEventTransaction = options.onEventTransaction;
+    this.#onNonPassiveRegions = options.onNonPassiveRegions;
     worker.addEventListener("message", this.#handleMessage);
     worker.addEventListener("error", this.#handleError);
     worker.addEventListener("messageerror", this.#handleMessageError);
@@ -272,6 +278,12 @@ export class RenderWorkerClient {
         return;
       case "doper:edit-transaction":
         if (this.#state === "ready") this.#onEditTransaction?.(message.transaction);
+        return;
+      case "doper:event-transaction":
+        if (this.#state === "ready") this.#onEventTransaction?.(message.transaction);
+        return;
+      case "doper:non-passive-regions":
+        if (this.#state === "ready") this.#onNonPassiveRegions?.(message.regions);
         return;
       case "doper:fatal":
         this.fail(new Error(`render Worker failed: ${message.error}`));

@@ -64,6 +64,91 @@ describe("createHostedCanvasRoot", () => {
     await root.close();
   });
 
+  it("converts passive canvas pointer input into isolated logical event commands", async () => {
+    installCanvasGlobal();
+    const core = fakeCore();
+    const canvas = new FakeCanvas();
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+
+    canvas.emit("pointerdown", {
+      type: "pointerdown",
+      clientX: 30,
+      clientY: 25,
+      buttons: 1,
+      shiftKey: true,
+      ctrlKey: false,
+      altKey: true,
+      metaKey: false,
+    });
+    expect(decodeInputBatch(core.inputs[0] ?? new Uint8Array())).toEqual({
+      frameSeq: 1,
+      commands: [
+        {
+          type: "dispatchEvent",
+          eventId: 1,
+          kind: "pointerdown",
+          x: 40,
+          y: 20,
+          deltaX: 0,
+          deltaY: 0,
+          buttons: 1,
+          modifiers: 5,
+          pointerId: 0,
+          elapsedMicros: 16_667,
+        },
+      ],
+    });
+    await root.close();
+    canvas.emit("pointerdown", {
+      type: "pointerdown",
+      clientX: 30,
+      clientY: 25,
+      buttons: 1,
+      shiftKey: false,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+    });
+    expect(core.inputs).toHaveLength(1);
+  });
+
+  it("prevents wheel defaults synchronously only inside Core-published regions", async () => {
+    installCanvasGlobal();
+    const core = fakeCore();
+    core.non_passive_regions = () =>
+      Uint32Array.of(1, 1, 1, floatBits(20), floatBits(10), floatBits(80), floatBits(60));
+    const canvas = new FakeCanvas();
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+    root.render(undefined);
+    const preventDefault = vi.fn();
+    canvas.emit("wheel", {
+      type: "wheel",
+      clientX: 30,
+      clientY: 25,
+      buttons: 0,
+      shiftKey: false,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+      cancelable: true,
+      preventDefault,
+      deltaMode: 0,
+      deltaX: 0,
+      deltaY: 12,
+      timeStamp: 10,
+    });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    await root.close();
+  });
+
   it("materializes Core-requested virtual windows without an application callback", async () => {
     installCanvasGlobal();
     const core = fakeCore() as FakeCore & { take_virtual_refills(): Uint32Array };
@@ -298,9 +383,18 @@ describe("createHostedCanvasRoot", () => {
   });
 });
 
+class FakeEditContext extends EventTarget {
+  public constructor(_options: object) {
+    super();
+  }
+}
+
 class FakeCanvas {
+  readonly #domListeners = new Map<string, Set<(event: never) => void>>();
   public height = 80;
   public width = 160;
+  public clientHeight = 80;
+  public ownerDocument = { defaultView: { EditContext: FakeEditContext } };
   public replacement: unknown;
   public transferCount = 0;
 
@@ -309,6 +403,24 @@ class FakeCanvas {
     clone.height = this.height;
     clone.width = this.width;
     return clone;
+  }
+
+  public addEventListener(type: string, listener: (event: never) => void): void {
+    const listeners = this.#domListeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.#domListeners.set(type, listeners);
+  }
+
+  public removeEventListener(type: string, listener: (event: never) => void): void {
+    this.#domListeners.get(type)?.delete(listener);
+  }
+
+  public emit(type: string, event: object): void {
+    for (const listener of this.#domListeners.get(type) ?? []) listener(event as never);
+  }
+
+  public getBoundingClientRect(): Pick<DOMRect, "height" | "left" | "top" | "width"> {
+    return { height: 80, left: 10, top: 5, width: 80 };
   }
 
   public getContext(): object {
@@ -463,6 +575,12 @@ function emptyDisplayList(): Uint8Array {
   view.setUint16(6, 16, true);
   view.setUint32(8, 16, true);
   return bytes;
+}
+
+function floatBits(value: number): number {
+  const scratch = new DataView(new ArrayBuffer(4));
+  scratch.setFloat32(0, value, true);
+  return scratch.getUint32(0, true);
 }
 
 function hasKind(value: unknown, kind: string): boolean {

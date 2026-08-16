@@ -413,6 +413,77 @@ impl ScrollController {
         Ok(ScrollAdvance { active, changed })
     }
 
+    pub(crate) fn apply_wheel(
+        &mut self,
+        scene: &mut Scene,
+        node: NodeId,
+        delta: [f32; 2],
+        elapsed_micros: u32,
+    ) -> Result<ScrollAdvance, CoreError> {
+        if scene.kind(node) != Some(NodeKind::Scroll) {
+            return Err(CoreError::InvalidScrollTarget { node });
+        }
+        let mut state = self
+            .states
+            .get(&node)
+            .ok_or(CoreError::InvalidScrollTarget { node })?
+            .clone();
+        state.begin();
+        let changed = state.delta(delta[0], delta[1], elapsed_micros)?;
+        state.end(false)?;
+        scene.apply_scroll_position(node, state.position()?)?;
+        self.states.insert(node, state);
+        self.metrics.input_commands = self.metrics.input_commands.saturating_add(1);
+        Ok(ScrollAdvance {
+            active: false,
+            changed,
+        })
+    }
+
+    pub(crate) fn begin_direct(&mut self, node: NodeId) -> Result<(), CoreError> {
+        let state = self
+            .states
+            .get_mut(&node)
+            .ok_or(CoreError::InvalidScrollTarget { node })?;
+        state.begin();
+        self.metrics.input_commands = self.metrics.input_commands.saturating_add(1);
+        Ok(())
+    }
+
+    pub(crate) fn direct_delta(
+        &mut self,
+        scene: &mut Scene,
+        node: NodeId,
+        delta: [f32; 2],
+        elapsed_micros: u32,
+    ) -> Result<ScrollAdvance, CoreError> {
+        let state = self
+            .states
+            .get_mut(&node)
+            .ok_or(CoreError::InvalidScrollTarget { node })?;
+        let changed = state.delta(delta[0], delta[1], elapsed_micros)?;
+        scene.apply_scroll_position(node, state.position()?)?;
+        self.metrics.input_commands = self.metrics.input_commands.saturating_add(1);
+        Ok(ScrollAdvance {
+            active: false,
+            changed,
+        })
+    }
+
+    pub(crate) fn end_direct(
+        &mut self,
+        node: NodeId,
+        retain_velocity: bool,
+    ) -> Result<(), CoreError> {
+        let state = self
+            .states
+            .get_mut(&node)
+            .ok_or(CoreError::InvalidScrollTarget { node })?;
+        state.end(retain_velocity)?;
+        self.metrics.input_commands = self.metrics.input_commands.saturating_add(1);
+        Ok(())
+    }
+
     pub(crate) fn advance(
         &mut self,
         scene: &mut Scene,

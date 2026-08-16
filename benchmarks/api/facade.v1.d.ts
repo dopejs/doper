@@ -26,6 +26,9 @@ export {
   type CommonProps,
   type ContainerProps,
   type DoperElement,
+  type DoperEvent,
+  type DoperEventHandler,
+  type DoperEventPhase,
   type DoperNode,
   type EdgeInsets,
   type DoperFontLoadErrorCode,
@@ -44,6 +47,15 @@ export {
   type Woff2Decoder,
 } from "@dopejs/doper-jsx";
 export { type DoperRoot } from "@dopejs/doper-reconciler";
+export type {
+  EditTransaction,
+  EventTransaction,
+  EditingGeometry,
+  EditingSelection,
+  NativeTextInputMode,
+} from "@dopejs/doper-editing";
+export { TextEditingController, type TextEditingControllerOptions } from "@dopejs/doper-editing";
+export { useTextEditingController } from "./editing";
 export {
   createCanvasRoot,
   createHostedCanvasRoot,
@@ -55,6 +67,7 @@ export {
   type FrameReport,
   type HostCapabilities,
   type HostMutationTransportMetrics,
+  type NonPassiveRegion,
   type HostInputTransportMetrics,
   type HostTransportDecision,
   type HostTransportMode,

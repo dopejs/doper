@@ -48,6 +48,41 @@ pub struct InputSelection {
     pub focus: InputPosition,
 }
 
+/// Browser-independent event category routed through Core hit testing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
+pub enum InputEventKind {
+    /// Primary or auxiliary pointer press.
+    PointerDown = 1,
+    /// Pointer release.
+    PointerUp = 2,
+    /// Pointer movement.
+    PointerMove = 3,
+    /// Pointer stream cancellation.
+    PointerCancel = 4,
+    /// Synthesized activation after a compatible press/release pair.
+    Click = 5,
+    /// Wheel or trackpad delta.
+    Wheel = 6,
+}
+
+impl InputEventKind {
+    pub(crate) fn decode(value: u16) -> Result<Self, AbiError> {
+        match value {
+            1 => Ok(Self::PointerDown),
+            2 => Ok(Self::PointerUp),
+            3 => Ok(Self::PointerMove),
+            4 => Ok(Self::PointerCancel),
+            5 => Ok(Self::Click),
+            6 => Ok(Self::Wheel),
+            _ => Err(AbiError::UnknownIdentifier {
+                category: "input event kind",
+                value: u32::from(value),
+            }),
+        }
+    }
+}
+
 const MAX_SCROLL_DELTA: f32 = 1_000_000.0;
 const MAX_SCROLL_DELTA_MICROS: u32 = 1_000_000;
 
@@ -155,6 +190,15 @@ pub enum InputCommand {
         /// Generation-bearing editable node.
         node_id: u32,
     },
+    /// Requests active-editor character bounds for one UTF-16 range.
+    RequestCharacterBounds {
+        /// Generation-bearing editable node.
+        node_id: u32,
+        /// Inclusive requested UTF-16 start.
+        start: u32,
+        /// Exclusive requested UTF-16 end.
+        end: u32,
+    },
     /// Starts direct manipulation of a Core-owned scroll node.
     ScrollBegin {
         /// Generation-bearing target scroll node.
@@ -180,6 +224,25 @@ pub enum InputCommand {
     ScrollCancel {
         /// Generation-bearing target scroll node.
         node_id: u32,
+    },
+    /// Routes one pointer/wheel sample through Core world geometry.
+    DispatchEvent {
+        /// Host-monotonic event identifier used by the reverse result.
+        event_id: u32,
+        /// Event category.
+        kind: InputEventKind,
+        /// Canvas-local logical coordinates.
+        position: [f32; 2],
+        /// Wheel delta, zero for pointer events.
+        delta: [f32; 2],
+        /// Browser pointer button bitset.
+        buttons: u32,
+        /// Shift/Control/Alt/Meta bits.
+        modifiers: u32,
+        /// Browser pointer identity, or zero for non-pointer events.
+        pointer_id: u32,
+        /// Time since the previous related sample in microseconds.
+        elapsed_micros: u32,
     },
 }
 
@@ -398,6 +461,19 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
         InputOpcode::BlurEditable => InputCommand::BlurEditable {
             node_id: reader.read_u32()?,
         },
+        InputOpcode::RequestCharacterBounds => {
+            let node_id = reader.read_u32()?;
+            let start = reader.read_u32()?;
+            let end = reader.read_u32()?;
+            if start > end {
+                return Err(AbiError::InvalidValue("character bounds range is reversed"));
+            }
+            InputCommand::RequestCharacterBounds {
+                node_id,
+                start,
+                end,
+            }
+        }
         InputOpcode::ScrollBegin => InputCommand::ScrollBegin {
             node_id: reader.read_u32()?,
         },
@@ -427,6 +503,28 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
         InputOpcode::ScrollCancel => InputCommand::ScrollCancel {
             node_id: reader.read_u32()?,
         },
+        InputOpcode::DispatchEvent => {
+            let event_id = reader.read_u32()?;
+            let kind = InputEventKind::decode(reader.read_u16()?)?;
+            reader.read_zeroes(2)?;
+            let position = [reader.read_f32()?, reader.read_f32()?];
+            let delta = [reader.read_f32()?, reader.read_f32()?];
+            let buttons = reader.read_u32()?;
+            let modifiers = reader.read_u32()?;
+            let pointer_id = reader.read_u32()?;
+            let elapsed_micros = reader.read_u32()?;
+            validate_event_fields(position, delta, buttons, modifiers, elapsed_micros)?;
+            InputCommand::DispatchEvent {
+                event_id,
+                kind,
+                position,
+                delta,
+                buttons,
+                modifiers,
+                pointer_id,
+                elapsed_micros,
+            }
+        }
         InputOpcode::Commit => return Err(AbiError::InvalidValue("nested input commit")),
     })
 }
@@ -495,6 +593,18 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
         | InputCommand::BlurEditable { node_id }
         | InputCommand::ScrollEnd { node_id }
         | InputCommand::ScrollCancel { node_id } => writer.u32(*node_id),
+        InputCommand::RequestCharacterBounds {
+            node_id,
+            start,
+            end,
+        } => {
+            if start > end {
+                return Err(AbiError::InvalidValue("character bounds range is reversed"));
+            }
+            writer.u32(*node_id);
+            writer.u32(*start);
+            writer.u32(*end);
+        }
         InputCommand::ScrollDelta {
             node_id,
             delta_x,
@@ -512,6 +622,29 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             writer.u32(*node_id);
             writer.f32(*delta_x)?;
             writer.f32(*delta_y)?;
+            writer.u32(*elapsed_micros);
+        }
+        InputCommand::DispatchEvent {
+            event_id,
+            kind,
+            position,
+            delta,
+            buttons,
+            modifiers,
+            pointer_id,
+            elapsed_micros,
+        } => {
+            validate_event_fields(*position, *delta, *buttons, *modifiers, *elapsed_micros)?;
+            writer.u32(*event_id);
+            writer.u16(*kind as u16);
+            writer.u16(0);
+            writer.f32(position[0])?;
+            writer.f32(position[1])?;
+            writer.f32(delta[0])?;
+            writer.f32(delta[1])?;
+            writer.u32(*buttons);
+            writer.u32(*modifiers);
+            writer.u32(*pointer_id);
             writer.u32(*elapsed_micros);
         }
         command => {
@@ -567,11 +700,37 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::Redo { .. } => InputOpcode::Redo,
         InputCommand::FocusEditable { .. } => InputOpcode::FocusEditable,
         InputCommand::BlurEditable { .. } => InputOpcode::BlurEditable,
+        InputCommand::RequestCharacterBounds { .. } => InputOpcode::RequestCharacterBounds,
         InputCommand::ScrollBegin { .. } => InputOpcode::ScrollBegin,
         InputCommand::ScrollDelta { .. } => InputOpcode::ScrollDelta,
         InputCommand::ScrollEnd { .. } => InputOpcode::ScrollEnd,
         InputCommand::ScrollCancel { .. } => InputOpcode::ScrollCancel,
+        InputCommand::DispatchEvent { .. } => InputOpcode::DispatchEvent,
     }
+}
+
+fn validate_event_fields(
+    position: [f32; 2],
+    delta: [f32; 2],
+    buttons: u32,
+    modifiers: u32,
+    elapsed_micros: u32,
+) -> Result<(), AbiError> {
+    if position.iter().any(|value| value.abs() > 1_000_000_000.0) {
+        return Err(AbiError::InvalidValue("event coordinate exceeds maximum"));
+    }
+    if delta.iter().any(|value| value.abs() > MAX_SCROLL_DELTA) {
+        return Err(AbiError::InvalidValue("event delta exceeds maximum"));
+    }
+    if buttons & !0xffff != 0 || modifiers & !0x0f != 0 {
+        return Err(AbiError::InvalidValue(
+            "event button or modifier bits are reserved",
+        ));
+    }
+    if elapsed_micros == 0 || elapsed_micros > MAX_SCROLL_DELTA_MICROS {
+        return Err(AbiError::InvalidValue("event elapsed time is invalid"));
+    }
+    Ok(())
 }
 
 fn read_target(reader: &mut Reader<'_>) -> Result<(u32, u64), AbiError> {

@@ -1,4 +1,10 @@
-import { createElement, createFont, type DoperNode, type NodeHandle } from "@dopejs/doper-jsx";
+import {
+  createElement,
+  createFont,
+  type DoperEvent,
+  type DoperNode,
+  type NodeHandle,
+} from "@dopejs/doper-jsx";
 import { signal, useEffect } from "@dopejs/doper-runtime";
 import { describe, expect, it, vi } from "vitest";
 
@@ -177,6 +183,76 @@ describe("reconciler", () => {
     expect(callback).toHaveBeenCalledOnce();
     root.render(createElement("container", {}));
     expect(() => root.invokeCallback(binding?.resourceId ?? 0)).toThrow(/unknown callback/u);
+  });
+
+  it("propagates Core-hit-tested events through capture, target, and bubble phases", () => {
+    const sink = new RecordingSink();
+    const calls: string[] = [];
+    const errors: Error[] = [];
+    const root = createRoot(sink, { onPostCommitError: (error) => errors.push(error) });
+    root.render(
+      createElement("container", {
+        onClickCapture: (event: DoperEvent) => {
+          calls.push(`outer:${String(event.eventPhase)}:${String(event.currentTarget.nodeId)}`);
+          throw new Error("observed callback failure");
+        },
+        onClick: () => calls.push("outer-bubble"),
+        children: createElement("text", {
+          value: "target",
+          onClickCapture: (event: DoperEvent) =>
+            calls.push(`target-capture:${String(event.eventPhase)}`),
+          onClick: (event: DoperEvent) => {
+            calls.push(`target-bubble:${String(event.eventPhase)}:${String(event.target.nodeId)}`);
+            event.preventDefault();
+            event.stopPropagation();
+            expect(event.defaultPrevented).toBe(true);
+          },
+        }),
+      }),
+    );
+    const nodes = mutationsOfType(sink.batches[0], "createNode");
+    const rootId = nodes[0]?.nodeId ?? 0;
+    const outerId = nodes[1]?.nodeId ?? 0;
+    const targetId = nodes[2]?.nodeId ?? 0;
+
+    root.applyEventTransaction({
+      eventId: 7,
+      kind: "click",
+      target: targetId,
+      x: 12,
+      y: 8,
+      deltaX: 0,
+      deltaY: 0,
+      buttons: 0,
+      modifiers: 5,
+      pointerId: 1,
+      elapsedMicros: 16_667,
+      path: [rootId, outerId, targetId],
+    });
+
+    expect(calls).toEqual([
+      `outer:1:${String(outerId)}`,
+      "target-capture:2",
+      `target-bubble:2:${String(targetId)}`,
+    ]);
+    expect(errors).toHaveLength(1);
+    expect(root.failed).toBe(false);
+
+    root.applyEventTransaction({
+      eventId: 8,
+      kind: "click",
+      target: 0xffff_fffe,
+      x: 0,
+      y: 0,
+      deltaX: 0,
+      deltaY: 0,
+      buttons: 0,
+      modifiers: 0,
+      pointerId: 0,
+      elapsedMicros: 16_667,
+      path: [rootId, 0xffff_fffe],
+    });
+    expect(calls).toHaveLength(3);
   });
 
   it("materializes only Core-requested virtual-list windows and reuses overlapping items", () => {

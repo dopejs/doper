@@ -361,23 +361,98 @@ bidi、复杂脚本及完整 CJK 避头尾只有在核心指标稳定且通过�
 
 ### M4：编辑、事件、命中与无障碍
 
+> 当前状态：**进行中（2026-08-16）**。M4-A 已完成并收口：`dc860ef` 交付原生
+> 编辑管线主体（`ConfigureEditable`、有界版本化 Edit Transaction Stream、
+> EditContext/textarea 代理双路径、composition/clipboard/undo-redo/submit、
+> Worker 重启恢复），后续切片交付 `doper-hit` BVH 命中、Core→Host Event
+> Transaction 流、Reconciler 三阶段派发与 non-passive 区域协议，命中语义边界
+> 与帧快照命中契约已记录进 design.md §12。`lint`/`typecheck`/
+> `contracts:check`/`rust:check`（fmt+clippy -D warnings+166 项测试）/TS 208
+> 项/浏览器 15 项全部通过。editing geometry 回路的协议位已就绪但未闭合
+> （`RequestCharacterBounds` 编码、`WasmCore::editing_geometry`、
+> `requestCharacterBounds` option、`updateEditingGeometry`），在 M4-B 首项
+> 闭合。M4-B/C/D 未开始。
+
 目标：使 doper 达到可用于真实输入和交互页面的完整性，业务不再依赖
 EmbedDOM 呼起 HTML 输入控件。
 
-主要交付：
+按依赖顺序拆为四个子阶段。M4-A 是 M4-B 的前置；M4-C 与 M4-D 相互独立，可在
+M4-B 稳定后并行推进。
 
-- `EditableText` 原语、`TextField`/`TextArea` widgets 与 editing controller。
-- EditContext canvas 绑定，以及 doper-host 统一托管的不可见输入代理降级。
-- caret 闪烁、范围选择、拖选、双击选词、Bidi/跨行键盘导航与 scroll-into-view。
-- IME composition、候选窗 bounds、软键盘、clipboard、undo/redo 和 submit。
-- 版本化编辑事务、Shell 确认/校正、外部 value 更新和 Worker 重启恢复。
-- `ConfigureEditable` revision/config mutation、活动值即时 shaping/inline fallback，
-  以及独立有界的 Core→Host Edit Transaction Stream。
-- 增量 BVH、朴素命中 oracle、capture/target/bubble 三阶段事件。
-- passive 输入与非 passive 区域矩形协议。
-- 焦点、编辑态 textbox 语义和语义树到 DOM 影子树映射。
-- 基于 role/label/value 的 E2E 选择器和核心交互用例。
-- 浏览器/OS/输入法/屏幕阅读器测试矩阵，以及编辑状态与语义树 devtools。
+#### M4-A 命中与事件底座
+
+状态：**已完成（2026-08-16）**。
+
+已完成（未提交切片 + `dc860ef`）：
+
+- `doper-hit` crate：世界几何构建、增量 BVH（拓扑变化 rebuild / 几何 refit）、
+  逆仿射精确判定、朴素线性 oracle 与 `bvh_matches_linear_oracle` 属性测试。
+- Core→Host Event Transaction 流：版本化 `DOPV` 编码、Rust/TS 双端逐条对齐的
+  校验、drain 背压门禁、miss 不产生背压、混合输入批原子回滚。
+- Reconciler 三阶段事件派发、`preventDefault`/`stopPropagation`/
+  `stopImmediatePropagation`、12 个 handler prop 与 facade 类型导出。
+- non-passive 区域矩形协议：Core 计算 Scroll 区域 AABB，Host 据此挂非 passive
+  监听并同步 `preventDefault` + pointer capture，无异步回传竞态。
+- Worker 协议 v4：事件事务与 non-passive 区域消息及结构校验。
+
+收口结果：
+
+- `contracts:check`、`rust:check`、`lint`、`typecheck`、TS 与浏览器测试全绿后
+  提交；facade 公开 API 快照按审阅流程更新（新增事件与编辑导出）。
+- 已修复：`hosted-root` 的 `#eventTimestamps` 按 pointerId 累积不清理；
+  `engine.rs` 事件批 clone+二次编码冗余（改为一次编码、暂存字节）；
+  `HitIndex::geometry()` O(n) 线性查找（拓扑变化时重建索引映射）；
+  EditContext `textupdate` 对自然 caret 位置误发冗余 `setSelection` 导致
+  原子事件批回滚的缺陷。
+- 命中语义边界与「按帧快照命中」契约已记录进 design.md §12：重叠命中按
+  「最后绘制者胜」，不含 z-order/`pointer-events` 语义；keyboard 走编辑输入
+  协议，focus 归入 M4-D。
+
+#### M4-B 编辑交互闭环
+
+状态：**未开始**（协议位已就位）。
+
+- 闭合 editing geometry 回路：Host 消费 `editing_geometry()`，自动回传
+  control/selection/character bounds 供 IME 候选窗定位；打通
+  `requestCharacterBounds` → `RequestCharacterBounds` 请求链。
+- 文本 point→offset 命中：点击置 caret、拖选、双击选词；复用 M3 的
+  grapheme/cluster/glyph/line/caret 映射，不拆 grapheme。
+- 键盘导航：输入桥接管 keydown，Core 侧新增 caret 移动 intent（字符/词/行首尾/
+  跨行含 desired-x），caret affinity 语义落地。
+- active editor 的 scroll-into-view：经 Core 滚动模型最小幅度滚动，不走 DOM。
+- 软键盘：`inputMode` 透传与 VirtualKeyboard API 能力探测。
+
+范围澄清：Bidi 视觉导航依赖 bidi 文本能力（M3 已明确延后）。M4-B 交付 LTR
+键盘导航并保留 logical/visual 映射接口位置；bidi 导航随 bidi 文本进入时一并
+交付，不以降低质量强行塞入。
+
+#### M4-C 编辑健壮性、widgets 与性能
+
+状态：**未开始**。
+
+- `TextField`/`TextArea` widgets 包（边框、placeholder、错误态），只组合
+  `editableText` 原语，不引入新的输入路径。
+- composition fixture 矩阵扩展：组合字符、emoji ZWJ、RTL 文本、CJK 多段候选，
+  确定性 replay 全绿。
+- 密码隐私自动验证：录制回放、frame report、错误文本不含密码明文。
+- 输入→glyph/caret 呈现延迟 benchmark（`pnpm m4:perf`），进入绝对指标与
+  历史趋势。
+
+#### M4-D 语义树与无障碍
+
+状态：**未开始**（仅有 M1 预留的 `semanticRole/Label/Value` prop 与
+`SEMANTICS` 失效域）。
+
+- Core 语义树导出 API（role/label/value/bounds/focusable）。
+- `@dopejs/doper-a11y`：语义树到 canvas 旁绝对定位 DOM 影子树的映射与增量
+  更新。
+- 通用焦点模型（焦点顺序、焦点环）与编辑态 textbox 语义。
+- 基于 role/label/value 的 E2E 选择器、核心交互用例与键盘契约测试。
+- 编辑状态与语义树 devtools；浏览器/OS/输入法/屏幕阅读器矩阵作为平台资格
+  采集，不阻塞工程完成。
+
+自动出口命令：`pnpm m4:check` = `pnpm m3:check` + 命中/事件/编辑契约与属性
+测试 + composition replay + 语义树 E2E + `pnpm m4:perf`。
 
 出口门禁：
 

@@ -77,6 +77,60 @@ describe("render Worker protocol validation", () => {
     ).toBe(false);
     expect(
       isRenderWorkerOutboundMessage({
+        kind: "doper:non-passive-regions",
+        regions: [{ flags: 3, left: 0, top: 0, right: 100, bottom: 80 }],
+        sessionId: 7,
+      }),
+    ).toBe(true);
+    expect(
+      isRenderWorkerOutboundMessage({
+        kind: "doper:non-passive-regions",
+        regions: [{ flags: 0, left: 0, top: 0, right: 100, bottom: 80 }],
+        sessionId: 7,
+      }),
+    ).toBe(false);
+    expect(
+      isRenderWorkerOutboundMessage({
+        kind: "doper:event-transaction",
+        sessionId: 7,
+        transaction: {
+          eventId: 1,
+          kind: "pointerdown",
+          target: 3,
+          x: 1,
+          y: 2,
+          deltaX: 0,
+          deltaY: 0,
+          buttons: 1,
+          modifiers: 0,
+          pointerId: 1,
+          elapsedMicros: 16_667,
+          path: [1, 2, 3],
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isRenderWorkerOutboundMessage({
+        kind: "doper:event-transaction",
+        sessionId: 7,
+        transaction: {
+          eventId: 1,
+          kind: "pointerdown",
+          target: 3,
+          x: 1,
+          y: 2,
+          deltaX: 0,
+          deltaY: 0,
+          buttons: 1,
+          modifiers: 0,
+          pointerId: 1,
+          elapsedMicros: 16_667,
+          path: [1, 2, 2, 3],
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isRenderWorkerOutboundMessage({
         kind: "doper:virtual-refill",
         requests: [{ nodeId: 0x0010_0001, start: 4, end: 8 }],
         sessionId: 7,

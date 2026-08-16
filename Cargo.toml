@@ -5,6 +5,7 @@ members = [
   "core/doper-core",
   "core/doper-edit",
   "core/doper-headless",
+  "core/doper-hit",
   "core/doper-layout",
   "core/doper-paint",
   "core/doper-scene",

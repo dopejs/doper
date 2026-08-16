@@ -8,6 +8,8 @@ import {
   type Color,
   type CommonProps,
   type DoperNode,
+  type DoperEvent,
+  type DoperEventHandler,
   type EditableTextProps,
   type FunctionComponent,
   type HostType,
@@ -17,7 +19,7 @@ import {
   type VirtualListProps,
 } from "@dopejs/doper-jsx";
 import { ComponentScope } from "@dopejs/doper-runtime/internal";
-import type { EditTransaction } from "@dopejs/doper-editing";
+import type { EditTransaction, EventTransaction, InputEventKind } from "@dopejs/doper-editing";
 
 import { MAX_VIRTUAL_ITEMS, NodeKind, Prop, ResourceKind } from "./generated";
 import { encodeMutationBatch, NULL_NODE_ID, type Mutation } from "./mutation-stream";
@@ -56,6 +58,7 @@ export interface DoperRoot {
 export interface CoreDrivenDoperRoot extends DoperRoot {
   refillVirtualRanges(requests: readonly VirtualRangeRequest[]): void;
   applyEditTransaction(transaction: EditTransaction): void;
+  applyEventTransaction(transaction: EventTransaction): void;
   editableState(nodeId: number): EditableStateSnapshot | undefined;
   submitEditable(nodeId: number): void;
 }
@@ -109,6 +112,7 @@ interface HostInstance extends BaseInstance {
   editableSelection: { anchor: number; focus: number } | undefined;
   onEditTransaction: ((transaction: EditTransaction) => void) | undefined;
   onSubmit: (() => void) | undefined;
+  eventHandlers: Map<EventHandlerKey, DoperEventHandler>;
 }
 
 interface ComponentInstance extends BaseInstance {
@@ -147,7 +151,10 @@ interface NormalizedHostProps {
   readonly virtualItemIndex: number | undefined;
   readonly virtualList: NormalizedVirtualList | undefined;
   readonly editable: NormalizedEditable | undefined;
+  readonly eventHandlers: Map<EventHandlerKey, DoperEventHandler>;
 }
+
+type EventHandlerKey = `${InputEventKind}:${"bubble" | "capture"}`;
 
 interface NormalizedEditable {
   readonly revision: bigint;
@@ -183,6 +190,18 @@ const COMMON_KEYS = new Set([
   "minHeight",
   "minWidth",
   "onTap",
+  "onPointerDownCapture",
+  "onPointerDown",
+  "onPointerUpCapture",
+  "onPointerUp",
+  "onPointerMoveCapture",
+  "onPointerMove",
+  "onPointerCancelCapture",
+  "onPointerCancel",
+  "onClickCapture",
+  "onClick",
+  "onWheelCapture",
+  "onWheel",
   "opacity",
   "padding",
   "ref",
@@ -373,6 +392,49 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
       focus: transaction.selection.focus,
     };
     instance.onEditTransaction?.(transaction);
+  }
+
+  public applyEventTransaction(transaction: EventTransaction): void {
+    this.assertUsable();
+    validateEventTransaction(transaction);
+    if (transaction.path[0] !== this.#rootNodeId) return;
+    const path = transaction.path
+      .slice(1)
+      .map((nodeId) => this.#hostsByNodeId.get(nodeId))
+      .filter((instance): instance is HostInstance => instance?.mounted === true);
+    if (path.length !== transaction.path.length - 1 || path.at(-1)?.nodeId !== transaction.target) {
+      return;
+    }
+
+    const state = new PropagationState(transaction);
+    const errors: Error[] = [];
+    const target = path.at(-1);
+    if (target === undefined) return;
+    const ancestors = path.slice(0, -1);
+    for (const instance of ancestors) {
+      this.invokeEventHandler(instance, transaction.kind, "capture", state, errors);
+      if (state.propagationStopped) break;
+    }
+    if (!state.propagationStopped) {
+      this.invokeEventHandler(target, transaction.kind, "capture", state, errors);
+      if (!state.immediatePropagationStopped) {
+        this.invokeEventHandler(target, transaction.kind, "bubble", state, errors);
+      }
+    }
+    if (!state.propagationStopped) {
+      for (const instance of [...ancestors].reverse()) {
+        this.invokeEventHandler(instance, transaction.kind, "bubble", state, errors);
+        if (state.propagationStopped) break;
+      }
+    }
+    if (errors.length === 0) return;
+    if (this.#onPostCommitError !== undefined) {
+      for (const error of errors) this.#onPostCommitError(error);
+      return;
+    }
+    const [firstError] = errors;
+    if (errors.length === 1 && firstError !== undefined) throw firstError;
+    throw new AggregateError(errors, "event handlers failed", { cause: firstError });
   }
 
   public editableState(nodeId: number): EditableStateSnapshot | undefined {
@@ -686,6 +748,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
       editableSelection: undefined,
       onEditTransaction: undefined,
       onSubmit: undefined,
+      eventHandlers: new Map(),
       mounted: true,
     };
     this.mutations().push({
@@ -803,6 +866,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
       }
     }
     this.replaceCallback(instance, next.onTap);
+    instance.eventHandlers = next.eventHandlers;
     this.replaceResourceProp(instance, "text:font", Prop.Font, ResourceKind.Font, next.text?.font);
     if (next.text !== undefined) this.replaceTextRun(instance, next.text);
     if (next.editable !== undefined) {
@@ -1036,6 +1100,22 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
     instance.onTapId = nextId;
   }
 
+  private invokeEventHandler(
+    instance: HostInstance,
+    kind: InputEventKind,
+    phase: "bubble" | "capture",
+    state: PropagationState,
+    errors: Error[],
+  ): void {
+    const handler = instance.eventHandlers.get(`${kind}:${phase}`);
+    if (handler === undefined) return;
+    try {
+      handler(state.eventFor(instance.nodeId, phase));
+    } catch (cause) {
+      errors.push(toError(cause, `${kind} ${phase} event handler failed`));
+    }
+  }
+
   private updateRef(instance: HostInstance, next: Ref<NodeHandle> | undefined): void {
     if (instance.ref === next) return;
     const previous = instance.ref;
@@ -1066,6 +1146,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
       this.#resources.release(resourceId, this.mutations());
     }
     instance.resources.clear();
+    instance.eventHandlers.clear();
     if (instance.onTapId !== undefined) this.releaseCallback(instance.onTapId);
     if (instance.ref !== undefined) {
       const ref = instance.ref;
@@ -1211,6 +1292,7 @@ function normalizeHostProps(
   addOptionalString(semantics, Prop.SemanticValue, common.semanticValue, "semanticValue");
   const ref = normalizeRef(common.ref);
   const onTap = normalizeCallback(common.onTap, "onTap");
+  const eventHandlers = normalizeEventHandlers(props);
 
   let text: NormalizedHostProps["text"];
   if (type === "text" || type === "editableText") {
@@ -1368,6 +1450,7 @@ function normalizeHostProps(
     virtualItemIndex,
     virtualList,
     editable,
+    eventHandlers,
   };
 }
 
@@ -1551,6 +1634,102 @@ function normalizeCallback(value: unknown, label: string): (() => void) | undefi
   if (value === undefined) return undefined;
   if (typeof value !== "function") throw new TypeError(`${label} must be a function`);
   return value as () => void;
+}
+
+function normalizeEventHandlers(
+  props: Readonly<Record<string, unknown>>,
+): Map<EventHandlerKey, DoperEventHandler> {
+  const bindings = [
+    ["pointerdown:capture", "onPointerDownCapture"],
+    ["pointerdown:bubble", "onPointerDown"],
+    ["pointerup:capture", "onPointerUpCapture"],
+    ["pointerup:bubble", "onPointerUp"],
+    ["pointermove:capture", "onPointerMoveCapture"],
+    ["pointermove:bubble", "onPointerMove"],
+    ["pointercancel:capture", "onPointerCancelCapture"],
+    ["pointercancel:bubble", "onPointerCancel"],
+    ["click:capture", "onClickCapture"],
+    ["click:bubble", "onClick"],
+    ["wheel:capture", "onWheelCapture"],
+    ["wheel:bubble", "onWheel"],
+  ] as const satisfies readonly (readonly [EventHandlerKey, string])[];
+  const result = new Map<EventHandlerKey, DoperEventHandler>();
+  for (const [key, property] of bindings) {
+    const value = props[property];
+    if (value === undefined) continue;
+    if (typeof value !== "function") throw new TypeError(`${property} must be a function`);
+    result.set(key, value as DoperEventHandler);
+  }
+  return result;
+}
+
+class PropagationState {
+  public defaultPrevented = false;
+  public propagationStopped = false;
+  public immediatePropagationStopped = false;
+  readonly #transaction: EventTransaction;
+
+  public constructor(transaction: EventTransaction) {
+    this.#transaction = transaction;
+  }
+
+  public eventFor(nodeId: number, phase: "bubble" | "capture"): DoperEvent {
+    const transaction = this.#transaction;
+    const isDefaultPrevented = (): boolean => this.defaultPrevented;
+    const target = Object.freeze({ nodeId: transaction.target });
+    const currentTarget = Object.freeze({ nodeId });
+    return Object.freeze({
+      type: transaction.kind,
+      eventId: transaction.eventId,
+      target,
+      currentTarget,
+      eventPhase: nodeId === transaction.target ? 2 : phase === "capture" ? 1 : 3,
+      x: transaction.x,
+      y: transaction.y,
+      deltaX: transaction.deltaX,
+      deltaY: transaction.deltaY,
+      buttons: transaction.buttons,
+      pointerId: transaction.pointerId,
+      elapsedMicros: transaction.elapsedMicros,
+      shiftKey: (transaction.modifiers & 1) !== 0,
+      ctrlKey: (transaction.modifiers & 2) !== 0,
+      altKey: (transaction.modifiers & 4) !== 0,
+      metaKey: (transaction.modifiers & 8) !== 0,
+      get defaultPrevented() {
+        return isDefaultPrevented();
+      },
+      preventDefault: () => {
+        this.defaultPrevented = true;
+      },
+      stopPropagation: () => {
+        this.propagationStopped = true;
+      },
+      stopImmediatePropagation: () => {
+        this.immediatePropagationStopped = true;
+        this.propagationStopped = true;
+      },
+    });
+  }
+}
+
+function validateEventTransaction(transaction: EventTransaction): void {
+  if (transaction === null || typeof transaction !== "object") {
+    throw new TypeError("event transaction must be an object");
+  }
+  assertU32(transaction.eventId, "event transaction eventId");
+  assertU32(transaction.target, "event transaction target");
+  if (!Array.isArray(transaction.path) || transaction.path.length === 0) {
+    throw new TypeError("event transaction path must be a non-empty array");
+  }
+  const seen = new Set<number>();
+  for (const nodeId of transaction.path) {
+    assertU32(nodeId, "event transaction path nodeId");
+    if (seen.has(nodeId)) throw new Error("event transaction path contains a cycle");
+    seen.add(nodeId);
+  }
+  if (transaction.path.at(-1) !== transaction.target) {
+    throw new Error("event transaction path does not end at target");
+  }
 }
 
 function normalizeEditCallback(

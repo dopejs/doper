@@ -16,6 +16,36 @@ export interface NodeHandle {
 /** Object or callback ref. */
 export type Ref<T> = { current: T | null } | ((value: T | null) => void);
 
+/** DOM-style event phase after Core world-space hit testing. */
+export type DoperEventPhase = 1 | 2 | 3;
+
+/** Stable Shell event object; coordinates are canvas-local logical pixels. */
+export interface DoperEvent {
+  readonly type: "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel";
+  readonly eventId: number;
+  readonly target: NodeHandle;
+  readonly currentTarget: NodeHandle;
+  readonly eventPhase: DoperEventPhase;
+  readonly x: number;
+  readonly y: number;
+  readonly deltaX: number;
+  readonly deltaY: number;
+  readonly buttons: number;
+  readonly pointerId: number;
+  readonly elapsedMicros: number;
+  readonly shiftKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly altKey: boolean;
+  readonly metaKey: boolean;
+  readonly defaultPrevented: boolean;
+  preventDefault(): void;
+  stopPropagation(): void;
+  stopImmediatePropagation(): void;
+}
+
+/** Handler invoked during Core-resolved capture or bubble propagation. */
+export type DoperEventHandler = (event: DoperEvent) => void;
+
 /** RGBA color accepted by portable solid-paint encoding. */
 export type Color =
   | `#${string}`
@@ -45,6 +75,18 @@ export interface CommonProps {
   readonly opacity?: number;
   readonly transform?: readonly [number, number, number, number, number, number];
   readonly onTap?: () => void;
+  readonly onPointerDownCapture?: DoperEventHandler;
+  readonly onPointerDown?: DoperEventHandler;
+  readonly onPointerUpCapture?: DoperEventHandler;
+  readonly onPointerUp?: DoperEventHandler;
+  readonly onPointerMoveCapture?: DoperEventHandler;
+  readonly onPointerMove?: DoperEventHandler;
+  readonly onPointerCancelCapture?: DoperEventHandler;
+  readonly onPointerCancel?: DoperEventHandler;
+  readonly onClickCapture?: DoperEventHandler;
+  readonly onClick?: DoperEventHandler;
+  readonly onWheelCapture?: DoperEventHandler;
+  readonly onWheel?: DoperEventHandler;
   readonly semanticRole?: string;
   readonly semanticLabel?: string;
   readonly semanticValue?: string;

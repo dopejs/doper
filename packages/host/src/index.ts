@@ -6,6 +6,7 @@ export {
   type CoreClient,
   type CoreFrameDiagnostics,
   type FrameReport,
+  type NonPassiveRegion,
   type VirtualRefillRange,
 } from "./main-thread";
 export { createWasmCore, type WasmCoreInput } from "./wasm";

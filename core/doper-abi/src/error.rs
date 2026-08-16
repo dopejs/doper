@@ -15,6 +15,8 @@ pub enum StreamKind {
     SystemTextMetrics,
     /// Core-to-Host revisioned edit transactions.
     EditTransactions,
+    /// Core-to-Host hit-tested UI event transactions.
+    EventTransactions,
     /// Ordered mutation and editing replay recording.
     Recording,
 }

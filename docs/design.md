@@ -729,6 +729,18 @@ const editor = useTextEditingController({ value: cell.value });
 - **回传**：命中结果与事件路径通过反向 ring buffer 回传 Shell，由 Shell 执行业务回调。
 - **`preventDefault` 的时序问题**：passive 监听器不能 `preventDefault`。需要阻止默认行为的区域（如内部可滚动区）由 Core 预先计算并把「非 passive 区域矩形」同步回主线程，主线程据此对这些区域使用非 passive 监听。这是必须显式处理的正确性点。
 
+### 命中语义边界（M4-A 决策，2026-08-16）
+
+- **重叠命中**：多个节点覆盖同一点时，按 Scene 拓扑顺序取「最后绘制者」为
+  target。当前不提供 z-order、`pointer-events` 关闭命中或不可见节点跳过语义；
+  引入其中任何一项都是显式的 design.md 范围决策，不允许在实现中隐式加入。
+- **帧快照命中**：同一事件批内的全部事件针对上一提交帧的 `HitIndex` 几何做
+  命中；批内滚动或几何变化在下一次 commit/derived-state 刷新后才影响命中。
+  这是契约行为：它保持事件批的原子回滚语义与确定性回放，并与浏览器「事件
+  针对已呈现帧」的直觉一致。需要批内即时几何的场景必须拆分事件批。
+- **事件种类**：Core 事件流当前只承载 pointer/click/wheel。keyboard 走编辑
+  输入协议（见 11.1），focus 语义随 M4-D 语义树引入；两者都不伪装成命中事件。
+
 ---
 
 ## 13. 反应式层（TypeScript）

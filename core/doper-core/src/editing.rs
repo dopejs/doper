@@ -54,6 +54,31 @@ pub(crate) struct EditingInputOutcome {
 }
 
 impl EditingController {
+    pub(crate) fn validate_character_range(
+        &self,
+        node: NodeId,
+        start: u32,
+        end: u32,
+    ) -> Result<(), CoreError> {
+        let active = self
+            .sessions
+            .get(&node)
+            .ok_or(CoreError::InvalidEditableTarget { node })?;
+        if self.active_node != Some(node) {
+            return Err(CoreError::InvalidEditableTarget { node });
+        }
+        let length = active.session.text_index().utf16_len();
+        if start > end || end > length {
+            return Err(CoreError::InvalidEditableCharacterRange {
+                node,
+                start,
+                end,
+                length,
+            });
+        }
+        Ok(())
+    }
+
     pub(crate) fn synchronize(
         &mut self,
         scene: &Scene,
@@ -89,55 +114,52 @@ impl EditingController {
         {
             let value = scene_text(scene, node)?;
             let requested_config = requested.get(&node).copied();
-            match self.sessions.get_mut(&node) {
-                Some(active) => {
-                    if let Some(configuration) = requested_config {
-                        active.session.reconfigure(edit_config(configuration))?;
-                        active.flags = configuration.flags;
-                        active.max_graphemes = configuration.max_graphemes;
-                        if configuration.revision > active.session.revision() {
-                            let selection = Selection::collapsed(utf16_len(value)?);
-                            let transaction = active.session.apply_external(ExternalValue {
-                                revision: configuration.revision,
-                                text: value.to_owned(),
-                                selection,
-                            })?;
-                            self.pending.push((node, transaction));
-                            changed.push(node);
-                        } else if configuration.revision == active.session.revision()
-                            && value != active.session.text()
-                        {
-                            return Err(CoreError::EditableRevisionConflict {
-                                node,
-                                revision: configuration.revision,
-                            });
-                        }
+            if let Some(active) = self.sessions.get_mut(&node) {
+                if let Some(configuration) = requested_config {
+                    active.session.reconfigure(edit_config(configuration))?;
+                    active.flags = configuration.flags;
+                    active.max_graphemes = configuration.max_graphemes;
+                    if configuration.revision > active.session.revision() {
+                        let selection = Selection::collapsed(utf16_len(value)?);
+                        let transaction = active.session.apply_external(ExternalValue {
+                            revision: configuration.revision,
+                            text: value.to_owned(),
+                            selection,
+                        })?;
+                        self.pending.push((node, transaction));
+                        changed.push(node);
+                    } else if configuration.revision == active.session.revision()
+                        && value != active.session.text()
+                    {
+                        return Err(CoreError::EditableRevisionConflict {
+                            node,
+                            revision: configuration.revision,
+                        });
                     }
                 }
-                None => {
-                    let configuration = requested_config.unwrap_or(EditableConfiguration {
-                        node_id: node.raw(),
-                        revision: 0,
-                        flags: EDITABLE_MULTILINE,
-                        max_graphemes: MAX_EDITABLE_GRAPHEMES,
-                    });
-                    let selection = Selection::collapsed(utf16_len(value)?);
-                    let session = EditSession::new(
-                        value.to_owned(),
-                        selection,
-                        configuration.revision,
-                        edit_config(configuration),
-                    )?;
-                    self.sessions.insert(
-                        node,
-                        ActiveEdit {
-                            session,
-                            flags: configuration.flags,
-                            max_graphemes: configuration.max_graphemes,
-                        },
-                    );
-                    changed.push(node);
-                }
+            } else {
+                let configuration = requested_config.unwrap_or(EditableConfiguration {
+                    node_id: node.raw(),
+                    revision: 0,
+                    flags: EDITABLE_MULTILINE,
+                    max_graphemes: MAX_EDITABLE_GRAPHEMES,
+                });
+                let selection = Selection::collapsed(utf16_len(value)?);
+                let session = EditSession::new(
+                    value.to_owned(),
+                    selection,
+                    configuration.revision,
+                    edit_config(configuration),
+                )?;
+                self.sessions.insert(
+                    node,
+                    ActiveEdit {
+                        session,
+                        flags: configuration.flags,
+                        max_graphemes: configuration.max_graphemes,
+                    },
+                );
+                changed.push(node);
             }
         }
         changed.sort_unstable();

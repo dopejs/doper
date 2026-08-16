@@ -13,7 +13,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { CanvasFrameSink, type CoreClient, type FrameReport } from "./main-thread";
-import { EDIT_TRANSACTIONS_MAGIC } from "./generated";
+import { EDIT_TRANSACTIONS_MAGIC, EVENT_TRANSACTIONS_MAGIC } from "./generated";
 import { decodeSystemTextMetricBatch } from "./system-text-metrics";
 
 const DISPLAY_LIST_MAGIC = 0x4450_4f44;
@@ -239,6 +239,40 @@ describe("CanvasFrameSink", () => {
     });
   });
 
+  it("drains and validates hit-tested event paths before returning from input", () => {
+    const onEventTransaction = vi.fn();
+    const sink = new CanvasFrameSink(
+      fakeContext([], []),
+      {
+        commit: () => emptyDisplayList(),
+        input: () => undefined,
+        take_event_transactions: () => eventTransactionStream(),
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onEventTransaction,
+    );
+
+    expect(sink.input(Uint8Array.of(1, 2, 3, 4))).toBeNull();
+    expect(onEventTransaction).toHaveBeenCalledWith({
+      eventId: 9,
+      kind: "click",
+      target: 3,
+      x: 12,
+      y: 20,
+      deltaX: 0,
+      deltaY: 0,
+      buttons: 0,
+      modifiers: 1,
+      pointerId: 0,
+      elapsedMicros: 16_667,
+      path: [1, 2, 3],
+    });
+  });
+
   it("drains and validates versioned virtual refill ranges after Core frames", () => {
     const refills = vi.fn();
     let first = true;
@@ -266,6 +300,37 @@ describe("CanvasFrameSink", () => {
       take_virtual_refills: () => Uint32Array.of(1, 1),
     });
     expect(() => malformed.commit(mutationFrame([]))).toThrow(/request count/u);
+  });
+
+  it("validates synchronous non-passive regions before publishing them", () => {
+    const regions = vi.fn();
+    const bits = (value: number): number => {
+      const scratch = new DataView(new ArrayBuffer(4));
+      scratch.setFloat32(0, value, true);
+      return scratch.getUint32(0, true);
+    };
+    const sink = new CanvasFrameSink(
+      fakeContext([], []),
+      {
+        commit: () => emptyDisplayList(),
+        non_passive_regions: () => Uint32Array.of(1, 1, 1, bits(1), bits(2), bits(30), bits(40)),
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      regions,
+    );
+    sink.commit(mutationFrame([]));
+    expect(regions).toHaveBeenCalledWith([{ flags: 1, left: 1, top: 2, right: 30, bottom: 40 }]);
+
+    const malformed = new CanvasFrameSink(fakeContext([], []), {
+      commit: () => emptyDisplayList(),
+      non_passive_regions: () => Uint32Array.of(1, 1),
+    });
+    expect(() => malformed.commit(mutationFrame([]))).toThrow(/count/u);
   });
 
   it("upserts and releases browser text metrics with exact pair reference lifetimes", () => {
@@ -427,6 +492,29 @@ function selectionTransactionStream(): Uint8Array {
   bytes[64] = 1;
   bytes[66] = 1;
   bytes[67] = 1;
+  return bytes;
+}
+
+function eventTransactionStream(): Uint8Array {
+  const bytes = new Uint8Array(80);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, EVENT_TRANSACTIONS_MAGIC, true);
+  view.setUint16(4, ABI_VERSION, true);
+  view.setUint16(6, STREAM_HEADER_BYTES, true);
+  view.setUint32(8, bytes.byteLength, true);
+  view.setUint32(12, 1, true);
+  bytes[16] = 1;
+  view.setUint32(20, 9, true);
+  view.setUint16(24, 5, true);
+  view.setUint32(28, 3, true);
+  view.setFloat32(32, 12, true);
+  view.setFloat32(36, 20, true);
+  view.setUint32(52, 1, true);
+  view.setUint32(60, 16_667, true);
+  view.setUint32(64, 3, true);
+  view.setUint32(68, 1, true);
+  view.setUint32(72, 2, true);
+  view.setUint32(76, 3, true);
   return bytes;
 }
 

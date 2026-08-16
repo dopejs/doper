@@ -243,10 +243,12 @@ pub enum InputOpcode {
     Redo = 11,
     FocusEditable = 12,
     BlurEditable = 13,
+    RequestCharacterBounds = 14,
     ScrollBegin = 32,
     ScrollDelta = 33,
     ScrollEnd = 34,
     ScrollCancel = 35,
+    DispatchEvent = 48,
     Commit = 240,
 }
 
@@ -267,10 +269,12 @@ impl InputOpcode {
             11 => Some(Self::Redo),
             12 => Some(Self::FocusEditable),
             13 => Some(Self::BlurEditable),
+            14 => Some(Self::RequestCharacterBounds),
             32 => Some(Self::ScrollBegin),
             33 => Some(Self::ScrollDelta),
             34 => Some(Self::ScrollEnd),
             35 => Some(Self::ScrollCancel),
+            48 => Some(Self::DispatchEvent),
             240 => Some(Self::Commit),
             _ => None,
         }
@@ -294,10 +298,12 @@ impl InputOpcode {
             Self::Redo => Some(16),
             Self::FocusEditable => Some(8),
             Self::BlurEditable => Some(8),
+            Self::RequestCharacterBounds => Some(16),
             Self::ScrollBegin => Some(8),
             Self::ScrollDelta => Some(20),
             Self::ScrollEnd => Some(8),
             Self::ScrollCancel => Some(8),
+            Self::DispatchEvent => Some(44),
             Self::Commit => Some(8),
         }
     }
@@ -318,10 +324,12 @@ impl InputOpcode {
             Self::Redo => 16,
             Self::FocusEditable => 8,
             Self::BlurEditable => 8,
+            Self::RequestCharacterBounds => 16,
             Self::ScrollBegin => 8,
             Self::ScrollDelta => 20,
             Self::ScrollEnd => 8,
             Self::ScrollCancel => 8,
+            Self::DispatchEvent => 44,
             Self::Commit => 8,
         }
     }
@@ -663,6 +671,35 @@ impl Prop {
     }
 }
 
+pub const NON_PASSIVE_REGION_VERSION: u32 = 1;
+pub const NON_PASSIVE_REGION_HEADER_WORDS: usize = 2;
+pub const NON_PASSIVE_REGION_RECORD_WORDS: usize = 5;
+pub const NON_PASSIVE_REGION_HEADER_VERSION_INDEX: usize = 0;
+pub const NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX: usize = 1;
+pub const NON_PASSIVE_REGION_RECORD_FLAGS_INDEX: usize = 0;
+pub const NON_PASSIVE_REGION_RECORD_LEFT_BITS_INDEX: usize = 1;
+pub const NON_PASSIVE_REGION_RECORD_TOP_BITS_INDEX: usize = 2;
+pub const NON_PASSIVE_REGION_RECORD_RIGHT_BITS_INDEX: usize = 3;
+pub const NON_PASSIVE_REGION_RECORD_BOTTOM_BITS_INDEX: usize = 4;
+pub const EDITING_GEOMETRY_VERSION: u32 = 1;
+pub const EDITING_GEOMETRY_HEADER_WORDS: usize = 5;
+pub const EDITING_GEOMETRY_RECT_WORDS: usize = 4;
+pub const EDITING_GEOMETRY_CHARACTER_WORDS: usize = 6;
+pub const EDITING_GEOMETRY_HEADER_VERSION_INDEX: usize = 0;
+pub const EDITING_GEOMETRY_HEADER_NODE_ID_INDEX: usize = 1;
+pub const EDITING_GEOMETRY_HEADER_SELECTION_START_INDEX: usize = 2;
+pub const EDITING_GEOMETRY_HEADER_SELECTION_END_INDEX: usize = 3;
+pub const EDITING_GEOMETRY_HEADER_CHARACTER_COUNT_INDEX: usize = 4;
+pub const EDITING_GEOMETRY_RECT_LEFT_BITS_INDEX: usize = 0;
+pub const EDITING_GEOMETRY_RECT_TOP_BITS_INDEX: usize = 1;
+pub const EDITING_GEOMETRY_RECT_WIDTH_BITS_INDEX: usize = 2;
+pub const EDITING_GEOMETRY_RECT_HEIGHT_BITS_INDEX: usize = 3;
+pub const EDITING_GEOMETRY_CHARACTER_START_INDEX: usize = 0;
+pub const EDITING_GEOMETRY_CHARACTER_END_INDEX: usize = 1;
+pub const EDITING_GEOMETRY_CHARACTER_LEFT_BITS_INDEX: usize = 2;
+pub const EDITING_GEOMETRY_CHARACTER_TOP_BITS_INDEX: usize = 3;
+pub const EDITING_GEOMETRY_CHARACTER_WIDTH_BITS_INDEX: usize = 4;
+pub const EDITING_GEOMETRY_CHARACTER_HEIGHT_BITS_INDEX: usize = 5;
 pub const EDIT_TRANSACTIONS_MAGIC: u32 = 1162891076;
 pub const MAX_EDIT_TRANSACTIONS_BYTES: usize = 16777216;
 pub const MAX_EDIT_TRANSACTION_INSTRUCTIONS: u32 = 262144;
@@ -694,6 +731,41 @@ impl EditTransactionOpcode {
     pub const fn minimum_bytes(self) -> usize {
         match self {
             Self::Transaction => 56,
+        }
+    }
+}
+
+pub const EVENT_TRANSACTIONS_MAGIC: u32 = 1448103748;
+pub const MAX_EVENT_TRANSACTIONS_BYTES: usize = 16777216;
+pub const MAX_EVENT_TRANSACTION_INSTRUCTIONS: u32 = 262144;
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
+pub enum EventTransactionOpcode {
+    Event = 1,
+}
+
+impl EventTransactionOpcode {
+    #[must_use]
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::Event),
+            _ => None,
+        }
+    }
+}
+
+impl EventTransactionOpcode {
+    #[must_use]
+    pub const fn fixed_bytes(self) -> Option<usize> {
+        match self {
+            Self::Event => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn minimum_bytes(self) -> usize {
+        match self {
+            Self::Event => 52,
         }
     }
 }

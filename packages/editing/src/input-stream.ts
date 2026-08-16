@@ -37,6 +37,9 @@ export interface InputSelection {
   readonly focus: InputPosition;
 }
 
+export type InputEventKind =
+  "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel";
+
 interface InputTarget {
   readonly nodeId: number;
   readonly baseRevision: bigint;
@@ -62,6 +65,12 @@ export type InputCommand =
   | (InputTarget & { readonly type: "redo" })
   | { readonly type: "focusEditable"; readonly nodeId: number }
   | { readonly type: "blurEditable"; readonly nodeId: number }
+  | {
+      readonly type: "requestCharacterBounds";
+      readonly nodeId: number;
+      readonly start: number;
+      readonly end: number;
+    }
   | { readonly type: "scrollBegin"; readonly nodeId: number }
   | {
       readonly type: "scrollDelta";
@@ -71,7 +80,20 @@ export type InputCommand =
       readonly elapsedMicros: number;
     }
   | { readonly type: "scrollEnd"; readonly nodeId: number }
-  | { readonly type: "scrollCancel"; readonly nodeId: number };
+  | { readonly type: "scrollCancel"; readonly nodeId: number }
+  | {
+      readonly type: "dispatchEvent";
+      readonly eventId: number;
+      readonly kind: InputEventKind;
+      readonly x: number;
+      readonly y: number;
+      readonly deltaX: number;
+      readonly deltaY: number;
+      readonly buttons: number;
+      readonly modifiers: number;
+      readonly pointerId: number;
+      readonly elapsedMicros: number;
+    };
 
 /** Complete ordered transaction; Commit is encoded automatically. */
 export interface InputBatch {
@@ -173,6 +195,30 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
       writer.f32(command.deltaY);
       writer.u32(command.elapsedMicros);
       return;
+    case "requestCharacterBounds":
+      assertU32(command.nodeId, "editable nodeId");
+      assertU32(command.start, "character bounds start");
+      assertU32(command.end, "character bounds end");
+      if (command.start > command.end) fail("character bounds range is reversed");
+      writer.u32(command.nodeId);
+      writer.u32(command.start);
+      writer.u32(command.end);
+      return;
+    case "dispatchEvent":
+      assertU32(command.eventId, "eventId");
+      validateEventFields(command);
+      writer.u32(command.eventId);
+      writer.u16(eventKindCode(command.kind));
+      writer.u16(0);
+      writer.f32(command.x);
+      writer.f32(command.y);
+      writer.f32(command.deltaX);
+      writer.f32(command.deltaY);
+      writer.u32(command.buttons);
+      writer.u32(command.modifiers);
+      writer.u32(command.pointerId);
+      writer.u32(command.elapsedMicros);
+      return;
   }
   writer.target(command);
   switch (command.type) {
@@ -261,6 +307,13 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
       return { type: "focusEditable", nodeId: reader.u32() };
     case InputOpcode.BlurEditable:
       return { type: "blurEditable", nodeId: reader.u32() };
+    case InputOpcode.RequestCharacterBounds: {
+      const nodeId = reader.u32();
+      const start = reader.u32();
+      const end = reader.u32();
+      if (start > end) fail("character bounds range is reversed");
+      return { type: "requestCharacterBounds", nodeId, start, end };
+    }
     case InputOpcode.ScrollBegin:
       return { type: "scrollBegin", nodeId: reader.u32() };
     case InputOpcode.ScrollDelta: {
@@ -279,6 +332,26 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
       return { type: "scrollEnd", nodeId: reader.u32() };
     case InputOpcode.ScrollCancel:
       return { type: "scrollCancel", nodeId: reader.u32() };
+    case InputOpcode.DispatchEvent: {
+      const eventId = reader.u32();
+      const kind = eventKind(reader.u16());
+      reader.zeroes(2);
+      const command = {
+        type: "dispatchEvent" as const,
+        eventId,
+        kind,
+        x: reader.f32(),
+        y: reader.f32(),
+        deltaX: reader.f32(),
+        deltaY: reader.f32(),
+        buttons: reader.u32(),
+        modifiers: reader.u32(),
+        pointerId: reader.u32(),
+        elapsedMicros: reader.u32(),
+      };
+      validateEventFields(command);
+      return command;
+    }
     default:
       return fail(`unexpected input opcode ${String(opcode)}`);
   }
@@ -312,6 +385,8 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.FocusEditable;
     case "blurEditable":
       return InputOpcode.BlurEditable;
+    case "requestCharacterBounds":
+      return InputOpcode.RequestCharacterBounds;
     case "scrollBegin":
       return InputOpcode.ScrollBegin;
     case "scrollDelta":
@@ -320,6 +395,74 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.ScrollEnd;
     case "scrollCancel":
       return InputOpcode.ScrollCancel;
+    case "dispatchEvent":
+      return InputOpcode.DispatchEvent;
+  }
+}
+
+function eventKindCode(kind: InputEventKind): number {
+  switch (kind) {
+    case "pointerdown":
+      return 1;
+    case "pointerup":
+      return 2;
+    case "pointermove":
+      return 3;
+    case "pointercancel":
+      return 4;
+    case "click":
+      return 5;
+    case "wheel":
+      return 6;
+  }
+}
+
+function eventKind(value: number): InputEventKind {
+  switch (value) {
+    case 1:
+      return "pointerdown";
+    case 2:
+      return "pointerup";
+    case 3:
+      return "pointermove";
+    case 4:
+      return "pointercancel";
+    case 5:
+      return "click";
+    case 6:
+      return "wheel";
+    default:
+      return fail("unknown input event kind");
+  }
+}
+
+function validateEventFields(
+  command: Pick<
+    Extract<InputCommand, { readonly type: "dispatchEvent" }>,
+    "buttons" | "deltaX" | "deltaY" | "elapsedMicros" | "modifiers" | "pointerId" | "x" | "y"
+  >,
+): void {
+  for (const [value, label, maximum] of [
+    [command.x, "event x", 1_000_000_000],
+    [command.y, "event y", 1_000_000_000],
+    [command.deltaX, "event deltaX", MAX_SCROLL_DELTA],
+    [command.deltaY, "event deltaY", MAX_SCROLL_DELTA],
+  ] as const) {
+    if (!Number.isFinite(value) || Math.abs(value) > maximum) fail(`${label} is invalid`);
+  }
+  if (!Number.isInteger(command.buttons) || command.buttons < 0 || command.buttons > 0xffff) {
+    fail("event buttons are invalid");
+  }
+  if (!Number.isInteger(command.modifiers) || command.modifiers < 0 || command.modifiers > 0x0f) {
+    fail("event modifiers are invalid");
+  }
+  assertU32(command.pointerId, "event pointerId");
+  if (
+    !Number.isInteger(command.elapsedMicros) ||
+    command.elapsedMicros < 1 ||
+    command.elapsedMicros > MAX_SCROLL_DELTA_MICROS
+  ) {
+    fail("event elapsed time is invalid");
   }
 }
 

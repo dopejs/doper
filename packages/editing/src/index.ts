@@ -5,6 +5,7 @@ export {
   encodeInputBatch,
   type InputBatch,
   type InputCommand,
+  type InputEventKind,
   type InputPosition,
   type InputSelection,
 } from "./input-stream";
@@ -25,3 +26,8 @@ export {
   type NativeTextInputMode,
 } from "./native-input";
 export { TextEditingController, type TextEditingControllerOptions } from "./controller";
+export {
+  EventTransactionDecodingError,
+  decodeEventTransactionBatch,
+  type EventTransaction,
+} from "./event-transactions";

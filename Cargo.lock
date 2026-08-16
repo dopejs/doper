@@ -84,6 +84,7 @@ dependencies = [
  "doper-abi",
  "doper-edit",
  "doper-headless",
+ "doper-hit",
  "doper-layout",
  "doper-paint",
  "doper-scene",
@@ -107,6 +108,16 @@ version = "0.1.0"
 dependencies = [
  "doper-abi",
  "doper-paint",
+ "doper-scene",
+ "proptest",
+]
+
+[[package]]
+name = "doper-hit"
+version = "0.1.0"
+dependencies = [
+ "doper-abi",
+ "doper-layout",
  "doper-scene",
  "proptest",
 ]
