@@ -55,6 +55,12 @@ export type {
   NativeTextInputMode,
 } from "@dopejs/doper-editing";
 export { TextEditingController, type TextEditingControllerOptions } from "@dopejs/doper-editing";
+export {
+  TextArea,
+  TextField,
+  type TextAreaProps,
+  type TextFieldProps,
+} from "@dopejs/doper-widgets";
 export { useTextEditingController } from "./editing";
 export {
   createCanvasRoot,

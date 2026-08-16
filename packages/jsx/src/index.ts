@@ -20,6 +20,7 @@ export {
   type DoperEventPhase,
   type DoperNode,
   type EdgeInsets,
+  type EditableInputMode,
   type EditableTextProps,
   type ElementType,
   type FunctionComponent,

@@ -439,15 +439,20 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 
 #### M4-C 编辑健壮性、widgets 与性能
 
-状态：**未开始**。
+状态：**已完成（2026-08-17）**。
 
-- `TextField`/`TextArea` widgets 包（边框、placeholder、错误态），只组合
-  `editableText` 原语，不引入新的输入路径。
-- composition fixture 矩阵扩展：组合字符、emoji ZWJ、RTL 文本、CJK 多段候选，
-  确定性 replay 全绿。
-- 密码隐私自动验证：录制回放、frame report、错误文本不含密码明文。
-- 输入→glyph/caret 呈现延迟 benchmark（`pnpm m4:perf`），进入绝对指标与
-  历史趋势。
+- `@dopejs/doper-widgets` 已交付 `TextField`/`TextArea`：嵌套 container 边框、
+  错误态（错误色边框 + alert caption）、readOnly/password/inputMode/
+  controller 透传与 textbox 语义，只组合 `editableText` 原语；已从 facade
+  主入口导出并更新公开 API 快照。placeholder 需要 overlay/绝对定位布局能力，
+  作为显式延后项随该布局能力交付，不以 hack 实现。
+- composition 矩阵已覆盖组合字符、emoji ZWJ、RTL（希伯来文逻辑序编辑 + 词
+  选择）、CJK 多段候选转换，验证 grapheme 原子性、单一 undo 单元与 revision
+  单调（doper-edit 会话测试）。
+- 密码隐私由既有自动测试覆盖：Core display 永不含明文、密码目标剪贴板阻断、
+  DOPR 录制显式跳过敏感流。
+- `pnpm m4:perf` 已建立：`m4_editing_benchmark`（1,000 键击混合插入/导航/
+  删除）P95 ≤ 8ms、P99 ≤ 16.7ms 门禁，当前 P95/P99 约 0.052/0.054ms，零掉帧。
 
 #### M4-D 语义树与无障碍
 

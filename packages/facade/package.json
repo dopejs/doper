@@ -31,7 +31,8 @@
     "@dopejs/doper-host": "workspace:*",
     "@dopejs/doper-jsx": "workspace:*",
     "@dopejs/doper-reconciler": "workspace:*",
-    "@dopejs/doper-runtime": "workspace:*"
+    "@dopejs/doper-runtime": "workspace:*",
+    "@dopejs/doper-widgets": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

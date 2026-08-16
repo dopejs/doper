@@ -593,6 +593,71 @@ mod tests {
     }
 
     #[test]
+    fn composition_matrix_covers_combining_zwj_rtl_and_multi_segment_cjk() {
+        // Combining sequence: the composed grapheme deletes as one unit.
+        let mut editor = session("x", Selection::collapsed(1));
+        apply(&mut editor, EditIntent::BeginComposition);
+        apply(&mut editor, EditIntent::UpdateComposition("e".to_owned()));
+        apply(
+            &mut editor,
+            EditIntent::UpdateComposition("e\u{301}".to_owned()),
+        );
+        apply(&mut editor, EditIntent::CommitComposition(None));
+        assert_eq!(editor.text(), "xe\u{301}");
+        apply(&mut editor, EditIntent::DeleteBackward);
+        assert_eq!(editor.text(), "x");
+
+        // Emoji ZWJ family commits, deletes, and undoes as a single grapheme.
+        let mut editor = session("", Selection::collapsed(0));
+        apply(&mut editor, EditIntent::BeginComposition);
+        apply(
+            &mut editor,
+            EditIntent::UpdateComposition("👨\u{200d}👩\u{200d}👧\u{200d}👦".to_owned()),
+        );
+        apply(&mut editor, EditIntent::CommitComposition(None));
+        assert_eq!(editor.text(), "👨\u{200d}👩\u{200d}👧\u{200d}👦");
+        apply(&mut editor, EditIntent::DeleteBackward);
+        assert_eq!(editor.text(), "");
+        apply(&mut editor, EditIntent::Undo);
+        assert_eq!(editor.text(), "👨\u{200d}👩\u{200d}👧\u{200d}👦");
+        apply(&mut editor, EditIntent::Undo);
+        assert_eq!(editor.text(), "");
+
+        // RTL Hebrew edits stay logical-order and grapheme-safe.
+        let mut editor = session("שלום", Selection::collapsed(4));
+        apply(&mut editor, EditIntent::Insert(" עולם".to_owned()));
+        assert_eq!(editor.text(), "שלום עולם");
+        apply(&mut editor, EditIntent::DeleteBackward);
+        assert_eq!(editor.text(), "שלום עול");
+        assert_eq!(
+            crate::word_range_utf16(editor.text(), 1).expect("rtl word"),
+            (0, 4)
+        );
+
+        // Multi-segment CJK conversion: every candidate swap stays one
+        // temporary state and the final commit is one undo unit.
+        let mut editor = session("说：", Selection::collapsed(1));
+        let base_revision = editor.revision();
+        apply(&mut editor, EditIntent::BeginComposition);
+        for candidate in ["ni", "ni hao", "你好", "妳好", "你好世界"] {
+            apply(
+                &mut editor,
+                EditIntent::UpdateComposition((*candidate).to_owned()),
+            );
+            assert!(editor.composition_range().is_some());
+        }
+        apply(
+            &mut editor,
+            EditIntent::CommitComposition(Some("你好世界".to_owned())),
+        );
+        assert_eq!(editor.text(), "说你好世界：");
+        assert!(editor.revision() > base_revision);
+        apply(&mut editor, EditIntent::Undo);
+        assert_eq!(editor.text(), "说：");
+        assert!(!editor.can_undo());
+    }
+
+    #[test]
     fn cancel_composition_restores_value_and_selection() {
         let original_selection = Selection::collapsed(1);
         let mut editor = session("ab", original_selection);

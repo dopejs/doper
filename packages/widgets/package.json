@@ -1,0 +1,24 @@
+{
+  "name": "@dopejs/doper-widgets",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dopejs/doper-editing": "workspace:*",
+    "@dopejs/doper-jsx": "workspace:*"
+  }
+}
