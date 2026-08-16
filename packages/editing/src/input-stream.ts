@@ -60,6 +60,8 @@ export type InputCommand =
   | (InputTarget & { readonly type: "cancelComposition" })
   | (InputTarget & { readonly type: "undo" })
   | (InputTarget & { readonly type: "redo" })
+  | { readonly type: "focusEditable"; readonly nodeId: number }
+  | { readonly type: "blurEditable"; readonly nodeId: number }
   | { readonly type: "scrollBegin"; readonly nodeId: number }
   | {
       readonly type: "scrollDelta";
@@ -147,6 +149,8 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
   const opcode = opcodeFor(command);
   writer.instruction(opcode);
   switch (command.type) {
+    case "focusEditable":
+    case "blurEditable":
     case "scrollBegin":
     case "scrollEnd":
     case "scrollCancel":
@@ -253,6 +257,10 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
       return { ...reader.target(), type: "undo" };
     case InputOpcode.Redo:
       return { ...reader.target(), type: "redo" };
+    case InputOpcode.FocusEditable:
+      return { type: "focusEditable", nodeId: reader.u32() };
+    case InputOpcode.BlurEditable:
+      return { type: "blurEditable", nodeId: reader.u32() };
     case InputOpcode.ScrollBegin:
       return { type: "scrollBegin", nodeId: reader.u32() };
     case InputOpcode.ScrollDelta: {
@@ -300,6 +308,10 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.Undo;
     case "redo":
       return InputOpcode.Redo;
+    case "focusEditable":
+      return InputOpcode.FocusEditable;
+    case "blurEditable":
+      return InputOpcode.BlurEditable;
     case "scrollBegin":
       return InputOpcode.ScrollBegin;
     case "scrollDelta":

@@ -314,21 +314,22 @@ delta 与采样间隔。字符串以 UTF-8 编码，selection offset 保持浏�
 语义。整批输入只在末尾唯一 `Commit(frame_seq)` 后生效，任一指令的 revision、
 offset、composition、滚动采样或路由校验失败都回滚整个批次。
 
-| opcode | 指令                   | payload                                                     |
-| ------ | ---------------------- | ----------------------------------------------------------- |
-| `0x01` | `CreateNode`           | `node_id: u32, kind: u16, parent: u32, before_sibling: u32` |
-| `0x02` | `RemoveNode`           | `node_id: u32`                                              |
-| `0x03` | `Reparent`             | `node_id: u32, new_parent: u32, before_sibling: u32`        |
-| `0x10` | `SetF32`               | `node_id: u32, prop: u16, value: f32`                       |
-| `0x11` | `SetVec4`              | `node_id: u32, prop: u16, v: [f32;4]`                       |
-| `0x12` | `SetRef`               | `node_id: u32, prop: u16, resource_id: u32`                 |
-| `0x13` | `SetFlags`             | `node_id: u32, set: u32, clear: u32`                        |
-| `0x20` | `SetTextRun`           | `node_id: u32, str_id: u32, style_id: u32`                  |
-| `0x30` | `DefineResource`       | `resource_id: u32, kind: u16, len: u32, bytes[]`            |
-| `0x40` | `ScrollTo`             | `node_id: u32, x: f32, y: f32, behavior: u16`               |
-| `0x41` | `ConfigureVirtualList` | `node_id: u32, item_count: u32, estimate/policy: [f32;4]`   |
-| `0x42` | `SetVirtualItem`       | `node_id: u32, item_index: u32`                             |
-| `0xF0` | `Commit`               | `frame_seq: u32`                                            |
+| opcode | 指令                   | payload                                                       |
+| ------ | ---------------------- | ------------------------------------------------------------- |
+| `0x01` | `CreateNode`           | `node_id: u32, kind: u16, parent: u32, before_sibling: u32`   |
+| `0x02` | `RemoveNode`           | `node_id: u32`                                                |
+| `0x03` | `Reparent`             | `node_id: u32, new_parent: u32, before_sibling: u32`          |
+| `0x10` | `SetF32`               | `node_id: u32, prop: u16, value: f32`                         |
+| `0x11` | `SetVec4`              | `node_id: u32, prop: u16, v: [f32;4]`                         |
+| `0x12` | `SetRef`               | `node_id: u32, prop: u16, resource_id: u32`                   |
+| `0x13` | `SetFlags`             | `node_id: u32, set: u32, clear: u32`                          |
+| `0x20` | `SetTextRun`           | `node_id: u32, str_id: u32, style_id: u32`                    |
+| `0x30` | `DefineResource`       | `resource_id: u32, kind: u16, len: u32, bytes[]`              |
+| `0x40` | `ScrollTo`             | `node_id: u32, x: f32, y: f32, behavior: u16`                 |
+| `0x41` | `ConfigureVirtualList` | `node_id: u32, item_count: u32, estimate/policy: [f32;4]`     |
+| `0x42` | `SetVirtualItem`       | `node_id: u32, item_index: u32`                               |
+| `0x50` | `ConfigureEditable`    | `node_id: u32, revision: u64, flags: u32, max_graphemes: u32` |
+| `0xF0` | `Commit`               | `frame_seq: u32`                                              |
 
 ### 约定
 
@@ -369,21 +370,28 @@ DisplayList 使用同一 16 字节 stream header，magic 为 `DOPD`。ABI v1 要
 reserved/padding 或越界资源一律在回放前失败关闭。详细决策见
 [`adr/0005-versioned-binary-stream-envelope.md`](adr/0005-versioned-binary-stream-envelope.md)。
 
-| opcode                                            | 指令                              |
-| ------------------------------------------------- | --------------------------------- |
-| `Save` / `Restore`                                | 状态栈                            |
-| `Transform(Affine)`                               | 变换                              |
-| `ClipRect(Rect)` / `ClipPath(path_id)`            | 裁剪                              |
-| `Alpha(f32)`                                      | 透明度                            |
-| `FillRect(Rect, paint_id)`                        | 矩形                              |
-| `FillRRect(RRect, paint_id)`                      | 圆角矩形                          |
-| `FillPath(path_id, paint_id)`                     | 路径                              |
-| `DrawGlyphRun(font_id, size, origin, glyph_span)` | 字形序列（web 字体路径）          |
-| `DrawTextFallback(str_id, font_desc_id, origin)`  | 系统字体路径，回放器调 `fillText` |
-| `DrawImage(image_id, src, dst)`                   | 图片                              |
-| `DrawPicture(picture_id, offset)`                 | 引用缓存的子指令流                |
+| opcode                                               | 指令                              |
+| ---------------------------------------------------- | --------------------------------- |
+| `Save` / `Restore`                                   | 状态栈                            |
+| `Transform(Affine)`                                  | 变换                              |
+| `ClipRect(Rect)` / `ClipPath(path_id)`               | 裁剪                              |
+| `Alpha(f32)`                                         | 透明度                            |
+| `FillRect(Rect, paint_id)`                           | 矩形                              |
+| `FillRRect(RRect, paint_id)`                         | 圆角矩形                          |
+| `FillPath(path_id, paint_id)`                        | 路径                              |
+| `DrawGlyphRun(font_id, size, origin, glyph_span)`    | 字形序列（web 字体路径）          |
+| `DrawTextFallback(str_id, font_desc_id, origin)`     | 系统字体路径，回放器调 `fillText` |
+| `DrawTextInlineFallback(font_desc_id, origin, utf8)` | Core 编辑覆盖层的系统字体即时文本 |
+| `DrawImage(image_id, src, dst)`                      | 图片                              |
+| `DrawPicture(picture_id, offset)`                    | 引用缓存的子指令流                |
 
 `DrawPicture` 是缓存复用的关键：item 内容不变时，滚动只需改变 `DrawPicture` 的 offset，指令流本身零重建。
+
+`DrawTextInlineFallback` 只用于 Core 持有、尚未回写为 Shell intern 资源的活动编辑值。
+它沿用同一条 DisplayList trust boundary，UTF-8 长度受流预算约束，Canvas2D 回放器在
+preflight 阶段完成解码，不能在绘制中访问未验证字节。显式 web 字体仍由 Core 对活动
+值重新 shaping 后走 `DrawGlyphRun`；无法 shaping 时整段退到 inline fallback。该指令
+避免把每次按键同步改写 Scene resource，也避免等待一次 Shell render 才显示输入。
 
 ---
 
@@ -644,6 +652,20 @@ HTML 输入控件，Scene 中也不存在与每个编辑节点一一对应的 DO
   Worker 重启和外部 value 更新都必须有明确的 composition 终止规则。
 
 这样避免把每次按键变成一次完整 TSX build，同时保留受控数据和业务校验能力。
+
+`EditableText` 的 Shell→Core 状态同步由 `ConfigureEditable` mutation 显式携带
+authoritative revision、只读/密码/多行 flags 与 grapheme 上限；文字本身仍由同帧的
+`SetTextRun` 引用。首次创建建立会话，严格更新的 revision 才能校正活动值；相同
+revision 的确认不清空 undo，较旧 revision 被忽略且不得覆盖新输入。配置、字符串
+资源和 Scene 结构在同一个 mutation commit 后统一校验，派生失败按 Core poison 规则
+关闭该实例，Host 回退并用完整快照恢复。
+
+Core→Host 使用独立的有界、版本化 Edit Transaction Stream。记录携带 node id、
+base/new revision、delta、selection、composition 与 transaction kind；Host 必须先完整
+验证一批再交给 controller。Worker 在本地完成绘制后把该批转发主线程，主线程路径直接
+消费同一编码。反向流拥塞时不得丢事务或只保留末尾 delta：先合并为每节点的完整状态
+快照，仍超预算则触发可恢复 Worker 降级。密码事务可交给对应业务回调，但不得进入
+Replay Recording、通用 frame report、devtools 或错误文本。
 
 ### 文本位置模型
 

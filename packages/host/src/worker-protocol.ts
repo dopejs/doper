@@ -2,8 +2,9 @@ import type { FrameReport } from "./main-thread";
 import type { VirtualRefillRange } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
+import type { EditTransaction } from "@dopejs/doper-editing";
 
-export const WORKER_PROTOCOL_VERSION = 2 as const;
+export const WORKER_PROTOCOL_VERSION = 3 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
@@ -90,6 +91,12 @@ export interface WorkerVirtualRefillMessage {
   readonly sessionId: number;
 }
 
+export interface WorkerEditTransactionMessage {
+  readonly kind: "doper:edit-transaction";
+  readonly sessionId: number;
+  readonly transaction: EditTransaction;
+}
+
 export interface WorkerFatalMessage {
   readonly error: string;
   readonly kind: "doper:fatal";
@@ -103,6 +110,7 @@ export interface WorkerShutdownCompleteMessage {
 
 export type RenderWorkerOutboundMessage =
   | WorkerClockMetricsMessage
+  | WorkerEditTransactionMessage
   | WorkerFatalMessage
   | WorkerFrameMessage
   | WorkerPreparedMessage
@@ -169,6 +177,8 @@ export function isRenderWorkerOutboundMessage(
       return isClockMetrics(value.metrics);
     case "doper:virtual-refill":
       return Array.isArray(value.requests) && value.requests.every(isVirtualRefillRange);
+    case "doper:edit-transaction":
+      return isEditTransaction(value.transaction);
     case "doper:fatal":
       return typeof value.error === "string";
     case "doper:shutdown-complete":
@@ -186,8 +196,61 @@ export function isRenderWorkerOutboundEnvelope(value: unknown): boolean {
     value.kind === "doper:frame" ||
     value.kind === "doper:clock-metrics" ||
     value.kind === "doper:virtual-refill" ||
+    value.kind === "doper:edit-transaction" ||
     value.kind === "doper:fatal" ||
     value.kind === "doper:shutdown-complete"
+  );
+}
+
+function isEditTransaction(value: unknown): value is EditTransaction {
+  if (
+    !isRecord(value) ||
+    !isNonNegativeInteger(value.nodeId) ||
+    value.nodeId > 0xffff_ffff ||
+    typeof value.baseRevision !== "bigint" ||
+    typeof value.revision !== "bigint" ||
+    value.baseRevision < 0n ||
+    value.revision <= value.baseRevision ||
+    !isRecord(value.selection) ||
+    !isU32(value.selection.anchor) ||
+    !isU32(value.selection.focus) ||
+    !isAffinity(value.selection.anchorAffinity) ||
+    !isAffinity(value.selection.focusAffinity) ||
+    !isTransactionKind(value.kind)
+  ) {
+    return false;
+  }
+  if (value.delta !== undefined) {
+    if (
+      !isRecord(value.delta) ||
+      typeof value.delta.text !== "string" ||
+      !isRange(value.delta.range)
+    ) {
+      return false;
+    }
+  }
+  return value.composition === undefined || isRange(value.composition);
+}
+
+function isRange(value: unknown): boolean {
+  return isRecord(value) && isU32(value.start) && isU32(value.end) && value.start <= value.end;
+}
+
+function isU32(value: unknown): value is number {
+  return isNonNegativeInteger(value) && value <= 0xffff_ffff;
+}
+
+function isAffinity(value: unknown): boolean {
+  return value === "upstream" || value === "downstream";
+}
+
+function isTransactionKind(value: unknown): boolean {
+  return (
+    value === "edit" ||
+    value === "composition" ||
+    value === "undo" ||
+    value === "redo" ||
+    value === "external"
   );
 }
 

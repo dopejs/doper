@@ -689,6 +689,7 @@ impl Scene {
                     );
                 }
             }
+            Mutation::ConfigureEditable { .. } => {}
             Mutation::CreateNode { .. }
             | Mutation::RemoveNode { .. }
             | Mutation::Reparent { .. }
@@ -882,6 +883,7 @@ fn validate_node_operation(
         Mutation::ScrollTo { .. } => kind == NodeKind::Scroll,
         Mutation::ConfigureVirtualList { .. } => kind == NodeKind::Scroll,
         Mutation::SetVirtualItem { .. } => kind == NodeKind::Container,
+        Mutation::ConfigureEditable { .. } => kind == NodeKind::EditableText,
         _ => true,
     };
     if supported {
@@ -895,6 +897,7 @@ fn validate_node_operation(
                 Mutation::ScrollTo { .. } => "ScrollTo",
                 Mutation::ConfigureVirtualList { .. } => "ConfigureVirtualList",
                 Mutation::SetVirtualItem { .. } => "SetVirtualItem",
+                Mutation::ConfigureEditable { .. } => "ConfigureEditable",
                 _ => "unknown",
             },
         })
@@ -925,7 +928,8 @@ fn mutation_node(mutation: &Mutation) -> Option<u32> {
         | Mutation::SetTextRun { node_id, .. }
         | Mutation::ScrollTo { node_id, .. }
         | Mutation::ConfigureVirtualList { node_id, .. }
-        | Mutation::SetVirtualItem { node_id, .. } => Some(*node_id),
+        | Mutation::SetVirtualItem { node_id, .. }
+        | Mutation::ConfigureEditable { node_id, .. } => Some(*node_id),
         Mutation::CreateNode { .. }
         | Mutation::Reparent { .. }
         | Mutation::DefineResource { .. }
@@ -1639,6 +1643,13 @@ fn plan_apply_property(
                 operation: "SetVirtualItem",
             });
         }
+        Mutation::ConfigureEditable { .. } if kind != NodeKind::EditableText => {
+            return Err(SceneError::UnsupportedNodeOperation {
+                node,
+                kind,
+                operation: "ConfigureEditable",
+            });
+        }
         _ => {}
     }
     match mutation {
@@ -1735,6 +1746,7 @@ fn plan_apply_property(
                 .ok_or(SceneError::StaleNode { node })?
                 .virtual_item_index = Some(item_index);
         }
+        Mutation::ConfigureEditable { .. } => {}
         Mutation::CreateNode { .. }
         | Mutation::RemoveNode { .. }
         | Mutation::Reparent { .. }

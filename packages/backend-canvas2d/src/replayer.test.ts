@@ -135,6 +135,7 @@ describe("Canvas2DReplayer", () => {
         view.setUint32(8, 6, true);
         writeF32s(view, 12, [11, 22]);
       }),
+      inlineTextCommand(6, 12, 23, "编🙂"),
       command(DisplayOpcode.DrawImage, 36, (view) => {
         view.setUint32(4, 7, true);
         writeF32s(view, 8, [0, 1, 2, 3, 10, 11, 12, 13]);
@@ -142,7 +143,7 @@ describe("Canvas2DReplayer", () => {
     ]);
     const calls: unknown[][] = [];
 
-    expect(new Canvas2DReplayer().replay(fakeContext(calls), list, resources).commands).toBe(7);
+    expect(new Canvas2DReplayer().replay(fakeContext(calls), list, resources).commands).toBe(8);
     expect(calls).toContainEqual(["transform", 1, 2, 3, 4, 5, 6]);
     expect(calls).toContainEqual(["roundRect", 1, 2, 30, 40, [3, 4, 5, 6]]);
     expect(calls).toContainEqual(["fillPath", pathValue, "#123456"]);
@@ -152,6 +153,17 @@ describe("Canvas2DReplayer", () => {
       "hello",
       11,
       22,
+      "500 14px Inter",
+      "#abcdef",
+      "rtl",
+      "center",
+      "middle",
+    ]);
+    expect(calls).toContainEqual([
+      "fillText",
+      "编🙂",
+      12,
+      23,
       "500 14px Inter",
       "#abcdef",
       "rtl",
@@ -259,6 +271,21 @@ function command(
   result[0] = opcode;
   write(new DataView(result.buffer));
   return result;
+}
+
+function inlineTextCommand(styleId: number, x: number, y: number, text: string): Uint8Array {
+  const encoded = new TextEncoder().encode(text);
+  const padding = (4 - (encoded.byteLength % 4)) % 4;
+  return command(
+    DisplayOpcode.DrawTextInlineFallback,
+    16 + encoded.byteLength + padding,
+    (view) => {
+      view.setUint32(4, styleId, true);
+      writeF32s(view, 8, [x, y]);
+      view.setUint32(16, encoded.byteLength, true);
+      new Uint8Array(view.buffer).set(encoded, 20);
+    },
+  );
 }
 
 function writeF32s(view: DataView, offset: number, values: readonly number[]): void {

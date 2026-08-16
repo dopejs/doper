@@ -1,4 +1,5 @@
 import type { DoperFont } from "./font";
+import type { EditTransaction, TextEditingController } from "@dopejs/doper-editing";
 
 /** Stable list identity used by localized reconciliation. */
 export type Key = string | number;
@@ -85,12 +86,16 @@ export interface TextProps extends Omit<CommonProps, "children"> {
 
 /** Engine-native editable-text primitive; browser bridging is owned by the host. */
 export interface EditableTextProps extends Omit<TextProps, "children"> {
-  readonly value: string;
+  /** Stable local controller; mutually exclusive with value/revision. */
+  readonly controller?: TextEditingController;
+  readonly value?: string;
+  /** Authoritative controlled-value revision; stale revisions never replace newer Core input. */
+  readonly revision?: number | bigint;
   readonly multiline?: boolean;
   readonly readOnly?: boolean;
   readonly password?: boolean;
   readonly maxGraphemes?: number;
-  readonly onTransaction?: (value: string, revision: number) => void;
+  readonly onTransaction?: (transaction: EditTransaction) => void;
   readonly onSubmit?: () => void;
 }
 

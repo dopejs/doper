@@ -8,6 +8,7 @@ import {
   type Color,
   type CommonProps,
   type DoperNode,
+  type EditableTextProps,
   type FunctionComponent,
   type HostType,
   type Key,
@@ -16,6 +17,7 @@ import {
   type VirtualListProps,
 } from "@dopejs/doper-jsx";
 import { ComponentScope } from "@dopejs/doper-runtime/internal";
+import type { EditTransaction } from "@dopejs/doper-editing";
 
 import { MAX_VIRTUAL_ITEMS, NodeKind, Prop, ResourceKind } from "./generated";
 import { encodeMutationBatch, NULL_NODE_ID, type Mutation } from "./mutation-stream";
@@ -53,6 +55,20 @@ export interface DoperRoot {
 /** Internal Host contract for applying asynchronous Core virtual windows. */
 export interface CoreDrivenDoperRoot extends DoperRoot {
   refillVirtualRanges(requests: readonly VirtualRangeRequest[]): void;
+  applyEditTransaction(transaction: EditTransaction): void;
+  editableState(nodeId: number): EditableStateSnapshot | undefined;
+  submitEditable(nodeId: number): void;
+}
+
+/** Shell-owned durable state used to activate one native editing surface. */
+export interface EditableStateSnapshot {
+  readonly multiline: boolean;
+  readonly nodeId: number;
+  readonly password: boolean;
+  readonly readOnly: boolean;
+  readonly revision: bigint;
+  readonly selection: { readonly anchor: number; readonly focus: number };
+  readonly value: string;
 }
 
 /** Core-planned full preheat window to materialize outside the render frame. */
@@ -89,6 +105,10 @@ interface HostInstance extends BaseInstance {
   virtualItems: Map<number, DoperNode>;
   virtualList: NormalizedVirtualList | undefined;
   virtualRange: readonly [number, number] | undefined;
+  editable: NormalizedEditable | undefined;
+  editableSelection: { anchor: number; focus: number } | undefined;
+  onEditTransaction: ((transaction: EditTransaction) => void) | undefined;
+  onSubmit: (() => void) | undefined;
 }
 
 interface ComponentInstance extends BaseInstance {
@@ -126,6 +146,16 @@ interface NormalizedHostProps {
   readonly scrollPosition: readonly [number, number] | undefined;
   readonly virtualItemIndex: number | undefined;
   readonly virtualList: NormalizedVirtualList | undefined;
+  readonly editable: NormalizedEditable | undefined;
+}
+
+interface NormalizedEditable {
+  readonly revision: bigint;
+  readonly flags: number;
+  readonly maxGraphemes: number;
+  readonly value: string;
+  readonly onTransaction: ((transaction: EditTransaction) => void) | undefined;
+  readonly onSubmit: (() => void) | undefined;
 }
 
 interface NormalizedVirtualList {
@@ -174,12 +204,14 @@ const TEXT_KEYS = new Set([
 ]);
 const EDITABLE_KEYS = new Set([
   ...TEXT_KEYS,
+  "controller",
   "maxGraphemes",
   "multiline",
   "onSubmit",
   "onTransaction",
   "password",
   "readOnly",
+  "revision",
 ]);
 const SCROLL_KEYS = new Set([...COMMON_KEYS, "scrollX", "scrollY"]);
 const VIRTUAL_LIST_KEYS = new Set([
@@ -304,6 +336,72 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
         );
       }
     });
+  }
+
+  public applyEditTransaction(transaction: EditTransaction): void {
+    this.assertUsable();
+    if (transaction === null || typeof transaction !== "object") {
+      throw new TypeError("edit transaction must be an object");
+    }
+    assertU32(transaction.nodeId, "edit transaction nodeId");
+    const instance = this.#hostsByNodeId.get(transaction.nodeId);
+    if (instance === undefined || !instance.mounted) return;
+    if (instance.type !== "editableText" || instance.editable === undefined) {
+      throw new Error(`edit transaction targeted non-editable node ${String(transaction.nodeId)}`);
+    }
+    const current = instance.editable;
+    if (transaction.baseRevision !== current.revision) {
+      throw new Error(
+        `edit transaction base revision ${String(transaction.baseRevision)} does not match Shell revision ${String(current.revision)}`,
+      );
+    }
+    if (transaction.revision <= transaction.baseRevision) {
+      throw new Error("edit transaction revision must increase");
+    }
+    const value =
+      transaction.delta === undefined
+        ? current.value
+        : applyUtf16Replacement(
+            current.value,
+            transaction.delta.range.start,
+            transaction.delta.range.end,
+            transaction.delta.text,
+          );
+    instance.editable = { ...current, revision: transaction.revision, value };
+    instance.editableSelection = {
+      anchor: transaction.selection.anchor,
+      focus: transaction.selection.focus,
+    };
+    instance.onEditTransaction?.(transaction);
+  }
+
+  public editableState(nodeId: number): EditableStateSnapshot | undefined {
+    this.assertUsable();
+    assertU32(nodeId, "editable state nodeId");
+    const instance = this.#hostsByNodeId.get(nodeId);
+    if (instance === undefined || !instance.mounted || instance.editable === undefined) return;
+    const editable = instance.editable;
+    const selection = instance.editableSelection ?? {
+      anchor: editable.value.length,
+      focus: editable.value.length,
+    };
+    return Object.freeze({
+      multiline: (editable.flags & 1) !== 0,
+      nodeId,
+      password: (editable.flags & 4) !== 0,
+      readOnly: (editable.flags & 2) !== 0,
+      revision: editable.revision,
+      selection: Object.freeze({ ...selection }),
+      value: editable.value,
+    });
+  }
+
+  public submitEditable(nodeId: number): void {
+    this.assertUsable();
+    assertU32(nodeId, "editable submit nodeId");
+    const instance = this.#hostsByNodeId.get(nodeId);
+    if (instance === undefined || !instance.mounted || instance.editable === undefined) return;
+    instance.onSubmit?.();
   }
 
   public unmount(): void {
@@ -584,6 +682,10 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
       virtualItems: new Map(),
       virtualList: undefined,
       virtualRange: undefined,
+      editable: undefined,
+      editableSelection: undefined,
+      onEditTransaction: undefined,
+      onSubmit: undefined,
       mounted: true,
     };
     this.mutations().push({
@@ -703,6 +805,41 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
     this.replaceCallback(instance, next.onTap);
     this.replaceResourceProp(instance, "text:font", Prop.Font, ResourceKind.Font, next.text?.font);
     if (next.text !== undefined) this.replaceTextRun(instance, next.text);
+    if (next.editable !== undefined) {
+      if (!equalEditable(instance.editable, next.editable)) {
+        this.mutations().push({
+          type: "configureEditable",
+          nodeId: instance.nodeId,
+          revision: next.editable.revision,
+          flags: next.editable.flags,
+          maxGraphemes: next.editable.maxGraphemes,
+        });
+      }
+      const previous = instance.editable;
+      if (previous !== undefined && next.editable.revision < previous.revision) {
+        instance.editable = {
+          ...next.editable,
+          revision: previous.revision,
+          value: previous.value,
+        };
+      } else if (
+        previous !== undefined &&
+        next.editable.revision === previous.revision &&
+        next.editable.value !== previous.value
+      ) {
+        instance.editable = { ...next.editable, value: previous.value };
+      } else {
+        instance.editable = next.editable;
+        if (previous === undefined || next.editable.revision > previous.revision) {
+          instance.editableSelection = {
+            anchor: next.editable.value.length,
+            focus: next.editable.value.length,
+          };
+        }
+      }
+      instance.onEditTransaction = next.editable.onTransaction;
+      instance.onSubmit = next.editable.onSubmit;
+    }
     if (next.scrollPosition !== undefined) {
       if (!equalPair(instance.scrollPosition, next.scrollPosition)) {
         this.mutations().push({
@@ -1079,7 +1216,12 @@ function normalizeHostProps(
   if (type === "text" || type === "editableText") {
     const value =
       type === "editableText"
-        ? requireString(props.value, "EditableText value")
+        ? (props as unknown as EditableTextProps).controller === undefined
+          ? requireString(props.value, "EditableText value")
+          : requireString(
+              (props as unknown as EditableTextProps).controller?.value,
+              "EditableText controller value",
+            )
         : props.value === undefined
           ? primitiveText(props.children)
           : requireString(props.value, "Text value");
@@ -1112,6 +1254,44 @@ function normalizeHostProps(
     const x = optionalFinite(props.scrollX, 0, "scrollX");
     const y = optionalFinite(props.scrollY, 0, "scrollY");
     scrollPosition = [x, y];
+  }
+
+  let editable: NormalizedEditable | undefined;
+  if (type === "editableText") {
+    const editableProps = props as unknown as EditableTextProps;
+    const controller = editableProps.controller;
+    if (
+      controller !== undefined &&
+      (editableProps.value !== undefined || editableProps.revision !== undefined)
+    ) {
+      throw new TypeError("EditableText controller is mutually exclusive with value and revision");
+    }
+    const onTransaction = normalizeEditCallback(editableProps.onTransaction);
+    editable = {
+      revision: controller?.revision ?? optionalRevision(editableProps.revision),
+      flags:
+        (editableProps.multiline === true ? 1 : 0) |
+        (editableProps.readOnly === true ? 2 : 0) |
+        (editableProps.password === true ? 4 : 0),
+      maxGraphemes: requireBoundedInteger(
+        editableProps.maxGraphemes ?? 1_000_000,
+        0,
+        1_000_000,
+        "maxGraphemes",
+      ),
+      value:
+        controller === undefined
+          ? requireString(editableProps.value, "EditableText value")
+          : requireString(controller.value, "EditableText controller value"),
+      onTransaction:
+        controller === undefined
+          ? onTransaction
+          : (transaction) => {
+              controller.applyTransaction(transaction);
+              onTransaction?.(transaction);
+            },
+      onSubmit: normalizeCallback(editableProps.onSubmit, "onSubmit"),
+    };
   }
 
   let virtualList: NormalizedVirtualList | undefined;
@@ -1187,6 +1367,7 @@ function normalizeHostProps(
     scrollPosition,
     virtualItemIndex,
     virtualList,
+    editable,
   };
 }
 
@@ -1336,6 +1517,20 @@ function optionalPositive(value: unknown, fallback: number, label: string): numb
   return value;
 }
 
+function optionalRevision(value: unknown): bigint {
+  if (value === undefined) return 0n;
+  if (typeof value === "bigint") {
+    if (value < 0n || value > 0xffff_ffff_ffff_ffffn) {
+      throw new RangeError("revision must be a u64");
+    }
+    return value;
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError("revision must be a non-negative safe integer or bigint");
+  }
+  return BigInt(value);
+}
+
 function optionalFinite(value: unknown, fallback: number, label: string): number {
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -1356,6 +1551,14 @@ function normalizeCallback(value: unknown, label: string): (() => void) | undefi
   if (value === undefined) return undefined;
   if (typeof value !== "function") throw new TypeError(`${label} must be a function`);
   return value as () => void;
+}
+
+function normalizeEditCallback(
+  value: unknown,
+): ((transaction: EditTransaction) => void) | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "function") throw new TypeError("onTransaction must be a function");
+  return value as (transaction: EditTransaction) => void;
 }
 
 function normalizeRef(value: unknown): Ref<NodeHandle> | undefined {
@@ -1418,6 +1621,36 @@ function equalVirtualListPolicy(
     left.velocityHorizonSeconds === right.velocityHorizonSeconds &&
     left.maximumAheadViewports === right.maximumAheadViewports
   );
+}
+
+function equalEditable(left: NormalizedEditable | undefined, right: NormalizedEditable): boolean {
+  return (
+    left?.revision === right.revision &&
+    left.flags === right.flags &&
+    left.maxGraphemes === right.maxGraphemes
+  );
+}
+
+function applyUtf16Replacement(
+  value: string,
+  start: number,
+  end: number,
+  replacement: string,
+): string {
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > end) {
+    throw new RangeError("edit delta range is invalid");
+  }
+  if (end > value.length || !isUtf16Boundary(value, start) || !isUtf16Boundary(value, end)) {
+    throw new RangeError("edit delta splits a UTF-16 surrogate pair or exceeds the current value");
+  }
+  return value.slice(0, start) + replacement + value.slice(end);
+}
+
+function isUtf16Boundary(value: string, offset: number): boolean {
+  if (offset <= 0 || offset >= value.length) return true;
+  const previous = value.charCodeAt(offset - 1);
+  const next = value.charCodeAt(offset);
+  return !(previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff);
 }
 
 function assertU32(value: unknown, label: string): asserts value is number {

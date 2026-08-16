@@ -76,7 +76,7 @@ impl EditSession {
         let mut candidate = self.clone();
         let mut transactions = Vec::with_capacity(batch.instructions.len());
         for instruction in batch.instructions {
-            let (actual_node, command) = edit_command(instruction.command)?;
+            let (actual_node, command) = edit_command_from_input(instruction.command)?;
             if actual_node != node_id {
                 return Err(InputReplayError::WrongTarget {
                     expected: node_id,
@@ -93,7 +93,10 @@ impl EditSession {
     }
 }
 
-fn edit_command(command: InputCommand) -> Result<(u32, EditCommand), InputReplayError> {
+/// Converts one shared ABI command into an editing command and target.
+pub fn edit_command_from_input(
+    command: InputCommand,
+) -> Result<(u32, EditCommand), InputReplayError> {
     let (node_id, base_revision, intent) = match command {
         InputCommand::Replace {
             node_id,
@@ -157,7 +160,9 @@ fn edit_command(command: InputCommand) -> Result<(u32, EditCommand), InputReplay
             node_id,
             base_revision,
         } => (node_id, base_revision, EditIntent::Redo),
-        InputCommand::ScrollBegin { .. }
+        InputCommand::FocusEditable { .. }
+        | InputCommand::BlurEditable { .. }
+        | InputCommand::ScrollBegin { .. }
         | InputCommand::ScrollDelta { .. }
         | InputCommand::ScrollEnd { .. }
         | InputCommand::ScrollCancel { .. } => return Err(InputReplayError::UnsupportedCommand),

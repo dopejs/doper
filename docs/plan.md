@@ -371,6 +371,8 @@ EmbedDOM 呼起 HTML 输入控件。
 - caret 闪烁、范围选择、拖选、双击选词、Bidi/跨行键盘导航与 scroll-into-view。
 - IME composition、候选窗 bounds、软键盘、clipboard、undo/redo 和 submit。
 - 版本化编辑事务、Shell 确认/校正、外部 value 更新和 Worker 重启恢复。
+- `ConfigureEditable` revision/config mutation、活动值即时 shaping/inline fallback，
+  以及独立有界的 Core→Host Edit Transaction Stream。
 - 增量 BVH、朴素命中 oracle、capture/target/bubble 三阶段事件。
 - passive 输入与非 passive 区域矩形协议。
 - 焦点、编辑态 textbox 语义和语义树到 DOM 影子树映射。

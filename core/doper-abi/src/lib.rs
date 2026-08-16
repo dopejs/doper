@@ -9,6 +9,7 @@
 
 mod codec;
 mod display_list;
+mod edit_transactions;
 mod error;
 mod glyph_resources;
 mod input;
@@ -18,7 +19,10 @@ mod system_text_metrics;
 
 use core::fmt;
 
-pub use display_list::{DisplayCommand, DisplayInstruction, DisplayList};
+pub use display_list::{DisplayCommand, DisplayInstruction, DisplayList, EditorDecorationKind};
+pub use edit_transactions::{
+    EditTransactionBatch, EditTransactionKind, EditTransactionRecord, WireAffinity, WireRange,
+};
 pub use error::{AbiError, StreamKind};
 pub use glyph_resources::{
     GlyphBitmapResource, GlyphPlacementResource, GlyphResourceBatch, GlyphResourceCommand,
@@ -171,6 +175,9 @@ mod tests {
             MutationOpcode::DefineResource,
             MutationOpcode::ReleaseResource,
             MutationOpcode::ScrollTo,
+            MutationOpcode::ConfigureVirtualList,
+            MutationOpcode::SetVirtualItem,
+            MutationOpcode::ConfigureEditable,
             MutationOpcode::Commit,
         ];
         for opcode in mutations {
@@ -224,12 +231,17 @@ mod tests {
             DisplayOpcode::FillPath,
             DisplayOpcode::DrawGlyphRun,
             DisplayOpcode::DrawTextFallback,
+            DisplayOpcode::DrawTextInlineFallback,
             DisplayOpcode::DrawImage,
             DisplayOpcode::DrawPicture,
         ];
         for opcode in displays {
             assert_eq!(DisplayOpcode::from_u8(opcode as u8), Some(opcode));
-            assert_eq!(opcode.fixed_bytes(), Some(opcode.minimum_bytes()));
+            assert!(
+                opcode
+                    .fixed_bytes()
+                    .is_none_or(|fixed| fixed == opcode.minimum_bytes())
+            );
         }
         assert_eq!(DisplayOpcode::from_u8(0), None);
 

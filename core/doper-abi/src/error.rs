@@ -13,6 +13,8 @@ pub enum StreamKind {
     GlyphResources,
     /// Host-to-Core system-font measurement cache deltas.
     SystemTextMetrics,
+    /// Core-to-Host revisioned edit transactions.
+    EditTransactions,
     /// Ordered mutation and editing replay recording.
     Recording,
 }

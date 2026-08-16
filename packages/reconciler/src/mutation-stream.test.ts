@@ -112,6 +112,22 @@ describe("Mutation Stream", () => {
       }),
     ).toThrow(/finite/u);
   });
+
+  it("round-trips revisioned editable configuration without precision loss", () => {
+    const batch: MutationBatch = {
+      frameSeq: 11,
+      mutations: [
+        {
+          type: "configureEditable",
+          nodeId: 3,
+          revision: 0xfedc_ba98_7654_3210n,
+          flags: 5,
+          maxGraphemes: 1000,
+        },
+      ],
+    };
+    expect(decodeMutationBatch(encodeMutationBatch(batch))).toEqual(batch);
+  });
 });
 
 function toHex(bytes: Uint8Array): string {

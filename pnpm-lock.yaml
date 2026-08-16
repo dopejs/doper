@@ -62,6 +62,9 @@ importers:
       '@dopejs/doper-backend-canvas2d':
         specifier: workspace:*
         version: link:../backend-canvas2d
+      '@dopejs/doper-editing':
+        specifier: workspace:*
+        version: link:../editing
       '@dopejs/doper-host':
         specifier: workspace:*
         version: link:../host
@@ -89,12 +92,18 @@ importers:
 
   packages/jsx:
     dependencies:
+      '@dopejs/doper-editing':
+        specifier: workspace:*
+        version: link:../editing
       woff2-encoder:
         specifier: 2.0.0
         version: 2.0.0
 
   packages/reconciler:
     dependencies:
+      '@dopejs/doper-editing':
+        specifier: workspace:*
+        version: link:../editing
       '@dopejs/doper-jsx':
         specifier: workspace:*
         version: link:../jsx

@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@dopejs/doper-backend-canvas2d": "workspace:*",
+    "@dopejs/doper-editing": "workspace:*",
     "@dopejs/doper-host": "workspace:*",
     "@dopejs/doper-jsx": "workspace:*",
     "@dopejs/doper-reconciler": "workspace:*",

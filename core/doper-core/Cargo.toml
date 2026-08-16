@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 doper-abi = { path = "../doper-abi" }
+doper-edit = { path = "../doper-edit" }
 doper-layout = { path = "../doper-layout" }
 doper-paint = { path = "../doper-paint" }
 doper-scene = { path = "../doper-scene" }
@@ -19,7 +20,6 @@ doper-scroll = { path = "../doper-scroll" }
 doper-text = { path = "../doper-text" }
 
 [dev-dependencies]
-doper-edit = { path = "../doper-edit" }
 doper-headless = { path = "../doper-headless" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

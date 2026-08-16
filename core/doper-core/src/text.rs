@@ -1,16 +1,18 @@
 use std::{collections::HashMap, sync::Arc};
 
 use doper_abi::{
-    AbiError, GlyphBitmapResource, GlyphPlacementResource, GlyphResourceBatch,
-    GlyphResourceCommand, GlyphResourceInstruction, GlyphSpanResource, MAX_GLYPH_RESOURCES_BYTES,
-    MAX_SYSTEM_TEXT_METRIC_INSTRUCTIONS, ResourceKind, SFNT_FONT_DATA_BYTES_OFFSET,
-    SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET, SystemTextMetric, SystemTextMetricBatch,
-    SystemTextMetricCommand,
+    AbiError, EditorDecorationKind, GlyphBitmapResource, GlyphPlacementResource,
+    GlyphResourceBatch, GlyphResourceCommand, GlyphResourceInstruction, GlyphSpanResource,
+    MAX_GLYPH_RESOURCES_BYTES, MAX_SYSTEM_TEXT_METRIC_INSTRUCTIONS, ResourceKind,
+    SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
+    SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand,
 };
 use doper_layout::{BoxConstraints, IntrinsicMeasurer, Size};
-use doper_paint::{ShapedGlyphRun, TextPaintResolver, TextStyleResource};
+use doper_paint::{EditorDecoration, ShapedGlyphRun, TextPaintResolver, TextStyleResource};
 use doper_scene::{NodeId, Scene};
-use doper_text::{FontFace, GlyphAtlas, TextEngine, TextLayout, TextOptions};
+use doper_text::{CaretStop, FontFace, GlyphAtlas, TextEngine, TextLayout, TextOptions};
+
+use crate::editing::ActiveEditorVisual;
 
 /// Cumulative explicit-font path counters.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -45,6 +47,7 @@ struct PreparedRun {
     span_id: u32,
     device_pixel_ratio_bits: u32,
     font: FontFace,
+    content_hash: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,6 +55,7 @@ struct ForcedFallbackRun {
     string: u32,
     style: u32,
     font: u32,
+    content_hash: u64,
 }
 
 /// Transactional text layout, raster, and derived-resource owner.
@@ -61,6 +65,8 @@ pub(crate) struct CoreTextSystem {
     fonts: HashMap<u32, Option<FontFace>>,
     system_metrics: HashMap<(u32, u32), SystemTextMetric>,
     forced_fallback: HashMap<NodeId, ForcedFallbackRun>,
+    edit_overrides: HashMap<NodeId, Arc<str>>,
+    editor_decorations: HashMap<NodeId, Vec<EditorDecoration>>,
     active: HashMap<NodeId, PreparedRun>,
     candidate: Option<HashMap<NodeId, PreparedRun>>,
     staged: Vec<GlyphResourceInstruction>,
@@ -78,6 +84,8 @@ impl Default for CoreTextSystem {
             fonts: HashMap::new(),
             system_metrics: HashMap::new(),
             forced_fallback: HashMap::new(),
+            edit_overrides: HashMap::new(),
+            editor_decorations: HashMap::new(),
             active: HashMap::new(),
             candidate: None,
             staged: Vec::new(),
@@ -90,6 +98,43 @@ impl Default for CoreTextSystem {
 }
 
 impl CoreTextSystem {
+    pub(crate) fn set_edit_overrides(&mut self, overrides: HashMap<NodeId, Arc<str>>) {
+        self.edit_overrides = overrides;
+    }
+
+    pub(crate) fn update_editor_decorations(
+        &mut self,
+        scene: &Scene,
+        visual: Option<ActiveEditorVisual>,
+        caret_visible: bool,
+    ) {
+        self.editor_decorations.clear();
+        let Some(visual) = visual else {
+            return;
+        };
+        let source = self.candidate.as_ref().unwrap_or(&self.active);
+        let decorations = if let Some(run) = source.get(&visual.node) {
+            decorations_from_carets(&run.layout.carets, visual, caret_visible)
+        } else {
+            let Some(text_run) = scene.text_run(visual.node) else {
+                return;
+            };
+            let Some(style) = scene
+                .resource(text_run.style_id)
+                .filter(|resource| resource.kind == ResourceKind::TextStyle)
+                .and_then(|resource| TextStyleResource::decode(text_run.style_id, resource).ok())
+            else {
+                return;
+            };
+            let Some(value) = self.text_value(scene, visual.node) else {
+                return;
+            };
+            let carets = approximate_caret_stops(&value, style.font_size, style.line_height);
+            decorations_from_carets(&carets, visual, caret_visible)
+        };
+        self.editor_decorations.insert(visual.node, decorations);
+    }
+
     pub(crate) fn validate_system_metrics(
         &self,
         batch: &SystemTextMetricBatch,
@@ -165,10 +210,12 @@ impl CoreTextSystem {
     }
 
     pub(crate) fn prepare_resources(&mut self, scene: &Scene) -> Vec<NodeId> {
+        let edit_overrides = &self.edit_overrides;
         self.forced_fallback.retain(|node, forced| {
             scene.text_run(*node).is_some_and(|text| {
                 text.string_id == forced.string && text.style_id == forced.style
             }) && scene.ref_prop(*node, doper_abi::Prop::Font) == Some(forced.font)
+                && text_content_hash(scene, edit_overrides, *node) == Some(forced.content_hash)
         });
         let mut candidate = self.candidate.take().unwrap_or_else(|| self.active.clone());
         candidate.retain(|node, run| {
@@ -177,6 +224,7 @@ impl CoreTextSystem {
                     text.string_id == run.string_id && text.style_id == run.style_id
                 })
                 && scene.ref_prop(*node, doper_abi::Prop::Font) == Some(run.font_id)
+                && text_content_hash(scene, edit_overrides, *node) == Some(run.content_hash)
         });
 
         let removed_releases = self
@@ -379,19 +427,17 @@ impl IntrinsicMeasurer for CoreTextSystem {
             string: text_run.string_id,
             style: text_run.style_id,
             font: font_id,
+            content_hash: self.text_content_hash(scene, node).unwrap_or_default(),
         };
         if self.forced_fallback.get(&node) == Some(&forced) {
             self.candidate_mut().remove(&node);
             return self.measure_system_fallback(scene, node, constraints);
         }
         self.forced_fallback.remove(&node);
-        let Some(string) = scene
-            .resource(text_run.string_id)
-            .filter(|resource| resource.kind == ResourceKind::Utf8String)
-            .and_then(|resource| std::str::from_utf8(&resource.bytes).ok())
-        else {
+        let Some(string) = self.text_value(scene, node) else {
             return self.measure_system_fallback(scene, node, constraints);
         };
+        let content_hash = hash_bytes(string.as_bytes());
         let Some(style) = scene
             .resource(text_run.style_id)
             .filter(|resource| resource.kind == ResourceKind::TextStyle)
@@ -409,7 +455,7 @@ impl IntrinsicMeasurer for CoreTextSystem {
             line_height: style.line_height,
             max_width,
         };
-        let Ok(layout) = self.engine.layout(&font, string, options) else {
+        let Ok(layout) = self.engine.layout(&font, &string, options) else {
             self.candidate_mut().remove(&node);
             return self.measure_system_fallback(scene, node, constraints);
         };
@@ -425,6 +471,7 @@ impl IntrinsicMeasurer for CoreTextSystem {
                     && previous.style_id == text_run.style_id
                     && previous.font_id == font_id
                     && previous.max_width_bits == max_width.to_bits()
+                    && previous.content_hash == content_hash
             })
             .map_or(0, |previous| previous.span_id);
         let device_pixel_ratio_bits = self.device_pixel_ratio.to_bits();
@@ -441,6 +488,7 @@ impl IntrinsicMeasurer for CoreTextSystem {
                 span_id: previous_span,
                 device_pixel_ratio_bits,
                 font,
+                content_hash,
             },
         );
         self.metrics.shaped_runs = self.metrics.shaped_runs.saturating_add(1);
@@ -458,6 +506,141 @@ impl TextPaintResolver for CoreTextSystem {
             span_id: run.span_id,
         })
     }
+
+    fn inline_fallback(&self, node: NodeId) -> Option<&str> {
+        self.edit_overrides.get(&node).map(AsRef::as_ref)
+    }
+
+    fn editor_decorations(&self, node: NodeId) -> &[EditorDecoration] {
+        self.editor_decorations
+            .get(&node)
+            .map_or(&[], Vec::as_slice)
+    }
+}
+
+fn decorations_from_carets(
+    carets: &[CaretStop],
+    visual: ActiveEditorVisual,
+    caret_visible: bool,
+) -> Vec<EditorDecoration> {
+    let mut decorations = Vec::new();
+    let start = visual.selection[0].min(visual.selection[1]);
+    let end = visual.selection[0].max(visual.selection[1]);
+    if start == end {
+        if caret_visible && let Some(caret) = closest_caret(carets, end) {
+            decorations.push(EditorDecoration {
+                rect: [caret.x, caret.y, 1.5, caret.height],
+                rgba: 0x1111_11ff,
+                kind: EditorDecorationKind::Caret,
+            });
+        }
+    } else {
+        append_range_decorations(
+            &mut decorations,
+            carets,
+            start,
+            end,
+            0x3390_ff66,
+            EditorDecorationKind::Selection,
+            false,
+        );
+    }
+    if let Some([start, end]) = visual.composition {
+        append_range_decorations(
+            &mut decorations,
+            carets,
+            start,
+            end,
+            0x2563_ebff,
+            EditorDecorationKind::Composition,
+            true,
+        );
+    }
+    decorations
+}
+
+fn append_range_decorations(
+    output: &mut Vec<EditorDecoration>,
+    carets: &[CaretStop],
+    start: u32,
+    end: u32,
+    rgba: u32,
+    kind: EditorDecorationKind,
+    underline: bool,
+) {
+    if start >= end {
+        return;
+    }
+    let Some(first) = closest_caret(carets, start) else {
+        return;
+    };
+    let Some(last) = closest_caret(carets, end) else {
+        return;
+    };
+    for line in first.line..=last.line {
+        let line_carets = carets.iter().filter(|caret| caret.line == line);
+        let maximum_x = line_carets
+            .clone()
+            .map(|caret| caret.x)
+            .fold(0.0_f32, f32::max);
+        let Some(sample) = line_carets.clone().next() else {
+            continue;
+        };
+        let left = if line == first.line { first.x } else { 0.0 };
+        let right = if line == last.line { last.x } else { maximum_x };
+        let width = (right - left).max(if underline { 1.0 } else { 0.0 });
+        let (y, height) = if underline {
+            (sample.y + sample.height - 1.5, 1.5)
+        } else {
+            (sample.y, sample.height)
+        };
+        output.push(EditorDecoration {
+            rect: [left, y, width, height],
+            rgba,
+            kind,
+        });
+    }
+}
+
+fn closest_caret(carets: &[CaretStop], offset: u32) -> Option<CaretStop> {
+    carets
+        .iter()
+        .copied()
+        .min_by_key(|caret| (i64::from(caret.utf16_offset) - i64::from(offset)).unsigned_abs())
+}
+
+fn approximate_caret_stops(text: &str, font_size: f32, line_height: f32) -> Vec<CaretStop> {
+    let advance = font_size * 0.6;
+    let mut carets = Vec::with_capacity(text.chars().count().saturating_add(1));
+    let mut utf16 = 0_u32;
+    let mut line = 0_usize;
+    let mut x = 0.0_f32;
+    carets.push(CaretStop {
+        byte_offset: 0,
+        utf16_offset: 0,
+        line,
+        x,
+        y: 0.0,
+        height: line_height,
+    });
+    for (byte_offset, character) in text.char_indices() {
+        utf16 = utf16.saturating_add(u32::try_from(character.len_utf16()).unwrap_or(2));
+        if character == '\n' {
+            line = line.saturating_add(1);
+            x = 0.0;
+        } else {
+            x += advance;
+        }
+        carets.push(CaretStop {
+            byte_offset: byte_offset.saturating_add(character.len_utf8()),
+            utf16_offset: utf16,
+            line,
+            x,
+            y: usize_to_f32(line) * line_height,
+            height: line_height,
+        });
+    }
+    carets
 }
 
 impl CoreTextSystem {
@@ -472,6 +655,7 @@ impl CoreTextSystem {
                 string: run.string_id,
                 style: run.style_id,
                 font: run.font_id,
+                content_hash: run.content_hash,
             },
         );
     }
@@ -493,7 +677,9 @@ impl CoreTextSystem {
         else {
             return Size::ZERO;
         };
-        if let Some(metric) = self.system_metrics.get(&(run.string_id, run.style_id)) {
+        if !self.edit_overrides.contains_key(&node)
+            && let Some(metric) = self.system_metrics.get(&(run.string_id, run.style_id))
+        {
             self.metrics.system_metric_hits = self.metrics.system_metric_hits.saturating_add(1);
             return constraints.constrain(Size::new(
                 metric.max_line_width,
@@ -501,7 +687,26 @@ impl CoreTextSystem {
             ));
         }
         self.metrics.system_metric_misses = self.metrics.system_metric_misses.saturating_add(1);
-        approximate_fallback_measure(scene, node, constraints, style.font_size, style.line_height)
+        let Some(text) = self.text_value(scene, node) else {
+            return Size::ZERO;
+        };
+        approximate_fallback_measure(&text, constraints, style.font_size, style.line_height)
+    }
+
+    fn text_value(&self, scene: &Scene, node: NodeId) -> Option<Arc<str>> {
+        if let Some(value) = self.edit_overrides.get(&node) {
+            return Some(Arc::clone(value));
+        }
+        let run = scene.text_run(node)?;
+        let string = scene
+            .resource(run.string_id)
+            .filter(|resource| resource.kind == ResourceKind::Utf8String)
+            .and_then(|resource| std::str::from_utf8(&resource.bytes).ok())?;
+        Some(Arc::from(string))
+    }
+
+    fn text_content_hash(&self, scene: &Scene, node: NodeId) -> Option<u64> {
+        text_content_hash(scene, &self.edit_overrides, node)
     }
 }
 
@@ -526,22 +731,11 @@ fn decode_font(scene: &Scene, font_id: u32) -> Option<(u32, Arc<[u8]>)> {
 }
 
 fn approximate_fallback_measure(
-    scene: &Scene,
-    node: NodeId,
+    string: &str,
     constraints: BoxConstraints,
     font_size: f32,
     line_height: f32,
 ) -> Size {
-    let Some(run) = scene.text_run(node) else {
-        return Size::ZERO;
-    };
-    let Some(string) = scene
-        .resource(run.string_id)
-        .filter(|resource| resource.kind == ResourceKind::Utf8String)
-        .and_then(|resource| std::str::from_utf8(&resource.bytes).ok())
-    else {
-        return Size::ZERO;
-    };
     let mut line_count = 0_usize;
     let mut longest_line = 0_usize;
     for line in string.split('\n') {
@@ -551,6 +745,31 @@ fn approximate_fallback_measure(
     let width = usize_to_f32(longest_line) * font_size * 0.6;
     let height = usize_to_f32(line_count) * line_height;
     constraints.constrain(Size::new(width, height))
+}
+
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn text_content_hash(
+    scene: &Scene,
+    overrides: &HashMap<NodeId, Arc<str>>,
+    node: NodeId,
+) -> Option<u64> {
+    if let Some(value) = overrides.get(&node) {
+        return Some(hash_bytes(value.as_bytes()));
+    }
+    let run = scene.text_run(node)?;
+    let bytes = &scene
+        .resource(run.string_id)
+        .filter(|resource| resource.kind == ResourceKind::Utf8String)?
+        .bytes;
+    Some(hash_bytes(bytes))
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {

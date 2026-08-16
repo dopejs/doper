@@ -6,9 +6,12 @@ import {
   INSTRUCTION_HEADER_BYTES,
   MAX_DISPLAY_INSTRUCTIONS,
   MAX_DISPLAY_LIST_BYTES,
+  MAX_RESOURCE_BYTES,
   PROTOCOL_ALIGNMENT,
   STREAM_HEADER_BYTES,
 } from "./generated";
+
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 /** A decoded drawing command used by diagnostics and contract tests. */
 export type DisplayCommand =
@@ -37,6 +40,18 @@ export type DisplayCommand =
       readonly stringId: number;
       readonly fontDescriptionId: number;
       readonly origin: readonly number[];
+    }
+  | {
+      readonly type: "drawTextInlineFallback";
+      readonly fontDescriptionId: number;
+      readonly origin: readonly number[];
+      readonly text: string;
+    }
+  | {
+      readonly type: "drawEditorDecoration";
+      readonly rect: readonly number[];
+      readonly rgba: number;
+      readonly kind: "caret" | "composition" | "selection";
     }
   | {
       readonly type: "drawImage";
@@ -144,6 +159,34 @@ function decodeCommand(reader: DisplayListReader, opcode: DisplayOpcode): Displa
         fontDescriptionId: reader.u32(),
         origin: reader.f32s(2),
       };
+    case DisplayOpcode.DrawTextInlineFallback: {
+      const fontDescriptionId = reader.u32();
+      const origin = reader.f32s(2);
+      return {
+        type: "drawTextInlineFallback",
+        fontDescriptionId,
+        origin,
+        text: reader.utf8(reader.u32()),
+      };
+    }
+    case DisplayOpcode.DrawEditorDecoration: {
+      const rect = reader.f32s(4);
+      if ((rect[2] ?? -1) < 0 || (rect[3] ?? -1) < 0) {
+        return fail("editor decoration has negative extent");
+      }
+      const rgba = reader.u32();
+      const rawKind = reader.u16();
+      reader.zeroes(2);
+      const kind =
+        rawKind === 1
+          ? "selection"
+          : rawKind === 2
+            ? "caret"
+            : rawKind === 3
+              ? "composition"
+              : fail("unknown editor decoration kind");
+      return { type: "drawEditorDecoration", rect, rgba, kind };
+    }
     case DisplayOpcode.DrawImage:
       return {
         type: "drawImage",
@@ -160,11 +203,13 @@ function decodeCommand(reader: DisplayListReader, opcode: DisplayOpcode): Displa
 
 /** @internal Allocation-free cursor over one DisplayList. */
 export class DisplayListReader {
+  readonly #bytes: Uint8Array;
   readonly #view: DataView;
   readonly #length: number;
   #offset = 0;
 
   public constructor(input: Uint8Array) {
+    this.#bytes = input;
     this.#view = new DataView(input.buffer, input.byteOffset, input.byteLength);
     this.#length = input.byteLength;
   }
@@ -209,6 +254,13 @@ export class DisplayListReader {
     return result;
   }
 
+  public zeroes(length: number): void {
+    this.require(length);
+    for (let index = 0; index < length; index += 1) {
+      if (this.#bytes[this.#offset++] !== 0) fail("reserved display-list bytes must be zero");
+    }
+  }
+
   public f32(): number {
     this.require(4);
     const result = this.#view.getFloat32(this.#offset, true);
@@ -226,6 +278,28 @@ export class DisplayListReader {
     for (let index = 0; index < count; index += 1) this.f32();
   }
 
+  /** @internal Reads bounded UTF-8 bytes and verifies zero alignment padding. */
+  public utf8(length: number): string {
+    if (!Number.isInteger(length) || length < 0 || length > MAX_RESOURCE_BYTES) {
+      fail("inline fallback text exceeds its byte limit");
+    }
+    this.require(length);
+    const start = this.#offset;
+    this.#offset += length;
+    let value: string;
+    try {
+      value = utf8Decoder.decode(this.#bytes.subarray(start, this.#offset));
+    } catch {
+      return fail("inline fallback text is not UTF-8");
+    }
+    const padding = (PROTOCOL_ALIGNMENT - (length % PROTOCOL_ALIGNMENT)) % PROTOCOL_ALIGNMENT;
+    this.require(padding);
+    for (let index = 0; index < padding; index += 1) {
+      if (this.#bytes[this.#offset++] !== 0) fail("inline fallback padding must be zero");
+    }
+    return value;
+  }
+
   private require(length: number): void {
     if (length > this.remaining) fail("truncated display list");
   }
@@ -235,7 +309,7 @@ function fail(message: string): never {
   throw new DisplayListError(message);
 }
 
-/** @internal Verifies a generated fixed command layout. */
+/** @internal Verifies a generated command layout. */
 export function validateInstructionSize(opcode: DisplayOpcode, offset: number, end: number): void {
   const layout = DISPLAY_LAYOUTS[opcode];
   const actual = end - offset;
@@ -243,5 +317,11 @@ export function validateInstructionSize(opcode: DisplayOpcode, offset: number, e
     fail(
       `display-list opcode ${String(opcode)} consumed ${String(actual)} bytes, expected ${String(layout.fixedBytes)}`,
     );
+  }
+  if (
+    layout.fixedBytes === null &&
+    (actual < layout.minimumBytes || actual % PROTOCOL_ALIGNMENT !== 0)
+  ) {
+    fail(`display-list opcode ${String(opcode)} consumed an invalid variable length`);
   }
 }

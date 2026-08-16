@@ -3,6 +3,7 @@ import type { FrameReport } from "./main-thread";
 import type { VirtualRefillRange } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
+import type { EditTransaction } from "@dopejs/doper-editing";
 import {
   WORKER_PROTOCOL_VERSION,
   isRenderWorkerOutboundEnvelope,
@@ -36,6 +37,7 @@ export interface RenderWorkerClientOptions {
   readonly onFatal?: (error: Error) => void;
   readonly onFrame?: (report: FrameReport) => void;
   readonly onVirtualRefills?: (requests: readonly VirtualRefillRange[]) => void;
+  readonly onEditTransaction?: (transaction: EditTransaction) => void;
   readonly sessionId: number;
 }
 
@@ -56,6 +58,7 @@ export class RenderWorkerClient {
   readonly #onFatal: ((error: Error) => void) | undefined;
   readonly #onFrame: ((report: FrameReport) => void) | undefined;
   readonly #onVirtualRefills: ((requests: readonly VirtualRefillRange[]) => void) | undefined;
+  readonly #onEditTransaction: ((transaction: EditTransaction) => void) | undefined;
   readonly #sessionId: number;
   readonly #worker: WorkerLike;
   #capabilities: RenderWorkerCapabilities | undefined;
@@ -79,6 +82,7 @@ export class RenderWorkerClient {
     this.#onFatal = options.onFatal;
     this.#onFrame = options.onFrame;
     this.#onVirtualRefills = options.onVirtualRefills;
+    this.#onEditTransaction = options.onEditTransaction;
     worker.addEventListener("message", this.#handleMessage);
     worker.addEventListener("error", this.#handleError);
     worker.addEventListener("messageerror", this.#handleMessageError);
@@ -265,6 +269,9 @@ export class RenderWorkerClient {
         return;
       case "doper:virtual-refill":
         if (this.#state === "ready") this.#onVirtualRefills?.(message.requests);
+        return;
+      case "doper:edit-transaction":
+        if (this.#state === "ready") this.#onEditTransaction?.(message.transaction);
         return;
       case "doper:fatal":
         this.fail(new Error(`render Worker failed: ${message.error}`));

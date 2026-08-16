@@ -14,14 +14,17 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
-    InputBatch, Mutation, MutationBatch, SystemTextMetricBatch,
+    InputBatch, InputCommand, Mutation, MutationBatch, SystemTextMetricBatch,
 };
 use doper_layout::{BoxConstraints, LayoutEngine};
 use doper_paint::{PaintEngine, PaintMetrics};
 use doper_scene::{BitSet, DirtyDomain, Scene, SceneMetrics};
 
 use crate::{
-    CoreError, CoreScrollMetrics, CoreTextMetrics, scroll::ScrollController, text::CoreTextSystem,
+    CoreError, CoreScrollMetrics, CoreTextMetrics,
+    editing::{EditableConfiguration, EditingController},
+    scroll::ScrollController,
+    text::CoreTextSystem,
 };
 
 /// Cumulative top-level frame and failure counters.
@@ -138,9 +141,13 @@ pub struct CoreEngine {
     paint: PaintEngine,
     scroll: ScrollController,
     text: CoreTextSystem,
+    editing: EditingController,
     constraints: BoxConstraints,
     metrics: CoreMetrics,
     last_frame_seq: Option<u32>,
+    last_input_sequence: Option<u32>,
+    caret_elapsed_seconds: f64,
+    caret_visible: bool,
     poisoned: bool,
 }
 
@@ -158,9 +165,13 @@ impl CoreEngine {
             paint: PaintEngine::new(),
             scroll: ScrollController::default(),
             text: CoreTextSystem::default(),
+            editing: EditingController::default(),
             constraints,
             metrics: CoreMetrics::default(),
             last_frame_seq: None,
+            last_input_sequence: None,
+            caret_elapsed_seconds: 0.0,
+            caret_visible: true,
             poisoned: false,
         })
     }
@@ -195,6 +206,9 @@ impl CoreEngine {
         if self.text.has_pending_resources() {
             return Err(CoreError::GlyphResourcesNotDrained);
         }
+        if self.editing.has_pending_transactions() {
+            return Err(CoreError::EditTransactionsNotDrained);
+        }
         let batch = match MutationBatch::decode(bytes) {
             Ok(batch) => batch,
             Err(error) => {
@@ -218,6 +232,24 @@ impl CoreEngine {
                 .map_err(CoreError::SystemTextMetricsState)?;
         }
         let frame_seq = batch.frame_seq;
+        let editable_configurations = batch
+            .instructions
+            .iter()
+            .filter_map(|instruction| match instruction.mutation {
+                Mutation::ConfigureEditable {
+                    node_id,
+                    revision,
+                    flags,
+                    max_graphemes,
+                } => Some(EditableConfiguration {
+                    node_id,
+                    revision,
+                    flags,
+                    max_graphemes,
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         let programmatic_scrolls: BTreeSet<u32> = batch
             .instructions
             .iter()
@@ -229,6 +261,22 @@ impl CoreEngine {
         if let Err(error) = self.scene.commit(batch) {
             self.metrics.scene_rejections += 1;
             return Err(CoreError::Scene(error));
+        }
+
+        let editing_changed = match self
+            .editing
+            .synchronize(&self.scene, &editable_configurations)
+        {
+            Ok(changed) => changed,
+            Err(error) => return self.poison(error),
+        };
+        if let Err(error) = self.editing.encode_pending() {
+            return self.poison(CoreError::EditTransactions(error));
+        }
+        self.text
+            .set_edit_overrides(self.editing.display_overrides());
+        if !editing_changed.is_empty() {
+            self.layout.mark_text_measurements_changed(&editing_changed);
         }
 
         if let Some(metric_batch) = metric_batch {
@@ -308,6 +356,9 @@ impl CoreEngine {
         if self.text.has_pending_resources() {
             return Err(CoreError::GlyphResourcesNotDrained);
         }
+        if self.editing.has_pending_transactions() {
+            return Err(CoreError::EditTransactionsNotDrained);
+        }
         let batch = SystemTextMetricBatch::decode(bytes).map_err(|error| {
             self.metrics.abi_rejections = self.metrics.abi_rejections.saturating_add(1);
             CoreError::Abi(error)
@@ -349,12 +400,9 @@ impl CoreEngine {
         Ok(Some(output))
     }
 
-    /// Atomically applies one Input Stream transaction to Core-owned scrolling.
+    /// Atomically applies one Input Stream transaction to Core-owned subsystems.
     ///
     /// Returns a new `DisplayList` only when direct manipulation changed pixels.
-    /// Editing commands are accepted by the editing subsystem in M3-B and are
-    /// rejected here until that state is integrated.
-    ///
     /// # Errors
     ///
     /// Returns an ABI, sequence, target, or scroll validation error without
@@ -366,6 +414,9 @@ impl CoreEngine {
         if self.text.has_pending_resources() {
             return Err(CoreError::GlyphResourcesNotDrained);
         }
+        if self.editing.has_pending_transactions() {
+            return Err(CoreError::EditTransactionsNotDrained);
+        }
         let batch = match InputBatch::decode(bytes) {
             Ok(batch) => batch,
             Err(error) => {
@@ -373,24 +424,132 @@ impl CoreEngine {
                 return Err(CoreError::Abi(error));
             }
         };
-        let outcome = match self.scroll.apply_input(&mut self.scene, &batch) {
+        if let Some(previous) = self.last_input_sequence
+            && !is_newer_sequence(batch.frame_seq, previous)
+        {
+            self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
+            return Err(CoreError::InputSequenceNotNewer {
+                previous,
+                incoming: batch.frame_seq,
+            });
+        }
+        let scroll_instructions = batch
+            .instructions
+            .iter()
+            .filter(|instruction| is_scroll_command(&instruction.command))
+            .cloned()
+            .collect::<Vec<_>>();
+        let edit_commands = batch
+            .instructions
+            .iter()
+            .filter(|instruction| !is_scroll_command(&instruction.command))
+            .map(|instruction| instruction.command.clone())
+            .collect::<Vec<_>>();
+        let mut candidate_scene = self.scene.clone();
+        let mut candidate_scroll = self.scroll.clone();
+        let mut candidate_editing = self.editing.clone();
+        let scroll_outcome = if scroll_instructions.is_empty() {
+            Default::default()
+        } else {
+            let scroll_batch = InputBatch {
+                frame_seq: batch.frame_seq,
+                instructions: scroll_instructions,
+            };
+            match candidate_scroll.apply_input(&mut candidate_scene, &scroll_batch) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
+                    return Err(error);
+                }
+            }
+        };
+        let edit_outcome = match candidate_editing.apply_commands(edit_commands) {
             Ok(outcome) => outcome,
             Err(error) => {
                 self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
                 return Err(error);
             }
         };
-        if let Err(error) = self.scroll.plan_virtual_frames() {
+        if let Err(error) = candidate_editing.encode_pending() {
+            self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
+            return Err(CoreError::EditTransactions(error));
+        }
+        if let Err(error) = candidate_scroll.plan_virtual_frames() {
             return self.poison(error);
         }
+        self.scene = candidate_scene;
+        self.scroll = candidate_scroll;
+        self.editing = candidate_editing;
+        if edit_outcome.accepted_commands > 0 {
+            self.caret_elapsed_seconds = 0.0;
+            self.caret_visible = true;
+        }
+        self.last_input_sequence = Some(batch.frame_seq);
+        self.text
+            .set_edit_overrides(self.editing.display_overrides());
         self.metrics.accepted_input_batches = self.metrics.accepted_input_batches.saturating_add(1);
-        if !outcome.changed {
-            return Ok(None);
+        if edit_outcome.changed_nodes.is_empty() {
+            if !scroll_outcome.changed {
+                return Ok(None);
+            }
+            let frame_seq = self
+                .last_frame_seq
+                .ok_or(CoreError::MissingCommittedFrame)?;
+            let output =
+                self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, false)?;
+            return Ok(Some(output));
         }
         let frame_seq = self
             .last_frame_seq
             .ok_or(CoreError::MissingCommittedFrame)?;
-        let output = self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, false)?;
+        self.layout
+            .mark_text_measurements_changed(&edit_outcome.changed_nodes);
+        self.text.begin_frame();
+        let mut geometry = match self.layout.layout_with_virtual(
+            &self.scene,
+            self.constraints,
+            &mut self.text,
+            &self.scroll,
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => return self.poison(CoreError::Layout(error)),
+        };
+        let corrected =
+            match self
+                .scroll
+                .synchronize(&mut self.scene, self.layout.snapshot(), &BTreeSet::new())
+            {
+                Ok(corrected) => corrected,
+                Err(error) => return self.poison(error),
+            };
+        if !corrected.is_empty() {
+            self.layout.mark_virtual_measurements_changed(&corrected);
+            let corrected_geometry = match self.layout.layout_with_virtual(
+                &self.scene,
+                self.constraints,
+                &mut self.text,
+                &self.scroll,
+            ) {
+                Ok(outcome) => outcome,
+                Err(error) => return self.poison(CoreError::Layout(error)),
+            };
+            merge_geometry(
+                &mut geometry.changed,
+                &mut geometry.visited,
+                &corrected_geometry.changed,
+                corrected_geometry.visited,
+            );
+        }
+        let fallback_nodes = self.text.prepare_resources(&self.scene);
+        self.relayout_text_fallbacks(
+            &fallback_nodes,
+            &mut geometry.changed,
+            &mut geometry.visited,
+        )?;
+        let output = self.paint_frame(frame_seq, &geometry.changed, geometry.visited, true)?;
+        if let Err(error) = self.text.commit_frame() {
+            return self.poison(CoreError::GlyphResources(error));
+        }
         Ok(Some(output))
     }
 
@@ -414,14 +573,30 @@ impl CoreEngine {
         if let Err(error) = self.scroll.plan_virtual_frames() {
             return self.poison(error);
         }
-        if !outcome.changed {
+        let mut caret_changed = false;
+        if self.editing.active_visual().is_some() {
+            self.caret_elapsed_seconds += elapsed_seconds;
+            while self.caret_elapsed_seconds >= 0.5 {
+                self.caret_elapsed_seconds -= 0.5;
+                self.caret_visible = !self.caret_visible;
+                caret_changed = true;
+            }
+        }
+        if !outcome.changed && !caret_changed {
             return Ok(None);
         }
         let frame_seq = self
             .last_frame_seq
             .ok_or(CoreError::MissingCommittedFrame)?;
-        let output = self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, false)?;
-        self.metrics.scroll_frames = self.metrics.scroll_frames.saturating_add(1);
+        let output = self.paint_frame(
+            frame_seq,
+            &BitSet::with_len(self.scene.len()),
+            0,
+            caret_changed,
+        )?;
+        if outcome.changed {
+            self.metrics.scroll_frames = self.metrics.scroll_frames.saturating_add(1);
+        }
         Ok(Some(output))
     }
 
@@ -531,6 +706,27 @@ impl CoreEngine {
         self.text.take_glyph_resources()
     }
 
+    /// Drains the versioned reverse transactions emitted by the latest edit operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an ABI error only if an internal encoding invariant is violated.
+    pub fn take_edit_transactions(&mut self) -> Result<Vec<u8>, CoreError> {
+        if !self.editing.has_pending_transactions() {
+            return Ok(Vec::new());
+        }
+        let bytes = self
+            .editing
+            .encode_pending()
+            .map_err(CoreError::EditTransactions)?;
+        let taken = self.editing.take_transactions();
+        debug_assert_eq!(
+            taken.records.len(),
+            doper_abi::EditTransactionBatch::decode(&bytes).map_or(0, |batch| batch.records.len())
+        );
+        Ok(bytes)
+    }
+
     /// Drains coalesced virtual-list refill requests produced by accepted frames.
     ///
     /// Requests are emitted after rendering and never invoke Shell code from the
@@ -546,6 +742,11 @@ impl CoreEngine {
         layout_visited_nodes: usize,
         force_full_paint: bool,
     ) -> Result<FrameOutput, CoreError> {
+        self.text.update_editor_decorations(
+            &self.scene,
+            self.editing.active_visual(),
+            self.caret_visible,
+        );
         let scene_nodes = self.scene.len();
         let dirty_layout_nodes = dirty_count(&self.scene, DirtyDomain::Layout);
         let dirty_paint_nodes = dirty_count(&self.scene, DirtyDomain::Paint);
@@ -669,6 +870,21 @@ fn merge_geometry(
     *visited = (*visited).saturating_add(source_visited);
 }
 
+fn is_scroll_command(command: &InputCommand) -> bool {
+    matches!(
+        command,
+        InputCommand::ScrollBegin { .. }
+            | InputCommand::ScrollDelta { .. }
+            | InputCommand::ScrollEnd { .. }
+            | InputCommand::ScrollCancel { .. }
+    )
+}
+
+fn is_newer_sequence(candidate: u32, previous: u32) -> bool {
+    let delta = candidate.wrapping_sub(previous);
+    delta != 0 && delta < (1_u32 << 31)
+}
+
 fn system_text_nodes(scene: &Scene, pairs: &[(u32, u32)]) -> Vec<doper_scene::NodeId> {
     if pairs.is_empty() {
         return Vec::new();
@@ -707,12 +923,12 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use doper_abi::{
-        DisplayCommand, DisplayList, GlyphResourceBatch, GlyphResourceCommand, InputBatch,
-        InputCommand, InputInstruction, Mutation, MutationBatch, MutationInstruction, NULL_NODE_ID,
-        NodeKind, Prop, RESOURCE_ENCODING_VERSION, ReplayRecord, ReplayRecording, ResourceKind,
-        SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
-        SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET, SFNT_FONT_VERSION_OFFSET,
-        SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand,
+        DisplayCommand, DisplayList, EditTransactionBatch, GlyphResourceBatch,
+        GlyphResourceCommand, InputBatch, InputCommand, InputInstruction, Mutation, MutationBatch,
+        MutationInstruction, NULL_NODE_ID, NodeKind, Prop, RESOURCE_ENCODING_VERSION, ReplayRecord,
+        ReplayRecording, ResourceKind, SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET,
+        SFNT_FONT_FACE_INDEX_OFFSET, SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET,
+        SFNT_FONT_VERSION_OFFSET, SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand,
         SystemTextMetricInstruction,
     };
     use doper_edit::{EditConfig, EditSession, Selection};
@@ -909,6 +1125,67 @@ mod tests {
         )
     }
 
+    fn editable_text_tree(flags: u32) -> Vec<u8> {
+        frame(
+            1,
+            vec![
+                Mutation::CreateNode {
+                    node_id: id(0),
+                    kind: NodeKind::Root,
+                    parent: NULL_NODE_ID,
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::CreateNode {
+                    node_id: id(1),
+                    kind: NodeKind::EditableText,
+                    parent: id(0),
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: ResourceKind::Paint,
+                    bytes: SolidPaint {
+                        red: 12,
+                        green: 34,
+                        blue: 56,
+                        alpha: 255,
+                    }
+                    .encode()
+                    .to_vec(),
+                },
+                Mutation::DefineResource {
+                    resource_id: 2,
+                    kind: ResourceKind::TextStyle,
+                    bytes: TextStyleResource {
+                        paint_id: 1,
+                        font_size: 16.0,
+                        line_height: 20.0,
+                        weight: 400,
+                        family: "sans-serif".to_owned(),
+                    }
+                    .encode()
+                    .expect("text style"),
+                },
+                Mutation::DefineResource {
+                    resource_id: 3,
+                    kind: ResourceKind::Utf8String,
+                    bytes: b"a".to_vec(),
+                },
+                Mutation::SetTextRun {
+                    node_id: id(1),
+                    string_id: 3,
+                    style_id: 2,
+                },
+                Mutation::ConfigureEditable {
+                    node_id: id(1),
+                    revision: 0,
+                    flags,
+                    max_graphemes: 100,
+                },
+            ],
+        )
+    }
+
     fn system_metrics(command: SystemTextMetricCommand) -> Vec<u8> {
         SystemTextMetricBatch {
             instructions: vec![SystemTextMetricInstruction { flags: 0, command }],
@@ -1097,6 +1374,182 @@ mod tests {
             .expect("headless pixels");
         let filled = (10 * 100 + 10) * 4;
         assert_eq!(&image.pixels()[filled..filled + 4], &[12, 34, 56, 255]);
+    }
+
+    #[test]
+    fn editable_input_updates_core_text_and_inline_fallback_without_shell_commit() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let initial = engine
+            .commit(&editable_text_tree(1))
+            .expect("editable frame");
+        let initial_display = DisplayList::decode(&initial.display_list).expect("DisplayList");
+        assert!(
+            initial_display
+                .instructions
+                .iter()
+                .any(|instruction| matches!(
+                    &instruction.command,
+                    DisplayCommand::DrawTextInlineFallback { text, .. } if text == "a"
+                ))
+        );
+
+        let output = engine
+            .input(&input(
+                1,
+                vec![InputCommand::Insert {
+                    node_id: id(1),
+                    base_revision: 0,
+                    text: "你🙂".to_owned(),
+                }],
+            ))
+            .expect("editing input")
+            .expect("changed frame");
+        let display = DisplayList::decode(&output.display_list).expect("DisplayList");
+        assert!(display.instructions.iter().any(|instruction| matches!(
+            &instruction.command,
+            DisplayCommand::DrawTextInlineFallback { text, .. } if text == "a你🙂"
+        )));
+        assert_eq!(
+            engine.input(&input(2, vec![])),
+            Err(CoreError::EditTransactionsNotDrained)
+        );
+        let transactions = EditTransactionBatch::decode(
+            &engine
+                .take_edit_transactions()
+                .expect("edit transaction batch"),
+        )
+        .expect("decode edit transactions");
+        assert_eq!(transactions.records.len(), 1);
+        assert_eq!(transactions.records[0].node_id, id(1));
+        assert_eq!(transactions.records[0].base_revision, 0);
+        assert_eq!(transactions.records[0].revision, 1);
+        assert_eq!(
+            transactions.records[0]
+                .delta
+                .as_ref()
+                .map(|(_, text)| text.as_str()),
+            Some("你🙂")
+        );
+        let node = NodeId::from_raw(id(1)).expect("editable node");
+        let session = engine.editing.session(node).expect("editing session");
+        assert_eq!(session.text(), "a你🙂");
+        assert_eq!(session.revision(), 1);
+    }
+
+    #[test]
+    fn focused_editor_draws_selection_and_worker_clock_driven_caret() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit(&editable_text_tree(1))
+            .expect("editable frame");
+
+        let focused = engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus input")
+            .expect("focus frame");
+        let display = DisplayList::decode(&focused.display_list).expect("DisplayList");
+        assert!(display.instructions.iter().any(|instruction| matches!(
+            instruction.command,
+            DisplayCommand::DrawEditorDecoration {
+                kind: doper_abi::EditorDecorationKind::Caret,
+                ..
+            }
+        )));
+
+        assert!(
+            engine
+                .advance(0.25)
+                .expect("first caret half-period")
+                .is_none()
+        );
+        let hidden = engine
+            .advance(0.25)
+            .expect("second caret half-period")
+            .expect("caret blink frame");
+        let display = DisplayList::decode(&hidden.display_list).expect("DisplayList");
+        assert!(!display.instructions.iter().any(|instruction| matches!(
+            instruction.command,
+            DisplayCommand::DrawEditorDecoration {
+                kind: doper_abi::EditorDecorationKind::Caret,
+                ..
+            }
+        )));
+
+        let selected = engine
+            .input(&input(
+                2,
+                vec![InputCommand::SetSelection {
+                    node_id: id(1),
+                    base_revision: 0,
+                    selection: doper_abi::InputSelection {
+                        anchor: doper_abi::InputPosition {
+                            offset: 0,
+                            affinity: doper_abi::InputAffinity::Downstream,
+                        },
+                        focus: doper_abi::InputPosition {
+                            offset: 1,
+                            affinity: doper_abi::InputAffinity::Downstream,
+                        },
+                    },
+                }],
+            ))
+            .expect("selection input")
+            .expect("selection frame");
+        let display = DisplayList::decode(&selected.display_list).expect("DisplayList");
+        assert!(display.instructions.iter().any(|instruction| matches!(
+            instruction.command,
+            DisplayCommand::DrawEditorDecoration {
+                kind: doper_abi::EditorDecorationKind::Selection,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn editable_batches_are_atomic_and_password_display_never_contains_plaintext() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit(&editable_text_tree(1 | 4))
+            .expect("password frame");
+        let rejected = input(
+            1,
+            vec![
+                InputCommand::Insert {
+                    node_id: id(1),
+                    base_revision: 0,
+                    text: "secret".to_owned(),
+                },
+                InputCommand::Insert {
+                    node_id: id(1),
+                    base_revision: 0,
+                    text: "stale".to_owned(),
+                },
+            ],
+        );
+        assert!(matches!(engine.input(&rejected), Err(CoreError::Edit(_))));
+        let node = NodeId::from_raw(id(1)).expect("editable node");
+        assert_eq!(engine.editing.session(node).expect("session").text(), "a");
+
+        let output = engine
+            .input(&input(
+                2,
+                vec![InputCommand::Insert {
+                    node_id: id(1),
+                    base_revision: 0,
+                    text: "secret".to_owned(),
+                }],
+            ))
+            .expect("password input")
+            .expect("changed frame");
+        let display = DisplayList::decode(&output.display_list).expect("DisplayList");
+        assert!(display.instructions.iter().any(|instruction| matches!(
+            &instruction.command,
+            DisplayCommand::DrawTextInlineFallback { text, .. }
+                if text == "•••••••" && !text.contains("secret")
+        )));
     }
 
     #[test]

@@ -115,6 +115,27 @@ impl EditSession {
         !self.redo.is_empty() && self.composition.is_none()
     }
 
+    /// Revalidates the active value against a new policy without changing revision.
+    ///
+    /// Existing undo entries remain valid; history is trimmed to the new budgets.
+    pub fn reconfigure(&mut self, config: EditConfig) -> Result<(), EditError> {
+        validate_value(&config, &self.text, &self.index)?;
+        self.config = config;
+        while self.undo.len() > config.max_history_entries
+            || self.undo_bytes > config.max_history_bytes
+        {
+            let removed = self.undo.pop_front().expect("history is non-empty");
+            self.undo_bytes -= removed.retained_bytes;
+        }
+        while self.redo.len() > config.max_history_entries
+            || self.redo_bytes > config.max_history_bytes
+        {
+            let removed = self.redo.pop_front().expect("history is non-empty");
+            self.redo_bytes -= removed.retained_bytes;
+        }
+        Ok(())
+    }
+
     /// Applies one exact-base-revision command atomically.
     pub fn apply(&mut self, command: EditCommand) -> Result<EditTransaction, EditError> {
         if command.base_revision != self.revision {

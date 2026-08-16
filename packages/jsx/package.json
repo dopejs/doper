@@ -26,6 +26,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@dopejs/doper-editing": "workspace:*",
     "woff2-encoder": "2.0.0"
   }
 }

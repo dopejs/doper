@@ -44,6 +44,14 @@ export {
   type Woff2Decoder,
 } from "@dopejs/doper-jsx";
 export { type DoperRoot } from "@dopejs/doper-reconciler";
+export type {
+  EditTransaction,
+  EditingGeometry,
+  EditingSelection,
+  NativeTextInputMode,
+} from "@dopejs/doper-editing";
+export { TextEditingController, type TextEditingControllerOptions } from "@dopejs/doper-editing";
+export { useTextEditingController } from "./editing";
 export {
   createCanvasRoot,
   createHostedCanvasRoot,

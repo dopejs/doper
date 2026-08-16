@@ -1,6 +1,7 @@
 use core::fmt;
 
 use doper_abi::AbiError;
+use doper_edit::EditError;
 use doper_layout::LayoutError;
 use doper_paint::PaintError;
 use doper_scene::NodeId;
@@ -31,12 +32,42 @@ pub enum CoreError {
     Paint(PaintError),
     /// Core produced an invalid glyph-resource batch; the instance is poisoned.
     GlyphResources(AbiError),
+    /// Core could not encode its bounded reverse edit-transaction batch.
+    EditTransactions(AbiError),
     /// A metric delta disagreed with Core's active system-font metric cache.
     SystemTextMetricsState(&'static str),
     /// The caller requested another resource-producing frame before draining DOPG.
     GlyphResourcesNotDrained,
+    /// A caller started another editable commit before draining the prior reverse batch.
+    EditTransactionsNotDrained,
     /// A scrolling coefficient, extent, or physics operation was invalid.
     Scroll(ScrollError),
+    /// A revision, offset, composition, or edit resource invariant was rejected.
+    Edit(EditError),
+    /// Editable configuration used unknown flags or exceeded a hard policy limit.
+    InvalidEditableConfiguration(&'static str),
+    /// An editing command did not target an active EditableText node.
+    InvalidEditableTarget {
+        /// Generation-bearing rejected node.
+        node: NodeId,
+    },
+    /// A read-only editable node rejected a mutating input command.
+    EditableReadOnly {
+        /// Generation-bearing read-only node.
+        node: NodeId,
+    },
+    /// An EditableText node had no valid UTF-8 Scene text resource.
+    MissingEditableText {
+        /// Generation-bearing malformed node.
+        node: NodeId,
+    },
+    /// Equal authoritative revisions disagreed about the current text.
+    EditableRevisionConflict {
+        /// Generation-bearing conflicted node.
+        node: NodeId,
+        /// Revision claimed by both values.
+        revision: u64,
+    },
     /// An Input Stream transaction was not strictly newer than the accepted sequence.
     InputSequenceNotNewer {
         /// Last accepted sequence.
@@ -87,5 +118,11 @@ impl From<SceneError> for CoreError {
 impl From<ScrollError> for CoreError {
     fn from(error: ScrollError) -> Self {
         Self::Scroll(error)
+    }
+}
+
+impl From<EditError> for CoreError {
+    fn from(error: EditError) -> Self {
+        Self::Edit(error)
     }
 }

@@ -136,6 +136,7 @@ export enum MutationOpcode {
   ScrollTo = 64,
   ConfigureVirtualList = 65,
   SetVirtualItem = 66,
+  ConfigureEditable = 80,
   Commit = 240,
 }
 
@@ -154,6 +155,7 @@ export const MUTATION_LAYOUTS = {
   [MutationOpcode.ScrollTo]: { fixedBytes: 20, minimumBytes: 20 },
   [MutationOpcode.ConfigureVirtualList]: { fixedBytes: 28, minimumBytes: 28 },
   [MutationOpcode.SetVirtualItem]: { fixedBytes: 12, minimumBytes: 12 },
+  [MutationOpcode.ConfigureEditable]: { fixedBytes: 24, minimumBytes: 24 },
   [MutationOpcode.Commit]: { fixedBytes: 8, minimumBytes: 8 },
 } as const;
 
@@ -169,6 +171,8 @@ export enum InputOpcode {
   CancelComposition = 9,
   Undo = 10,
   Redo = 11,
+  FocusEditable = 12,
+  BlurEditable = 13,
   ScrollBegin = 32,
   ScrollDelta = 33,
   ScrollEnd = 34,
@@ -188,6 +192,8 @@ export const INPUT_LAYOUTS = {
   [InputOpcode.CancelComposition]: { fixedBytes: 16, minimumBytes: 16 },
   [InputOpcode.Undo]: { fixedBytes: 16, minimumBytes: 16 },
   [InputOpcode.Redo]: { fixedBytes: 16, minimumBytes: 16 },
+  [InputOpcode.FocusEditable]: { fixedBytes: 8, minimumBytes: 8 },
+  [InputOpcode.BlurEditable]: { fixedBytes: 8, minimumBytes: 8 },
   [InputOpcode.ScrollBegin]: { fixedBytes: 8, minimumBytes: 8 },
   [InputOpcode.ScrollDelta]: { fixedBytes: 20, minimumBytes: 20 },
   [InputOpcode.ScrollEnd]: { fixedBytes: 8, minimumBytes: 8 },
@@ -206,6 +212,8 @@ export enum DisplayOpcode {
   FillPath = 18,
   DrawGlyphRun = 32,
   DrawTextFallback = 33,
+  DrawTextInlineFallback = 36,
+  DrawEditorDecoration = 37,
   DrawImage = 34,
   DrawPicture = 35,
 }
@@ -221,6 +229,11 @@ export const DISPLAY_LAYOUTS = {
   [DisplayOpcode.FillPath]: { fixedBytes: 12, minimumBytes: 12 },
   [DisplayOpcode.DrawGlyphRun]: { fixedBytes: 24, minimumBytes: 24 },
   [DisplayOpcode.DrawTextFallback]: { fixedBytes: 20, minimumBytes: 20 },
+  [DisplayOpcode.DrawTextInlineFallback]: {
+    fixedBytes: null,
+    minimumBytes: 20,
+  },
+  [DisplayOpcode.DrawEditorDecoration]: { fixedBytes: 28, minimumBytes: 28 },
   [DisplayOpcode.DrawImage]: { fixedBytes: 40, minimumBytes: 40 },
   [DisplayOpcode.DrawPicture]: { fixedBytes: 16, minimumBytes: 16 },
 } as const;
@@ -395,4 +408,14 @@ export const PROP_METADATA = {
     resourceKind: ResourceKind.Utf8String,
     invalidation: 16,
   },
+} as const;
+export const EDIT_TRANSACTIONS_MAGIC = 1162891076 as const;
+export const MAX_EDIT_TRANSACTIONS_BYTES = 16777216 as const;
+export const MAX_EDIT_TRANSACTION_INSTRUCTIONS = 262144 as const;
+export enum EditTransactionOpcode {
+  Transaction = 1,
+}
+
+export const EDIT_TRANSACTION_LAYOUTS = {
+  [EditTransactionOpcode.Transaction]: { fixedBytes: null, minimumBytes: 56 },
 } as const;

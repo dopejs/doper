@@ -6,7 +6,14 @@ import {
   type MutationSink,
   type RootOptions,
 } from "@dopejs/doper-reconciler";
-import { decodeInputBatch, encodeInputBatch, type InputCommand } from "@dopejs/doper-editing";
+import {
+  decodeInputBatch,
+  encodeInputBatch,
+  NativeTextInputBridge,
+  type EditTransaction,
+  type EditingGeometry,
+  type InputCommand,
+} from "@dopejs/doper-editing";
 
 import { MAX_INPUT_BYTES, MAX_MUTATION_BYTES } from "./generated";
 import {
@@ -73,12 +80,15 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly initializationTimeoutMs?: number;
   readonly mutationAcknowledgementTimeoutMs?: number;
   readonly mutationBufferBytes?: number;
+  /** Forces the centralized textarea fallback for qualification or known-bad EditContext builds. */
+  readonly nativeTextInputMode?: "auto" | "textarea-proxy";
   readonly onCanvasReplaced?: (canvas: HTMLCanvasElement, previous: HTMLCanvasElement) => void;
   readonly onClockMetrics?: (metrics: RenderClockMetrics) => void;
   readonly onFrame?: (report: FrameReport) => void;
   readonly onHostError?: (error: Error) => void;
   readonly onModeChange?: (mode: HostTransportMode, decision: HostTransportDecision) => void;
   readonly onVirtualRefills?: (requests: readonly VirtualRefillRange[]) => void;
+  readonly onEditTransaction?: (transaction: EditTransaction) => void;
   readonly rasterCache?: boolean;
   readonly transport?: HostTransportPolicy;
   readonly workerFactory?: () => Worker;
@@ -95,6 +105,9 @@ export interface HostedCanvasRoot extends DoperRoot {
   scrollBy(target: ScrollTarget, deltaX: number, deltaY: number, elapsedMs: number): void;
   endScroll(target: ScrollTarget): void;
   cancelScroll(target: ScrollTarget): void;
+  focusEditable(target: ScrollTarget): void;
+  blurEditable(): void;
+  updateEditingGeometry(geometry: EditingGeometry): void;
   inputTransportMetrics(): HostInputTransportMetrics;
   transportMetrics(): HostMutationTransportMetrics | undefined;
 }
@@ -124,6 +137,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #inputDirectFrames = 0;
   #inputRing: SabMutationRing | undefined;
   #inputSabFallbackFrames = 0;
+  #inputBridge: NativeTextInputBridge;
   #lastInputRingMetrics: SabMutationRingMetrics | undefined;
   #mode: HostTransportMode = "main-thread";
   #lastTransportMetrics: HostMutationTransportMetrics | undefined;
@@ -140,6 +154,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       throw new TypeError("canvas must be HTMLCanvasElement");
     this.#canvas = canvas;
     this.#options = options;
+    this.#inputBridge = this.createInputBridge(canvas);
     const capabilities =
       options.capabilities ?? detectHostCapabilities(canvas, options.capabilityEnvironment);
     this.#decision = selectHostTransport(capabilities, options.transport);
@@ -244,6 +259,27 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.sendScroll([{ type: "scrollCancel", nodeId: scrollNodeId(target) }]);
   }
 
+  /** Activates native text services for one mounted EditableText node. */
+  public focusEditable(target: ScrollTarget): void {
+    const nodeId = scrollNodeId(target);
+    const state = this.requireCoreRoot().editableState(nodeId);
+    if (state === undefined) throw new Error(`node ${String(nodeId)} is not an editable target`);
+    this.sendInputCommands([{ type: "focusEditable", nodeId }]);
+    this.#inputBridge.activate(state);
+  }
+
+  /** Ends the active native editing surface without creating per-widget DOM. */
+  public blurEditable(): void {
+    const nodeId = this.#inputBridge.activeNodeId;
+    if (nodeId !== undefined) this.sendInputCommands([{ type: "blurEditable", nodeId }]);
+    this.#inputBridge.deactivate();
+  }
+
+  /** Supplies Core-derived editor and caret bounds to the OS input service. */
+  public updateEditingGeometry(geometry: EditingGeometry): void {
+    this.#inputBridge.updateGeometry(geometry);
+  }
+
   public async initialize(): Promise<void> {
     if (this.#root !== undefined) throw new Error("hosted root is already initialized");
     if (this.#decision.mode === "main-thread") {
@@ -256,7 +292,10 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       const error = toError(cause, "render Worker initialization failed");
       this.#options.onHostError?.(error);
       this.disposeWorkerRuntime(error);
-      if (this.#transferred) this.#canvas = replaceTransferredCanvas(this.#canvas, this.#options);
+      if (this.#transferred) {
+        this.#canvas = replaceTransferredCanvas(this.#canvas, this.#options);
+        this.replaceInputBridge(this.#canvas);
+      }
       this.#decision = runtimeFallbackDecision(this.#decision, error);
       await this.initializeMainThread(this.#canvas);
     }
@@ -300,6 +339,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       onFatal: (error) => this.handleWorkerFatal(error),
       ...(this.#options.onFrame === undefined ? {} : { onFrame: this.#options.onFrame }),
       onVirtualRefills: (requests) => this.deferVirtualRefills(requests),
+      onEditTransaction: (transaction) => this.handleEditTransaction(transaction),
       sessionId: nextSessionId(),
     };
     const client = new RenderWorkerClient(workerFactory(), clientOptions);
@@ -379,6 +419,10 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   }
 
   private sendScroll(commands: readonly InputCommand[]): void {
+    this.sendInputCommands(commands);
+  }
+
+  private sendInputCommands(commands: readonly InputCommand[]): void {
     const frameSeq = this.#inputSequence;
     this.dispatchInput(encodeInputBatch({ frameSeq, commands }));
   }
@@ -401,6 +445,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       rasterCache,
       (requests) => this.deferVirtualRefills(requests),
       this.#options.onHostError,
+      (transaction) => this.handleEditTransaction(transaction),
     );
     this.#frameSink = sink;
     this.#recoverableSink.install(sink);
@@ -408,6 +453,12 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#mode = "main-thread";
     this.startMainThreadClock(sink);
     this.#options.onModeChange?.(this.#mode, this.#decision);
+  }
+
+  private handleEditTransaction(transaction: EditTransaction): void {
+    this.#root?.applyEditTransaction(transaction);
+    this.#inputBridge.applyTransaction(transaction);
+    this.#options.onEditTransaction?.(transaction);
   }
 
   private handleWorkerFatal(error: Error): void {
@@ -441,13 +492,20 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   }
 
   private async recoverToMainThread(error: Error): Promise<void> {
+    const activeEditor = this.#inputBridge.activeNodeId;
+    this.#inputBridge.deactivate();
     this.#recoverableSink.beginRecovery();
     this.disposeWorkerRuntime(error);
     this.#canvas = replaceTransferredCanvas(this.#canvas, this.#options);
+    this.replaceInputBridge(this.#canvas);
     this.#transferred = false;
     this.#decision = runtimeFallbackDecision(this.#decision, error);
     try {
       await this.initializeMainThread(this.#canvas);
+      if (activeEditor !== undefined) {
+        const state = this.#root?.editableState(activeEditor);
+        if (state !== undefined) this.#inputBridge.activate(state);
+      }
     } catch (cause) {
       const recoveryError = toError(cause, "main-thread recovery failed");
       this.#recoverableSink.fail(recoveryError);
@@ -524,6 +582,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (client !== undefined) await client.close();
     this.closeInputRing();
     this.#frameSink?.dispose();
+    this.#inputBridge.dispose();
     this.#core?.free?.();
     this.#core = undefined;
     this.#frameSink = undefined;
@@ -540,6 +599,25 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   private requireRoot(): DoperRoot {
     if (this.#root === undefined) throw new Error("hosted root is not initialized");
     return this.#root;
+  }
+
+  private requireCoreRoot(): CoreDrivenDoperRoot {
+    if (this.#root === undefined) throw new Error("hosted root is not initialized");
+    return this.#root;
+  }
+
+  private createInputBridge(canvas: HTMLCanvasElement): NativeTextInputBridge {
+    return new NativeTextInputBridge(canvas, {
+      dispatch: (command) => this.sendInputCommands([command]),
+      ...(this.#options.nativeTextInputMode === "textarea-proxy" ? { editContext: null } : {}),
+      onError: (error) => this.#options.onHostError?.(error),
+      onSubmit: (nodeId) => this.#root?.submitEditable(nodeId),
+    });
+  }
+
+  private replaceInputBridge(canvas: HTMLCanvasElement): void {
+    this.#inputBridge.dispose();
+    this.#inputBridge = this.createInputBridge(canvas);
   }
 }
 

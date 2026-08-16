@@ -33,6 +33,7 @@
     "displayInstructions": 1048576,
     "glyphResourceInstructions": 262144,
     "systemTextMetricInstructions": 262144,
+    "editTransactionInstructions": 262144,
     "glyphBitmapPixels": 16777216,
     "systemTextLines": 1048576,
     "recordingRecords": 1048576,
@@ -134,6 +135,11 @@
           "opcode": 66,
           "fields": ["u32", "u32"]
         },
+        {
+          "name": "ConfigureEditable",
+          "opcode": 80,
+          "fields": ["u32", "u32", "u32", "u32", "u32"]
+        },
         { "name": "Commit", "opcode": 240, "fields": ["u32"] }
       ]
     },
@@ -172,6 +178,8 @@
         { "name": "CancelComposition", "opcode": 9, "fields": ["u32", "u32", "u32"] },
         { "name": "Undo", "opcode": 10, "fields": ["u32", "u32", "u32"] },
         { "name": "Redo", "opcode": 11, "fields": ["u32", "u32", "u32"] },
+        { "name": "FocusEditable", "opcode": 12, "fields": ["u32"] },
+        { "name": "BlurEditable", "opcode": 13, "fields": ["u32"] },
         { "name": "ScrollBegin", "opcode": 32, "fields": ["u32"] },
         {
           "name": "ScrollDelta",
@@ -216,6 +224,16 @@
           "name": "DrawTextFallback",
           "opcode": 33,
           "fields": ["u32", "u32", "f32", "f32"]
+        },
+        {
+          "name": "DrawTextInlineFallback",
+          "opcode": 36,
+          "fields": ["u32", "f32", "f32", "u32", "bytes", "align4"]
+        },
+        {
+          "name": "DrawEditorDecoration",
+          "opcode": 37,
+          "fields": ["f32", "f32", "f32", "f32", "u32", "u16", "pad16"]
         },
         {
           "name": "DrawImage",
@@ -269,6 +287,36 @@
           "fields": [
             { "name": "stringId", "type": "u32" },
             { "name": "styleId", "type": "u32" }
+          ]
+        }
+      ]
+    },
+    "editTransactions": {
+      "magic": "DOPE",
+      "maxBytes": 16777216,
+      "commands": [
+        {
+          "name": "Transaction",
+          "opcode": 1,
+          "fields": [
+            "u32",
+            "u32",
+            "u32",
+            "u32",
+            "u32",
+            "u32",
+            "u32",
+            "u32",
+            "u32",
+            "u32",
+            "u32",
+            "u8",
+            "u8",
+            "u8",
+            "u8",
+            "u32",
+            "bytes",
+            "align4"
           ]
         }
       ]

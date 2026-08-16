@@ -19,6 +19,7 @@ export {
   createRoot,
   type CoreDrivenDoperRoot,
   type DoperRoot,
+  type EditableStateSnapshot,
   type MutationSink,
   type RootOptions,
   type VirtualRangeRequest,

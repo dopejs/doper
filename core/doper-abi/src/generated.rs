@@ -152,6 +152,7 @@ pub enum MutationOpcode {
     ScrollTo = 64,
     ConfigureVirtualList = 65,
     SetVirtualItem = 66,
+    ConfigureEditable = 80,
     Commit = 240,
 }
 
@@ -173,6 +174,7 @@ impl MutationOpcode {
             64 => Some(Self::ScrollTo),
             65 => Some(Self::ConfigureVirtualList),
             66 => Some(Self::SetVirtualItem),
+            80 => Some(Self::ConfigureEditable),
             240 => Some(Self::Commit),
             _ => None,
         }
@@ -197,6 +199,7 @@ impl MutationOpcode {
             Self::ScrollTo => Some(20),
             Self::ConfigureVirtualList => Some(28),
             Self::SetVirtualItem => Some(12),
+            Self::ConfigureEditable => Some(24),
             Self::Commit => Some(8),
         }
     }
@@ -218,6 +221,7 @@ impl MutationOpcode {
             Self::ScrollTo => 20,
             Self::ConfigureVirtualList => 28,
             Self::SetVirtualItem => 12,
+            Self::ConfigureEditable => 24,
             Self::Commit => 8,
         }
     }
@@ -237,6 +241,8 @@ pub enum InputOpcode {
     CancelComposition = 9,
     Undo = 10,
     Redo = 11,
+    FocusEditable = 12,
+    BlurEditable = 13,
     ScrollBegin = 32,
     ScrollDelta = 33,
     ScrollEnd = 34,
@@ -259,6 +265,8 @@ impl InputOpcode {
             9 => Some(Self::CancelComposition),
             10 => Some(Self::Undo),
             11 => Some(Self::Redo),
+            12 => Some(Self::FocusEditable),
+            13 => Some(Self::BlurEditable),
             32 => Some(Self::ScrollBegin),
             33 => Some(Self::ScrollDelta),
             34 => Some(Self::ScrollEnd),
@@ -284,6 +292,8 @@ impl InputOpcode {
             Self::CancelComposition => Some(16),
             Self::Undo => Some(16),
             Self::Redo => Some(16),
+            Self::FocusEditable => Some(8),
+            Self::BlurEditable => Some(8),
             Self::ScrollBegin => Some(8),
             Self::ScrollDelta => Some(20),
             Self::ScrollEnd => Some(8),
@@ -306,6 +316,8 @@ impl InputOpcode {
             Self::CancelComposition => 16,
             Self::Undo => 16,
             Self::Redo => 16,
+            Self::FocusEditable => 8,
+            Self::BlurEditable => 8,
             Self::ScrollBegin => 8,
             Self::ScrollDelta => 20,
             Self::ScrollEnd => 8,
@@ -328,6 +340,8 @@ pub enum DisplayOpcode {
     FillPath = 18,
     DrawGlyphRun = 32,
     DrawTextFallback = 33,
+    DrawTextInlineFallback = 36,
+    DrawEditorDecoration = 37,
     DrawImage = 34,
     DrawPicture = 35,
 }
@@ -346,6 +360,8 @@ impl DisplayOpcode {
             18 => Some(Self::FillPath),
             32 => Some(Self::DrawGlyphRun),
             33 => Some(Self::DrawTextFallback),
+            36 => Some(Self::DrawTextInlineFallback),
+            37 => Some(Self::DrawEditorDecoration),
             34 => Some(Self::DrawImage),
             35 => Some(Self::DrawPicture),
             _ => None,
@@ -367,6 +383,8 @@ impl DisplayOpcode {
             Self::FillPath => Some(12),
             Self::DrawGlyphRun => Some(24),
             Self::DrawTextFallback => Some(20),
+            Self::DrawTextInlineFallback => None,
+            Self::DrawEditorDecoration => Some(28),
             Self::DrawImage => Some(40),
             Self::DrawPicture => Some(16),
         }
@@ -385,6 +403,8 @@ impl DisplayOpcode {
             Self::FillPath => 12,
             Self::DrawGlyphRun => 24,
             Self::DrawTextFallback => 20,
+            Self::DrawTextInlineFallback => 20,
+            Self::DrawEditorDecoration => 28,
             Self::DrawImage => 40,
             Self::DrawPicture => 16,
         }
@@ -639,6 +659,41 @@ impl Prop {
             Self::SemanticRole => Some(ResourceKind::Utf8String),
             Self::SemanticLabel => Some(ResourceKind::Utf8String),
             Self::SemanticValue => Some(ResourceKind::Utf8String),
+        }
+    }
+}
+
+pub const EDIT_TRANSACTIONS_MAGIC: u32 = 1162891076;
+pub const MAX_EDIT_TRANSACTIONS_BYTES: usize = 16777216;
+pub const MAX_EDIT_TRANSACTION_INSTRUCTIONS: u32 = 262144;
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
+pub enum EditTransactionOpcode {
+    Transaction = 1,
+}
+
+impl EditTransactionOpcode {
+    #[must_use]
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::Transaction),
+            _ => None,
+        }
+    }
+}
+
+impl EditTransactionOpcode {
+    #[must_use]
+    pub const fn fixed_bytes(self) -> Option<usize> {
+        match self {
+            Self::Transaction => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn minimum_bytes(self) -> usize {
+        match self {
+            Self::Transaction => 56,
         }
     }
 }

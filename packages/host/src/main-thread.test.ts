@@ -13,6 +13,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { CanvasFrameSink, type CoreClient, type FrameReport } from "./main-thread";
+import { EDIT_TRANSACTIONS_MAGIC } from "./generated";
 import { decodeSystemTextMetricBatch } from "./system-text-metrics";
 
 const DISPLAY_LIST_MAGIC = 0x4450_4f44;
@@ -207,6 +208,37 @@ describe("CanvasFrameSink", () => {
     expect(() => sink.advance(Number.NaN)).toThrow(/elapsedSeconds/u);
   });
 
+  it("drains validated edit transactions even when selection input does not repaint", () => {
+    const onEditTransaction = vi.fn();
+    const sink = new CanvasFrameSink(
+      fakeContext([], []),
+      {
+        commit: () => emptyDisplayList(),
+        input: () => undefined,
+        take_edit_transactions: () => selectionTransactionStream(),
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onEditTransaction,
+    );
+
+    expect(sink.input(Uint8Array.of(1, 2, 3, 4))).toBeNull();
+    expect(onEditTransaction).toHaveBeenCalledWith({
+      nodeId: 7,
+      baseRevision: 0n,
+      revision: 1n,
+      selection: {
+        anchor: 1,
+        anchorAffinity: "downstream",
+        focus: 1,
+        focusAffinity: "downstream",
+      },
+      kind: "edit",
+    });
+  });
+
   it("drains and validates versioned virtual refill ranges after Core frames", () => {
     const refills = vi.fn();
     let first = true;
@@ -377,6 +409,25 @@ function textStyle(
 
 function emptyDisplayList(): Uint8Array {
   return displayList([]);
+}
+
+function selectionTransactionStream(): Uint8Array {
+  const bytes = new Uint8Array(72);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, EDIT_TRANSACTIONS_MAGIC, true);
+  view.setUint16(4, ABI_VERSION, true);
+  view.setUint16(6, STREAM_HEADER_BYTES, true);
+  view.setUint32(8, bytes.byteLength, true);
+  view.setUint32(12, 1, true);
+  bytes[16] = 1;
+  view.setUint32(20, 7, true);
+  view.setUint32(32, 1, true);
+  view.setUint32(48, 1, true);
+  view.setUint32(52, 1, true);
+  bytes[64] = 1;
+  bytes[66] = 1;
+  bytes[67] = 1;
+  return bytes;
 }
 
 function fillRectDisplayList(paintId: number): Uint8Array {

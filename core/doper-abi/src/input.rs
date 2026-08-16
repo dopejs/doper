@@ -145,6 +145,16 @@ pub enum InputCommand {
         /// Exact Core revision observed by the producer.
         base_revision: u64,
     },
+    /// Activates caret, selection, and IME geometry for an editable node.
+    FocusEditable {
+        /// Generation-bearing editable node.
+        node_id: u32,
+    },
+    /// Deactivates an editable node if it currently owns focus.
+    BlurEditable {
+        /// Generation-bearing editable node.
+        node_id: u32,
+    },
     /// Starts direct manipulation of a Core-owned scroll node.
     ScrollBegin {
         /// Generation-bearing target scroll node.
@@ -382,6 +392,12 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
                 base_revision,
             }
         }
+        InputOpcode::FocusEditable => InputCommand::FocusEditable {
+            node_id: reader.read_u32()?,
+        },
+        InputOpcode::BlurEditable => InputCommand::BlurEditable {
+            node_id: reader.read_u32()?,
+        },
         InputOpcode::ScrollBegin => InputCommand::ScrollBegin {
             node_id: reader.read_u32()?,
         },
@@ -475,6 +491,8 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             write_text(writer, text.as_deref().unwrap_or_default())?;
         }
         InputCommand::ScrollBegin { node_id }
+        | InputCommand::FocusEditable { node_id }
+        | InputCommand::BlurEditable { node_id }
         | InputCommand::ScrollEnd { node_id }
         | InputCommand::ScrollCancel { node_id } => writer.u32(*node_id),
         InputCommand::ScrollDelta {
@@ -547,6 +565,8 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::CancelComposition { .. } => InputOpcode::CancelComposition,
         InputCommand::Undo { .. } => InputOpcode::Undo,
         InputCommand::Redo { .. } => InputOpcode::Redo,
+        InputCommand::FocusEditable { .. } => InputOpcode::FocusEditable,
+        InputCommand::BlurEditable { .. } => InputOpcode::BlurEditable,
         InputCommand::ScrollBegin { .. } => InputOpcode::ScrollBegin,
         InputCommand::ScrollDelta { .. } => InputOpcode::ScrollDelta,
         InputCommand::ScrollEnd { .. } => InputOpcode::ScrollEnd,
@@ -705,6 +725,8 @@ mod tests {
                     node_id: 1,
                     base_revision: revision + 11,
                 }),
+                instruction(InputCommand::FocusEditable { node_id: 1 }),
+                instruction(InputCommand::BlurEditable { node_id: 1 }),
                 instruction(InputCommand::ScrollBegin { node_id: 2 }),
                 instruction(InputCommand::ScrollDelta {
                     node_id: 2,

@@ -1,10 +1,34 @@
 use crate::codec::{
-    Reader, Writer, read_header, read_instruction_header, validate_encode_instruction_count,
+    Reader, Writer, checked_padding, read_header, read_instruction_header,
+    validate_encode_instruction_count,
 };
 use crate::{
     AbiError, DISPLAY_LIST_MAGIC, DisplayOpcode, MAX_DISPLAY_INSTRUCTIONS, MAX_DISPLAY_LIST_BYTES,
-    StreamKind,
+    MAX_RESOURCE_BYTES, StreamKind,
 };
+
+/// Semantic editor overlay kind retained for backend conformance diagnostics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
+pub enum EditorDecorationKind {
+    /// Active range selection background.
+    Selection = 1,
+    /// Collapsed insertion caret.
+    Caret = 2,
+    /// Active IME composition underline.
+    Composition = 3,
+}
+
+impl EditorDecorationKind {
+    fn decode(value: u16) -> Result<Self, AbiError> {
+        match value {
+            1 => Ok(Self::Selection),
+            2 => Ok(Self::Caret),
+            3 => Ok(Self::Composition),
+            _ => Err(AbiError::InvalidValue("unknown editor decoration kind")),
+        }
+    }
+}
 
 /// One validated Core-to-backend drawing command.
 #[derive(Clone, Debug, PartialEq)]
@@ -61,6 +85,24 @@ pub enum DisplayCommand {
         font_description_id: u32,
         /// Baseline origin `[x, y]`.
         origin: [f32; 2],
+    },
+    /// Draws a validated inline UTF-8 fallback owned by active Core editing state.
+    DrawTextInlineFallback {
+        /// Interned host font description identifier.
+        font_description_id: u32,
+        /// Baseline origin `[x, y]`.
+        origin: [f32; 2],
+        /// Inline text unavailable as an immutable Scene resource yet.
+        text: String,
+    },
+    /// Draws one Core-derived editor overlay without a transient Scene resource.
+    DrawEditorDecoration {
+        /// Local rectangle `[x, y, width, height]`.
+        rect: [f32; 4],
+        /// Packed red/green/blue/alpha bytes in network-readable `0xRRGGBBAA` order.
+        rgba: u32,
+        /// Overlay semantics.
+        kind: EditorDecorationKind,
     },
     /// Draws an image from one rectangle into another.
     DrawImage {
@@ -224,6 +266,39 @@ fn decode_command(
             font_description_id: reader.read_u32()?,
             origin: read_f32_array(reader)?,
         },
+        DisplayOpcode::DrawTextInlineFallback => {
+            let font_description_id = reader.read_u32()?;
+            let origin = read_f32_array(reader)?;
+            let length =
+                usize::try_from(reader.read_u32()?).map_err(|_| AbiError::ArithmeticOverflow)?;
+            if length > MAX_RESOURCE_BYTES {
+                return Err(AbiError::ResourceTooLarge {
+                    actual: length,
+                    maximum: MAX_RESOURCE_BYTES,
+                });
+            }
+            let text = std::str::from_utf8(reader.read_bytes(length)?)
+                .map_err(|_| AbiError::InvalidValue("inline fallback text is not UTF-8"))?
+                .to_owned();
+            reader.read_zeroes(checked_padding(length)?)?;
+            DisplayCommand::DrawTextInlineFallback {
+                font_description_id,
+                origin,
+                text,
+            }
+        }
+        DisplayOpcode::DrawEditorDecoration => {
+            let rect = read_f32_array(reader)?;
+            if rect[2] < 0.0 || rect[3] < 0.0 {
+                return Err(AbiError::InvalidValue(
+                    "editor decoration has negative extent",
+                ));
+            }
+            let rgba = reader.read_u32()?;
+            let kind = EditorDecorationKind::decode(reader.read_u16()?)?;
+            reader.read_zeroes(2)?;
+            DisplayCommand::DrawEditorDecoration { rect, rgba, kind }
+        }
         DisplayOpcode::DrawImage => DisplayCommand::DrawImage {
             image_id: reader.read_u32()?,
             source: read_f32_array(reader)?,
@@ -302,6 +377,36 @@ fn encode_command(writer: &mut Writer, instruction: &DisplayInstruction) -> Resu
             writer.u32(*font_description_id);
             write_f32_array(writer, origin)?;
         }
+        DisplayCommand::DrawTextInlineFallback {
+            font_description_id,
+            origin,
+            text,
+        } => {
+            if text.len() > MAX_RESOURCE_BYTES {
+                return Err(AbiError::ResourceTooLarge {
+                    actual: text.len(),
+                    maximum: MAX_RESOURCE_BYTES,
+                });
+            }
+            writer.instruction(DisplayOpcode::DrawTextInlineFallback as u8, flags);
+            writer.u32(*font_description_id);
+            write_f32_array(writer, origin)?;
+            writer.u32(u32::try_from(text.len()).map_err(|_| AbiError::ArithmeticOverflow)?);
+            writer.bytes(text.as_bytes());
+            writer.pad();
+        }
+        DisplayCommand::DrawEditorDecoration { rect, rgba, kind } => {
+            if rect[2] < 0.0 || rect[3] < 0.0 {
+                return Err(AbiError::InvalidValue(
+                    "editor decoration has negative extent",
+                ));
+            }
+            writer.instruction(DisplayOpcode::DrawEditorDecoration as u8, flags);
+            write_f32_array(writer, rect)?;
+            writer.u32(*rgba);
+            writer.u16(*kind as u16);
+            writer.u16(0);
+        }
         DisplayCommand::DrawImage {
             image_id,
             source,
@@ -338,6 +443,8 @@ fn display_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::FillPath { .. } => DisplayOpcode::FillPath,
         DisplayCommand::DrawGlyphRun { .. } => DisplayOpcode::DrawGlyphRun,
         DisplayCommand::DrawTextFallback { .. } => DisplayOpcode::DrawTextFallback,
+        DisplayCommand::DrawTextInlineFallback { .. } => DisplayOpcode::DrawTextInlineFallback,
+        DisplayCommand::DrawEditorDecoration { .. } => DisplayOpcode::DrawEditorDecoration,
         DisplayCommand::DrawImage { .. } => DisplayOpcode::DrawImage,
         DisplayCommand::DrawPicture { .. } => DisplayOpcode::DrawPicture,
     }
@@ -353,8 +460,11 @@ fn validate_instruction_size(
         .ok_or(AbiError::ArithmeticOverflow)?;
     let expected = opcode
         .fixed_bytes()
-        .expect("DisplayList v1 has no variable-length command");
-    if actual != expected {
+        .unwrap_or_else(|| opcode.minimum_bytes());
+    if opcode.fixed_bytes().is_some() && actual != expected
+        || opcode.fixed_bytes().is_none()
+            && (actual < expected || actual % crate::PROTOCOL_ALIGNMENT != 0)
+    {
         return Err(AbiError::InstructionLengthMismatch {
             opcode: opcode as u8,
             offset,
@@ -449,6 +559,16 @@ mod tests {
                 string_id: 9,
                 font_description_id: 10,
                 origin: [11.0, 12.0],
+            },
+            DisplayCommand::DrawTextInlineFallback {
+                font_description_id: 10,
+                origin: [11.0, 12.0],
+                text: "编🙂".to_owned(),
+            },
+            DisplayCommand::DrawEditorDecoration {
+                rect: [2.0, 3.0, 1.5, 18.0],
+                rgba: 0x1122_33ff,
+                kind: EditorDecorationKind::Caret,
             },
             DisplayCommand::DrawImage {
                 image_id: 13,

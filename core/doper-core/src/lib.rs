@@ -3,6 +3,7 @@
 
 //! Deterministic top-level orchestration for the doper rendering Core.
 
+mod editing;
 mod engine;
 mod error;
 mod scroll;

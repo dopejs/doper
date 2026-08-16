@@ -68,6 +68,50 @@ describe("reconciler", () => {
     );
   });
 
+  it("applies revisioned edit deltas to the Shell mirror without stale prop overwrite", () => {
+    const sink = new RecordingSink();
+    const onTransaction = vi.fn();
+    const root = createRoot(sink);
+    root.render(createElement("editableText", { value: "a", revision: 0n, onTransaction }));
+    const configuration = mutationsOfType(sink.batches[0], "configureEditable")[0];
+    if (configuration === undefined) throw new Error("editable configuration missing");
+
+    root.applyEditTransaction({
+      nodeId: configuration.nodeId,
+      baseRevision: 0n,
+      revision: 1n,
+      delta: { range: { start: 1, end: 1 }, text: "🙂" },
+      selection: {
+        anchor: 3,
+        anchorAffinity: "downstream",
+        focus: 3,
+        focusAffinity: "downstream",
+      },
+      kind: "edit",
+    });
+    expect(onTransaction).toHaveBeenLastCalledWith(
+      expect.objectContaining({ baseRevision: 0n, revision: 1n }),
+    );
+
+    root.render(createElement("editableText", { value: "a", revision: 0n, onTransaction }));
+    root.applyEditTransaction({
+      nodeId: configuration.nodeId,
+      baseRevision: 1n,
+      revision: 2n,
+      delta: { range: { start: 3, end: 3 }, text: "!" },
+      selection: {
+        anchor: 4,
+        anchorAffinity: "downstream",
+        focus: 4,
+        focusAffinity: "downstream",
+      },
+      kind: "edit",
+    });
+    expect(onTransaction).toHaveBeenLastCalledWith(
+      expect.objectContaining({ baseRevision: 1n, revision: 2n }),
+    );
+  });
+
   it("preserves keyed host identity while reordering siblings", () => {
     const sink = new RecordingSink();
     const root = createRoot(sink);

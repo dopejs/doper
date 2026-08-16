@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use doper_abi::{DisplayCommand, DisplayInstruction, DisplayList, NodeKind, Prop, ResourceKind};
+use doper_abi::{
+    DisplayCommand, DisplayInstruction, DisplayList, EditorDecorationKind, NodeKind, Prop,
+    ResourceKind,
+};
 use doper_layout::LayoutSnapshot;
 use doper_scene::{BitSet, DirtyDomain, NodeId, Scene};
 
@@ -64,10 +67,25 @@ pub struct ShapedGlyphRun {
     pub span_id: u32,
 }
 
+/// Core-derived local editor overlay rendered in the same transform and clip stack as text.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EditorDecoration {
+    /// Local logical-pixel rectangle.
+    pub rect: [f32; 4],
+    /// Packed `0xRRGGBBAA` color.
+    pub rgba: u32,
+    /// Selection, caret, or composition semantics.
+    pub kind: EditorDecorationKind,
+}
+
 /// Read-only bridge from the text subsystem into paint.
 pub trait TextPaintResolver {
     /// Returns a complete shaped run, or `None` to use the whole-run fallback.
     fn glyph_run(&self, node: NodeId) -> Option<ShapedGlyphRun>;
+    /// Returns a Core-owned fallback string that has not become a Scene resource.
+    fn inline_fallback(&self, node: NodeId) -> Option<&str>;
+    /// Returns transient selection, composition, and caret overlays for one active editor.
+    fn editor_decorations(&self, node: NodeId) -> &[EditorDecoration];
 }
 
 struct FallbackTextPaint;
@@ -75,6 +93,14 @@ struct FallbackTextPaint;
 impl TextPaintResolver for FallbackTextPaint {
     fn glyph_run(&self, _node: NodeId) -> Option<ShapedGlyphRun> {
         None
+    }
+
+    fn inline_fallback(&self, _node: NodeId) -> Option<&str> {
+        None
+    }
+
+    fn editor_decorations(&self, _node: NodeId) -> &[EditorDecoration] {
+        &[]
     }
 }
 
@@ -367,6 +393,20 @@ fn build_node(
             },
         );
     }
+    let editor_decorations = text.editor_decorations(node);
+    for decoration in editor_decorations
+        .iter()
+        .filter(|decoration| decoration.kind == EditorDecorationKind::Selection)
+    {
+        push(
+            &mut instructions,
+            DisplayCommand::DrawEditorDecoration {
+                rect: decoration.rect,
+                rgba: decoration.rgba,
+                kind: decoration.kind,
+            },
+        );
+    }
     if let Some(text_run) = scene.text_run(node) {
         typed_resource(scene, text_run.string_id, ResourceKind::Utf8String)?;
         let style_resource = typed_resource(scene, text_run.style_id, ResourceKind::TextStyle)?;
@@ -383,6 +423,15 @@ fn build_node(
                     glyph_span_id: glyph_run.span_id,
                 },
             );
+        } else if let Some(inline) = text.inline_fallback(node) {
+            push(
+                &mut instructions,
+                DisplayCommand::DrawTextInlineFallback {
+                    font_description_id: text_run.style_id,
+                    origin: [0.0, style.font_size],
+                    text: inline.to_owned(),
+                },
+            );
         } else {
             push(
                 &mut instructions,
@@ -393,6 +442,19 @@ fn build_node(
                 },
             );
         }
+    }
+    for decoration in editor_decorations
+        .iter()
+        .filter(|decoration| decoration.kind != EditorDecorationKind::Selection)
+    {
+        push(
+            &mut instructions,
+            DisplayCommand::DrawEditorDecoration {
+                rect: decoration.rect,
+                rgba: decoration.rgba,
+                kind: decoration.kind,
+            },
+        );
     }
     if scene.kind(node) == Some(NodeKind::Scroll) {
         let [scroll_x, scroll_y] = scene.scroll_position(node).unwrap_or([0.0, 0.0]);

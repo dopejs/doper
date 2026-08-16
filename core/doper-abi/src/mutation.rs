@@ -134,6 +134,17 @@ pub enum Mutation {
         /// Zero-based logical item index.
         item_index: u32,
     },
+    /// Creates or updates the revisioned policy for an editable-text node.
+    ConfigureEditable {
+        /// Target editable-text node.
+        node_id: u32,
+        /// Authoritative Shell revision.
+        revision: u64,
+        /// Version 1 editable behavior flags.
+        flags: u32,
+        /// Maximum user-perceived characters accepted by Core.
+        max_graphemes: u32,
+    },
 }
 
 /// A mutation plus transport flags retained for forward-compatible semantics.
@@ -360,6 +371,12 @@ fn decode_mutation(opcode: MutationOpcode, reader: &mut Reader<'_>) -> Result<Mu
             node_id: reader.read_u32()?,
             item_index: reader.read_u32()?,
         },
+        MutationOpcode::ConfigureEditable => Mutation::ConfigureEditable {
+            node_id: reader.read_u32()?,
+            revision: u64::from(reader.read_u32()?) | (u64::from(reader.read_u32()?) << 32),
+            flags: reader.read_u32()?,
+            max_graphemes: reader.read_u32()?,
+        },
         MutationOpcode::Commit => return Err(AbiError::InvalidValue("nested commit")),
     })
 }
@@ -562,6 +579,24 @@ fn encode_mutation(writer: &mut Writer, instruction: &MutationInstruction) -> Re
             writer.u32(*node_id);
             writer.u32(*item_index);
         }
+        Mutation::ConfigureEditable {
+            node_id,
+            revision,
+            flags: editable_flags,
+            max_graphemes,
+        } => {
+            writer.instruction(MutationOpcode::ConfigureEditable as u8, flags);
+            let revision = revision.to_le_bytes();
+            writer.u32(*node_id);
+            writer.u32(u32::from_le_bytes(
+                revision[..4].try_into().expect("four bytes"),
+            ));
+            writer.u32(u32::from_le_bytes(
+                revision[4..].try_into().expect("four bytes"),
+            ));
+            writer.u32(*editable_flags);
+            writer.u32(*max_graphemes);
+        }
     }
     validate_instruction_size(
         mutation_opcode(&instruction.mutation),
@@ -587,6 +622,7 @@ fn mutation_opcode(mutation: &Mutation) -> MutationOpcode {
         Mutation::ScrollTo { .. } => MutationOpcode::ScrollTo,
         Mutation::ConfigureVirtualList { .. } => MutationOpcode::ConfigureVirtualList,
         Mutation::SetVirtualItem { .. } => MutationOpcode::SetVirtualItem,
+        Mutation::ConfigureEditable { .. } => MutationOpcode::ConfigureEditable,
     }
 }
 

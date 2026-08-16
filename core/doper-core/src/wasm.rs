@@ -108,6 +108,11 @@ impl WasmCore {
         self.inner.take_glyph_resources()
     }
 
+    /// Drains revisioned Core-to-Host editing transactions.
+    pub fn take_edit_transactions(&mut self) -> Result<Vec<u8>, JsValue> {
+        self.inner.take_edit_transactions().map_err(js_error)
+    }
+
     /// Applies logical viewport bounds to the next frame.
     pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<(), JsValue> {
         self.inner.set_viewport(width, height).map_err(js_error)

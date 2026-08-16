@@ -12,10 +12,12 @@ import {
   createRoot,
   decodeMutationBatch,
   type DoperRoot,
+  type CoreDrivenDoperRoot,
   type MutationSink,
   type ResourceKind,
   type RootOptions,
 } from "@dopejs/doper-reconciler";
+import { decodeEditTransactionBatch, type EditTransaction } from "@dopejs/doper-editing";
 
 import { encodeSystemTextMetricBatch } from "./system-text-metrics";
 
@@ -63,6 +65,7 @@ export interface CoreClient {
   set_system_text_metrics?(metrics: Uint8Array): Uint8Array | undefined;
   is_poisoned?(): boolean;
   take_glyph_resources?(): Uint8Array;
+  take_edit_transactions?(): Uint8Array;
   take_virtual_refills?(): Uint32Array;
 }
 
@@ -109,6 +112,7 @@ export interface FrameReport extends ReplayStats {
 /** Main-thread M1 root configuration and observability callbacks. */
 export interface CanvasRootOptions extends RootOptions {
   readonly onFrame?: (report: FrameReport) => void;
+  readonly onEditTransaction?: (transaction: EditTransaction) => void;
 }
 
 type ResourceAction =
@@ -138,6 +142,7 @@ export class CanvasFrameSink implements MutationSink {
   readonly #onVirtualRefills: ((requests: readonly VirtualRefillRange[]) => void) | undefined;
   readonly #rasterCache: RasterTileCache<ReplayStats> | undefined;
   readonly #onAsyncError: ((error: Error) => void) | undefined;
+  readonly #onEditTransaction: ((transaction: EditTransaction) => void) | undefined;
   readonly #fontSet: FontFaceSet | undefined;
   readonly #fontLoadingDone: (() => void) | undefined;
   #devicePixelRatio = 1;
@@ -152,6 +157,7 @@ export class CanvasFrameSink implements MutationSink {
     rasterCache?: RasterTileCache<ReplayStats>,
     onVirtualRefills?: (requests: readonly VirtualRefillRange[]) => void,
     onAsyncError?: (error: Error) => void,
+    onEditTransaction?: (transaction: EditTransaction) => void,
   ) {
     this.#context = context;
     this.#core = core;
@@ -159,6 +165,7 @@ export class CanvasFrameSink implements MutationSink {
     this.#rasterCache = rasterCache;
     this.#onVirtualRefills = onVirtualRefills;
     this.#onAsyncError = onAsyncError;
+    this.#onEditTransaction = onEditTransaction;
     this.#resources = new Canvas2DResourceRegistry();
     this.#replayer = new Canvas2DReplayer();
     this.#fontSet = runtimeFontSet();
@@ -235,6 +242,7 @@ export class CanvasFrameSink implements MutationSink {
       ...(this.#rasterCache === undefined ? {} : { rasterCache: this.#rasterCache.metrics() }),
       ...(replay.rasterFrame === undefined ? {} : { rasterFrame: replay.rasterFrame }),
     });
+    this.emitEditTransactions(this.takeEditTransactions());
   }
 
   /** Applies one Core Input Stream transaction and replays only changed pixels. */
@@ -243,13 +251,18 @@ export class CanvasFrameSink implements MutationSink {
     if (core.input === undefined) throw new Error("Core does not implement Input Stream dispatch");
     const displayList = core.input(bytes);
     this.emitVirtualRefills();
-    if (displayList === undefined) return null;
+    if (displayList === undefined) {
+      this.emitEditTransactions(this.takeEditTransactions());
+      return null;
+    }
     this.applyDynamicGlyphResources();
-    return this.acceptDynamicFrame(displayList, {
+    const result = this.acceptDynamicFrame(displayList, {
       cause: "input",
       inputBytes: bytes.byteLength,
       mutationBytes: 0,
     });
+    this.emitEditTransactions(this.takeEditTransactions());
+    return result;
   }
 
   /** Advances Core-owned animation and replays only when the Picture changes. */
@@ -483,6 +496,19 @@ export class CanvasFrameSink implements MutationSink {
     this.#resourceRevision = nextSequence(this.#resourceRevision);
     this.#rasterCache?.clear();
   }
+
+  private takeEditTransactions(): readonly EditTransaction[] {
+    if (this.#core.take_edit_transactions === undefined) return [];
+    const bytes = this.#core.take_edit_transactions();
+    if (!(bytes instanceof Uint8Array)) {
+      throw new TypeError("Core edit transactions must be Uint8Array bytes");
+    }
+    return bytes.byteLength === 0 ? [] : decodeEditTransactionBatch(bytes);
+  }
+
+  private emitEditTransactions(transactions: readonly EditTransaction[]): void {
+    for (const transaction of transactions) this.#onEditTransaction?.(transaction);
+  }
 }
 
 /** Four-screen default budget; callers can replace it for device-specific policy. */
@@ -680,6 +706,7 @@ export function createCanvasRoot(
   core: CoreClient,
   options: CanvasRootOptions = {},
 ): DoperRoot {
+  const coreRoot: { current: CoreDrivenDoperRoot | undefined } = { current: undefined };
   const sink = new CanvasFrameSink(
     context,
     core,
@@ -687,8 +714,13 @@ export function createCanvasRoot(
     undefined,
     undefined,
     options.onPostCommitError,
+    (transaction) => {
+      coreRoot.current?.applyEditTransaction(transaction);
+      options.onEditTransaction?.(transaction);
+    },
   );
   const root = createRoot(sink, options);
+  coreRoot.current = root;
   return {
     render: (node) => root.render(node),
     flushSync: () => root.flushSync(),

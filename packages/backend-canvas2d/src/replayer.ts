@@ -187,6 +187,22 @@ function validateCommand(
       required(resources.getTextStyle(reader.u32()), "text style");
       reader.skipF32(2);
       return;
+    case DisplayOpcode.DrawTextInlineFallback:
+      required(resources.getTextStyle(reader.u32()), "text style");
+      reader.skipF32(2);
+      reader.utf8(reader.u32());
+      return;
+    case DisplayOpcode.DrawEditorDecoration: {
+      reader.skipF32(2);
+      if (reader.f32() < 0 || reader.f32() < 0) {
+        replayFail("editor decoration has negative extent");
+      }
+      reader.u32();
+      const kind = reader.u16();
+      if (kind < 1 || kind > 3) replayFail("unknown editor decoration kind");
+      if (reader.u16() !== 0) replayFail("editor decoration reserved bytes must be zero");
+      return;
+    }
     case DisplayOpcode.DrawImage:
       required(resources.getImage(reader.u32()), "image");
       reader.skipF32(8);
@@ -302,23 +318,26 @@ function replayCommand(
       const style = required(resources.getTextStyle(reader.u32()), "text style");
       const x = reader.f32();
       const y = reader.f32();
-      context.font = style.font;
-      context.fillStyle = style.fillStyle;
-      if (style.direction !== undefined) context.direction = style.direction;
-      if (style.textAlign !== undefined) context.textAlign = style.textAlign;
-      if (style.textBaseline !== undefined) context.textBaseline = style.textBaseline;
-      if (style.lineHeight === undefined || !text.includes("\n")) {
-        context.fillText(text, x, y);
-      } else {
-        let line = 0;
-        let start = 0;
-        for (let index = 0; index <= text.length; index += 1) {
-          if (index !== text.length && text.charCodeAt(index) !== 0x0a) continue;
-          context.fillText(text.slice(start, index), x, y + line * style.lineHeight);
-          line += 1;
-          start = index + 1;
-        }
-      }
+      drawFallbackText(context, text, style, x, y);
+      return;
+    }
+    case DisplayOpcode.DrawTextInlineFallback: {
+      const style = required(resources.getTextStyle(reader.u32()), "text style");
+      const x = reader.f32();
+      const y = reader.f32();
+      const text = reader.utf8(reader.u32());
+      drawFallbackText(context, text, style, x, y);
+      return;
+    }
+    case DisplayOpcode.DrawEditorDecoration: {
+      const x = reader.f32();
+      const y = reader.f32();
+      const width = reader.f32();
+      const height = reader.f32();
+      context.fillStyle = rgbaCss(reader.u32());
+      reader.u16();
+      reader.u16();
+      context.fillRect(x, y, width, height);
       return;
     }
     case DisplayOpcode.DrawImage: {
@@ -362,9 +381,43 @@ function replayCommand(
   }
 }
 
+function rgbaCss(value: number): string {
+  const red = (value >>> 24) & 0xff;
+  const green = (value >>> 16) & 0xff;
+  const blue = (value >>> 8) & 0xff;
+  const alpha = value & 0xff;
+  return `rgba(${String(red)}, ${String(green)}, ${String(blue)}, ${String(alpha / 255)})`;
+}
+
 function required<T>(value: T | undefined, kind: string): T {
   if (value === undefined) replayFail(`referenced ${kind} resource is missing`);
   return value;
+}
+
+function drawFallbackText(
+  context: Canvas2DContext,
+  text: string,
+  style: CanvasTextStyle,
+  x: number,
+  y: number,
+): void {
+  context.font = style.font;
+  context.fillStyle = style.fillStyle;
+  if (style.direction !== undefined) context.direction = style.direction;
+  if (style.textAlign !== undefined) context.textAlign = style.textAlign;
+  if (style.textBaseline !== undefined) context.textBaseline = style.textBaseline;
+  if (style.lineHeight === undefined || !text.includes("\n")) {
+    context.fillText(text, x, y);
+    return;
+  }
+  let line = 0;
+  let start = 0;
+  for (let index = 0; index <= text.length; index += 1) {
+    if (index !== text.length && text.charCodeAt(index) !== 0x0a) continue;
+    context.fillText(text.slice(start, index), x, y + line * style.lineHeight);
+    line += 1;
+    start = index + 1;
+  }
 }
 
 function replayFail(message: string): never {

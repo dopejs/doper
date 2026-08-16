@@ -92,6 +92,13 @@ export type Mutation =
       readonly type: "setVirtualItem";
       readonly nodeId: number;
       readonly itemIndex: number;
+    }
+  | {
+      readonly type: "configureEditable";
+      readonly nodeId: number;
+      readonly revision: bigint;
+      readonly flags: number;
+      readonly maxGraphemes: number;
     };
 
 /** A complete transaction. Commit is encoded automatically at the end. */
@@ -301,6 +308,18 @@ function encodeMutation(writer: ByteWriter, mutation: Mutation): void {
       writer.u32(mutation.nodeId);
       writer.u32(mutation.itemIndex);
       return;
+    case "configureEditable":
+      assertU32(mutation.nodeId, "nodeId");
+      assertU64(mutation.revision, "revision");
+      assertU32(mutation.flags, "editable flags");
+      assertU32(mutation.maxGraphemes, "maxGraphemes");
+      writer.instruction(MutationOpcode.ConfigureEditable);
+      writer.u32(mutation.nodeId);
+      writer.u32(Number(mutation.revision & 0xffff_ffffn));
+      writer.u32(Number(mutation.revision >> 32n));
+      writer.u32(mutation.flags);
+      writer.u32(mutation.maxGraphemes);
+      return;
   }
 }
 
@@ -408,6 +427,14 @@ function decodeMutation(reader: ByteReader, opcode: MutationOpcode): Mutation {
         type: "setVirtualItem",
         nodeId: reader.u32(),
         itemIndex: reader.u32(),
+      };
+    case MutationOpcode.ConfigureEditable:
+      return {
+        type: "configureEditable",
+        nodeId: reader.u32(),
+        revision: BigInt(reader.u32()) | (BigInt(reader.u32()) << 32n),
+        flags: reader.u32(),
+        maxGraphemes: reader.u32(),
       };
     default:
       return fail(`unknown mutation opcode ${String(opcode)}`);
@@ -584,6 +611,10 @@ function assertU16(value: number, label: string): void {
 
 function assertU32(value: number, label: string): void {
   if (!Number.isInteger(value) || value < 0 || value > 0xffff_ffff) fail(`${label} must be a u32`);
+}
+
+function assertU64(value: bigint, label: string): void {
+  if (value < 0n || value > 0xffff_ffff_ffff_ffffn) fail(`${label} must be a u64`);
 }
 
 function padding(length: number): number {

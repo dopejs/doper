@@ -114,6 +114,7 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
     message.rasterCache ? createDefaultRasterCache(context, fatal) : undefined,
     (requests) => post({ kind: "doper:virtual-refill", requests, sessionId }),
     fatal,
+    (transaction) => post({ kind: "doper:edit-transaction", transaction, sessionId }),
   );
   const consume = (frameSeq: number, bytes: Uint8Array): void => {
     const decoded = decodeMutationBatch(bytes);
