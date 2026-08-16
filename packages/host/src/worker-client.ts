@@ -1,6 +1,6 @@
 import { ABI_VERSION } from "./generated";
 import type { FrameReport } from "./main-thread";
-import type { NonPassiveRegion, VirtualRefillRange } from "./main-thread";
+import type { EditingGeometryFrame, NonPassiveRegion, VirtualRefillRange } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
 import type { EditTransaction, EventTransaction } from "@dopejs/doper-editing";
@@ -40,6 +40,7 @@ export interface RenderWorkerClientOptions {
   readonly onEditTransaction?: (transaction: EditTransaction) => void;
   readonly onEventTransaction?: (transaction: EventTransaction) => void;
   readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
+  readonly onEditingGeometry?: (frame: EditingGeometryFrame) => void;
   readonly sessionId: number;
 }
 
@@ -63,6 +64,7 @@ export class RenderWorkerClient {
   readonly #onEditTransaction: ((transaction: EditTransaction) => void) | undefined;
   readonly #onEventTransaction: ((transaction: EventTransaction) => void) | undefined;
   readonly #onNonPassiveRegions: ((regions: readonly NonPassiveRegion[]) => void) | undefined;
+  readonly #onEditingGeometry: ((frame: EditingGeometryFrame) => void) | undefined;
   readonly #sessionId: number;
   readonly #worker: WorkerLike;
   #capabilities: RenderWorkerCapabilities | undefined;
@@ -89,6 +91,7 @@ export class RenderWorkerClient {
     this.#onEditTransaction = options.onEditTransaction;
     this.#onEventTransaction = options.onEventTransaction;
     this.#onNonPassiveRegions = options.onNonPassiveRegions;
+    this.#onEditingGeometry = options.onEditingGeometry;
     worker.addEventListener("message", this.#handleMessage);
     worker.addEventListener("error", this.#handleError);
     worker.addEventListener("messageerror", this.#handleMessageError);
@@ -284,6 +287,9 @@ export class RenderWorkerClient {
         return;
       case "doper:non-passive-regions":
         if (this.#state === "ready") this.#onNonPassiveRegions?.(message.regions);
+        return;
+      case "doper:editing-geometry":
+        if (this.#state === "ready") this.#onEditingGeometry?.(message.frame);
         return;
       case "doper:fatal":
         this.fail(new Error(`render Worker failed: ${message.error}`));

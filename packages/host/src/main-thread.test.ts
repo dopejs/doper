@@ -333,6 +333,90 @@ describe("CanvasFrameSink", () => {
     expect(() => malformed.commit(mutationFrame([]))).toThrow(/count/u);
   });
 
+  it("validates and publishes active editing geometry for the IME loop", () => {
+    const geometry = vi.fn();
+    const bits = (value: number): number => {
+      const scratch = new DataView(new ArrayBuffer(4));
+      scratch.setFloat32(0, value, true);
+      return scratch.getUint32(0, true);
+    };
+    const words = Uint32Array.of(
+      1,
+      17,
+      2,
+      3,
+      1,
+      bits(5),
+      bits(6),
+      bits(100),
+      bits(20),
+      bits(7),
+      bits(8),
+      bits(9),
+      bits(10),
+      2,
+      3,
+      bits(11),
+      bits(12),
+      bits(13),
+      bits(14),
+    );
+    const sink = new CanvasFrameSink(
+      fakeContext([], []),
+      { commit: () => emptyDisplayList(), editing_geometry: () => words },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      geometry,
+    );
+    sink.commit(mutationFrame([]));
+    expect(geometry).toHaveBeenCalledWith({
+      nodeId: 17,
+      selectionStart: 2,
+      selectionEnd: 3,
+      controlBounds: { left: 5, top: 6, width: 100, height: 20 },
+      selectionBounds: { left: 7, top: 8, width: 9, height: 10 },
+      characterBounds: [{ start: 2, end: 3, rect: { left: 11, top: 12, width: 13, height: 14 } }],
+    });
+
+    const idle = vi.fn();
+    const idleSink = new CanvasFrameSink(
+      fakeContext([], []),
+      {
+        commit: () => emptyDisplayList(),
+        editing_geometry: () => Uint32Array.of(1, 0xffff_ffff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      idle,
+    );
+    idleSink.commit(mutationFrame([]));
+    expect(idle).not.toHaveBeenCalled();
+
+    const malformed = new CanvasFrameSink(
+      fakeContext([], []),
+      { commit: () => emptyDisplayList(), editing_geometry: () => Uint32Array.of(1, 17, 2) },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      vi.fn(),
+    );
+    expect(() => malformed.commit(mutationFrame([]))).toThrow(/layout/u);
+  });
+
   it("upserts and releases browser text metrics with exact pair reference lifetimes", () => {
     const commit = vi.fn((_mutations: Uint8Array, _metrics?: Uint8Array) => emptyDisplayList());
     const sink = new CanvasFrameSink(fakeContext([], []), { commit });

@@ -56,6 +56,23 @@ import {
   VIRTUAL_REFILL_RECORD_START_INDEX,
   VIRTUAL_REFILL_RECORD_WORDS,
   VIRTUAL_REFILL_VERSION,
+  EDITING_GEOMETRY_CHARACTER_END_INDEX,
+  EDITING_GEOMETRY_CHARACTER_LEFT_BITS_INDEX,
+  EDITING_GEOMETRY_CHARACTER_START_INDEX,
+  EDITING_GEOMETRY_CHARACTER_WORDS,
+  EDITING_GEOMETRY_HEADER_CHARACTER_COUNT_INDEX,
+  EDITING_GEOMETRY_HEADER_NODE_ID_INDEX,
+  EDITING_GEOMETRY_HEADER_SELECTION_END_INDEX,
+  EDITING_GEOMETRY_HEADER_SELECTION_START_INDEX,
+  EDITING_GEOMETRY_HEADER_VERSION_INDEX,
+  EDITING_GEOMETRY_HEADER_WORDS,
+  EDITING_GEOMETRY_RECT_HEIGHT_BITS_INDEX,
+  EDITING_GEOMETRY_RECT_LEFT_BITS_INDEX,
+  EDITING_GEOMETRY_RECT_TOP_BITS_INDEX,
+  EDITING_GEOMETRY_RECT_WIDTH_BITS_INDEX,
+  EDITING_GEOMETRY_RECT_WORDS,
+  EDITING_GEOMETRY_VERSION,
+  NULL_NODE_ID,
   NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX,
   NON_PASSIVE_REGION_HEADER_VERSION_INDEX,
   NON_PASSIVE_REGION_HEADER_WORDS,
@@ -83,6 +100,7 @@ export interface CoreClient {
   take_edit_transactions?(): Uint8Array;
   take_event_transactions?(): Uint8Array;
   non_passive_regions?(): Uint32Array;
+  editing_geometry?(): Uint32Array;
   take_virtual_refills?(): Uint32Array;
 }
 
@@ -100,6 +118,31 @@ export interface NonPassiveRegion {
   readonly left: number;
   readonly right: number;
   readonly top: number;
+}
+
+/** Canvas-local logical-pixel rectangle decoded from the editing geometry snapshot. */
+export interface EditingGeometryRect {
+  readonly height: number;
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+}
+
+/** One UTF-16 character range with its world-space rectangle for IME queries. */
+export interface EditingCharacterBounds {
+  readonly end: number;
+  readonly rect: EditingGeometryRect;
+  readonly start: number;
+}
+
+/** Active-editor geometry snapshot for candidate-window and caret placement. */
+export interface EditingGeometryFrame {
+  readonly characterBounds: readonly EditingCharacterBounds[];
+  readonly controlBounds: EditingGeometryRect;
+  readonly nodeId: number;
+  readonly selectionBounds: EditingGeometryRect;
+  readonly selectionEnd: number;
+  readonly selectionStart: number;
 }
 
 /** Deterministic Core phase-work and invalidation diagnostics. */
@@ -141,6 +184,7 @@ export interface CanvasRootOptions extends RootOptions {
   readonly onEditTransaction?: (transaction: EditTransaction) => void;
   readonly onEventTransaction?: (transaction: EventTransaction) => void;
   readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
+  readonly onEditingGeometry?: (frame: EditingGeometryFrame) => void;
 }
 
 type ResourceAction =
@@ -173,6 +217,7 @@ export class CanvasFrameSink implements MutationSink {
   readonly #onEditTransaction: ((transaction: EditTransaction) => void) | undefined;
   readonly #onEventTransaction: ((transaction: EventTransaction) => void) | undefined;
   readonly #onNonPassiveRegions: ((regions: readonly NonPassiveRegion[]) => void) | undefined;
+  readonly #onEditingGeometry: ((frame: EditingGeometryFrame) => void) | undefined;
   readonly #fontSet: FontFaceSet | undefined;
   readonly #fontLoadingDone: (() => void) | undefined;
   #devicePixelRatio = 1;
@@ -190,6 +235,7 @@ export class CanvasFrameSink implements MutationSink {
     onEditTransaction?: (transaction: EditTransaction) => void,
     onEventTransaction?: (transaction: EventTransaction) => void,
     onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void,
+    onEditingGeometry?: (frame: EditingGeometryFrame) => void,
   ) {
     this.#context = context;
     this.#core = core;
@@ -200,6 +246,7 @@ export class CanvasFrameSink implements MutationSink {
     this.#onEditTransaction = onEditTransaction;
     this.#onEventTransaction = onEventTransaction;
     this.#onNonPassiveRegions = onNonPassiveRegions;
+    this.#onEditingGeometry = onEditingGeometry;
     this.#resources = new Canvas2DResourceRegistry();
     this.#replayer = new Canvas2DReplayer();
     this.#fontSet = runtimeFontSet();
@@ -239,6 +286,7 @@ export class CanvasFrameSink implements MutationSink {
     const displayList = this.#core.commit(bytes, metricBytes);
     this.emitVirtualRefills();
     this.emitNonPassiveRegions();
+    this.emitEditingGeometry();
     if (!(displayList instanceof Uint8Array)) {
       throw new TypeError("Core commit must return Uint8Array DisplayList bytes");
     }
@@ -287,6 +335,7 @@ export class CanvasFrameSink implements MutationSink {
     const displayList = core.input(bytes);
     this.emitVirtualRefills();
     this.emitNonPassiveRegions();
+    this.emitEditingGeometry();
     this.emitEventTransactions(this.takeEventTransactions());
     if (displayList === undefined) {
       this.emitEditTransactions(this.takeEditTransactions());
@@ -312,6 +361,7 @@ export class CanvasFrameSink implements MutationSink {
     const displayList = core.advance(elapsedSeconds);
     this.emitVirtualRefills();
     this.emitNonPassiveRegions();
+    this.emitEditingGeometry();
     if (displayList === undefined) return this.replayLastFrame();
     this.applyDynamicGlyphResources();
     return this.acceptDynamicFrame(displayList, {
@@ -567,6 +617,14 @@ export class CanvasFrameSink implements MutationSink {
     const regions = parseNonPassiveRegions(snapshot);
     this.#onNonPassiveRegions?.(regions);
   }
+
+  private emitEditingGeometry(): void {
+    if (this.#onEditingGeometry === undefined) return;
+    const snapshot = this.#core.editing_geometry?.();
+    if (snapshot === undefined) return;
+    const frame = parseEditingGeometry(snapshot);
+    if (frame !== undefined) this.#onEditingGeometry(frame);
+  }
 }
 
 /** Four-screen default budget; callers can replace it for device-specific policy. */
@@ -792,6 +850,58 @@ function parseNonPassiveRegions(words: Uint32Array): NonPassiveRegion[] {
   return regions;
 }
 
+function parseEditingGeometry(words: Uint32Array): EditingGeometryFrame | undefined {
+  const minimum = EDITING_GEOMETRY_HEADER_WORDS + EDITING_GEOMETRY_RECT_WORDS * 2;
+  if (!(words instanceof Uint32Array) || words.length < minimum) {
+    throw new TypeError("Core editing geometry must use the generated Uint32Array layout");
+  }
+  if (words[EDITING_GEOMETRY_HEADER_VERSION_INDEX] !== EDITING_GEOMETRY_VERSION) {
+    throw new Error("Core editing geometry version is incompatible with Host");
+  }
+  const nodeId = requiredWord(words, EDITING_GEOMETRY_HEADER_NODE_ID_INDEX);
+  if (nodeId === NULL_NODE_ID) return undefined;
+  const selectionStart = requiredWord(words, EDITING_GEOMETRY_HEADER_SELECTION_START_INDEX);
+  const selectionEnd = requiredWord(words, EDITING_GEOMETRY_HEADER_SELECTION_END_INDEX);
+  if (selectionStart > selectionEnd) {
+    throw new RangeError("Core editing geometry selection range is inverted");
+  }
+  const count = requiredWord(words, EDITING_GEOMETRY_HEADER_CHARACTER_COUNT_INDEX);
+  const expected = minimum + count * EDITING_GEOMETRY_CHARACTER_WORDS;
+  if (!Number.isSafeInteger(expected) || words.length !== expected) {
+    throw new TypeError("Core editing geometry character count does not match its payload");
+  }
+  const scratch = new DataView(new ArrayBuffer(4));
+  const float = (bits: number): number => {
+    scratch.setUint32(0, bits, true);
+    return scratch.getFloat32(0, true);
+  };
+  const rect = (offset: number): EditingGeometryRect => {
+    const left = float(requiredWord(words, offset + EDITING_GEOMETRY_RECT_LEFT_BITS_INDEX));
+    const top = float(requiredWord(words, offset + EDITING_GEOMETRY_RECT_TOP_BITS_INDEX));
+    const width = float(requiredWord(words, offset + EDITING_GEOMETRY_RECT_WIDTH_BITS_INDEX));
+    const height = float(requiredWord(words, offset + EDITING_GEOMETRY_RECT_HEIGHT_BITS_INDEX));
+    if (![left, top, width, height].every(Number.isFinite) || width < 0 || height < 0) {
+      throw new RangeError("Core editing geometry rectangle is invalid");
+    }
+    return { height, left, top, width };
+  };
+  const controlBounds = rect(EDITING_GEOMETRY_HEADER_WORDS);
+  const selectionBounds = rect(EDITING_GEOMETRY_HEADER_WORDS + EDITING_GEOMETRY_RECT_WORDS);
+  const characterBounds: EditingCharacterBounds[] = [];
+  for (let record = 0; record < count; record += 1) {
+    const offset = minimum + record * EDITING_GEOMETRY_CHARACTER_WORDS;
+    const start = requiredWord(words, offset + EDITING_GEOMETRY_CHARACTER_START_INDEX);
+    const end = requiredWord(words, offset + EDITING_GEOMETRY_CHARACTER_END_INDEX);
+    if (start >= end) throw new RangeError("Core editing geometry character range is empty");
+    characterBounds.push({
+      end,
+      rect: rect(offset + EDITING_GEOMETRY_CHARACTER_LEFT_BITS_INDEX),
+      start,
+    });
+  }
+  return { characterBounds, controlBounds, nodeId, selectionBounds, selectionEnd, selectionStart };
+}
+
 /** Creates the deterministic main-thread M1 fallback rendering root. */
 export function createCanvasRoot(
   context: Canvas2DContext,
@@ -815,6 +925,7 @@ export function createCanvasRoot(
       options.onEventTransaction?.(transaction);
     },
     options.onNonPassiveRegions,
+    options.onEditingGeometry,
   );
   const root = createRoot(sink, options);
   coreRoot.current = root;

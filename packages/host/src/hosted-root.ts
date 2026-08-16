@@ -21,6 +21,8 @@ import {
   CanvasFrameSink,
   createDefaultRasterCache,
   type CoreClient,
+  type EditingGeometryFrame,
+  type EditingGeometryRect,
   type FrameReport,
   type NonPassiveRegion,
   type VirtualRefillRange,
@@ -352,6 +354,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       onEditTransaction: (transaction) => this.handleEditTransaction(transaction),
       onEventTransaction: (transaction) => this.handleEventTransaction(transaction),
       onNonPassiveRegions: (regions) => this.handleNonPassiveRegions(regions),
+      onEditingGeometry: (frame) => this.handleEditingGeometry(frame),
       sessionId: nextSessionId(),
     };
     const client = new RenderWorkerClient(workerFactory(), clientOptions);
@@ -600,6 +603,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       (transaction) => this.handleEditTransaction(transaction),
       (transaction) => this.handleEventTransaction(transaction),
       (regions) => this.handleNonPassiveRegions(regions),
+      (frame) => this.handleEditingGeometry(frame),
     );
     this.#frameSink = sink;
     this.#recoverableSink.install(sink);
@@ -809,7 +813,41 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       ...(this.#options.nativeTextInputMode === "textarea-proxy" ? { editContext: null } : {}),
       onError: (error) => this.#options.onHostError?.(error),
       onSubmit: (nodeId) => this.#root?.submitEditable(nodeId),
+      requestCharacterBounds: (nodeId, start, end) => {
+        this.sendInputCommands([{ type: "requestCharacterBounds", nodeId, start, end }]);
+      },
     });
+  }
+
+  /** Feeds Core-computed editor geometry to the IME bridge automatically. */
+  private handleEditingGeometry(frame: EditingGeometryFrame): void {
+    if (this.#inputBridge.activeNodeId !== frame.nodeId) return;
+    const toDomRect = (rect: EditingGeometryRect): DOMRect =>
+      new DOMRect(rect.left, rect.top, rect.width, rect.height);
+    const characters = frame.characterBounds;
+    try {
+      this.#inputBridge.updateGeometry({
+        controlBounds: toDomRect(frame.controlBounds),
+        selectionBounds: toDomRect(frame.selectionBounds),
+        ...(characters.length === 0
+          ? {}
+          : {
+              characterBounds: (start: number, end: number): readonly DOMRect[] => {
+                const rects: DOMRect[] = [];
+                for (let unit = start; unit < end; unit += 1) {
+                  const record = characters.find(
+                    (character) => character.start <= unit && unit < character.end,
+                  );
+                  if (record === undefined) return rects;
+                  rects.push(toDomRect(record.rect));
+                }
+                return rects;
+              },
+            }),
+      });
+    } catch (cause) {
+      this.#options.onHostError?.(toError(cause, "editing geometry synchronization failed"));
+    }
   }
 
   private replaceInputBridge(canvas: HTMLCanvasElement): void {

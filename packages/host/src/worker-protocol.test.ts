@@ -131,6 +131,50 @@ describe("render Worker protocol validation", () => {
     ).toBe(false);
     expect(
       isRenderWorkerOutboundMessage({
+        kind: "doper:editing-geometry",
+        frame: {
+          nodeId: 17,
+          selectionStart: 2,
+          selectionEnd: 3,
+          controlBounds: { left: 5, top: 6, width: 100, height: 20 },
+          selectionBounds: { left: 7, top: 8, width: 9, height: 10 },
+          characterBounds: [
+            { start: 2, end: 3, rect: { left: 11, top: 12, width: 13, height: 14 } },
+          ],
+        },
+        sessionId: 7,
+      }),
+    ).toBe(true);
+    expect(
+      isRenderWorkerOutboundMessage({
+        kind: "doper:editing-geometry",
+        frame: {
+          nodeId: 17,
+          selectionStart: 4,
+          selectionEnd: 3,
+          controlBounds: { left: 5, top: 6, width: 100, height: 20 },
+          selectionBounds: { left: 7, top: 8, width: 9, height: 10 },
+          characterBounds: [],
+        },
+        sessionId: 7,
+      }),
+    ).toBe(false);
+    expect(
+      isRenderWorkerOutboundMessage({
+        kind: "doper:editing-geometry",
+        frame: {
+          nodeId: 17,
+          selectionStart: 2,
+          selectionEnd: 3,
+          controlBounds: { left: 5, top: 6, width: -1, height: 20 },
+          selectionBounds: { left: 7, top: 8, width: 9, height: 10 },
+          characterBounds: [],
+        },
+        sessionId: 7,
+      }),
+    ).toBe(false);
+    expect(
+      isRenderWorkerOutboundMessage({
         kind: "doper:virtual-refill",
         requests: [{ nodeId: 0x0010_0001, start: 4, end: 8 }],
         sessionId: 7,

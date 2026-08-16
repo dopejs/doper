@@ -1,11 +1,16 @@
 import type { FrameReport } from "./main-thread";
 import type { VirtualRefillRange } from "./main-thread";
 import type { NonPassiveRegion } from "./main-thread";
+import type {
+  EditingCharacterBounds,
+  EditingGeometryFrame,
+  EditingGeometryRect,
+} from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
 import type { EditTransaction, EventTransaction } from "@dopejs/doper-editing";
 
-export const WORKER_PROTOCOL_VERSION = 4 as const;
+export const WORKER_PROTOCOL_VERSION = 5 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
@@ -110,6 +115,12 @@ export interface WorkerNonPassiveRegionsMessage {
   readonly sessionId: number;
 }
 
+export interface WorkerEditingGeometryMessage {
+  readonly frame: EditingGeometryFrame;
+  readonly kind: "doper:editing-geometry";
+  readonly sessionId: number;
+}
+
 export interface WorkerFatalMessage {
   readonly error: string;
   readonly kind: "doper:fatal";
@@ -126,6 +137,7 @@ export type RenderWorkerOutboundMessage =
   | WorkerEditTransactionMessage
   | WorkerEventTransactionMessage
   | WorkerNonPassiveRegionsMessage
+  | WorkerEditingGeometryMessage
   | WorkerFatalMessage
   | WorkerFrameMessage
   | WorkerPreparedMessage
@@ -198,6 +210,8 @@ export function isRenderWorkerOutboundMessage(
       return isEventTransaction(value.transaction);
     case "doper:non-passive-regions":
       return Array.isArray(value.regions) && value.regions.every(isNonPassiveRegion);
+    case "doper:editing-geometry":
+      return isEditingGeometryFrame(value.frame);
     case "doper:fatal":
       return typeof value.error === "string";
     case "doper:shutdown-complete":
@@ -218,8 +232,45 @@ export function isRenderWorkerOutboundEnvelope(value: unknown): boolean {
     value.kind === "doper:edit-transaction" ||
     value.kind === "doper:event-transaction" ||
     value.kind === "doper:non-passive-regions" ||
+    value.kind === "doper:editing-geometry" ||
     value.kind === "doper:fatal" ||
     value.kind === "doper:shutdown-complete"
+  );
+}
+
+function isEditingGeometryRect(value: unknown): value is EditingGeometryRect {
+  return (
+    isRecord(value) &&
+    isFiniteNumber(value.left) &&
+    isFiniteNumber(value.top) &&
+    isFiniteNumber(value.width) &&
+    isFiniteNumber(value.height) &&
+    value.width >= 0 &&
+    value.height >= 0
+  );
+}
+
+function isEditingCharacterBounds(value: unknown): value is EditingCharacterBounds {
+  return (
+    isRecord(value) &&
+    isU32(value.start) &&
+    isU32(value.end) &&
+    value.start < value.end &&
+    isEditingGeometryRect(value.rect)
+  );
+}
+
+function isEditingGeometryFrame(value: unknown): value is EditingGeometryFrame {
+  return (
+    isRecord(value) &&
+    isU32(value.nodeId) &&
+    isU32(value.selectionStart) &&
+    isU32(value.selectionEnd) &&
+    value.selectionStart <= value.selectionEnd &&
+    isEditingGeometryRect(value.controlBounds) &&
+    isEditingGeometryRect(value.selectionBounds) &&
+    Array.isArray(value.characterBounds) &&
+    value.characterBounds.every(isEditingCharacterBounds)
   );
 }
 

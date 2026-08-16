@@ -119,6 +119,84 @@ describe("M4 native editing vertical slice", () => {
       roots.pop();
     }
   });
+
+  it("feeds Core editor geometry to the IME surface and answers character queries", async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 180;
+    canvas.height = 60;
+    document.body.append(canvas);
+    let handle: NodeHandle | null = null;
+    const frames: FrameReport[] = [];
+    const transactions: EditTransaction[] = [];
+    const errors: Error[] = [];
+    const root = await createHostedCanvasRoot(canvas, {
+      onEditTransaction: (transaction) => transactions.push(transaction),
+      onFrame: (report) => frames.push(report),
+      onHostError: (error) => errors.push(error),
+      transport: { preference: "main-thread", strict: true },
+    });
+    roots.push(root);
+    root.render(
+      createElement("editableText", {
+        height: 40,
+        ref: (value: NodeHandle | null) => {
+          handle = value;
+        },
+        revision: 1n,
+        value: "ab",
+        width: 160,
+      }),
+    );
+    await withTimeout(
+      waitUntil(() => frames.some((frame) => frame.cause === "mutation")),
+      3_000,
+      "geometry initial frame",
+    );
+    if (handle === null) throw new Error("editable ref was not attached");
+    root.focusEditable(handle);
+    const context = Reflect.get(canvas, "editContext") as BrowserEditContext;
+    const controlBounds: DOMRect[] = [];
+    const selectionBounds: DOMRect[] = [];
+    const characterBounds: Array<readonly [number, readonly DOMRect[]]> = [];
+    Object.assign(context, {
+      updateControlBounds: (rect: DOMRect) => controlBounds.push(rect),
+      updateSelectionBounds: (rect: DOMRect) => selectionBounds.push(rect),
+      updateCharacterBounds: (rangeStart: number, rects: readonly DOMRect[]) =>
+        characterBounds.push([rangeStart, rects]),
+    });
+
+    dispatchText(canvas, "auto", "文", 2);
+    await withTimeout(
+      waitUntil(() => transactions.length === 1 && controlBounds.length > 0),
+      3_000,
+      "geometry after edit",
+    );
+    const control = controlBounds.at(-1);
+    if (control === undefined) throw new Error("control bounds were not published");
+    expect(control.width).toBeGreaterThan(0);
+    expect(control.height).toBeGreaterThan(0);
+    expect(Number.isFinite(control.x)).toBe(true);
+    const selection = selectionBounds.at(-1);
+    if (selection === undefined) throw new Error("selection bounds were not published");
+    expect(Number.isFinite(selection.x)).toBe(true);
+
+    context.dispatchEvent(
+      Object.assign(new Event("characterboundsupdate"), { rangeStart: 0, rangeEnd: 2 }),
+    );
+    await withTimeout(
+      waitUntil(() => characterBounds.length > 0),
+      3_000,
+      "character bounds answer",
+    );
+    const [rangeStart, rects] = characterBounds.at(-1) ?? [Number.NaN, []];
+    expect(rangeStart).toBe(0);
+    expect(rects).toHaveLength(2);
+    for (const rect of rects) {
+      expect(rect.width).toBeGreaterThan(0);
+      expect(rect.height).toBeGreaterThan(0);
+    }
+    expect(errors).toEqual([]);
+  });
 });
 
 function dispatchText(
