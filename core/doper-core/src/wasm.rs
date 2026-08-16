@@ -25,10 +25,31 @@ impl WasmCore {
     }
 
     /// Atomically consumes one complete Mutation Stream and returns `DisplayList` bytes.
-    pub fn commit(&mut self, bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
-        let output = self.inner.commit(bytes).map_err(js_error)?;
+    pub fn commit(
+        &mut self,
+        bytes: &[u8],
+        system_text_metrics: Option<Vec<u8>>,
+    ) -> Result<Vec<u8>, JsValue> {
+        let output = self
+            .inner
+            .commit_with_system_text_metrics(bytes, system_text_metrics.as_deref())
+            .map_err(js_error)?;
         self.last_diagnostics = Some(output.diagnostics);
         Ok(output.display_list.to_vec())
+    }
+
+    /// Refreshes Host-measured system-font metrics and returns a replacement frame if needed.
+    pub fn set_system_text_metrics(&mut self, bytes: &[u8]) -> Result<Option<Vec<u8>>, JsValue> {
+        let output = self
+            .inner
+            .set_system_text_metrics(bytes)
+            .map_err(js_error)?;
+        if let Some(output) = output {
+            self.last_diagnostics = Some(output.diagnostics);
+            Ok(Some(output.display_list.to_vec()))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Atomically consumes one Input Stream transaction.

@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, ops::Range};
 
 use swash::{
     shape::ShapeContext,
-    text::{Codepoint, Script},
+    text::{BidiClass, Codepoint, Script},
 };
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 use unicode_segmentation::UnicodeSegmentation;
@@ -175,6 +175,25 @@ pub(crate) fn layout_text(
             actual: text.len(),
             maximum: MAX_TEXT_BYTES,
         });
+    }
+    if text.chars().any(|character| {
+        matches!(
+            character.bidi_class(),
+            BidiClass::AL
+                | BidiClass::AN
+                | BidiClass::FSI
+                | BidiClass::LRE
+                | BidiClass::LRI
+                | BidiClass::LRO
+                | BidiClass::PDF
+                | BidiClass::PDI
+                | BidiClass::R
+                | BidiClass::RLE
+                | BidiClass::RLI
+                | BidiClass::RLO
+        )
+    }) {
+        return Err(TextError::UnsupportedDirection);
     }
 
     let graphemes = grapheme_table(text)?;
@@ -533,8 +552,9 @@ fn usize_to_f32(value: usize) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{TextOptions, grapheme_table, utf16_offset};
+    use super::{TextOptions, grapheme_table, layout_text, utf16_offset};
     use crate::TextError;
+    use swash::shape::ShapeContext;
 
     #[test]
     fn offset_table_keeps_emoji_zwj_and_combining_sequences_atomic() {
@@ -554,6 +574,27 @@ mod tests {
             assert_eq!(
                 item.utf16.end,
                 utf16_offset(text, item.bytes.end).expect("end")
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_path_rejects_rtl_before_producing_incorrect_visual_order() {
+        let font = crate::FontFace::from_bytes(1, 1, 0, crate::conformance_font())
+            .expect("conformance font");
+        for text in ["English שלום", "\u{2066}English\u{2069}", "١٢٣"] {
+            assert_eq!(
+                layout_text(
+                    &mut ShapeContext::new(),
+                    &font,
+                    text,
+                    TextOptions {
+                        font_size: 16.0,
+                        line_height: 20.0,
+                        max_width: 200.0,
+                    },
+                ),
+                Err(TextError::UnsupportedDirection)
             );
         }
     }

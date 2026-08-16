@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashSet},
+    sync::Arc,
+};
 
 use doper_abi::{
     FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_LAYOUT_NODES_INDEX,
@@ -11,7 +14,7 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
-    InputBatch, Mutation, MutationBatch,
+    InputBatch, Mutation, MutationBatch, SystemTextMetricBatch,
 };
 use doper_layout::{BoxConstraints, LayoutEngine};
 use doper_paint::{PaintEngine, PaintMetrics};
@@ -170,6 +173,22 @@ impl CoreEngine {
     /// instance. A layout or paint invariant failure poisons the instance and
     /// all later calls return [`CoreError::Poisoned`].
     pub fn commit(&mut self, bytes: &[u8]) -> Result<FrameOutput, CoreError> {
+        self.commit_with_system_text_metrics(bytes, None)
+    }
+
+    /// Atomically commits mutations and an optional Host-measured system-text cache delta.
+    ///
+    /// Both streams are fully decoded before Scene state changes. Metric state is
+    /// installed only after Scene accepts the mutation transaction and before layout.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same failures as [`Self::commit`], plus metric ABI or cache-state errors.
+    pub fn commit_with_system_text_metrics(
+        &mut self,
+        bytes: &[u8],
+        system_text_metrics: Option<&[u8]>,
+    ) -> Result<FrameOutput, CoreError> {
         if self.poisoned {
             return Err(CoreError::Poisoned);
         }
@@ -183,6 +202,21 @@ impl CoreEngine {
                 return Err(CoreError::Abi(error));
             }
         };
+        let metric_batch = match system_text_metrics {
+            Some(bytes) => match SystemTextMetricBatch::decode(bytes) {
+                Ok(batch) => Some(batch),
+                Err(error) => {
+                    self.metrics.abi_rejections = self.metrics.abi_rejections.saturating_add(1);
+                    return Err(CoreError::Abi(error));
+                }
+            },
+            None => None,
+        };
+        if let Some(metric_batch) = &metric_batch {
+            self.text
+                .validate_system_metrics(metric_batch)
+                .map_err(CoreError::SystemTextMetricsState)?;
+        }
         let frame_seq = batch.frame_seq;
         let programmatic_scrolls: BTreeSet<u32> = batch
             .instructions
@@ -195,6 +229,14 @@ impl CoreEngine {
         if let Err(error) = self.scene.commit(batch) {
             self.metrics.scene_rejections += 1;
             return Err(CoreError::Scene(error));
+        }
+
+        if let Some(metric_batch) = metric_batch {
+            let changed_pairs = self.text.apply_system_metrics(metric_batch);
+            let changed_nodes = system_text_nodes(&self.scene, &changed_pairs);
+            if !changed_nodes.is_empty() {
+                self.layout.mark_text_measurements_changed(&changed_nodes);
+            }
         }
 
         self.text.begin_frame();
@@ -231,7 +273,12 @@ impl CoreEngine {
             }
             geometry.visited = geometry.visited.saturating_add(corrected_geometry.visited);
         }
-        self.text.prepare_resources(&self.scene);
+        let fallback_nodes = self.text.prepare_resources(&self.scene);
+        self.relayout_text_fallbacks(
+            &fallback_nodes,
+            &mut geometry.changed,
+            &mut geometry.visited,
+        )?;
         let text_changed = self.text.has_staged_changes();
         let output =
             self.paint_frame(frame_seq, &geometry.changed, geometry.visited, text_changed)?;
@@ -241,6 +288,65 @@ impl CoreEngine {
         self.metrics.committed_frames += 1;
         self.last_frame_seq = Some(frame_seq);
         Ok(output)
+    }
+
+    /// Refreshes active system-font metrics after browser font availability changes.
+    ///
+    /// Returns a replacement frame only when a changed active pair affected layout.
+    ///
+    /// # Errors
+    ///
+    /// Rejects malformed or inconsistent metric deltas atomically. Derived layout,
+    /// scroll, paint, or glyph-resource failures poison the instance.
+    pub fn set_system_text_metrics(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<Option<FrameOutput>, CoreError> {
+        if self.poisoned {
+            return Err(CoreError::Poisoned);
+        }
+        if self.text.has_pending_resources() {
+            return Err(CoreError::GlyphResourcesNotDrained);
+        }
+        let batch = SystemTextMetricBatch::decode(bytes).map_err(|error| {
+            self.metrics.abi_rejections = self.metrics.abi_rejections.saturating_add(1);
+            CoreError::Abi(error)
+        })?;
+        self.text
+            .validate_system_metrics(&batch)
+            .map_err(CoreError::SystemTextMetricsState)?;
+        let changed_pairs = self.text.apply_system_metrics(batch);
+        let changed_nodes = system_text_nodes(&self.scene, &changed_pairs);
+        if changed_nodes.is_empty() {
+            return Ok(None);
+        }
+        let frame_seq = self
+            .last_frame_seq
+            .ok_or(CoreError::MissingCommittedFrame)?;
+        self.layout.mark_text_measurements_changed(&changed_nodes);
+        self.text.begin_frame();
+        let mut geometry = match self.layout.layout_with_virtual(
+            &self.scene,
+            self.constraints,
+            &mut self.text,
+            &self.scroll,
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => return self.poison(CoreError::Layout(error)),
+        };
+        let fallback_nodes = self.text.prepare_resources(&self.scene);
+        self.relayout_text_fallbacks(
+            &fallback_nodes,
+            &mut geometry.changed,
+            &mut geometry.visited,
+        )?;
+        let text_changed = self.text.has_staged_changes();
+        let output =
+            self.paint_frame(frame_seq, &geometry.changed, geometry.visited, text_changed)?;
+        if let Err(error) = self.text.commit_frame() {
+            return self.poison(CoreError::GlyphResources(error));
+        }
+        Ok(Some(output))
     }
 
     /// Atomically applies one Input Stream transaction to Core-owned scrolling.
@@ -361,14 +467,17 @@ impl CoreEngine {
             return Ok(None);
         };
         self.text.begin_frame();
-        self.text.prepare_resources(&self.scene);
+        let fallback_nodes = self.text.prepare_resources(&self.scene);
+        let mut geometry_changed = BitSet::with_len(self.scene.len());
+        let mut layout_visited = 0;
+        self.relayout_text_fallbacks(&fallback_nodes, &mut geometry_changed, &mut layout_visited)?;
         if !self.text.has_staged_changes() {
             self.text
                 .commit_frame()
                 .map_err(CoreError::GlyphResources)?;
             return Ok(None);
         }
-        let output = self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, true)?;
+        let output = self.paint_frame(frame_seq, &geometry_changed, layout_visited, true)?;
         if let Err(error) = self.text.commit_frame() {
             return self.poison(CoreError::GlyphResources(error));
         }
@@ -482,6 +591,61 @@ impl CoreEngine {
         })
     }
 
+    fn relayout_text_fallbacks(
+        &mut self,
+        nodes: &[doper_scene::NodeId],
+        changed: &mut BitSet,
+        visited: &mut usize,
+    ) -> Result<(), CoreError> {
+        if nodes.is_empty() {
+            return Ok(());
+        }
+        self.layout.mark_text_measurements_changed(nodes);
+        let fallback_geometry = match self.layout.layout_with_virtual(
+            &self.scene,
+            self.constraints,
+            &mut self.text,
+            &self.scroll,
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => return self.poison(CoreError::Layout(error)),
+        };
+        merge_geometry(
+            changed,
+            visited,
+            &fallback_geometry.changed,
+            fallback_geometry.visited,
+        );
+        let corrected =
+            match self
+                .scroll
+                .synchronize(&mut self.scene, self.layout.snapshot(), &BTreeSet::new())
+            {
+                Ok(corrected) => corrected,
+                Err(error) => return self.poison(error),
+            };
+        if corrected.is_empty() {
+            return Ok(());
+        }
+        self.layout.mark_virtual_measurements_changed(&corrected);
+        let corrected_geometry = match self.layout.layout_with_virtual(
+            &self.scene,
+            self.constraints,
+            &mut self.text,
+            &self.scroll,
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => return self.poison(CoreError::Layout(error)),
+        };
+        merge_geometry(
+            changed,
+            visited,
+            &corrected_geometry.changed,
+            corrected_geometry.visited,
+        );
+        Ok(())
+    }
+
     fn poison<T>(&mut self, error: CoreError) -> Result<T, CoreError> {
         self.poisoned = true;
         self.metrics.fatal_derivation_failures += 1;
@@ -491,6 +655,35 @@ impl CoreEngine {
 
 fn dirty_count(scene: &Scene, domain: DirtyDomain) -> usize {
     scene.dirty(domain).iter_ones().count()
+}
+
+fn merge_geometry(
+    target: &mut BitSet,
+    visited: &mut usize,
+    source: &BitSet,
+    source_visited: usize,
+) {
+    for index in source.iter_ones() {
+        target.insert(index);
+    }
+    *visited = (*visited).saturating_add(source_visited);
+}
+
+fn system_text_nodes(scene: &Scene, pairs: &[(u32, u32)]) -> Vec<doper_scene::NodeId> {
+    if pairs.is_empty() {
+        return Vec::new();
+    }
+    let pairs = pairs.iter().copied().collect::<HashSet<_>>();
+    scene
+        .ids()
+        .iter()
+        .copied()
+        .filter(|node| {
+            scene
+                .text_run(*node)
+                .is_some_and(|run| pairs.contains(&(run.string_id, run.style_id)))
+        })
+        .collect()
 }
 
 fn count_word(value: usize) -> u32 {
@@ -519,6 +712,8 @@ mod tests {
         NodeKind, Prop, RESOURCE_ENCODING_VERSION, ReplayRecord, ReplayRecording, ResourceKind,
         SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
         SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET, SFNT_FONT_VERSION_OFFSET,
+        SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand,
+        SystemTextMetricInstruction,
     };
     use doper_edit::{EditConfig, EditSession, Selection};
     use doper_headless::HeadlessRenderer;
@@ -657,6 +852,69 @@ mod tests {
                 },
             ],
         )
+    }
+
+    fn system_text_tree() -> Vec<u8> {
+        frame(
+            1,
+            vec![
+                Mutation::CreateNode {
+                    node_id: id(0),
+                    kind: NodeKind::Root,
+                    parent: NULL_NODE_ID,
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::CreateNode {
+                    node_id: id(1),
+                    kind: NodeKind::Text,
+                    parent: id(0),
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: ResourceKind::Paint,
+                    bytes: SolidPaint {
+                        red: 12,
+                        green: 34,
+                        blue: 56,
+                        alpha: 255,
+                    }
+                    .encode()
+                    .to_vec(),
+                },
+                Mutation::DefineResource {
+                    resource_id: 2,
+                    kind: ResourceKind::TextStyle,
+                    bytes: TextStyleResource {
+                        paint_id: 1,
+                        font_size: 16.0,
+                        line_height: 20.0,
+                        weight: 400,
+                        family: "sans-serif".to_owned(),
+                    }
+                    .encode()
+                    .expect("text style"),
+                },
+                Mutation::DefineResource {
+                    resource_id: 3,
+                    kind: ResourceKind::Utf8String,
+                    bytes: b"wide\nline".to_vec(),
+                },
+                Mutation::SetTextRun {
+                    node_id: id(1),
+                    string_id: 3,
+                    style_id: 2,
+                },
+            ],
+        )
+    }
+
+    fn system_metrics(command: SystemTextMetricCommand) -> Vec<u8> {
+        SystemTextMetricBatch {
+            instructions: vec![SystemTextMetricInstruction { flags: 0, command }],
+        }
+        .encode()
+        .expect("system text metrics")
     }
 
     fn sfnt_font_resource(data: &[u8]) -> Vec<u8> {
@@ -918,6 +1176,82 @@ mod tests {
             engine.set_device_pixel_ratio(0.0),
             Err(CoreError::InvalidDevicePixelRatio(0.0))
         ));
+    }
+
+    #[test]
+    fn system_text_metrics_commit_atomically_and_refresh_active_layout() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let initial_metric = SystemTextMetricCommand::Upsert(SystemTextMetric {
+            string_id: 3,
+            style_id: 2,
+            max_line_width: 80.0,
+            line_count: 2,
+        });
+        let output = engine
+            .commit_with_system_text_metrics(
+                &system_text_tree(),
+                Some(&system_metrics(initial_metric)),
+            )
+            .expect("system text frame");
+        assert!(
+            DisplayList::decode(&output.display_list)
+                .expect("DisplayList")
+                .instructions
+                .iter()
+                .any(|instruction| matches!(
+                    instruction.command,
+                    DisplayCommand::DrawTextFallback { .. }
+                ))
+        );
+        let text = NodeId::from_raw(id(1)).expect("text id");
+        assert_eq!(
+            engine
+                .layout
+                .snapshot()
+                .geometry(text)
+                .map(|(_, size)| size),
+            Some(doper_layout::Size::new(80.0, 40.0))
+        );
+        assert_eq!(engine.text_metrics().system_metric_hits, 1);
+
+        let refreshed = engine
+            .set_system_text_metrics(&system_metrics(SystemTextMetricCommand::Upsert(
+                SystemTextMetric {
+                    string_id: 3,
+                    style_id: 2,
+                    max_line_width: 120.0,
+                    line_count: 3,
+                },
+            )))
+            .expect("metric refresh")
+            .expect("replacement frame");
+        assert!(refreshed.diagnostics.layout_visited_nodes > 0);
+        assert_eq!(
+            engine
+                .layout
+                .snapshot()
+                .geometry(text)
+                .map(|(_, size)| size),
+            Some(doper_layout::Size::new(120.0, 60.0))
+        );
+        assert_eq!(engine.text_metrics().system_metric_hits, 2);
+        assert_eq!(engine.text_metrics().system_metric_upserts, 2);
+    }
+
+    #[test]
+    fn system_text_metric_rejection_does_not_commit_scene_or_cache_state() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let release = system_metrics(SystemTextMetricCommand::Release {
+            string_id: 3,
+            style_id: 2,
+        });
+        assert!(matches!(
+            engine.commit_with_system_text_metrics(&system_text_tree(), Some(&release)),
+            Err(CoreError::SystemTextMetricsState(_))
+        ));
+        assert!(engine.scene().is_empty());
+        assert_eq!(engine.metrics().committed_frames, 0);
+        assert_eq!(engine.text_metrics().system_metric_releases, 0);
     }
 
     #[test]
@@ -1261,6 +1595,11 @@ mod tests {
                     ),
                     ReplayRecord::Input(bytes) => {
                         editor.replay_input(7, &bytes).expect("recorded input");
+                    }
+                    ReplayRecord::SystemTextMetrics(bytes) => {
+                        let _ = engine
+                            .set_system_text_metrics(&bytes)
+                            .expect("replay system text metrics");
                     }
                 }
             }

@@ -24,6 +24,8 @@ pub enum TextError {
         /// Accepted byte limit.
         maximum: usize,
     },
+    /// The first text path supports deterministic left-to-right layout only.
+    UnsupportedDirection,
     /// A numeric layout option is zero, negative, NaN, or infinite where disallowed.
     InvalidOptions,
     /// A shaped position could not be represented safely.

@@ -31,6 +31,8 @@ pub enum CoreError {
     Paint(PaintError),
     /// Core produced an invalid glyph-resource batch; the instance is poisoned.
     GlyphResources(AbiError),
+    /// A metric delta disagreed with Core's active system-font metric cache.
+    SystemTextMetricsState(&'static str),
     /// The caller requested another resource-producing frame before draining DOPG.
     GlyphResourcesNotDrained,
     /// A scrolling coefficient, extent, or physics operation was invalid.

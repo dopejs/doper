@@ -8,6 +8,8 @@ export {
   Canvas2DResourceRegistry,
   type CanvasEncodedResourceAction,
   type CanvasFontResource,
+  type CanvasSystemTextMetric,
+  type CanvasSystemTextPair,
 } from "./resources";
 export {
   GlyphResourceError,

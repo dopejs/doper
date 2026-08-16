@@ -155,8 +155,17 @@ impl LayoutEngine {
     /// were already consumed by the immediately preceding layout. Fixed-size
     /// lists remain localized; non-fixed lists expand to their safe ancestor.
     pub fn mark_virtual_measurements_changed(&mut self, lists: &[NodeId]) {
+        self.mark_external_measurements_changed(lists);
+    }
+
+    /// Schedules layout for text nodes whose Host-provided intrinsic metrics changed.
+    pub fn mark_text_measurements_changed(&mut self, nodes: &[NodeId]) {
+        self.mark_external_measurements_changed(nodes);
+    }
+
+    fn mark_external_measurements_changed(&mut self, nodes: &[NodeId]) {
         self.external_roots.clear();
-        self.external_roots.extend_from_slice(lists);
+        self.external_roots.extend_from_slice(nodes);
     }
 
     /// Computes and atomically commits geometry for the Scene.

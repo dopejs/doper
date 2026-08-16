@@ -32,7 +32,9 @@
     "inputInstructions": 262144,
     "displayInstructions": 1048576,
     "glyphResourceInstructions": 262144,
+    "systemTextMetricInstructions": 262144,
     "glyphBitmapPixels": 16777216,
+    "systemTextLines": 1048576,
     "recordingRecords": 1048576,
     "virtualItems": 4000000
   },
@@ -41,7 +43,8 @@
     "maxBytes": 67108864,
     "recordKinds": [
       { "name": "Mutation", "id": 1 },
-      { "name": "Input", "id": 2 }
+      { "name": "Input", "id": 2 },
+      { "name": "SystemTextMetrics", "id": 3 }
     ]
   },
   "frameDiagnostics": {
@@ -243,6 +246,30 @@
           "name": "ReleaseGlyphSpan",
           "opcode": 2,
           "fields": [{ "name": "spanId", "type": "u32" }]
+        }
+      ]
+    },
+    "systemTextMetrics": {
+      "magic": "DOPT",
+      "maxBytes": 8388608,
+      "commands": [
+        {
+          "name": "UpsertSystemTextMetric",
+          "opcode": 1,
+          "fields": [
+            { "name": "stringId", "type": "u32" },
+            { "name": "styleId", "type": "u32" },
+            { "name": "maxLineWidth", "type": "f32" },
+            { "name": "lineCount", "type": "u32" }
+          ]
+        },
+        {
+          "name": "ReleaseSystemTextMetric",
+          "opcode": 2,
+          "fields": [
+            { "name": "stringId", "type": "u32" },
+            { "name": "styleId", "type": "u32" }
+          ]
         }
       ]
     }

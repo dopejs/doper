@@ -12,18 +12,22 @@ export const MUTATION_MAGIC = 1297108804 as const;
 export const INPUT_MAGIC = 1229999940 as const;
 export const DISPLAY_LIST_MAGIC = 1146113860 as const;
 export const GLYPH_RESOURCES_MAGIC = 1196445508 as const;
+export const SYSTEM_TEXT_METRICS_MAGIC = 1414549316 as const;
 export const RECORDING_MAGIC = 1380994884 as const;
 export const MAX_MUTATION_BYTES = 16777216 as const;
 export const MAX_INPUT_BYTES = 16777216 as const;
 export const MAX_DISPLAY_LIST_BYTES = 33554432 as const;
 export const MAX_GLYPH_RESOURCES_BYTES = 16777216 as const;
+export const MAX_SYSTEM_TEXT_METRICS_BYTES = 8388608 as const;
 export const MAX_RECORDING_BYTES = 67108864 as const;
 export const MAX_RESOURCE_BYTES = 8388608 as const;
 export const MAX_MUTATION_INSTRUCTIONS = 262144 as const;
 export const MAX_INPUT_INSTRUCTIONS = 262144 as const;
 export const MAX_DISPLAY_INSTRUCTIONS = 1048576 as const;
 export const MAX_GLYPH_RESOURCE_INSTRUCTIONS = 262144 as const;
+export const MAX_SYSTEM_TEXT_METRIC_INSTRUCTIONS = 262144 as const;
 export const MAX_GLYPH_BITMAP_PIXELS = 16777216 as const;
+export const MAX_SYSTEM_TEXT_LINES = 1048576 as const;
 export const MAX_RECORDING_RECORDS = 1048576 as const;
 export const MAX_VIRTUAL_ITEMS = 4000000 as const;
 export const VIRTUAL_REFILL_VERSION = 1 as const;
@@ -114,6 +118,7 @@ export const AFFINE_F_OFFSET = 24 as const;
 export enum RecordingRecordKind {
   Mutation = 1,
   Input = 2,
+  SystemTextMetrics = 3,
 }
 
 export enum MutationOpcode {
@@ -228,6 +233,22 @@ export enum GlyphResourceOpcode {
 export const GLYPH_RESOURCE_LAYOUTS = {
   [GlyphResourceOpcode.DefineGlyphSpan]: { fixedBytes: null, minimumBytes: 24 },
   [GlyphResourceOpcode.ReleaseGlyphSpan]: { fixedBytes: 8, minimumBytes: 8 },
+} as const;
+
+export enum SystemTextMetricOpcode {
+  UpsertSystemTextMetric = 1,
+  ReleaseSystemTextMetric = 2,
+}
+
+export const SYSTEM_TEXT_METRIC_LAYOUTS = {
+  [SystemTextMetricOpcode.UpsertSystemTextMetric]: {
+    fixedBytes: 20,
+    minimumBytes: 20,
+  },
+  [SystemTextMetricOpcode.ReleaseSystemTextMetric]: {
+    fixedBytes: 12,
+    minimumBytes: 12,
+  },
 } as const;
 
 export enum NodeKind {

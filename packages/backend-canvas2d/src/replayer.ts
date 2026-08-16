@@ -10,6 +10,7 @@ export type Canvas2DContext = CanvasRenderingContext2D | OffscreenCanvasRenderin
 export interface CanvasTextStyle {
   readonly font: string;
   readonly fillStyle: string | CanvasGradient | CanvasPattern;
+  readonly lineHeight?: number;
   readonly direction?: CanvasDirection;
   readonly textAlign?: CanvasTextAlign;
   readonly textBaseline?: CanvasTextBaseline;
@@ -306,7 +307,18 @@ function replayCommand(
       if (style.direction !== undefined) context.direction = style.direction;
       if (style.textAlign !== undefined) context.textAlign = style.textAlign;
       if (style.textBaseline !== undefined) context.textBaseline = style.textBaseline;
-      context.fillText(text, x, y);
+      if (style.lineHeight === undefined || !text.includes("\n")) {
+        context.fillText(text, x, y);
+      } else {
+        let line = 0;
+        let start = 0;
+        for (let index = 0; index <= text.length; index += 1) {
+          if (index !== text.length && text.charCodeAt(index) !== 0x0a) continue;
+          context.fillText(text.slice(start, index), x, y + line * style.lineHeight);
+          line += 1;
+          start = index + 1;
+        }
+      }
       return;
     }
     case DisplayOpcode.DrawImage: {

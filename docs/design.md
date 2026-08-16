@@ -489,13 +489,13 @@ Shell 的最新 durable value 获胜：部分重叠请求裁到新边界，完�
 
 ## 10. 缓存体系
 
-| 级别                   | 内容                                     | 失效条件                         | 位置    |
-| ---------------------- | ---------------------------------------- | -------------------------------- | ------- |
-| **Layout Cache**       | 节点在给定约束下的 size                  | 约束变化或自身 dirty_layout      | Core    |
-| **Picture Cache**      | 子树的 DisplayList 片段（不可变）        | 子树 dirty_paint                 | Core    |
-| **Raster Cache**       | tile / picture 的位图                    | picture 变更、DPR 变更、内存压力 | Backend |
-| **Text Shape Cache**   | (str, font, size) → advance + glyph 序列 | 字体加载完成                     | Core    |
-| **Text Metrics Cache** | 系统字体 `measureText` 结果              | 字体或 DPR 变更                  | Backend |
+| 级别                   | 内容                                     | 失效条件                         | 位置      |
+| ---------------------- | ---------------------------------------- | -------------------------------- | --------- |
+| **Layout Cache**       | 节点在给定约束下的 size                  | 约束变化或自身 dirty_layout      | Core      |
+| **Picture Cache**      | 子树的 DisplayList 片段（不可变）        | 子树 dirty_paint                 | Core      |
+| **Raster Cache**       | tile / picture 的位图                    | picture 变更、DPR 变更、内存压力 | Backend   |
+| **Text Shape Cache**   | (str, font, size) → advance + glyph 序列 | 字体加载完成                     | Core      |
+| **Text Metrics Cache** | 系统字体 `measureText` 结果              | 字体、DPR 或最后一个引用释放     | Core/Host |
 
 内存治理：Raster Cache 按 LRU + 总预算（默认按屏幕面积的 N 倍）淘汰；移动端预算更紧。所有 cache 暴露命中率指标给 devtools 与线上监控。
 
@@ -549,9 +549,42 @@ WOFF2 在头部预检后才动态加载 decoder-only WASM，也允许受控宿�
 加载、解码、取消、格式与环境能力错误有稳定错误码；失败的 Promise 不会生成半有效
 `DoperFont`。decoder-only 模块不进入默认同步入口，也不计入产品 Core WASM。
 
-系统字体的真实 `measureText` 反馈和真实字体的浏览器端 Core→Canvas 像素 E2E 尚未
-完成，因此 M3-B 仍未达到出口。接入文本主链后的产品 Core WASM 为 278,929 bytes
-gzip，低于 300 KiB 代表性文本包络和 400 KiB 产品上限。
+系统字体测量使用 schema 生成、版本化的 `DOPT` System Text Metrics Batch。Host
+在 Mutation Stream 提交前，从事务后的 UTF-8 string/TextStyle 资源快照中按
+`(string_id, style_id)` 去重，通过 Canvas `measureText` 测量每个 hard line 的最大
+逻辑宽度；DOPT 与同一 Mutation Stream 一起进入 WASM，二者都完整解码和预检后才
+允许 Scene 提交，Core 在 layout 前原子安装度量。Host 维护节点拓扑和 pair 引用计数，
+只对首次出现的 pair 发送 upsert，最后一个引用消失时发送 release；Core 缓存有
+262,144 项硬上限，畸形、重复、非有限或超限输入均 fail closed。字体集合
+`loadingdone` 和 DPR 变化会重测所有 active pair，通过独立 metric-only 入口只重排
+受影响文本节点。DOPT 也进入 `DOPR` 录制回放，时间或平台字体状态不会在回放时被
+隐式重新采样。
+
+系统 fallback 的绘制与测量保持同一 hard-line 模型：Canvas2D 按编码 line-height
+逐行 `fillText`。首期不为系统字体实现引擎内 soft wrap；受约束的宽度会被布局 clamp，
+但不会伪造浏览器未执行的换行。需要确定性 soft wrap、caret cluster 或跨后端一致
+排版时必须显式加载字体。
+
+当前能力矩阵：
+
+| 输入/能力  | 显式字体路径                                                                      | 系统字体 fallback                                   |
+| ---------- | --------------------------------------------------------------------------------- | --------------------------------------------------- |
+| 字体格式   | `loadFont` 解码后的 TTF/OTF/TTC（源可为 SFNT/WOFF1/WOFF2）                        | 浏览器可解析的 CSS family                           |
+| 方向与脚本 | LTR；Latin、CJK 等以字体实际 glyph 覆盖为准；检测到 RTL/方向控制符即整段 fallback | 由浏览器 shaping/bidi 决定                          |
+| 换行       | hard line + UAX #14 基础 soft wrap                                                | hard line；首期无 soft wrap                         |
+| 栅格       | 单色 outline mask，DPR 重建                                                       | `fillText`；彩色/合成字体由浏览器决定               |
+| 映射       | UTF-8/UTF-16、grapheme、cluster、glyph、line、caret                               | 只保证整段尺寸与 hard-line geometry                 |
+| 确定性     | Core 输出确定，可录制输入                                                         | DOPT 记录测量结果后可回放；首次实测仍受平台字体影响 |
+
+字体缺失、缺 glyph、RTL、彩色/非 outline glyph、解析/shape/raster 或 DOPG 预算失败
+都必须整段 fallback，不能混合两条路径。完整 bidi、复杂脚本视觉导航和 CJK
+避头尾不在首期显式路径的承诺内，进入后续独立范围。
+
+真实 Chromium 门禁会加载真实 SFNT，通过公开 API 进入 WASM Core，禁用 `fillText`
+后断言 DOPG glyph bitmap 经 Canvas `drawImage` 产生非透明像素；系统字体门禁覆盖真实
+`measureText`、hard-line replay、字体/DPR 刷新、引用释放和 metric-only 增量重排。
+接入后的产品 Core WASM 为 283,124 bytes gzip，低于 300 KiB 代表性文本包络和
+400 KiB 产品上限。
 
 栅格器选择以 WASM 体积门禁为准：同一 Rust 1.96.0、`opt-z`、LTO 探针中，
 `swash` 同时承担 shaping 与 raster 时为 308,835 bytes gzip，超过代表性文本包络的

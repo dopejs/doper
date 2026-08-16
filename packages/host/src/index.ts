@@ -63,3 +63,10 @@ export {
   type ReplayRecording,
 } from "./recording";
 export { SabMutationRing, type SabMutationFrame, type SabMutationRingMetrics } from "./sab-ring";
+export {
+  SystemTextMetricError,
+  decodeSystemTextMetricBatch,
+  encodeSystemTextMetricBatch,
+  type SystemTextMetric,
+  type SystemTextMetricDelta,
+} from "./system-text-metrics";

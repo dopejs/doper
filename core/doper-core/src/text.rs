@@ -3,7 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use doper_abi::{
     AbiError, GlyphBitmapResource, GlyphPlacementResource, GlyphResourceBatch,
     GlyphResourceCommand, GlyphResourceInstruction, GlyphSpanResource, MAX_GLYPH_RESOURCES_BYTES,
-    ResourceKind, SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
+    MAX_SYSTEM_TEXT_METRIC_INSTRUCTIONS, ResourceKind, SFNT_FONT_DATA_BYTES_OFFSET,
+    SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET, SystemTextMetric, SystemTextMetricBatch,
+    SystemTextMetricCommand,
 };
 use doper_layout::{BoxConstraints, IntrinsicMeasurer, Size};
 use doper_paint::{ShapedGlyphRun, TextPaintResolver, TextStyleResource};
@@ -17,6 +19,14 @@ pub struct CoreTextMetrics {
     pub shaped_runs: u64,
     /// Runs sent to the whole-run system-font fallback.
     pub fallback_runs: u64,
+    /// Browser-measured fallback runs resolved without approximation.
+    pub system_metric_hits: u64,
+    /// Fallback runs temporarily measured by the deterministic approximation.
+    pub system_metric_misses: u64,
+    /// System-font metric entries inserted or refreshed by Host.
+    pub system_metric_upserts: u64,
+    /// System-font metric entries released after their last active run.
+    pub system_metric_releases: u64,
     /// Derived glyph spans defined for a backend.
     pub spans_defined: u64,
     /// Superseded glyph spans released from a backend.
@@ -37,11 +47,20 @@ struct PreparedRun {
     font: FontFace,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ForcedFallbackRun {
+    string: u32,
+    style: u32,
+    font: u32,
+}
+
 /// Transactional text layout, raster, and derived-resource owner.
 pub(crate) struct CoreTextSystem {
     engine: TextEngine,
     atlas: GlyphAtlas,
     fonts: HashMap<u32, Option<FontFace>>,
+    system_metrics: HashMap<(u32, u32), SystemTextMetric>,
+    forced_fallback: HashMap<NodeId, ForcedFallbackRun>,
     active: HashMap<NodeId, PreparedRun>,
     candidate: Option<HashMap<NodeId, PreparedRun>>,
     staged: Vec<GlyphResourceInstruction>,
@@ -57,6 +76,8 @@ impl Default for CoreTextSystem {
             engine: TextEngine::default(),
             atlas: GlyphAtlas::default(),
             fonts: HashMap::new(),
+            system_metrics: HashMap::new(),
+            forced_fallback: HashMap::new(),
             active: HashMap::new(),
             candidate: None,
             staged: Vec::new(),
@@ -69,12 +90,86 @@ impl Default for CoreTextSystem {
 }
 
 impl CoreTextSystem {
+    pub(crate) fn validate_system_metrics(
+        &self,
+        batch: &SystemTextMetricBatch,
+    ) -> Result<(), &'static str> {
+        let mut released = 0_usize;
+        let mut inserted = 0_usize;
+        for instruction in &batch.instructions {
+            match instruction.command {
+                SystemTextMetricCommand::Release {
+                    string_id,
+                    style_id,
+                } => {
+                    if !self.system_metrics.contains_key(&(string_id, style_id)) {
+                        return Err("system text metric release references an unavailable pair");
+                    }
+                    released = released.saturating_add(1);
+                }
+                SystemTextMetricCommand::Upsert(metric) => {
+                    if !self
+                        .system_metrics
+                        .contains_key(&(metric.string_id, metric.style_id))
+                    {
+                        inserted = inserted.saturating_add(1);
+                    }
+                }
+            }
+        }
+        let retained = self
+            .system_metrics
+            .len()
+            .checked_sub(released)
+            .and_then(|value| value.checked_add(inserted))
+            .ok_or("system text metric cache size overflow")?;
+        if retained
+            > usize::try_from(MAX_SYSTEM_TEXT_METRIC_INSTRUCTIONS)
+                .map_err(|_| "system text metric cache limit does not fit usize")?
+        {
+            return Err("system text metric cache exceeds its entry limit");
+        }
+        Ok(())
+    }
+
+    pub(crate) fn apply_system_metrics(&mut self, batch: SystemTextMetricBatch) -> Vec<(u32, u32)> {
+        let mut changed = Vec::with_capacity(batch.instructions.len());
+        for instruction in batch.instructions {
+            match instruction.command {
+                SystemTextMetricCommand::Upsert(metric) => {
+                    let key = (metric.string_id, metric.style_id);
+                    if self.system_metrics.get(&key) != Some(&metric) {
+                        self.system_metrics.insert(key, metric);
+                        changed.push(key);
+                    }
+                    self.metrics.system_metric_upserts =
+                        self.metrics.system_metric_upserts.saturating_add(1);
+                }
+                SystemTextMetricCommand::Release {
+                    string_id,
+                    style_id,
+                } => {
+                    self.system_metrics.remove(&(string_id, style_id));
+                    changed.push((string_id, style_id));
+                    self.metrics.system_metric_releases =
+                        self.metrics.system_metric_releases.saturating_add(1);
+                }
+            }
+        }
+        changed
+    }
+
     pub(crate) fn begin_frame(&mut self) {
         self.candidate = Some(self.active.clone());
         self.staged.clear();
     }
 
-    pub(crate) fn prepare_resources(&mut self, scene: &Scene) {
+    pub(crate) fn prepare_resources(&mut self, scene: &Scene) -> Vec<NodeId> {
+        self.forced_fallback.retain(|node, forced| {
+            scene.text_run(*node).is_some_and(|text| {
+                text.string_id == forced.string && text.style_id == forced.style
+            }) && scene.ref_prop(*node, doper_abi::Prop::Font) == Some(forced.font)
+        });
         let mut candidate = self.candidate.take().unwrap_or_else(|| self.active.clone());
         candidate.retain(|node, run| {
             scene.resolve(*node).is_some()
@@ -97,6 +192,7 @@ impl CoreTextSystem {
         let mut projected_bytes = 16_usize.saturating_add(removed_releases.saturating_mul(8));
         let nodes = candidate.keys().copied().collect::<Vec<_>>();
         let mut definitions = Vec::new();
+        let mut fallback_nodes = Vec::new();
         for node in nodes {
             let Some(run) = candidate.get(&node).cloned() else {
                 continue;
@@ -106,21 +202,29 @@ impl CoreTextSystem {
                 continue;
             }
             let Some(span_id) = self.allocate_span_id() else {
+                self.force_fallback(node, &run);
+                fallback_nodes.push(node);
                 candidate.remove(&node);
                 self.metrics.fallback_runs = self.metrics.fallback_runs.saturating_add(1);
                 continue;
             };
             let Ok(span) = self.build_span(span_id, &run) else {
+                self.force_fallback(node, &run);
+                fallback_nodes.push(node);
                 candidate.remove(&node);
                 self.metrics.fallback_runs = self.metrics.fallback_runs.saturating_add(1);
                 continue;
             };
             let Some(next_bytes) = projected_bytes.checked_add(span_wire_bytes(&span)) else {
+                self.force_fallback(node, &run);
+                fallback_nodes.push(node);
                 candidate.remove(&node);
                 self.metrics.fallback_runs = self.metrics.fallback_runs.saturating_add(1);
                 continue;
             };
             if next_bytes > MAX_GLYPH_RESOURCES_BYTES {
+                self.force_fallback(node, &run);
+                fallback_nodes.push(node);
                 candidate.remove(&node);
                 self.metrics.fallback_runs = self.metrics.fallback_runs.saturating_add(1);
                 continue;
@@ -151,6 +255,7 @@ impl CoreTextSystem {
         }
         self.staged.extend(definitions);
         self.candidate = Some(candidate);
+        fallback_nodes
     }
 
     pub(crate) fn commit_frame(&mut self) -> Result<bool, AbiError> {
@@ -267,28 +372,36 @@ impl IntrinsicMeasurer for CoreTextSystem {
         let Some(text_run) = scene.text_run(node) else {
             return Size::ZERO;
         };
-        let fallback = || fallback_measure(scene, node, constraints);
         let Some(font_id) = scene.ref_prop(node, doper_abi::Prop::Font) else {
-            return fallback();
+            return self.measure_system_fallback(scene, node, constraints);
         };
+        let forced = ForcedFallbackRun {
+            string: text_run.string_id,
+            style: text_run.style_id,
+            font: font_id,
+        };
+        if self.forced_fallback.get(&node) == Some(&forced) {
+            self.candidate_mut().remove(&node);
+            return self.measure_system_fallback(scene, node, constraints);
+        }
+        self.forced_fallback.remove(&node);
         let Some(string) = scene
             .resource(text_run.string_id)
             .filter(|resource| resource.kind == ResourceKind::Utf8String)
             .and_then(|resource| std::str::from_utf8(&resource.bytes).ok())
         else {
-            return fallback();
+            return self.measure_system_fallback(scene, node, constraints);
         };
         let Some(style) = scene
             .resource(text_run.style_id)
             .filter(|resource| resource.kind == ResourceKind::TextStyle)
             .and_then(|resource| TextStyleResource::decode(text_run.style_id, resource).ok())
         else {
-            return fallback();
+            return self.measure_system_fallback(scene, node, constraints);
         };
         let Some(font) = self.font(scene, font_id) else {
             self.candidate_mut().remove(&node);
-            self.metrics.fallback_runs = self.metrics.fallback_runs.saturating_add(1);
-            return fallback();
+            return self.measure_system_fallback(scene, node, constraints);
         };
         let max_width = constraints.max_width.max(f32::EPSILON);
         let options = TextOptions {
@@ -298,13 +411,11 @@ impl IntrinsicMeasurer for CoreTextSystem {
         };
         let Ok(layout) = self.engine.layout(&font, string, options) else {
             self.candidate_mut().remove(&node);
-            self.metrics.fallback_runs = self.metrics.fallback_runs.saturating_add(1);
-            return fallback();
+            return self.measure_system_fallback(scene, node, constraints);
         };
         if layout.missing_glyphs != 0 {
             self.candidate_mut().remove(&node);
-            self.metrics.fallback_runs = self.metrics.fallback_runs.saturating_add(1);
-            return fallback();
+            return self.measure_system_fallback(scene, node, constraints);
         }
         let previous_span = self
             .candidate_mut()
@@ -353,6 +464,51 @@ impl CoreTextSystem {
     fn candidate_mut(&mut self) -> &mut HashMap<NodeId, PreparedRun> {
         self.candidate.get_or_insert_with(|| self.active.clone())
     }
+
+    fn force_fallback(&mut self, node: NodeId, run: &PreparedRun) {
+        self.forced_fallback.insert(
+            node,
+            ForcedFallbackRun {
+                string: run.string_id,
+                style: run.style_id,
+                font: run.font_id,
+            },
+        );
+    }
+
+    fn measure_system_fallback(
+        &mut self,
+        scene: &Scene,
+        node: NodeId,
+        constraints: BoxConstraints,
+    ) -> Size {
+        self.metrics.fallback_runs = self.metrics.fallback_runs.saturating_add(1);
+        let Some(run) = scene.text_run(node) else {
+            return Size::ZERO;
+        };
+        let Some(style) = scene
+            .resource(run.style_id)
+            .filter(|resource| resource.kind == ResourceKind::TextStyle)
+            .and_then(|resource| TextStyleResource::decode(run.style_id, resource).ok())
+        else {
+            return Size::ZERO;
+        };
+        if let Some(metric) = self.system_metrics.get(&(run.string_id, run.style_id)) {
+            self.metrics.system_metric_hits = self.metrics.system_metric_hits.saturating_add(1);
+            return constraints.constrain(Size::new(
+                metric.max_line_width,
+                system_text_height(metric.line_count, style.line_height),
+            ));
+        }
+        self.metrics.system_metric_misses = self.metrics.system_metric_misses.saturating_add(1);
+        approximate_fallback_measure(scene, node, constraints, style.font_size, style.line_height)
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn system_text_height(line_count: u32, line_height: f32) -> f32 {
+    // The ABI caps line_count at 2^20, which is exactly representable by f32.
+    line_count as f32 * line_height
 }
 
 fn decode_font(scene: &Scene, font_id: u32) -> Option<(u32, Arc<[u8]>)> {
@@ -369,7 +525,13 @@ fn decode_font(scene: &Scene, font_id: u32) -> Option<(u32, Arc<[u8]>)> {
     ))
 }
 
-fn fallback_measure(scene: &Scene, node: NodeId, constraints: BoxConstraints) -> Size {
+fn approximate_fallback_measure(
+    scene: &Scene,
+    node: NodeId,
+    constraints: BoxConstraints,
+    font_size: f32,
+    line_height: f32,
+) -> Size {
     let Some(run) = scene.text_run(node) else {
         return Size::ZERO;
     };
@@ -380,21 +542,14 @@ fn fallback_measure(scene: &Scene, node: NodeId, constraints: BoxConstraints) ->
     else {
         return Size::ZERO;
     };
-    let Some(style) = scene
-        .resource(run.style_id)
-        .filter(|resource| resource.kind == ResourceKind::TextStyle)
-        .and_then(|resource| TextStyleResource::decode(run.style_id, resource).ok())
-    else {
-        return Size::ZERO;
-    };
     let mut line_count = 0_usize;
     let mut longest_line = 0_usize;
     for line in string.split('\n') {
         line_count += 1;
         longest_line = longest_line.max(line.chars().count());
     }
-    let width = usize_to_f32(longest_line) * style.font_size * 0.6;
-    let height = usize_to_f32(line_count) * style.line_height;
+    let width = usize_to_f32(longest_line) * font_size * 0.6;
+    let height = usize_to_f32(line_count) * line_height;
     constraints.constrain(Size::new(width, height))
 }
 

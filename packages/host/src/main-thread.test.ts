@@ -5,6 +5,7 @@ import {
 } from "@dopejs/doper-backend-canvas2d";
 import {
   ABI_VERSION,
+  NodeKind,
   ResourceKind,
   encodeMutationBatch,
   type Mutation,
@@ -12,6 +13,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { CanvasFrameSink, type CoreClient, type FrameReport } from "./main-thread";
+import { decodeSystemTextMetricBatch } from "./system-text-metrics";
 
 const DISPLAY_LIST_MAGIC = 0x4450_4f44;
 const STREAM_HEADER_BYTES = 16;
@@ -233,6 +235,115 @@ describe("CanvasFrameSink", () => {
     });
     expect(() => malformed.commit(mutationFrame([]))).toThrow(/request count/u);
   });
+
+  it("upserts and releases browser text metrics with exact pair reference lifetimes", () => {
+    const commit = vi.fn((_mutations: Uint8Array, _metrics?: Uint8Array) => emptyDisplayList());
+    const sink = new CanvasFrameSink(fakeContext([], []), { commit });
+    const firstTextNode = 0x0010_0001;
+    const secondTextNode = 0x0010_0002;
+    sink.commit(
+      mutationFrame([
+        {
+          type: "createNode",
+          nodeId: firstTextNode,
+          kind: NodeKind.Text,
+          parent: 0,
+          beforeSibling: 0,
+        },
+        {
+          type: "createNode",
+          nodeId: secondTextNode,
+          kind: NodeKind.Text,
+          parent: 0,
+          beforeSibling: 0,
+        },
+        {
+          type: "defineResource",
+          resourceId: 1,
+          kind: ResourceKind.Paint,
+          bytes: solidPaint(),
+        },
+        {
+          type: "defineResource",
+          resourceId: 2,
+          kind: ResourceKind.Utf8String,
+          bytes: new TextEncoder().encode("abcd\nxy"),
+        },
+        {
+          type: "defineResource",
+          resourceId: 3,
+          kind: ResourceKind.TextStyle,
+          bytes: textStyle(1, 16, 20, 400, "Inter"),
+        },
+        { type: "setTextRun", nodeId: firstTextNode, stringId: 2, styleId: 3 },
+        { type: "setTextRun", nodeId: secondTextNode, stringId: 2, styleId: 3 },
+      ]),
+    );
+
+    const initialMetrics = commit.mock.calls[0]?.[1];
+    expect(initialMetrics).toBeInstanceOf(Uint8Array);
+    if (initialMetrics === undefined) throw new Error("initial metric batch is missing");
+    expect(decodeSystemTextMetricBatch(initialMetrics)).toEqual([
+      {
+        type: "upsert",
+        metric: { stringId: 2, styleId: 3, maxLineWidth: 40, lineCount: 2 },
+      },
+    ]);
+
+    sink.commit(mutationFrame([{ type: "removeNode", nodeId: firstTextNode }]));
+    expect(commit.mock.calls[1]?.[1]).toBeUndefined();
+
+    sink.commit(mutationFrame([{ type: "removeNode", nodeId: secondTextNode }]));
+    const releasedMetrics = commit.mock.calls[2]?.[1];
+    if (releasedMetrics === undefined) throw new Error("release metric batch is missing");
+    expect(decodeSystemTextMetricBatch(releasedMetrics)).toEqual([
+      { type: "release", stringId: 2, styleId: 3 },
+    ]);
+  });
+
+  it("refreshes every active pair through the Core metric-only entry point", () => {
+    const setSystemTextMetrics = vi.fn((_metrics: Uint8Array) => emptyDisplayList());
+    const sink = new CanvasFrameSink(fakeContext([], []), {
+      commit: () => emptyDisplayList(),
+      set_system_text_metrics: setSystemTextMetrics,
+    });
+    const textNode = 0x0010_0001;
+    sink.commit(
+      mutationFrame([
+        { type: "createNode", nodeId: textNode, kind: NodeKind.Text, parent: 0, beforeSibling: 0 },
+        {
+          type: "defineResource",
+          resourceId: 1,
+          kind: ResourceKind.Paint,
+          bytes: solidPaint(),
+        },
+        {
+          type: "defineResource",
+          resourceId: 2,
+          kind: ResourceKind.Utf8String,
+          bytes: new TextEncoder().encode("font"),
+        },
+        {
+          type: "defineResource",
+          resourceId: 3,
+          kind: ResourceKind.TextStyle,
+          bytes: textStyle(1, 16, 20, 400, "Inter"),
+        },
+        { type: "setTextRun", nodeId: textNode, stringId: 2, styleId: 3 },
+      ]),
+    );
+
+    expect(sink.refreshSystemTextMetrics()).toMatchObject({ commands: 0 });
+    expect(setSystemTextMetrics).toHaveBeenCalledOnce();
+    const refreshedMetrics = setSystemTextMetrics.mock.calls[0]?.[0];
+    if (refreshedMetrics === undefined) throw new Error("refreshed metric batch is missing");
+    expect(decodeSystemTextMetricBatch(refreshedMetrics)).toEqual([
+      {
+        type: "upsert",
+        metric: { stringId: 2, styleId: 3, maxLineWidth: 40, lineCount: 1 },
+      },
+    ]);
+  });
 });
 
 function mutationFrame(mutations: readonly Mutation[]): Uint8Array {
@@ -241,6 +352,27 @@ function mutationFrame(mutations: readonly Mutation[]): Uint8Array {
 
 function solidPaint(): Uint8Array {
   return Uint8Array.of(1, 1, 0, 0, 0x12, 0x34, 0x56, 0xff);
+}
+
+function textStyle(
+  paintId: number,
+  fontSize: number,
+  lineHeight: number,
+  weight: number,
+  family: string,
+): Uint8Array {
+  const encodedFamily = new TextEncoder().encode(family);
+  const bytes = new Uint8Array((24 + encodedFamily.length + 3) & ~3);
+  const view = new DataView(bytes.buffer);
+  bytes[0] = 1;
+  bytes[1] = 1;
+  view.setUint32(4, paintId, true);
+  view.setFloat32(8, fontSize, true);
+  view.setFloat32(12, lineHeight, true);
+  view.setUint16(16, weight, true);
+  view.setUint32(20, encodedFamily.length, true);
+  bytes.set(encodedFamily, 24);
+  return bytes;
 }
 
 function emptyDisplayList(): Uint8Array {
@@ -277,7 +409,7 @@ function displayList(commands: readonly Uint8Array[]): Uint8Array {
 }
 
 function fakeContext(calls: unknown[][], events: string[]): Canvas2DContext {
-  const state = { fillStyle: "", globalAlpha: 1 };
+  const state = { fillStyle: "", font: "", globalAlpha: 1 };
   return {
     canvas: { height: 64, width: 64 },
     clearRect: (...values: number[]) => calls.push(["clearRect", ...values]),
@@ -294,6 +426,13 @@ function fakeContext(calls: unknown[][], events: string[]): Canvas2DContext {
     set globalAlpha(value: number) {
       state.globalAlpha = value;
     },
+    get font() {
+      return state.font;
+    },
+    set font(value: string) {
+      state.font = value;
+    },
+    measureText: (text: string) => ({ width: text.length * 10 }) as TextMetrics,
     save: () => {
       events.push("canvas");
       calls.push(["save"]);

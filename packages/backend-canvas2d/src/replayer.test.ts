@@ -161,6 +161,49 @@ describe("Canvas2DReplayer", () => {
     expect(calls).toContainEqual(["drawImage", imageValue, 0, 1, 2, 3, 10, 11, 12, 13]);
   });
 
+  it("replays system-font fallback hard lines with encoded line height", () => {
+    const resources = new Canvas2DResourceRegistry();
+    resources.defineText(1, "first\nsecond");
+    resources.defineTextStyle(2, {
+      font: "400 10px sans-serif",
+      fillStyle: "black",
+      lineHeight: 14,
+    });
+    const list = displayList([
+      command(DisplayOpcode.DrawTextFallback, 16, (view) => {
+        view.setUint32(4, 1, true);
+        view.setUint32(8, 2, true);
+        writeF32s(view, 12, [3, 5]);
+      }),
+    ]);
+    const calls: unknown[][] = [];
+
+    new Canvas2DReplayer().replay(fakeContext(calls), list, resources);
+
+    expect(calls).toContainEqual([
+      "fillText",
+      "first",
+      3,
+      5,
+      "400 10px sans-serif",
+      "black",
+      "inherit",
+      "start",
+      "alphabetic",
+    ]);
+    expect(calls).toContainEqual([
+      "fillText",
+      "second",
+      3,
+      19,
+      "400 10px sans-serif",
+      "black",
+      "inherit",
+      "start",
+      "alphabetic",
+    ]);
+  });
+
   it("rejects invalid numeric commands before touching canvas", () => {
     const resources = new Canvas2DResourceRegistry();
     resources.definePaint(1, "red");

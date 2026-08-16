@@ -19,8 +19,50 @@ describe("Canvas2DResourceRegistry", () => {
     expect(resources.getTextStyle(3)).toEqual({
       font: '400 16px "Inter"',
       fillStyle: "#12345680",
+      lineHeight: 20,
       textBaseline: "alphabetic",
     });
+  });
+
+  it("measures hard lines against a post-transaction preview without installing it", () => {
+    const resources = new Canvas2DResourceRegistry();
+    const actions = [
+      {
+        type: "define" as const,
+        id: 2,
+        kind: ResourceKind.Utf8String,
+        bytes: new TextEncoder().encode("wide\nxx"),
+      },
+      {
+        type: "define" as const,
+        id: 3,
+        kind: ResourceKind.TextStyle,
+        bytes: textStyle(1, 16, 20, 400, "Inter"),
+      },
+    ];
+    const fonts: string[] = [];
+    const state = { font: "initial" };
+    const context = {
+      get font() {
+        return state.font;
+      },
+      set font(value: string) {
+        state.font = value;
+      },
+      save: () => undefined,
+      restore: () => undefined,
+      measureText(text: string) {
+        fonts.push(state.font);
+        return { width: text.length * 7 } as TextMetrics;
+      },
+    } as unknown as CanvasRenderingContext2D;
+
+    expect(
+      resources.measureSystemTextPairs(context, actions, [{ stringId: 2, styleId: 3 }]),
+    ).toEqual([{ stringId: 2, styleId: 3, maxLineWidth: 28, lineCount: 2 }]);
+    expect(fonts).toEqual(['400 16px "Inter"', '400 16px "Inter"']);
+    expect(resources.getText(2)).toBeUndefined();
+    expect(resources.getTextStyle(3)).toBeUndefined();
   });
 
   it("rejects malformed payloads, unresolved dependencies, and duplicate ids", () => {

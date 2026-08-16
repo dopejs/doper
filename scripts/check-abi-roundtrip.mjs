@@ -39,6 +39,7 @@ async function checkAbiRoundtrip() {
   const inputGolden = await readGolden("input-stream.v1.json");
   const displayGolden = await readGolden("display-list.v1.json");
   const glyphGolden = await readGolden("glyph-resources.v1.json");
+  const textMetricsGolden = await readGolden("system-text-metrics.v1.json");
   const recordingGolden = await readGolden("replay-recording.v1.json");
   const resourceGolden = JSON.parse(
     await readFile(path.join(root, "benchmarks/abi/resources.v1.json"), "utf8"),
@@ -107,9 +108,25 @@ async function checkAbiRoundtrip() {
   assertEqual(inputHex, inputGolden, "TypeScript input encoder vs golden");
   assertEqual(roundTripInRust("input", inputHex), inputHex, "TypeScript to Rust input round trip");
 
+  const textMetricBytes = host.encodeSystemTextMetricBatch([
+    {
+      type: "upsert",
+      metric: { stringId: 7, styleId: 9, maxLineWidth: 123.5, lineCount: 2 },
+    },
+    { type: "release", stringId: 8, styleId: 10 },
+  ]);
+  const textMetricHex = encodeHex(textMetricBytes);
+  assertEqual(textMetricHex, textMetricsGolden, "TypeScript system text metrics vs golden");
+  assertEqual(
+    roundTripInRust("text-metrics", textMetricHex),
+    textMetricHex,
+    "TypeScript to Rust system text metrics round trip",
+  );
+
   const recordingBytes = host.encodeReplayRecording({
     records: [
       { type: "mutation", bytes: mutationBytes },
+      { type: "systemTextMetrics", bytes: textMetricBytes },
       { type: "input", bytes: inputBytes },
     ],
   });

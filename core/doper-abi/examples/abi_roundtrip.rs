@@ -1,6 +1,9 @@
 use std::io::{self, Read};
 
-use doper_abi::{DisplayList, GlyphResourceBatch, InputBatch, MutationBatch, ReplayRecording};
+use doper_abi::{
+    DisplayList, GlyphResourceBatch, InputBatch, MutationBatch, ReplayRecording,
+    SystemTextMetricBatch,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stream = std::env::args()
@@ -15,6 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "recording" => ReplayRecording::decode(&bytes)?.encode()?,
         "display" => DisplayList::decode(&bytes)?.encode()?,
         "glyph" => GlyphResourceBatch::decode(&bytes)?.encode()?,
+        "text-metrics" => SystemTextMetricBatch::decode(&bytes)?.encode()?,
         _ => return Err(format!("unknown stream kind {stream}").into()),
     };
     println!("{}", encode_hex(&output));

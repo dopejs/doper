@@ -12,18 +12,22 @@ pub const MUTATION_MAGIC: u32 = 1297108804;
 pub const INPUT_MAGIC: u32 = 1229999940;
 pub const DISPLAY_LIST_MAGIC: u32 = 1146113860;
 pub const GLYPH_RESOURCES_MAGIC: u32 = 1196445508;
+pub const SYSTEM_TEXT_METRICS_MAGIC: u32 = 1414549316;
 pub const RECORDING_MAGIC: u32 = 1380994884;
 pub const MAX_MUTATION_BYTES: usize = 16777216;
 pub const MAX_INPUT_BYTES: usize = 16777216;
 pub const MAX_DISPLAY_LIST_BYTES: usize = 33554432;
 pub const MAX_GLYPH_RESOURCES_BYTES: usize = 16777216;
+pub const MAX_SYSTEM_TEXT_METRICS_BYTES: usize = 8388608;
 pub const MAX_RECORDING_BYTES: usize = 67108864;
 pub const MAX_RESOURCE_BYTES: usize = 8388608;
 pub const MAX_MUTATION_INSTRUCTIONS: u32 = 262144;
 pub const MAX_INPUT_INSTRUCTIONS: u32 = 262144;
 pub const MAX_DISPLAY_INSTRUCTIONS: u32 = 1048576;
 pub const MAX_GLYPH_RESOURCE_INSTRUCTIONS: u32 = 262144;
+pub const MAX_SYSTEM_TEXT_METRIC_INSTRUCTIONS: u32 = 262144;
 pub const MAX_GLYPH_BITMAP_PIXELS: usize = 16777216;
+pub const MAX_SYSTEM_TEXT_LINES: u32 = 1048576;
 pub const MAX_RECORDING_RECORDS: u32 = 1048576;
 pub const MAX_VIRTUAL_ITEMS: u32 = 4000000;
 pub const VIRTUAL_REFILL_VERSION: u32 = 1;
@@ -116,6 +120,7 @@ pub const AFFINE_F_OFFSET: usize = 24;
 pub enum RecordingRecordKind {
     Mutation = 1,
     Input = 2,
+    SystemTextMetrics = 3,
 }
 
 impl RecordingRecordKind {
@@ -124,6 +129,7 @@ impl RecordingRecordKind {
         match value {
             1 => Some(Self::Mutation),
             2 => Some(Self::Input),
+            3 => Some(Self::SystemTextMetrics),
             _ => None,
         }
     }
@@ -417,6 +423,42 @@ impl GlyphResourceOpcode {
         match self {
             Self::DefineGlyphSpan => 24,
             Self::ReleaseGlyphSpan => 8,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
+pub enum SystemTextMetricOpcode {
+    UpsertSystemTextMetric = 1,
+    ReleaseSystemTextMetric = 2,
+}
+
+impl SystemTextMetricOpcode {
+    #[must_use]
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::UpsertSystemTextMetric),
+            2 => Some(Self::ReleaseSystemTextMetric),
+            _ => None,
+        }
+    }
+}
+
+impl SystemTextMetricOpcode {
+    #[must_use]
+    pub const fn fixed_bytes(self) -> Option<usize> {
+        match self {
+            Self::UpsertSystemTextMetric => Some(20),
+            Self::ReleaseSystemTextMetric => Some(12),
+        }
+    }
+
+    #[must_use]
+    pub const fn minimum_bytes(self) -> usize {
+        match self {
+            Self::UpsertSystemTextMetric => 20,
+            Self::ReleaseSystemTextMetric => 12,
         }
     }
 }

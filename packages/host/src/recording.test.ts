@@ -9,14 +9,17 @@ import {
   replayRecording,
   type ReplayDataClassification,
 } from "./recording";
+import { encodeSystemTextMetricBatch } from "./system-text-metrics";
 
 describe("binary replay recording", () => {
   it("preserves exact transaction bytes and observed order", () => {
     const mutation = mutationBytes();
     const input = inputBytes();
+    const metrics = systemTextMetricBytes();
     const bytes = encodeReplayRecording({
       records: [
         { type: "mutation", bytes: mutation },
+        { type: "systemTextMetrics", bytes: metrics },
         { type: "input", bytes: input },
       ],
     });
@@ -24,6 +27,7 @@ describe("binary replay recording", () => {
     expect(decodeReplayRecording(bytes)).toEqual({
       records: [
         { type: "mutation", bytes: mutation },
+        { type: "systemTextMetrics", bytes: metrics },
         { type: "input", bytes: input },
       ],
     });
@@ -31,9 +35,11 @@ describe("binary replay recording", () => {
     replayRecording(bytes, {
       mutation: (nested) => events.push(`mutation:${String(nested.byteLength)}`),
       input: (nested) => events.push(`input:${String(nested.byteLength)}`),
+      systemTextMetrics: (nested) => events.push(`metrics:${String(nested.byteLength)}`),
     });
     expect(events).toEqual([
       `mutation:${String(mutation.byteLength)}`,
+      `metrics:${String(metrics.byteLength)}`,
       `input:${String(input.byteLength)}`,
     ]);
   });
@@ -46,7 +52,7 @@ describe("binary replay recording", () => {
 
     const handler = vi.fn((nested: Uint8Array) => nested.fill(0));
     const archive = recorder.export();
-    replayRecording(archive, { mutation: handler, input: vi.fn() });
+    replayRecording(archive, { mutation: handler, input: vi.fn(), systemTextMetrics: vi.fn() });
     expect(handler).toHaveBeenCalledOnce();
     expect(() => decodeReplayRecording(archive)).not.toThrow();
   });
@@ -110,4 +116,13 @@ function inputBytes(): Uint8Array {
     frameSeq: 2,
     commands: [{ type: "insert", nodeId: 1 << 20, baseRevision: 7n, text: "你" }],
   });
+}
+
+function systemTextMetricBytes(): Uint8Array {
+  return encodeSystemTextMetricBatch([
+    {
+      type: "upsert",
+      metric: { stringId: 7, styleId: 9, maxLineWidth: 42, lineCount: 1 },
+    },
+  ]);
 }

@@ -3,7 +3,7 @@ use crate::codec::{
 };
 use crate::{
     AbiError, InputBatch, MAX_RECORDING_BYTES, MAX_RECORDING_RECORDS, MutationBatch,
-    RECORD_HEADER_BYTES, RECORDING_MAGIC, RecordingRecordKind, StreamKind,
+    RECORD_HEADER_BYTES, RECORDING_MAGIC, RecordingRecordKind, StreamKind, SystemTextMetricBatch,
 };
 
 /// One exact binary transaction in an ordered deterministic replay recording.
@@ -13,6 +13,8 @@ pub enum ReplayRecord {
     Mutation(Vec<u8>),
     /// A complete Host-to-Core Input Stream.
     Input(Vec<u8>),
+    /// A complete Host-to-Core system-font metric cache delta.
+    SystemTextMetrics(Vec<u8>),
 }
 
 impl ReplayRecord {
@@ -20,12 +22,13 @@ impl ReplayRecord {
         match self {
             Self::Mutation(_) => RecordingRecordKind::Mutation,
             Self::Input(_) => RecordingRecordKind::Input,
+            Self::SystemTextMetrics(_) => RecordingRecordKind::SystemTextMetrics,
         }
     }
 
     fn bytes(&self) -> &[u8] {
         match self {
-            Self::Mutation(bytes) | Self::Input(bytes) => bytes,
+            Self::Mutation(bytes) | Self::Input(bytes) | Self::SystemTextMetrics(bytes) => bytes,
         }
     }
 
@@ -33,6 +36,7 @@ impl ReplayRecord {
         match self {
             Self::Mutation(bytes) => MutationBatch::decode(bytes).map(|_| ()),
             Self::Input(bytes) => InputBatch::decode(bytes).map(|_| ()),
+            Self::SystemTextMetrics(bytes) => SystemTextMetricBatch::decode(bytes).map(|_| ()),
         }
     }
 }
@@ -90,6 +94,10 @@ impl ReplayRecording {
                     InputBatch::decode(&payload)?;
                     ReplayRecord::Input(payload)
                 }
+                RecordingRecordKind::SystemTextMetrics => {
+                    SystemTextMetricBatch::decode(&payload)?;
+                    ReplayRecord::SystemTextMetrics(payload)
+                }
             };
             records.push(record);
         }
@@ -127,6 +135,7 @@ mod tests {
     use super::*;
     use crate::{
         InputCommand, InputInstruction, Mutation, MutationInstruction, NULL_NODE_ID, NodeKind,
+        SystemTextMetric, SystemTextMetricCommand, SystemTextMetricInstruction,
     };
 
     fn mutation(frame_seq: u32) -> Vec<u8> {
@@ -162,11 +171,28 @@ mod tests {
         .expect("input")
     }
 
+    fn system_metrics() -> Vec<u8> {
+        SystemTextMetricBatch {
+            instructions: vec![SystemTextMetricInstruction {
+                flags: 0,
+                command: SystemTextMetricCommand::Upsert(SystemTextMetric {
+                    string_id: 7,
+                    style_id: 9,
+                    max_line_width: 42.0,
+                    line_count: 1,
+                }),
+            }],
+        }
+        .encode()
+        .expect("system text metrics")
+    }
+
     #[test]
     fn preserves_exact_nested_bytes_and_observed_order() {
         let recording = ReplayRecording {
             records: vec![
                 ReplayRecord::Mutation(mutation(1)),
+                ReplayRecord::SystemTextMetrics(system_metrics()),
                 ReplayRecord::Input(input(2)),
                 ReplayRecord::Mutation(mutation(3)),
             ],

@@ -400,6 +400,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       this.#options.onFrame,
       rasterCache,
       (requests) => this.deferVirtualRefills(requests),
+      this.#options.onHostError,
     );
     this.#frameSink = sink;
     this.#recoverableSink.install(sink);
@@ -522,6 +523,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#client = undefined;
     if (client !== undefined) await client.close();
     this.closeInputRing();
+    this.#frameSink?.dispose();
     this.#core?.free?.();
     this.#core = undefined;
     this.#frameSink = undefined;

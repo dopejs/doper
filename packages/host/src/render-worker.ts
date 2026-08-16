@@ -113,6 +113,7 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
     },
     message.rasterCache ? createDefaultRasterCache(context, fatal) : undefined,
     (requests) => post({ kind: "doper:virtual-refill", requests, sessionId }),
+    fatal,
   );
   const consume = (frameSeq: number, bytes: Uint8Array): void => {
     const decoded = decodeMutationBatch(bytes);
@@ -157,6 +158,7 @@ function disposeRuntime(): void {
   clock?.stop();
   postMessageReceiver?.dispose();
   sabReceiver?.dispose();
+  sink?.dispose();
   core?.free?.();
   clock = undefined;
   postMessageReceiver = undefined;

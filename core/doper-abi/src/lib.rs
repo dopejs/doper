@@ -14,6 +14,7 @@ mod glyph_resources;
 mod input;
 mod mutation;
 mod recording;
+mod system_text_metrics;
 
 use core::fmt;
 
@@ -28,6 +29,9 @@ pub use input::{
 };
 pub use mutation::{Mutation, MutationBatch, MutationInstruction};
 pub use recording::{ReplayRecord, ReplayRecording};
+pub use system_text_metrics::{
+    SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand, SystemTextMetricInstruction,
+};
 
 /// Semantic invalidation domains associated with a property.
 #[derive(Clone, Copy, Eq, PartialEq)]

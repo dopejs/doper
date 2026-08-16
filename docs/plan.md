@@ -297,16 +297,18 @@ web 字体 shaping、复杂排版和 glyph atlas 属于 M3。M1 的“像素对�
 
 ### M3：原生虚拟滚动与文本
 
-> 当前状态：**M3-A Scroll 已完成（2026-08-15），M3-B Text 实施中**。M3-A 已交付
+> 当前状态：**M3 已完成（2026-08-16）**。M3-A 已交付
 > `doper-scroll` 的 iOS/Android 物理、Fenwick HeightIndex、变量高度锚点纠偏、方向
 > 预热、占位/补建指标，以及 Shell 的 `<virtualList>` 有界窗口物化。独立 SAB Input
 > ring、postMessage 和主线程三路径均通过真实 Chromium；cache 开关、朴素前缀和、
-> native/wasm32 DisplayList 与补建窗口均严格差分一致。`pnpm m3:scroll:check` 全绿：
-> 170 项 TS、123 项 Rust、7 项 Chromium；TS/Rust 行覆盖率 85.87%/93.04%，
-> ABI/Scene/Scroll 为 95.43%/95.22%/99.39%；百万 item、20,000 帧 benchmark 的
-> P95/P99 为 0.542/0.666µs，保留堆 12,250,008 bytes；30 分钟 120Hz 加速 soak 后
-> 堆容量不增长；产品 WASM gzip 103,992 bytes。M3 整体仍未完成，不能把上述状态
-> 解读为文本体系或完整编辑能力已交付。
+> native/wasm32 DisplayList 与补建窗口均严格差分一致。M3-B 已交付显式字体的
+> shaping、换行、映射和 glyph atlas，以及系统字体的实测量 fallback。完整
+> `pnpm m3:check` 全绿：191 项 TS、153 项 Rust、10 项 Chromium；TS/Rust 行覆盖率
+> 84.03%/92.48%，ABI/Scene/Scroll/Text 为 95.33%/95.08%/99.39%/95.54%；百万
+> item、20,000 帧 benchmark 的 P95/P99 为 0.667/0.916µs，保留堆 12,250,008
+> bytes；30 分钟 120Hz 加速 soak 后堆容量不增长；产品 Core WASM gzip 283,124
+> bytes。完整编辑、事件、命中与无障碍仍属于 M4，不能因 M3 完成而宣称整套引擎
+> 已可供业务生产使用。
 
 目标：在代表性百万行场景中达到移动端滚动指标，并完成首个可用文本体系。
 
@@ -324,16 +326,19 @@ web 字体 shaping、复杂排版和 glyph atlas 属于 M3。M1 的“像素对�
 
 #### M3-B Text
 
-状态：**实施中**。`doper-text` 的显式 SFNT 校验、LTR shaping、UAX #14 基础
+状态：**已完成（2026-08-16）**。`doper-text` 的显式 SFNT 校验、LTR shaping、UAX #14 基础
 换行、grapheme/cluster/glyph/line/caret 映射、有界 Text Shape Cache，以及受
 WASM 体积门禁约束的灰度 outline glyph atlas 已完成；真实 SFNT 自动门禁为
 `pnpm m3:text:foundation`。公开 `createFont`/`font` API、版本化 SFNT 资源、Core
 shaping/栅格、`DrawGlyphRun`、DOPG 回传、Host 普通资源+DOPG 原子安装、Canvas2D
-mask 着色贴图和 DPR 重建链路均已完成。接入后的产品 Core WASM 为 278,929 bytes
+mask 着色贴图和 DPR 重建链路均已完成。接入后的产品 Core WASM 为 283,124 bytes
 gzip。宿主侧 `loadFont` 已以有界流读取、WOFF1 严格容器解码、WOFF2 头部预检和
 decoder-only 动态加载完成 TTF/OTF/TTC/WOFF/WOFF2 边界，并覆盖真实 WOFF2 往返与
-畸形输入。系统字体测量反馈，以及真实字体经 WASM 到浏览器像素的 E2E 尚未完成，
-因此 M3-B 尚未达到出口。
+畸形输入。版本化 `DOPT` 已把真实 Canvas `measureText` 结果与 Mutation Stream 原子
+提交到 Core；增量 pair 引用计数、硬上限、字体/DPR 刷新、metric-only 重排、DOPR
+录制回放与逐 hard-line `fillText` 已完成。真实 Chromium 会禁用 `fillText` 并验证
+公开 API → WASM shaping/raster → DOPG → Canvas 像素链。独立自动出口命令
+`pnpm m3:text:check` 与组合出口命令 `pnpm m3:check` 均已通过。
 
 - 显式 web 字体加载、LTR、基础换行和 Text Shape Cache。
 - 系统字体 `measureText`/`fillText` fallback 及缓存失效。

@@ -316,6 +316,10 @@ class FakeCanvas {
       canvas: this,
       clearRect() {},
       drawImage() {},
+      font: "",
+      measureText(value: string) {
+        return { width: value.length * 8 };
+      },
       resetTransform() {},
       restore() {},
       save() {},

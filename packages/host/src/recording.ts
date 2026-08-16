@@ -1,6 +1,8 @@
 import { decodeInputBatch } from "@dopejs/doper-editing";
 import { decodeMutationBatch } from "@dopejs/doper-reconciler";
 
+import { decodeSystemTextMetricBatch } from "./system-text-metrics";
+
 import {
   ABI_VERSION,
   MAX_RECORDING_BYTES,
@@ -14,6 +16,7 @@ import {
 
 const MUTATION_RECORD_KIND = Number(RecordingRecordKind.Mutation);
 const INPUT_RECORD_KIND = Number(RecordingRecordKind.Input);
+const SYSTEM_TEXT_METRICS_RECORD_KIND = Number(RecordingRecordKind.SystemTextMetrics);
 
 /** Explicit privacy classification required before binary data may be retained. */
 export type ReplayDataClassification = "recordable" | "sensitive";
@@ -21,7 +24,8 @@ export type ReplayDataClassification = "recordable" | "sensitive";
 /** One exact nested stream in observed order. */
 export type ReplayRecord =
   | { readonly type: "mutation"; readonly bytes: Uint8Array }
-  | { readonly type: "input"; readonly bytes: Uint8Array };
+  | { readonly type: "input"; readonly bytes: Uint8Array }
+  | { readonly type: "systemTextMetrics"; readonly bytes: Uint8Array };
 
 /** A recursively validated deterministic replay recording. */
 export interface ReplayRecording {
@@ -100,6 +104,7 @@ export function decodeReplayRecording(input: Uint8Array): ReplayRecording {
 export interface ReplayHandlers {
   readonly mutation: (bytes: Uint8Array) => void;
   readonly input: (bytes: Uint8Array) => void;
+  readonly systemTextMetrics: (bytes: Uint8Array) => void;
 }
 
 /** Validates then replays a complete recording in exact observed order. */
@@ -126,6 +131,14 @@ export class BinaryReplayRecorder {
   /** Captures one exact Input Stream, or safely skips password/private content. */
   public captureInput(bytes: Uint8Array, classification: ReplayDataClassification): boolean {
     return this.capture({ type: "input", bytes }, classification);
+  }
+
+  /** Captures one exact browser system-font metric cache delta. */
+  public captureSystemTextMetrics(
+    bytes: Uint8Array,
+    classification: ReplayDataClassification,
+  ): boolean {
+    return this.capture({ type: "systemTextMetrics", bytes }, classification);
   }
 
   /** Exports a detached versioned archive without exposing retained mutable buffers. */
@@ -210,19 +223,23 @@ class RecordingReader {
 function validateRecord(record: ReplayRecord): void {
   try {
     if (record.type === "mutation") decodeMutationBatch(record.bytes);
-    else decodeInputBatch(record.bytes);
+    else if (record.type === "input") decodeInputBatch(record.bytes);
+    else decodeSystemTextMetricBatch(record.bytes);
   } catch (cause) {
     throw new ReplayRecordingError(`invalid nested ${record.type} stream`, { cause });
   }
 }
 
 function kindFor(record: ReplayRecord): RecordingRecordKind {
-  return record.type === "mutation" ? RecordingRecordKind.Mutation : RecordingRecordKind.Input;
+  if (record.type === "mutation") return RecordingRecordKind.Mutation;
+  if (record.type === "input") return RecordingRecordKind.Input;
+  return RecordingRecordKind.SystemTextMetrics;
 }
 
 function recordFor(kind: number, bytes: Uint8Array): ReplayRecord {
   if (kind === MUTATION_RECORD_KIND) return { type: "mutation", bytes };
   if (kind === INPUT_RECORD_KIND) return { type: "input", bytes };
+  if (kind === SYSTEM_TEXT_METRICS_RECORD_KIND) return { type: "systemTextMetrics", bytes };
   return fail(`unknown recording record kind ${String(kind)}`);
 }
 

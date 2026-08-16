@@ -47,6 +47,9 @@ const context = {
   fillText(...values) {
     calls.push(["fillText", ...values, state.font, state.fillStyle]);
   },
+  measureText(value) {
+    return { width: String(value).length * 8 };
+  },
 };
 
 try {

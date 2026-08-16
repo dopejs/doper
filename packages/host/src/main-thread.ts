@@ -2,6 +2,7 @@ import {
   Canvas2DReplayer,
   Canvas2DResourceRegistry,
   RasterTileCache,
+  type CanvasSystemTextPair,
   type Canvas2DContext,
   type RasterFrameResult,
   type RasterTileCacheMetrics,
@@ -15,6 +16,8 @@ import {
   type ResourceKind,
   type RootOptions,
 } from "@dopejs/doper-reconciler";
+
+import { encodeSystemTextMetricBatch } from "./system-text-metrics";
 
 import {
   FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX,
@@ -50,13 +53,14 @@ import {
 
 /** Minimal binding implemented by the generated WASM Core wrapper. */
 export interface CoreClient {
-  commit(mutations: Uint8Array): Uint8Array;
+  commit(mutations: Uint8Array, systemTextMetrics?: Uint8Array): Uint8Array;
   input?(input: Uint8Array): Uint8Array | undefined;
   advance?(elapsedSeconds: number): Uint8Array | undefined;
   frame_diagnostics?(): Uint32Array;
   free?(): void;
   set_viewport?(width: number, height: number): void;
   set_device_pixel_ratio?(value: number): Uint8Array | undefined;
+  set_system_text_metrics?(metrics: Uint8Array): Uint8Array | undefined;
   is_poisoned?(): boolean;
   take_glyph_resources?(): Uint8Array;
   take_virtual_refills?(): Uint32Array;
@@ -116,6 +120,10 @@ type ResourceAction =
     }
   | { readonly type: "release"; readonly id: number; readonly kind: ResourceKind };
 
+interface TextPairState extends CanvasSystemTextPair {
+  readonly references: number;
+}
+
 /** Transactional bridge from reconciler frames to Core resources and Canvas. */
 export class CanvasFrameSink implements MutationSink {
   readonly #context: Canvas2DContext;
@@ -123,9 +131,15 @@ export class CanvasFrameSink implements MutationSink {
   readonly #resources: Canvas2DResourceRegistry;
   readonly #replayer: Canvas2DReplayer;
   readonly #resourceKinds = new Map<number, ResourceKind>();
+  readonly #nodeParents = new Map<number, number>();
+  readonly #nodeTextPairs = new Map<number, CanvasSystemTextPair>();
+  readonly #textPairState = new Map<string, TextPairState>();
   readonly #onFrame: ((report: FrameReport) => void) | undefined;
   readonly #onVirtualRefills: ((requests: readonly VirtualRefillRange[]) => void) | undefined;
   readonly #rasterCache: RasterTileCache<ReplayStats> | undefined;
+  readonly #onAsyncError: ((error: Error) => void) | undefined;
+  readonly #fontSet: FontFaceSet | undefined;
+  readonly #fontLoadingDone: (() => void) | undefined;
   #devicePixelRatio = 1;
   #lastDisplayList: Uint8Array | undefined;
   #lastPictureKey: string | undefined;
@@ -137,21 +151,51 @@ export class CanvasFrameSink implements MutationSink {
     onFrame?: (report: FrameReport) => void,
     rasterCache?: RasterTileCache<ReplayStats>,
     onVirtualRefills?: (requests: readonly VirtualRefillRange[]) => void,
+    onAsyncError?: (error: Error) => void,
   ) {
     this.#context = context;
     this.#core = core;
     this.#onFrame = onFrame;
     this.#rasterCache = rasterCache;
     this.#onVirtualRefills = onVirtualRefills;
+    this.#onAsyncError = onAsyncError;
     this.#resources = new Canvas2DResourceRegistry();
     this.#replayer = new Canvas2DReplayer();
+    this.#fontSet = runtimeFontSet();
+    this.#fontLoadingDone =
+      this.#fontSet === undefined || this.#core.set_system_text_metrics === undefined
+        ? undefined
+        : () => {
+            try {
+              this.refreshSystemTextMetrics();
+            } catch (cause) {
+              reportAsyncError(
+                toError(cause, "system font metric refresh failed"),
+                this.#onAsyncError,
+              );
+            }
+          };
     this.setDevicePixelRatio(runtimeDevicePixelRatio());
+    if (this.#fontLoadingDone !== undefined) {
+      this.#fontSet?.addEventListener("loadingdone", this.#fontLoadingDone);
+    }
   }
 
   /** Commits Core before mutating backend state or touching Canvas pixels. */
   public commit(bytes: Uint8Array): void {
-    const { actions, frameSeq, nextKinds } = this.preflightResources(bytes);
-    const displayList = this.#core.commit(bytes);
+    const { actions, frameSeq, metricDeltas, nextKinds, nextParents, nextTextPairs } =
+      this.preflightResources(bytes);
+    const metrics = metricDeltas.upserts.length
+      ? this.#resources.measureSystemTextPairs(this.#context, actions, metricDeltas.upserts)
+      : [];
+    const metricBytes =
+      metrics.length === 0 && metricDeltas.releases.length === 0
+        ? undefined
+        : encodeSystemTextMetricBatch([
+            ...metrics.map((metric) => ({ type: "upsert" as const, metric })),
+            ...metricDeltas.releases.map((pair) => ({ type: "release" as const, ...pair })),
+          ]);
+    const displayList = this.#core.commit(bytes, metricBytes);
     this.emitVirtualRefills();
     if (!(displayList instanceof Uint8Array)) {
       throw new TypeError("Core commit must return Uint8Array DisplayList bytes");
@@ -167,6 +211,9 @@ export class CanvasFrameSink implements MutationSink {
     }
     this.#resourceKinds.clear();
     for (const [id, kind] of nextKinds) this.#resourceKinds.set(id, kind);
+    replaceMap(this.#nodeParents, nextParents);
+    replaceMap(this.#nodeTextPairs, nextTextPairs);
+    replaceMap(this.#textPairState, countTextPairs(nextTextPairs));
     if (actions.length > 0 || glyphResources !== undefined) {
       this.#resourceRevision = nextSequence(this.#resourceRevision);
       this.#rasterCache?.clear();
@@ -235,6 +282,35 @@ export class CanvasFrameSink implements MutationSink {
     return this.#rasterCache?.metrics();
   }
 
+  /** Releases browser capability listeners owned by this rendering sink. */
+  public dispose(): void {
+    if (this.#fontLoadingDone !== undefined) {
+      this.#fontSet?.removeEventListener("loadingdone", this.#fontLoadingDone);
+    }
+  }
+
+  /** Remeasures every active fallback pair after browser font availability changes. */
+  public refreshSystemTextMetrics(): ReplayStats | null {
+    const update = this.#core.set_system_text_metrics?.bind(this.#core);
+    if (update === undefined || this.#textPairState.size === 0) return null;
+    const pairs = [...this.#textPairState.values()].map(({ stringId, styleId }) => ({
+      stringId,
+      styleId,
+    }));
+    const metrics = this.#resources.measureSystemTextPairs(this.#context, [], pairs);
+    const displayList = update(
+      encodeSystemTextMetricBatch(metrics.map((metric) => ({ type: "upsert" as const, metric }))),
+    );
+    if (displayList === undefined) return null;
+    this.applyDynamicGlyphResources();
+    return this.acceptDynamicFrame(displayList, {
+      animationDeltaMs: 0,
+      cause: "animation",
+      inputBytes: 0,
+      mutationBytes: 0,
+    });
+  }
+
   /** Invalidates DPR-sensitive raster entries without changing Core logical coordinates. */
   public setDevicePixelRatio(value: number): void {
     if (!Number.isFinite(value) || value <= 0)
@@ -242,6 +318,7 @@ export class CanvasFrameSink implements MutationSink {
     if (value === this.#devicePixelRatio) return;
     this.#devicePixelRatio = value;
     this.#rasterCache?.clear();
+    this.refreshSystemTextMetrics();
     const displayList = this.#core.set_device_pixel_ratio?.(value);
     if (displayList === undefined) return;
     this.applyDynamicGlyphResources();
@@ -314,13 +391,37 @@ export class CanvasFrameSink implements MutationSink {
   private preflightResources(bytes: Uint8Array): {
     readonly actions: ResourceAction[];
     readonly frameSeq: number;
+    readonly metricDeltas: {
+      readonly releases: CanvasSystemTextPair[];
+      readonly upserts: CanvasSystemTextPair[];
+    };
     readonly nextKinds: Map<number, ResourceKind>;
+    readonly nextParents: Map<number, number>;
+    readonly nextTextPairs: Map<number, CanvasSystemTextPair>;
   } {
     const batch = decodeMutationBatch(bytes);
     const nextKinds = new Map(this.#resourceKinds);
+    const nextParents = new Map(this.#nodeParents);
+    const nextTextPairs = new Map(this.#nodeTextPairs);
+    const children = indexChildren(nextParents);
     const actions: ResourceAction[] = [];
     for (const mutation of batch.mutations) {
-      if (mutation.type === "defineResource") {
+      if (mutation.type === "createNode") {
+        nextParents.set(mutation.nodeId, mutation.parent);
+        addChild(children, mutation.parent, mutation.nodeId);
+      } else if (mutation.type === "removeNode") {
+        removeHostSubtree(mutation.nodeId, nextParents, nextTextPairs, children);
+      } else if (mutation.type === "reparent") {
+        const previousParent = nextParents.get(mutation.nodeId);
+        if (previousParent !== undefined) removeChild(children, previousParent, mutation.nodeId);
+        nextParents.set(mutation.nodeId, mutation.newParent);
+        addChild(children, mutation.newParent, mutation.nodeId);
+      } else if (mutation.type === "setTextRun") {
+        nextTextPairs.set(
+          mutation.nodeId,
+          Object.freeze({ stringId: mutation.stringId, styleId: mutation.styleId }),
+        );
+      } else if (mutation.type === "defineResource") {
         if (nextKinds.has(mutation.resourceId)) {
           throw new Error(`resource ${String(mutation.resourceId)} is already defined in host`);
         }
@@ -340,7 +441,23 @@ export class CanvasFrameSink implements MutationSink {
         actions.push({ type: "release", id: mutation.resourceId, kind });
       }
     }
-    return { actions, frameSeq: batch.frameSeq, nextKinds };
+    const nextPairState = countTextPairs(nextTextPairs);
+    const upserts = [...nextPairState.entries()]
+      .filter(([key]) => !this.#textPairState.has(key))
+      .map(([, { stringId, styleId }]) => ({ stringId, styleId }));
+    const releases = [...this.#textPairState.entries()]
+      .filter(([key]) => !nextPairState.has(key))
+      .map(([, { stringId, styleId }]) => ({ stringId, styleId }));
+    upserts.sort(compareTextPair);
+    releases.sort(compareTextPair);
+    return {
+      actions,
+      frameSeq: batch.frameSeq,
+      metricDeltas: { releases, upserts },
+      nextKinds,
+      nextParents,
+      nextTextPairs,
+    };
   }
 
   private emitVirtualRefills(): void {
@@ -384,6 +501,100 @@ export function createDefaultRasterCache(
 function nextSequence(value: number): number {
   const next = (value + 1) >>> 0;
   return next === 0 ? 1 : next;
+}
+
+function textPairKey(pair: CanvasSystemTextPair): string {
+  return `${String(pair.stringId)}:${String(pair.styleId)}`;
+}
+
+function compareTextPair(left: CanvasSystemTextPair, right: CanvasSystemTextPair): number {
+  return left.stringId - right.stringId || left.styleId - right.styleId;
+}
+
+function countTextPairs(
+  runs: ReadonlyMap<number, CanvasSystemTextPair>,
+): Map<string, TextPairState> {
+  const pairs = new Map<string, TextPairState>();
+  for (const pair of runs.values()) {
+    const key = textPairKey(pair);
+    const previous = pairs.get(key);
+    pairs.set(
+      key,
+      Object.freeze({
+        ...pair,
+        references: (previous?.references ?? 0) + 1,
+      }),
+    );
+  }
+  return pairs;
+}
+
+function indexChildren(parents: ReadonlyMap<number, number>): Map<number, Set<number>> {
+  const children = new Map<number, Set<number>>();
+  for (const [node, parent] of parents) addChild(children, parent, node);
+  return children;
+}
+
+function addChild(children: Map<number, Set<number>>, parent: number, node: number): void {
+  let siblings = children.get(parent);
+  if (siblings === undefined) {
+    siblings = new Set();
+    children.set(parent, siblings);
+  }
+  siblings.add(node);
+}
+
+function removeChild(children: Map<number, Set<number>>, parent: number, node: number): void {
+  const siblings = children.get(parent);
+  siblings?.delete(node);
+  if (siblings?.size === 0) children.delete(parent);
+}
+
+function removeHostSubtree(
+  root: number,
+  parents: Map<number, number>,
+  textPairs: Map<number, CanvasSystemTextPair>,
+  children: Map<number, Set<number>>,
+): void {
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node === undefined) continue;
+    const descendants = children.get(node);
+    if (descendants !== undefined) pending.push(...descendants);
+    const parent = parents.get(node);
+    if (parent !== undefined) removeChild(children, parent, node);
+    children.delete(node);
+    parents.delete(node);
+    textPairs.delete(node);
+  }
+}
+
+function replaceMap<Key, Value>(target: Map<Key, Value>, source: ReadonlyMap<Key, Value>): void {
+  target.clear();
+  for (const [key, value] of source) target.set(key, value);
+}
+
+function runtimeFontSet(): FontFaceSet | undefined {
+  const scope = globalThis as typeof globalThis & {
+    readonly fonts?: FontFaceSet;
+  };
+  if (scope.fonts !== undefined) return scope.fonts;
+  return typeof document === "undefined" ? undefined : document.fonts;
+}
+
+function toError(cause: unknown, message: string): Error {
+  return cause instanceof Error ? cause : new Error(message, { cause });
+}
+
+function reportAsyncError(error: Error, handler: ((error: Error) => void) | undefined): void {
+  if (handler !== undefined) {
+    handler(error);
+    return;
+  }
+  queueMicrotask(() => {
+    throw error;
+  });
 }
 
 function runtimeDevicePixelRatio(): number {
@@ -469,6 +680,28 @@ export function createCanvasRoot(
   core: CoreClient,
   options: CanvasRootOptions = {},
 ): DoperRoot {
-  const sink = new CanvasFrameSink(context, core, options.onFrame);
-  return createRoot(sink, options);
+  const sink = new CanvasFrameSink(
+    context,
+    core,
+    options.onFrame,
+    undefined,
+    undefined,
+    options.onPostCommitError,
+  );
+  const root = createRoot(sink, options);
+  return {
+    render: (node) => root.render(node),
+    flushSync: () => root.flushSync(),
+    invokeCallback: (callbackId) => root.invokeCallback(callbackId),
+    unmount: () => {
+      try {
+        root.unmount();
+      } finally {
+        sink.dispose();
+      }
+    },
+    get failed() {
+      return root.failed;
+    },
+  };
 }

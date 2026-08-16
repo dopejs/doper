@@ -11,6 +11,8 @@ pub enum StreamKind {
     DisplayList,
     /// Core-to-backend glyph-span resource deltas.
     GlyphResources,
+    /// Host-to-Core system-font measurement cache deltas.
+    SystemTextMetrics,
     /// Ordered mutation and editing replay recording.
     Recording,
 }

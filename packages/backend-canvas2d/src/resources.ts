@@ -1,4 +1,4 @@
-import type { Canvas2DResources, CanvasTextStyle } from "./replayer";
+import type { Canvas2DContext, Canvas2DResources, CanvasTextStyle } from "./replayer";
 import { decodeGlyphResourceBatch, type CanvasGlyphSpan } from "./glyph-resources";
 import {
   AFFINE_A_OFFSET,
@@ -33,6 +33,7 @@ import {
   TEXT_STYLE_VARIANT_OFFSET,
   TEXT_STYLE_VERSION_OFFSET,
   TEXT_STYLE_WEIGHT_OFFSET,
+  MAX_SYSTEM_TEXT_LINES,
 } from "./generated";
 
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
@@ -48,6 +49,23 @@ type Rgba = readonly [number, number, number, number];
 interface PreparedGlyphSpan {
   readonly span: CanvasGlyphSpan;
   readonly sources: readonly CanvasImageSource[];
+}
+
+interface TextMeasurementStyle {
+  readonly font: string;
+  readonly lineHeight: number;
+}
+
+/** Immutable string/style resource pair requiring browser system-font metrics. */
+export interface CanvasSystemTextPair {
+  readonly stringId: number;
+  readonly styleId: number;
+}
+
+/** Canvas-measured fallback dimensions in logical CSS pixels. */
+export interface CanvasSystemTextMetric extends CanvasSystemTextPair {
+  readonly maxLineWidth: number;
+  readonly lineCount: number;
 }
 
 /** One portable resource lifecycle action accepted by an atomic backend transaction. */
@@ -68,6 +86,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
   readonly #images = new Map<number, CanvasImageSource>();
   readonly #texts = new Map<number, string>();
   readonly #textStyles = new Map<number, CanvasTextStyle>();
+  readonly #textMeasurementStyles = new Map<number, TextMeasurementStyle>();
   readonly #fonts = new Map<number, CanvasFontResource>();
   readonly #glyphSpans = new Map<number, CanvasGlyphSpan>();
   readonly #glyphRasters = new Map<number, PreparedGlyphSpan>();
@@ -167,6 +186,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
     const solidPaints = new Map(this.#solidPaints);
     const texts = new Map(this.#texts);
     const textStyles = new Map(this.#textStyles);
+    const textMeasurementStyles = new Map(this.#textMeasurementStyles);
     const fonts = new Map(this.#fonts);
     const encodedKinds = new Map(this.#encodedKinds);
     const glyphSpans = new Map(this.#glyphSpans);
@@ -201,9 +221,17 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
               Object.freeze({
                 font: `${String(decoded.weight)} ${String(decoded.fontSize)}px ${JSON.stringify(decoded.family)}`,
                 fillStyle,
+                lineHeight: decoded.lineHeight,
                 textBaseline: "alphabetic" as const,
               }),
               "text style",
+            );
+            textMeasurementStyles.set(
+              action.id,
+              Object.freeze({
+                font: `${String(decoded.weight)} ${String(decoded.fontSize)}px ${JSON.stringify(decoded.family)}`,
+                lineHeight: decoded.lineHeight,
+              }),
             );
             break;
           }
@@ -235,6 +263,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
               solidPaints.delete(action.id);
               return paints.delete(action.id);
             case ResourceKind.TextStyle:
+              textMeasurementStyles.delete(action.id);
               return textStyles.delete(action.id);
             case ResourceKind.Font:
               return fonts.delete(action.id);
@@ -277,6 +306,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
     replaceMap(this.#solidPaints, solidPaints);
     replaceMap(this.#texts, texts);
     replaceMap(this.#textStyles, textStyles);
+    replaceMap(this.#textMeasurementStyles, textMeasurementStyles);
     replaceMap(this.#fonts, fonts);
     replaceMap(this.#encodedKinds, encodedKinds);
     replaceMap(this.#glyphSpans, glyphSpans);
@@ -301,6 +331,65 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
 
   public getTextStyle(id: number): CanvasTextStyle | undefined {
     return this.#textStyles.get(id);
+  }
+
+  /**
+   * Measures immutable fallback pairs against the post-transaction text/style
+   * preview without installing resources or touching canvas pixels.
+   */
+  public measureSystemTextPairs(
+    context: Canvas2DContext,
+    actions: readonly CanvasEncodedResourceAction[],
+    pairs: readonly CanvasSystemTextPair[],
+  ): CanvasSystemTextMetric[] {
+    const texts = new Map(this.#texts);
+    const styles = new Map(this.#textMeasurementStyles);
+    for (const action of actions) {
+      if (action.kind === ResourceKind.Utf8String) {
+        if (action.type === "define") {
+          define(texts, action.id, decodeUtf8(action.bytes, "UTF-8 string"), "text");
+        } else if (!texts.delete(action.id)) {
+          throw new Error(`text resource ${String(action.id)} is not defined`);
+        }
+      } else if (action.kind === ResourceKind.TextStyle) {
+        if (action.type === "define") {
+          const decoded = decodeTextStyle(action.bytes);
+          define(
+            styles,
+            action.id,
+            Object.freeze({
+              font: `${String(decoded.weight)} ${String(decoded.fontSize)}px ${JSON.stringify(decoded.family)}`,
+              lineHeight: decoded.lineHeight,
+            }),
+            "text measurement style",
+          );
+        } else if (!styles.delete(action.id)) {
+          throw new Error(`text measurement style ${String(action.id)} is not defined`);
+        }
+      }
+    }
+
+    const metrics: CanvasSystemTextMetric[] = [];
+    const seen = new Set<string>();
+    context.save();
+    try {
+      for (const pair of pairs) {
+        const key = `${String(pair.stringId)}:${String(pair.styleId)}`;
+        if (seen.has(key)) throw new Error("system text pair occurs more than once");
+        seen.add(key);
+        const text = texts.get(pair.stringId);
+        const style = styles.get(pair.styleId);
+        if (text === undefined || style === undefined) {
+          throw new Error(`system text pair ${key} references an unavailable string or text style`);
+        }
+        context.font = style.font;
+        const measured = measureHardLines(context, text);
+        metrics.push(Object.freeze({ ...pair, ...measured }));
+      }
+    } finally {
+      context.restore();
+    }
+    return metrics;
   }
 
   public getFont(id: number): CanvasFontResource | undefined {
@@ -378,7 +467,7 @@ function decodeSolidPaint(bytes: Uint8Array): { readonly style: string; readonly
 function prepareGlyphSpan(span: CanvasGlyphSpan, paint: Rgba): PreparedGlyphSpan {
   const sources = span.bitmaps.map((bitmap) => {
     const surface = createGlyphSurface(bitmap.width, bitmap.height);
-    const context = surface.getContext("2d");
+    const context = glyphSurfaceContext(surface);
     if (context === null) throw new Error("glyph raster surface has no Canvas2D context");
     const image = context.createImageData(bitmap.width, bitmap.height);
     for (let pixel = 0; pixel < bitmap.data.length; pixel += 1) {
@@ -392,6 +481,14 @@ function prepareGlyphSpan(span: CanvasGlyphSpan, paint: Rgba): PreparedGlyphSpan
     return surface;
   });
   return Object.freeze({ span, sources: Object.freeze(sources) });
+}
+
+function glyphSurfaceContext(
+  surface: OffscreenCanvas | HTMLCanvasElement,
+): OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null {
+  return typeof OffscreenCanvas === "function" && surface instanceof OffscreenCanvas
+    ? surface.getContext("2d")
+    : (surface as HTMLCanvasElement).getContext("2d");
 }
 
 function canCreateGlyphSurface(): boolean {
@@ -427,6 +524,7 @@ function validateAffine(bytes: Uint8Array): void {
 function decodeTextStyle(bytes: Uint8Array): {
   readonly paintId: number;
   readonly fontSize: number;
+  readonly lineHeight: number;
   readonly weight: number;
   readonly family: string;
 } {
@@ -469,7 +567,30 @@ function decodeTextStyle(bytes: Uint8Array): {
   }
   const family = decodeUtf8(bytes.subarray(TEXT_STYLE_FAMILY_OFFSET, familyEnd), "font family");
   if (family.length === 0) throw new Error("font family must not be empty");
-  return { paintId, fontSize, weight, family };
+  return { paintId, fontSize, lineHeight, weight, family };
+}
+
+function measureHardLines(
+  context: Canvas2DContext,
+  text: string,
+): Pick<CanvasSystemTextMetric, "lineCount" | "maxLineWidth"> {
+  let lineCount = 0;
+  let maxLineWidth = 0;
+  let start = 0;
+  for (let index = 0; index <= text.length; index += 1) {
+    if (index !== text.length && text.charCodeAt(index) !== 0x0a) continue;
+    lineCount += 1;
+    if (lineCount > MAX_SYSTEM_TEXT_LINES) {
+      throw new RangeError("system text exceeds the supported hard-line limit");
+    }
+    const width = context.measureText(text.slice(start, index)).width;
+    if (!Number.isFinite(width) || width < 0) {
+      throw new Error("Canvas measureText returned an invalid width");
+    }
+    maxLineWidth = Math.max(maxLineWidth, width);
+    start = index + 1;
+  }
+  return { lineCount, maxLineWidth };
 }
 
 function validateHeader(
