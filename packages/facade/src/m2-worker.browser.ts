@@ -237,11 +237,31 @@ describe("M2 production transport matrix", () => {
         `${preference} scrolled virtual materialization`,
       );
 
-      const movedRange = refills
-        .filter((batch) => batch.some((request) => request.start > 0))
-        .at(-1)?.[0];
-      const finalReport = reports.filter((report) => report.cause === "mutation").at(-1);
+      // The preheat window is velocity dependent, so it keeps shrinking while
+      // the fling decays. Sampling the newest refill and the newest report
+      // independently can therefore straddle two different window sizes; wait
+      // for the Shell to converge on the window Core last asked for.
+      const newestWindow = (): { start: number; end: number } | undefined =>
+        refills.filter((batch) => batch.some((request) => request.start > 0)).at(-1)?.[0];
+      const newestReport = (): FrameReport | undefined =>
+        reports.filter((report) => report.cause === "mutation").at(-1);
+      await withTimeout(
+        waitUntil(() => {
+          const window_ = newestWindow();
+          const report = newestReport();
+          if (window_ === undefined || report === undefined) return false;
+          return report.core?.sceneNodes === 2 + (window_.end - window_.start) * 2;
+        }),
+        3_000,
+        `${preference} virtual window settles on the requested range`,
+      );
+
+      const movedRange = newestWindow();
+      const finalReport = newestReport();
       const finalItems = (movedRange?.end ?? 0) - (movedRange?.start ?? 0);
+      // The settled window must still cover the viewport, not just agree with
+      // itself: a window that collapsed to nothing would satisfy the equality.
+      expect(finalItems).toBeGreaterThan(10);
       expect(input.mutationBytes).toBe(0);
       expect(movedRange?.start).toBeGreaterThan(0);
       expect(finalItems).toBeLessThan(100);

@@ -8,8 +8,8 @@ mod error;
 mod resource;
 
 pub use engine::{
-    EditorDecoration, PaintEngine, PaintMetrics, PaintOutcome, Picture, ShapedGlyphRun,
-    TextPaintResolver,
+    EditorDecoration, PaintEngine, PaintMetrics, PaintOutcome, Picture, PlaceholderRect,
+    ShapedGlyphRun, TextPaintResolver, VirtualPaintResolver,
 };
 pub use error::PaintError;
 pub use resource::{AffineResource, SolidPaint, TextStyleResource};

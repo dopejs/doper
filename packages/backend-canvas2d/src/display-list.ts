@@ -48,6 +48,12 @@ export type DisplayCommand =
       readonly text: string;
     }
   | {
+      /** Core-authored skeleton for a virtual item the Shell has not materialized. */
+      readonly type: "fillPlaceholder";
+      readonly rect: readonly number[];
+      readonly rgba: number;
+    }
+  | {
       readonly type: "drawEditorDecoration";
       readonly rect: readonly number[];
       readonly rgba: number;
@@ -168,6 +174,13 @@ function decodeCommand(reader: DisplayListReader, opcode: DisplayOpcode): Displa
         origin,
         text: reader.utf8(reader.u32()),
       };
+    }
+    case DisplayOpcode.FillPlaceholder: {
+      const rect = reader.f32s(4);
+      if ((rect[2] ?? -1) < 0 || (rect[3] ?? -1) < 0) {
+        return fail("placeholder has negative extent");
+      }
+      return { type: "fillPlaceholder", rect, rgba: reader.u32() };
     }
     case DisplayOpcode.DrawEditorDecoration: {
       const rect = reader.f32s(4);

@@ -92,6 +92,8 @@ pub struct Virtualizer {
     config: VirtualizerConfig,
     available: Vec<bool>,
     requested: Vec<bool>,
+    /// Requested-but-unanswered items, reused across frames without allocating.
+    pending: Vec<usize>,
     refill: Vec<Range<usize>>,
     metrics: VirtualizerMetrics,
 }
@@ -121,6 +123,7 @@ impl Virtualizer {
             config,
             available: vec![false; len],
             requested: vec![false; len],
+            pending: Vec::new(),
             refill: Vec::new(),
             metrics: VirtualizerMetrics::default(),
         })
@@ -202,6 +205,12 @@ impl Virtualizer {
         Ok(())
     }
 
+    /// Returns whether the Shell has materialized an item.
+    #[must_use]
+    pub fn is_available(&self, index: usize) -> bool {
+        self.available.get(index).copied().unwrap_or(false)
+    }
+
     /// Applies a measured height and preserves the first visible item's visual anchor.
     ///
     /// # Errors
@@ -264,12 +273,23 @@ impl Virtualizer {
             .clamp(0.0, self.physics.maximum_position());
         let visible = self.heights.visible_range(position, viewport)?;
         let base = viewport * self.config.base_overscan_viewports;
-        let projected = (self.physics.velocity().abs() * self.config.velocity_horizon_seconds)
-            .min(viewport * self.config.maximum_ahead_viewports);
-        let (before, after) = if self.physics.velocity() < 0.0 {
-            (base + projected, base)
+        // Preheat around where the offset is heading, not only where it is.
+        // Wheel input never leaves a fling velocity behind, so projecting from
+        // `velocity` alone left the window symmetric and one viewport wide: a
+        // fast gesture outran it every frame and the viewport fell outside the
+        // materialized range.
+        let destination = self
+            .physics
+            .lookahead_position(self.config.velocity_horizon_seconds)
+            .clamp(0.0, self.physics.maximum_position());
+        let travel = (destination - position).clamp(
+            -viewport * self.config.maximum_ahead_viewports,
+            viewport * self.config.maximum_ahead_viewports,
+        );
+        let (before, after) = if travel < 0.0 {
+            (base + travel.abs(), base)
         } else {
-            (base, base + projected)
+            (base, base + travel)
         };
         let preheat_start = (position - before).max(0.0);
         let preheat_extent = viewport + before + after;
@@ -282,6 +302,14 @@ impl Virtualizer {
                 hits = hits.saturating_add(1);
             } else {
                 placeholders = placeholders.saturating_add(1);
+            }
+        }
+        // An item that was requested but never materialized -- the window moved
+        // on before the Shell answered -- must become requestable again, or it
+        // stays permanently blank the next time it scrolls into view.
+        for index in self.pending.drain(..) {
+            if !preheat.contains(&index) {
+                self.requested[index] = false;
             }
         }
         self.refill.clear();
@@ -298,6 +326,9 @@ impl Virtualizer {
             }
             if missing {
                 self.requested[index] = true;
+            }
+            if self.requested[index] && !self.available[index] {
+                self.pending.push(index);
             }
         }
         if let Some(start) = open {
@@ -350,6 +381,66 @@ impl Virtualizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wheel_scrolling_preheats_ahead_of_the_destination() {
+        // Regression: the projection used to read `physics.velocity()`, which a
+        // wheel gesture never sets, so the window stayed symmetric and one
+        // viewport wide and a fast gesture landed outside it every frame.
+        let mut virtualizer = Virtualizer::new(
+            HeightIndex::with_uniform(10_000, 32.0).expect("heights"),
+            512.0,
+            ScrollPlatform::Ios,
+            VirtualizerConfig::default(),
+        )
+        .expect("virtualizer");
+        virtualizer.mark_available(0..10_000).expect("available");
+
+        let settled = virtualizer.plan_frame().expect("frame").preheat;
+        virtualizer
+            .physics_mut()
+            .wheel_notch_by(4_000.0)
+            .expect("notch");
+        let heading = virtualizer.plan_frame().expect("frame");
+        // The lead is capped by `maximum_ahead_viewports` so memory stays
+        // bounded, but it must be a real lead rather than the symmetric window.
+        let config = VirtualizerConfig::default();
+        let capped_lead_items = (512.0 * config.maximum_ahead_viewports / 32.0).round();
+        let lead_items = heading.preheat.end - settled.end;
+        assert!(
+            f64::from(u32::try_from(lead_items).expect("lead fits")) >= capped_lead_items,
+            "preheat must lead the notch destination: {settled:?} -> {:?}",
+            heading.preheat
+        );
+    }
+
+    #[test]
+    fn an_unanswered_request_is_retried_after_the_window_moves_away() {
+        // Regression: `requested` was latched forever, so an item the Shell
+        // never materialized could never be requested again and stayed blank.
+        let mut virtualizer = Virtualizer::new(
+            HeightIndex::with_uniform(4_000, 32.0).expect("heights"),
+            320.0,
+            ScrollPlatform::Ios,
+            VirtualizerConfig::default(),
+        )
+        .expect("virtualizer");
+        let first = virtualizer.plan_frame().expect("frame");
+        assert!(
+            !first.refill.is_empty(),
+            "the first frame must request items"
+        );
+
+        // Move far away without ever answering, then come back.
+        virtualizer.physics_mut().jump_to(60_000.0).expect("jump");
+        virtualizer.plan_frame().expect("frame");
+        virtualizer.physics_mut().jump_to(0.0).expect("jump");
+        let returned = virtualizer.plan_frame().expect("frame");
+        assert!(
+            returned.refill.iter().any(|range| range.contains(&0)),
+            "returning to an unanswered item must request it again"
+        );
+    }
 
     #[test]
     fn emits_coalesced_refill_once_and_uses_placeholders_until_available() {

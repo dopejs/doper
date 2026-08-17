@@ -122,12 +122,26 @@ pub struct ScrollFrame {
     pub overscrolled: bool,
 }
 
-/// Exponential time constant for the discrete wheel-notch animation.
+/// Duration of the discrete wheel-notch animation.
 ///
-/// Browsers animate a wheel notch instead of jumping to it; this constant
-/// settles roughly 95% of the remaining distance in 135ms, which matches the
-/// desktop smooth-scroll feel without adding perceptible latency.
-const WHEEL_ANIMATION_TAU_SECONDS: f64 = 0.045;
+/// Browsers animate a wheel notch over a bounded, short interval rather than
+/// easing toward it asymptotically. The duration is what the gesture actually
+/// costs, so it has to stay close to the desktop smooth-scroll feel: an
+/// exponential approach with a stop threshold spends its final third covering
+/// a couple of pixels, which reads as sluggish scrolling even though the total
+/// distance is right.
+const WHEEL_ANIMATION_SECONDS: f64 = 0.12;
+
+/// One in-flight discrete wheel animation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct WheelAnimation {
+    /// Offset the animation started from.
+    start: f64,
+    /// Offset the animation lands on.
+    target: f64,
+    /// Time already spent animating.
+    elapsed_seconds: f64,
+}
 
 /// Core-owned deterministic scroll state with drag, fling, and rebound phases.
 #[derive(Clone, Debug, PartialEq)]
@@ -139,7 +153,14 @@ pub struct ScrollPhysics {
     velocity: f64,
     dragging: bool,
     /// Pending animated destination for discrete wheel notches.
-    wheel_target: Option<f64>,
+    wheel_animation: Option<WheelAnimation>,
+    /// Recent input speed used only to look ahead when planning caches.
+    ///
+    /// This is deliberately separate from `velocity`: a trackpad gesture must
+    /// not coast after the fingers lift, because the platform already sends its
+    /// own momentum samples, but the virtualizer still has to know which way
+    /// the content is moving so it can preheat ahead of it.
+    preheat_velocity: f64,
     metrics: ScrollPhysicsMetrics,
 }
 
@@ -163,7 +184,8 @@ impl ScrollPhysics {
             position: 0.0,
             velocity: 0.0,
             dragging: false,
-            wheel_target: None,
+            wheel_animation: None,
+            preheat_velocity: 0.0,
             metrics: ScrollPhysicsMetrics::default(),
         })
     }
@@ -218,8 +240,10 @@ impl ScrollPhysics {
         validate_extent(viewport_extent, "viewport extent")?;
         self.content_extent = content_extent;
         self.viewport_extent = viewport_extent;
-        if let Some(target) = self.wheel_target {
-            self.wheel_target = Some(target.clamp(0.0, self.maximum_position()));
+        let maximum = self.maximum_position();
+        if let Some(animation) = self.wheel_animation.as_mut() {
+            animation.start = animation.start.clamp(0.0, maximum);
+            animation.target = animation.target.clamp(0.0, maximum);
         }
         if !self.dragging {
             let clamped = self.position.clamp(0.0, self.maximum_position());
@@ -238,7 +262,7 @@ impl ScrollPhysics {
         self.velocity = 0.0;
         // Direct manipulation and high-precision deltas take over immediately;
         // a pending notch animation must not keep pulling the position.
-        self.wheel_target = None;
+        self.wheel_animation = None;
     }
 
     /// Applies a logical content-offset delta with bounded edge resistance.
@@ -251,7 +275,7 @@ impl ScrollPhysics {
         if !self.dragging {
             self.begin_drag();
         }
-        self.wheel_target = None;
+        self.wheel_animation = None;
         let previous = self.position;
         let maximum = self.maximum_position();
         let proposed = self.position + delta;
@@ -300,7 +324,7 @@ impl ScrollPhysics {
         self.position = clamped;
         self.velocity = 0.0;
         self.dragging = false;
-        self.wheel_target = None;
+        self.wheel_animation = None;
         Ok(self.frame(changed(previous, clamped)))
     }
 
@@ -331,11 +355,17 @@ impl ScrollPhysics {
                 value: elapsed_seconds,
             });
         }
+        // The lookahead speed reflects recent input, so it has to fade once the
+        // input stops; otherwise a finished gesture keeps preheating forward.
+        self.preheat_velocity /= 1.0 + self.config.deceleration * elapsed_seconds;
+        if self.preheat_velocity.abs() <= self.config.stop_velocity {
+            self.preheat_velocity = 0.0;
+        }
         if elapsed_seconds == 0.0 || self.dragging {
             return Ok(self.frame(false));
         }
-        if let Some(target) = self.wheel_target {
-            return Ok(self.advance_wheel_animation(target, elapsed_seconds));
+        if self.wheel_animation.is_some() {
+            return Ok(self.advance_wheel_animation(elapsed_seconds));
         }
         let previous = self.position;
         let maximum = self.maximum_position();
@@ -380,7 +410,10 @@ impl ScrollPhysics {
     pub fn wheel_notch_by(&mut self, delta: f64) -> Result<ScrollFrame, ScrollError> {
         validate_finite(delta, "scroll delta")?;
         let maximum = self.maximum_position();
-        let base = self.wheel_target.unwrap_or(self.position);
+        let base = self
+            .wheel_animation
+            .as_ref()
+            .map_or(self.position, |animation| animation.target);
         let target = (base + delta).clamp(0.0, maximum);
         self.dragging = false;
         self.velocity = 0.0;
@@ -388,26 +421,74 @@ impl ScrollPhysics {
         if (target - self.position).abs() <= self.config.stop_distance {
             let previous = self.position;
             self.position = target;
-            self.wheel_target = None;
+            self.wheel_animation = None;
             return Ok(self.frame(changed(self.position, previous)));
         }
-        self.wheel_target = Some(target);
+        // A notch arriving mid-animation retargets from where the offset is
+        // now, so a fast wheel spin never falls further and further behind.
+        self.wheel_animation = Some(WheelAnimation {
+            start: self.position,
+            target,
+            elapsed_seconds: 0.0,
+        });
         Ok(self.frame(false))
+    }
+
+    /// Records the observed input speed in logical pixels per second.
+    ///
+    /// Callers pass the speed of the gesture itself, not a fling velocity: this
+    /// never makes the offset move on its own.
+    pub fn note_input_speed(&mut self, pixels_per_second: f64) {
+        if pixels_per_second.is_finite() {
+            self.preheat_velocity = pixels_per_second;
+        }
+    }
+
+    /// Returns the offset caches should be planned around.
+    ///
+    /// A pending notch animation has an exact destination, so it is used
+    /// directly. Otherwise the offset is projected from whichever speed is
+    /// larger: a fling that is still coasting, or the gesture currently
+    /// driving the offset.
+    #[must_use]
+    pub fn lookahead_position(&self, horizon_seconds: f64) -> f64 {
+        if let Some(animation) = self.wheel_animation {
+            return animation.target;
+        }
+        let speed = if self.velocity.abs() >= self.preheat_velocity.abs() {
+            self.velocity
+        } else {
+            self.preheat_velocity
+        };
+        let horizon = if horizon_seconds.is_finite() {
+            horizon_seconds.max(0.0)
+        } else {
+            0.0
+        };
+        self.position + speed * horizon
     }
 
     /// Returns whether a discrete wheel animation is still running.
     #[must_use]
     pub const fn is_animating(&self) -> bool {
-        self.wheel_target.is_some()
+        self.wheel_animation.is_some()
     }
 
-    fn advance_wheel_animation(&mut self, target: f64, elapsed_seconds: f64) -> ScrollFrame {
+    fn advance_wheel_animation(&mut self, elapsed_seconds: f64) -> ScrollFrame {
         let previous = self.position;
-        let factor = 1.0 - (-elapsed_seconds / WHEEL_ANIMATION_TAU_SECONDS).exp();
-        self.position += (target - self.position) * factor;
-        if (target - self.position).abs() <= self.config.stop_distance {
-            self.position = target;
-            self.wheel_target = None;
+        let Some(mut animation) = self.wheel_animation else {
+            return self.frame(false);
+        };
+        animation.elapsed_seconds += elapsed_seconds;
+        let progress = (animation.elapsed_seconds / WHEEL_ANIMATION_SECONDS).clamp(0.0, 1.0);
+        // Cubic ease-out: fast at the start, and finished exactly on time.
+        let eased = 1.0 - (1.0 - progress).powi(3);
+        self.position = animation.start + (animation.target - animation.start) * eased;
+        if progress >= 1.0 {
+            self.position = animation.target;
+            self.wheel_animation = None;
+        } else {
+            self.wheel_animation = Some(animation);
         }
         self.metrics.frames = self.metrics.frames.saturating_add(1);
         self.frame(changed(self.position, previous))
@@ -426,7 +507,7 @@ impl ScrollPhysics {
             active: !self.dragging
                 && (self.velocity.abs() > f64::EPSILON
                     || overscrolled
-                    || self.wheel_target.is_some()),
+                    || self.wheel_animation.is_some()),
             changed,
             overscrolled,
         }
@@ -466,6 +547,17 @@ mod tests {
 
     use super::*;
 
+    /// Frames a duration covers when integrating at the 120Hz physics step.
+    fn frames_at_120hz(seconds: f64) -> usize {
+        let mut frames = 0;
+        let mut elapsed = 0.0;
+        while elapsed < seconds - f64::EPSILON {
+            elapsed += 1.0 / 120.0;
+            frames += 1;
+        }
+        frames
+    }
+
     fn wheel_physics() -> ScrollPhysics {
         ScrollPhysics::new(
             2_000.0,
@@ -502,8 +594,39 @@ mod tests {
         let frames = settle(&mut physics);
         assert!((physics.position() - 200.0).abs() <= f64::EPSILON);
         assert!(!physics.is_animating());
-        // 120Hz frames: the animation is perceptibly smooth but still brief.
-        assert!((5..=40).contains(&frames), "settled in {frames} frames");
+        // The animation has a bounded duration rather than an asymptotic tail:
+        // at 120Hz it must finish within a frame of WHEEL_ANIMATION_SECONDS.
+        let expected = frames_at_120hz(WHEEL_ANIMATION_SECONDS);
+        assert!(
+            (expected..=expected + 1).contains(&frames),
+            "settled in {frames} frames, expected about {expected}"
+        );
+    }
+
+    #[test]
+    fn a_wheel_notch_always_finishes_within_its_bounded_duration() {
+        // A long asymptotic tail is what makes wheel scrolling feel sluggish,
+        // so the contract is the completion time, not just the destination.
+        let mut physics = wheel_physics();
+        physics.wheel_notch_by(400.0).expect("notch");
+        let mut elapsed = 0.0;
+        let step = 1.0 / 120.0;
+        while physics.is_animating() {
+            physics.advance(step).expect("frame");
+            elapsed += step;
+            assert!(
+                elapsed <= WHEEL_ANIMATION_SECONDS + step * 2.0,
+                "tail at {elapsed}s"
+            );
+        }
+        assert!(elapsed >= WHEEL_ANIMATION_SECONDS - step * 2.0);
+        // Ease-out: most of the distance is covered in the first half.
+        let mut halfway = wheel_physics();
+        halfway.wheel_notch_by(400.0).expect("notch");
+        for _ in 0..frames_at_120hz(WHEEL_ANIMATION_SECONDS) / 2 {
+            halfway.advance(step).expect("frame");
+        }
+        assert!(halfway.position() > 200.0, "at {}", halfway.position());
     }
 
     #[test]

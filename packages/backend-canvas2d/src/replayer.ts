@@ -192,6 +192,14 @@ function validateCommand(
       reader.skipF32(2);
       reader.utf8(reader.u32());
       return;
+    case DisplayOpcode.FillPlaceholder: {
+      reader.skipF32(2);
+      if (reader.f32() < 0 || reader.f32() < 0) {
+        replayFail("placeholder has negative extent");
+      }
+      reader.u32();
+      return;
+    }
     case DisplayOpcode.DrawEditorDecoration: {
       reader.skipF32(2);
       if (reader.f32() < 0 || reader.f32() < 0) {
@@ -327,6 +335,15 @@ function replayCommand(
       const y = reader.f32();
       const text = reader.utf8(reader.u32());
       drawFallbackText(context, text, style, x, y);
+      return;
+    }
+    case DisplayOpcode.FillPlaceholder: {
+      const x = reader.f32();
+      const y = reader.f32();
+      const width = reader.f32();
+      const height = reader.f32();
+      context.fillStyle = rgbaCss(reader.u32());
+      context.fillRect(x, y, width, height);
       return;
     }
     case DisplayOpcode.DrawEditorDecoration: {

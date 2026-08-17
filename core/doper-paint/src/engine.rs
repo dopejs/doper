@@ -88,6 +88,29 @@ pub trait TextPaintResolver {
     fn editor_decorations(&self, node: NodeId) -> &[EditorDecoration];
 }
 
+/// One Core-authored skeleton rectangle in a scroll container's content space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlaceholderRect {
+    /// Rectangle `[x, y, width, height]` in the scrolled content space.
+    pub rect: [f32; 4],
+    /// Straight (non-premultiplied) RGBA colour.
+    pub rgba: u32,
+}
+
+/// Read-only bridge from the virtual-scrolling planner into paint.
+pub trait VirtualPaintResolver {
+    /// Returns skeletons for visible items the Shell has not materialized yet.
+    fn placeholders(&self, node: NodeId) -> &[PlaceholderRect];
+}
+
+struct NoPlaceholders;
+
+impl VirtualPaintResolver for NoPlaceholders {
+    fn placeholders(&self, _node: NodeId) -> &[PlaceholderRect] {
+        &[]
+    }
+}
+
 struct FallbackTextPaint;
 
 impl TextPaintResolver for FallbackTextPaint {
@@ -141,16 +164,21 @@ impl PaintEngine {
         geometry_changed: &BitSet,
         force_full: bool,
     ) -> Result<PaintOutcome, PaintError> {
-        self.paint_with_text(
+        self.paint_frame(
             scene,
             layout,
             geometry_changed,
             force_full,
             &FallbackTextPaint,
+            &NoPlaceholders,
         )
     }
 
     /// Builds or reuses a Picture with optional Core-shaped glyph runs.
+    ///
+    /// # Errors
+    ///
+    /// Returns a paint error when Scene, layout, and dirty state disagree.
     pub fn paint_with_text(
         &mut self,
         scene: &Scene,
@@ -158,6 +186,26 @@ impl PaintEngine {
         geometry_changed: &BitSet,
         force_full: bool,
         text: &impl TextPaintResolver,
+    ) -> Result<PaintOutcome, PaintError> {
+        self.paint_frame(
+            scene,
+            layout,
+            geometry_changed,
+            force_full,
+            text,
+            &NoPlaceholders,
+        )
+    }
+
+    /// Builds or reuses a Picture with Core-shaped glyphs and virtual skeletons.
+    pub fn paint_frame(
+        &mut self,
+        scene: &Scene,
+        layout: &LayoutSnapshot,
+        geometry_changed: &BitSet,
+        force_full: bool,
+        text: &impl TextPaintResolver,
+        virtual_items: &impl VirtualPaintResolver,
     ) -> Result<PaintOutcome, PaintError> {
         if scene.ids() != layout.ids() {
             return Err(PaintError::LayoutTopologyMismatch);
@@ -186,7 +234,7 @@ impl PaintEngine {
 
         let rebuild = rebuild_subtrees(scene, geometry_changed, topology_unchanged, force_full);
         let (display_list, updates, subtree_builds, subtree_cache_hits) =
-            build_display_list(scene, layout, &self.subtrees, &rebuild, text)?;
+            build_display_list(scene, layout, &self.subtrees, &rebuild, text, virtual_items)?;
         let command_count = display_list.instructions.len();
         let bytes = display_list.encode()?;
         let picture = Picture {
@@ -263,6 +311,7 @@ fn build_display_list(
     current: &HashMap<NodeId, Arc<CachedSubtree>>,
     rebuild: &[bool],
     text: &impl TextPaintResolver,
+    virtual_items: &impl VirtualPaintResolver,
 ) -> Result<SubtreeBuild, PaintError> {
     let mut updates = HashMap::new();
     let mut subtree_builds = 0_u64;
@@ -272,7 +321,7 @@ fn build_display_list(
             continue;
         }
         let local: Arc<[DisplayInstruction]> =
-            Arc::from(build_node(scene, layout, index, node, text)?);
+            Arc::from(build_node(scene, layout, index, node, text, virtual_items)?);
         let mut children = Vec::new();
         let mut command_count = local.len().checked_add(1).ok_or_else(overflow)?;
         let mut child = scene.first_child(node);
@@ -354,6 +403,7 @@ fn build_node(
     index: usize,
     node: NodeId,
     text: &impl TextPaintResolver,
+    virtual_items: &impl VirtualPaintResolver,
 ) -> Result<Vec<DisplayInstruction>, PaintError> {
     let (offset, size) = layout
         .geometry_at(index)
@@ -462,6 +512,17 @@ fn build_node(
             push(
                 &mut instructions,
                 DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, -scroll_x, -scroll_y]),
+            );
+        }
+        // Skeletons live in the scrolled content space and are emitted before
+        // the children, so a materialized row always wins over its placeholder.
+        for placeholder in virtual_items.placeholders(node) {
+            push(
+                &mut instructions,
+                DisplayCommand::FillPlaceholder {
+                    rect: placeholder.rect,
+                    rgba: placeholder.rgba,
+                },
             );
         }
     }

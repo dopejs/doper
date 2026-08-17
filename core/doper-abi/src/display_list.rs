@@ -95,6 +95,15 @@ pub enum DisplayCommand {
         /// Inline text unavailable as an immutable Scene resource yet.
         text: String,
     },
+    /// Fills a Core-authored skeleton for a virtual item the Shell has not
+    /// materialized yet, so a lagging refill degrades to a visible placeholder
+    /// instead of blank canvas.
+    FillPlaceholder {
+        /// Rectangle `[x, y, width, height]`.
+        rect: [f32; 4],
+        /// Straight (non-premultiplied) RGBA colour.
+        rgba: u32,
+    },
     /// Draws one Core-derived editor overlay without a transient Scene resource.
     DrawEditorDecoration {
         /// Local rectangle `[x, y, width, height]`.
@@ -299,6 +308,16 @@ fn decode_command(
             reader.read_zeroes(2)?;
             DisplayCommand::DrawEditorDecoration { rect, rgba, kind }
         }
+        DisplayOpcode::FillPlaceholder => {
+            let rect = read_f32_array(reader)?;
+            if rect[2] < 0.0 || rect[3] < 0.0 {
+                return Err(AbiError::InvalidValue("placeholder has negative extent"));
+            }
+            DisplayCommand::FillPlaceholder {
+                rect,
+                rgba: reader.read_u32()?,
+            }
+        }
         DisplayOpcode::DrawImage => DisplayCommand::DrawImage {
             image_id: reader.read_u32()?,
             source: read_f32_array(reader)?,
@@ -407,6 +426,14 @@ fn encode_command(writer: &mut Writer, instruction: &DisplayInstruction) -> Resu
             writer.u16(*kind as u16);
             writer.u16(0);
         }
+        DisplayCommand::FillPlaceholder { rect, rgba } => {
+            if rect[2] < 0.0 || rect[3] < 0.0 {
+                return Err(AbiError::InvalidValue("placeholder has negative extent"));
+            }
+            writer.instruction(DisplayOpcode::FillPlaceholder as u8, flags);
+            write_f32_array(writer, rect)?;
+            writer.u32(*rgba);
+        }
         DisplayCommand::DrawImage {
             image_id,
             source,
@@ -445,6 +472,7 @@ fn display_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::DrawTextFallback { .. } => DisplayOpcode::DrawTextFallback,
         DisplayCommand::DrawTextInlineFallback { .. } => DisplayOpcode::DrawTextInlineFallback,
         DisplayCommand::DrawEditorDecoration { .. } => DisplayOpcode::DrawEditorDecoration,
+        DisplayCommand::FillPlaceholder { .. } => DisplayOpcode::FillPlaceholder,
         DisplayCommand::DrawImage { .. } => DisplayOpcode::DrawImage,
         DisplayCommand::DrawPicture { .. } => DisplayOpcode::DrawPicture,
     }

@@ -152,7 +152,8 @@ impl HeadlessRenderer {
                 let polygon = state.transform.rect(rect);
                 self.fill_polygon(polygon, &state.clips, paint, state.alpha, width, height);
             }
-            DisplayCommand::DrawEditorDecoration { rect, rgba, .. } => {
+            DisplayCommand::FillPlaceholder { rect, rgba }
+            | DisplayCommand::DrawEditorDecoration { rect, rgba, .. } => {
                 let [red, green, blue, alpha] = rgba.to_be_bytes();
                 let state = self.current().clone();
                 let polygon = state.transform.rect(rect);
@@ -381,6 +382,7 @@ fn validate_supported(display_list: &DisplayList) -> Result<(), HeadlessError> {
             | DisplayCommand::ClipRect(_)
             | DisplayCommand::Alpha(_)
             | DisplayCommand::FillRect { .. }
+            | DisplayCommand::FillPlaceholder { .. }
             | DisplayCommand::DrawEditorDecoration { .. } => {}
             ref command => return Err(HeadlessError::UnsupportedCommand(command_opcode(command))),
         }
@@ -401,6 +403,7 @@ fn command_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::DrawGlyphRun { .. } => DisplayOpcode::DrawGlyphRun,
         DisplayCommand::DrawTextFallback { .. } => DisplayOpcode::DrawTextFallback,
         DisplayCommand::DrawTextInlineFallback { .. } => DisplayOpcode::DrawTextInlineFallback,
+        DisplayCommand::FillPlaceholder { .. } => DisplayOpcode::FillPlaceholder,
         DisplayCommand::DrawEditorDecoration { .. } => DisplayOpcode::DrawEditorDecoration,
         DisplayCommand::DrawImage { .. } => DisplayOpcode::DrawImage,
         DisplayCommand::DrawPicture { .. } => DisplayOpcode::DrawPicture,

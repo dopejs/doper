@@ -1501,12 +1501,13 @@ impl CoreEngine {
         let dirty_paint_self_nodes = dirty_count(&self.scene, DirtyDomain::PaintSelf);
         let dirty_hit_nodes = dirty_count(&self.scene, DirtyDomain::Hit);
         let dirty_semantics_nodes = dirty_count(&self.scene, DirtyDomain::Semantics);
-        let painted = match self.paint.paint_with_text(
+        let painted = match self.paint.paint_frame(
             &self.scene,
             self.layout.snapshot(),
             geometry_changed,
             force_full_paint,
             &self.text,
+            &self.scroll,
         ) {
             Ok(outcome) => outcome,
             Err(error) => return self.poison(CoreError::Paint(error)),
@@ -3506,6 +3507,42 @@ mod tests {
         engine.advance(10.0).expect("bounded catch-up");
         assert_eq!(engine.scroll_metrics().clamped_catch_up_frames, 1);
         assert!(engine.scroll_metrics().physics_frames <= 30);
+    }
+
+    #[test]
+    fn unmaterialized_visible_items_paint_a_skeleton_instead_of_blank_canvas() {
+        // Regression: the placeholder path existed only as a metric counter, so
+        // a visible item the Shell had not materialized produced no draw at all
+        // and the viewport showed blank canvas during fast scrolling.
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let output = engine.commit(&virtual_list_tree()).expect("initial frame");
+        let missing = engine.scroll_metrics().virtual_placeholders;
+        assert!(
+            missing > 0,
+            "the fixture must leave visible items unmaterialized"
+        );
+
+        let list = DisplayList::decode(&output.display_list).expect("display list");
+        let skeletons: Vec<_> = list
+            .instructions
+            .iter()
+            .filter_map(|instruction| match instruction.command {
+                DisplayCommand::FillPlaceholder { rect, rgba } => Some((rect, rgba)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            u64::try_from(skeletons.len()).expect("count fits"),
+            missing,
+            "every counted placeholder must also be drawn"
+        );
+        for (rect, rgba) in &skeletons {
+            assert!(
+                rect[2] > 0.0 && rect[3] > 0.0,
+                "skeleton must cover area: {rect:?}"
+            );
+            assert_ne!(*rgba & 0xff, 0, "skeleton must be opaque enough to see");
+        }
     }
 
     #[test]

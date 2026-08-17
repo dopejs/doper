@@ -2,12 +2,19 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use doper_abi::{InputBatch, InputCommand, NodeKind};
 use doper_layout::{LayoutSnapshot, VirtualLayoutProvider};
+use doper_paint::{PlaceholderRect, VirtualPaintResolver};
 use doper_scene::{NodeId, Scene, VirtualListConfig};
 use doper_scroll::{
     HeightIndex, ScrollPhysics, ScrollPhysicsConfig, ScrollPlatform, Virtualizer, VirtualizerConfig,
 };
 
 use crate::CoreError;
+
+/// Skeleton colour for an item the Shell has not materialized yet.
+///
+/// A neutral, low-contrast grey: it has to read as "loading" without competing
+/// with real rows, and it must never be mistaken for content.
+const PLACEHOLDER_RGBA: u32 = 0xeef1_f5ff;
 
 const MAXIMUM_CATCH_UP_SECONDS: f64 = 0.25;
 const PHYSICS_STEP_SECONDS: f64 = 1.0 / 120.0;
@@ -57,6 +64,10 @@ struct VirtualAxis {
     source: VirtualListConfig,
     materialized: BTreeSet<u32>,
     planned_window: Option<(u32, u32)>,
+    /// Skeletons for this frame, reused across frames without reallocating.
+    placeholders: Vec<PlaceholderRect>,
+    /// Width used for skeleton rectangles, tracked from the scroll viewport.
+    content_width: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -121,9 +132,11 @@ impl ScrollAxes {
         virtual_list: Option<VirtualListConfig>,
     ) -> Result<(), CoreError> {
         self.x.set_extents(content[0], viewport[0])?;
+        let width = checked_position(viewport[0])?;
         match (&mut self.y, virtual_list) {
             (VerticalAxis::Virtual(axis), Some(config)) if axis.source == config => {
                 axis.planner.set_viewport_extent(viewport[1])?;
+                axis.content_width = width;
             }
             (VerticalAxis::Plain(physics), None) => {
                 physics.set_extents(content[1], viewport[1])?;
@@ -131,6 +144,7 @@ impl ScrollAxes {
             (_, Some(config)) => {
                 let position = self.y.physics().position();
                 let mut axis = create_virtual_axis(config, viewport[1], platform)?;
+                axis.content_width = width;
                 axis.planner.physics_mut().jump_to(position)?;
                 self.y = VerticalAxis::Virtual(Box::new(axis));
             }
@@ -173,6 +187,12 @@ impl ScrollAxes {
             *estimate = *estimate * (1.0 - VELOCITY_FILTER_NEW_SAMPLE)
                 + incoming * VELOCITY_FILTER_NEW_SAMPLE;
         }
+        // Feed the observed gesture speed to both axes so the virtualizer can
+        // preheat ahead of the motion even when no fling velocity is retained.
+        self.x.note_input_speed(self.estimated_velocity[0]);
+        self.y
+            .physics_mut()
+            .note_input_speed(self.estimated_velocity[1]);
         let x = self.x.drag_by(f64::from(delta_x))?;
         let y = self.y.physics_mut().drag_by(f64::from(delta_y))?;
         Ok(x.changed || y.changed)
@@ -263,6 +283,12 @@ impl ScrollAxes {
     }
 }
 
+impl VirtualPaintResolver for ScrollController {
+    fn placeholders(&self, node: NodeId) -> &[PlaceholderRect] {
+        Self::placeholders(self, node)
+    }
+}
+
 fn create_virtual_axis(
     source: VirtualListConfig,
     viewport: f64,
@@ -286,6 +312,8 @@ fn create_virtual_axis(
         source,
         materialized: BTreeSet::new(),
         planned_window: None,
+        placeholders: Vec::new(),
+        content_width: 0.0,
     })
 }
 
@@ -546,6 +574,14 @@ impl ScrollController {
         self.metrics
     }
 
+    /// Returns this frame's skeletons for a scroll node, empty when fully materialized.
+    pub(crate) fn placeholders(&self, node: NodeId) -> &[PlaceholderRect] {
+        match self.states.get(&node).map(|state| &state.y) {
+            Some(VerticalAxis::Virtual(axis)) => &axis.placeholders,
+            _ => &[],
+        }
+    }
+
     pub(crate) fn take_refills(&mut self) -> Vec<VirtualRefillRequest> {
         core::mem::take(&mut self.pending_refills)
     }
@@ -555,12 +591,38 @@ impl ScrollController {
             let VerticalAxis::Virtual(axis) = &mut state.y else {
                 continue;
             };
-            let frame = axis.planner.plan_frame()?;
-            let placeholders = u64::try_from(frame.placeholders).unwrap_or(u64::MAX);
-            let ranges = frame.refill.to_vec();
-            let window_start = u32::try_from(frame.preheat.start)
+            let (missing, visible, ranges, preheat) = {
+                let frame = axis.planner.plan_frame()?;
+                (
+                    frame.placeholders,
+                    frame.visible.clone(),
+                    frame.refill.to_vec(),
+                    frame.preheat.clone(),
+                )
+            };
+            let placeholders = u64::try_from(missing).unwrap_or(u64::MAX);
+            // Every visible item the Shell has not materialized becomes a
+            // skeleton. Without this the viewport simply renders nothing there,
+            // which is the blank canvas users see when a fast gesture outruns
+            // the refill round trip.
+            axis.placeholders.clear();
+            if missing > 0 {
+                let width = axis.content_width;
+                for index in visible {
+                    if axis.planner.is_available(index) {
+                        continue;
+                    }
+                    let top = axis.planner.heights().offset_of(index)?;
+                    let height = axis.planner.heights().height(index).unwrap_or(0.0);
+                    axis.placeholders.push(PlaceholderRect {
+                        rect: [0.0, checked_position(top)?, width, height],
+                        rgba: PLACEHOLDER_RGBA,
+                    });
+                }
+            }
+            let window_start = u32::try_from(preheat.start)
                 .map_err(|_| CoreError::InvalidScrollPosition(f64::MAX))?;
-            let window_end = u32::try_from(frame.preheat.end)
+            let window_end = u32::try_from(preheat.end)
                 .map_err(|_| CoreError::InvalidScrollPosition(f64::MAX))?;
             self.metrics.virtual_frames = self.metrics.virtual_frames.saturating_add(1);
             self.metrics.virtual_placeholders = self
