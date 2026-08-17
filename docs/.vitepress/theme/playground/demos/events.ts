@@ -54,16 +54,14 @@ function scene(context: DemoContext): DoperNode {
 /** Core BVH hit testing feeding DOM-aligned three-phase dispatch. */
 export const eventsDemo: Demo = {
   id: "events",
-  title: "命中测试与三阶段事件",
-  description:
-    "指针坐标进入 Core，由增量 BVH 做世界空间命中并构建 root→target 路径，" +
-    "再由 Shell 按 capture / target / bubble 三阶段派发。点击蓝色方块观察顺序。",
+  title: (messages) => messages.eventsTitle,
+  description: (messages) => messages.eventsDescription,
   render: scene,
   activate: (context) => {
     log.length = 0;
     const title = document.createElement("p");
     title.style.margin = "0";
-    title.textContent = "传播日志（新→旧）";
+    title.textContent = context.messages.propagationLog;
     output = document.createElement("pre");
     output.style.cssText =
       "margin:0;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:11px;line-height:1.6;color:#e6ebf2";

@@ -43,16 +43,14 @@ function scene(context: DemoContext): DoperNode {
 /** Core-owned virtual scrolling: the Shell never materializes a million rows. */
 export const scrollDemo: Demo = {
   id: "scroll",
-  title: "百万行原生虚拟滚动",
-  description:
-    "一百万行由 Core 拥有的虚拟列表。滚动稳态完全在 Core 内闭环、不回调 Shell，" +
-    "Shell 只按 Core 规划的预热窗口物化可见区间。用滚轮或拖拽试试，右侧是实时帧指标。",
+  title: (messages) => messages.scrollTitle,
+  description: (messages) => messages.scrollDescription,
   render: scene,
   activate: (context) => {
-    context.setMetric("列表项", ITEM_COUNT.toLocaleString());
+    context.setMetric(context.messages.listItems, ITEM_COUNT.toLocaleString());
     for (const row of [0, 500_000, 999_999]) {
       const button = document.createElement("button");
-      button.textContent = `跳到第 ${row.toLocaleString()} 行`;
+      button.textContent = context.messages.jumpToRow(row.toLocaleString());
       button.addEventListener("click", () => {
         programmaticOffset = row * ROW_HEIGHT;
         context.root.render(scene(context));

@@ -40,8 +40,8 @@ function scene(context: DemoContext) {
           singleLine = applyDelta(singleLine, transaction);
           singleRevision = transaction.revision;
           transactions += 1;
-          context.setMetric("编辑事务", String(transactions));
-          context.setMetric("Shell 值", singleLine.slice(0, 24));
+          context.setMetric(context.messages.editTransactions, String(transactions));
+          context.setMetric(context.messages.shellValue, singleLine.slice(0, 24));
         },
       }),
       createElement("container", { width: fieldWidth, height: 12 }),
@@ -55,7 +55,7 @@ function scene(context: DemoContext) {
           multiLine = applyDelta(multiLine, transaction);
           multiRevision = transaction.revision;
           transactions += 1;
-          context.setMetric("编辑事务", String(transactions));
+          context.setMetric(context.messages.editTransactions, String(transactions));
         },
       }),
       createElement("container", { width: fieldWidth, height: 12 }),
@@ -79,19 +79,17 @@ function scene(context: DemoContext) {
 /** Canvas-native editing: EditContext or the centralized textarea proxy. */
 export const editingDemo: Demo = {
   id: "editing",
-  title: "canvas 原生编辑与 IME",
-  description:
-    "业务不创建任何 HTML 输入控件。引擎在 canvas 上绑定 EditContext（不支持时降级到宿主统一托管的隐藏 textarea 代理），" +
-    "caret、选区、IME 候选窗定位、剪贴板与撤销重做都由 Core 负责。",
+  title: (messages) => messages.editingTitle,
+  description: (messages) => messages.editingDescription,
   render: scene,
   activate: (context) => {
     transactions = 0;
-    context.setMetric("编辑事务", "0");
-    const mode = "editContext" in context.canvas ? "EditContext" : "textarea 代理";
-    context.setMetric("输入桥", mode);
+    context.setMetric(context.messages.editTransactions, "0");
+    const mode = "editContext" in context.canvas ? "EditContext" : "textarea proxy";
+    context.setMetric(context.messages.inputBridge, mode);
     const note = document.createElement("p");
     note.style.margin = "0";
-    note.textContent = "先点一下输入框获取焦点，再输入或用输入法。";
+    note.textContent = context.messages.editingHint;
     context.controls.append(note);
   },
 };

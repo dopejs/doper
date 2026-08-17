@@ -37,17 +37,15 @@ function scene(context: DemoContext) {
 /** Semantic tree export mirrored into a DOM shadow tree for AT and E2E. */
 export const semanticsDemo: Demo = {
   id: "semantics",
-  title: "语义树与无障碍影子 DOM",
-  description:
-    "Core 导出角色/标签/值/世界边界/焦点标志，宿主把它增量镜像为 canvas 旁的透明 DOM 影子树。" +
-    "屏幕阅读器和 E2E 都能按 role/label 选中；聚焦影子元素会转发到引擎编辑会话。",
+  title: (messages) => messages.semanticsTitle,
+  description: (messages) => messages.semanticsDescription,
   render: scene,
   activate: (context) => {
     const list = document.createElement("pre");
     list.style.cssText =
       "margin:0;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:11px;line-height:1.6";
     const button = document.createElement("button");
-    button.textContent = "读取语义树 + 聚焦“收件人”";
+    button.textContent = context.messages.readSemantics;
     button.addEventListener("click", () => {
       const nodes = queryAllByRole(document.body, "textbox").map(
         (element) =>

@@ -6,4 +6,4 @@ sidebar: false
 aside: false
 ---
 
-<AppFrame src="./storybook/" />
+<AppFrame src="/storybook/" />

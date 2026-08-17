@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import { useData } from "vitepress";
 
 import type { Demo, DemoContext } from "./demo";
+import { playgroundMessages } from "./messages";
 
 type EngineModule = typeof import("@dopejs/doper");
 type HostedRoot = Awaited<ReturnType<EngineModule["createHostedCanvasRoot"]>>;
+
+const { lang } = useData();
+const messages = computed(() => playgroundMessages(lang.value));
 
 const host = ref<HTMLElement>();
 const controls = ref<HTMLElement>();
@@ -12,7 +17,7 @@ const catalog = shallowRef<readonly Demo[]>([]);
 const active = shallowRef<Demo>();
 const badges = ref<Array<[string, string]>>([]);
 const metrics = ref<Array<[string, string]>>([]);
-const status = ref("正在加载引擎核心（约 1MB WASM）…");
+const status = ref("");
 const failure = ref("");
 
 const root = shallowRef<HostedRoot>();
@@ -50,7 +55,7 @@ async function mount(demo: Demo): Promise<void> {
   const token = ++generation;
   active.value = demo;
   failure.value = "";
-  status.value = "正在加载引擎核心（约 1MB WASM）…";
+  status.value = messages.value.loading;
   metricRows.clear();
   publish();
   panel.replaceChildren();
@@ -79,13 +84,14 @@ async function mount(demo: Demo): Promise<void> {
       onFrame: (report) => {
         if (token !== generation) return;
         frames += 1;
-        metricRows.set("帧数", String(frames));
-        metricRows.set("命令数", String(report.commands));
-        metricRows.set("DisplayList", `${String(report.displayListBytes)} B`);
+        const text = messages.value;
+        metricRows.set(text.frames, String(frames));
+        metricRows.set(text.commands, String(report.commands));
+        metricRows.set(text.displayList, `${String(report.displayListBytes)} B`);
         if (report.core !== undefined) {
-          metricRows.set("Scene 节点", String(report.core.sceneNodes));
-          metricRows.set("布局访问", String(report.core.layoutVisitedNodes));
-          metricRows.set("脏绘制", String(report.core.dirtyPaintNodes));
+          metricRows.set(text.sceneNodes, String(report.core.sceneNodes));
+          metricRows.set(text.layoutVisited, String(report.core.layoutVisitedNodes));
+          metricRows.set(text.dirtyPaint, String(report.core.dirtyPaintNodes));
         }
         publish();
       },
@@ -105,6 +111,7 @@ async function mount(demo: Demo): Promise<void> {
       width,
       height,
       controls: panel,
+      messages: messages.value,
       setMetric: (label, value) => {
         if (token !== generation) return;
         metricRows.set(label, value);
@@ -149,6 +156,7 @@ function onHashChange(): void {
 
 onMounted(() => {
   window.addEventListener("hashchange", onHashChange);
+  status.value = messages.value.loading;
   void (async () => {
     try {
       // Loaded lazily so the static site build never evaluates browser-only
@@ -186,14 +194,14 @@ onBeforeUnmount(() => {
         :aria-current="demo.id === active?.id ? 'page' : undefined"
         @click="select(demo)"
       >
-        {{ demo.title }}
+        {{ demo.title(messages) }}
       </button>
     </nav>
 
     <header class="pg__header">
       <div>
-        <h2>{{ active?.title ?? "Playground" }}</h2>
-        <p>{{ active?.description ?? "百万行滚动、原生编辑、命中测试与降级链的可交互演示。" }}</p>
+        <h2>{{ active === undefined ? "Playground" : active.title(messages) }}</h2>
+        <p>{{ active === undefined ? "" : active.description(messages) }}</p>
       </div>
       <div class="pg__badges">
         <span v-for="[label, value] in badges" :key="label" class="pg__badge">
