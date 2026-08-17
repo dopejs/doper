@@ -18,3 +18,5 @@ apps/platform-probe/public/wasm/budget-manifest.json
 .vitest-attachments/
 **/__screenshots__/
 dist-pages/
+docs/.vitepress/dist/
+docs/.vitepress/cache/

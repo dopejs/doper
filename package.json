@@ -43,6 +43,8 @@
     "playground:build": "pnpm --filter @dopejs/playground exec vite build --mode pages",
     "storybook:dev": "pnpm --filter @dopejs/storybook dev",
     "storybook:build": "pnpm --filter @dopejs/storybook build",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
     "pages:build": "pnpm packages:build && node scripts/build-pages.mjs",
     "npm:release:verify": "node scripts/check-npm-release.mjs",
     "npm:release:publish": "pnpm npm:release:verify && pnpm -r publish --access public",
@@ -98,6 +100,7 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.67.0",
     "vite": "8.2.1",
+    "vitepress": "1.6.4",
     "vitest": "4.1.10"
   }
 }
