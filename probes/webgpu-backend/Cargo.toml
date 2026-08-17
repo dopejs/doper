@@ -1,0 +1,23 @@
+# Isolated prototype workspace: heavyweight GPU dependencies must not slow
+# the product gates. Built only by the M5 backend-differential script.
+[workspace]
+
+[package]
+name = "doper-gpu-probe"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+doper-abi = { path = "../../core/doper-abi" }
+doper-headless = { path = "../../core/doper-headless" }
+doper-paint = { path = "../../core/doper-paint" }
+doper-scene = { path = "../../core/doper-scene" }
+bytemuck = { version = "=1.25.2", features = ["derive"] }
+pollster = "=1.0.1"
+wgpu = "=30.0.0"
+
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
