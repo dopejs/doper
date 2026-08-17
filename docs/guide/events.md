@@ -50,4 +50,4 @@ passive 监听器不能调用 `preventDefault()`。这是必须显式处理的�
   批内滚动改变几何要到下一帧才影响命中——这保证了事件批的原子回滚语义与确定性回放。
 - 键盘输入走[编辑输入协议](/guide/editing)，不伪装成命中事件。
 
-在 [Playground 的事件演示](/playground/#/events)里可以看到实时的三阶段传播日志。
+在 [Playground 的事件演示](/playground#/events)里可以看到实时的三阶段传播日志。

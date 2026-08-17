@@ -99,7 +99,7 @@ UTF-16 offset ↔ Unicode scalar ↔ grapheme ↔ shaping cluster ↔ glyph / li
 
 密码文本不进入录制回放、日志、devtools 明文或无障碍值；密码目标也不写剪贴板。
 Core 侧只输出遮罩字形，明文根本不进入 DisplayList。这条有自动测试断言，
-[线上 Playground](/playground/#/editing) 里也可以自行检查 DOM。
+[线上 Playground](/playground#/editing) 里也可以自行检查 DOM。
 
 ## 已知边界
 

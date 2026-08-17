@@ -11,14 +11,14 @@ export default defineConfig({
   srcExclude: ["**/node_modules/**"],
   // The playground and Storybook are separate static apps copied in beside the
   // docs build, so they resolve at runtime but are not VitePress routes.
-  ignoreDeadLinks: [/^\/playground\//u, /^\/storybook\//u],
+  ignoreDeadLinks: [/^\/playground\/$/u, /^\/storybook\/$/u],
   head: [["meta", { name: "theme-color", content: "#5aa9ff" }]],
   themeConfig: {
     nav: [
       { text: "指南", link: "/guide/getting-started" },
       { text: "API", link: "/api/" },
-      { text: "Playground", link: "/playground/", target: "_self" },
-      { text: "Storybook", link: "/storybook/", target: "_self" },
+      { text: "Playground", link: "/playground" },
+      { text: "Storybook", link: "/storybook" },
       {
         text: "工程",
         items: [

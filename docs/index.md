@@ -11,7 +11,7 @@ hero:
       link: /guide/getting-started
     - theme: alt
       text: Playground
-      link: /playground/
+      link: /playground
     - theme: alt
       text: GitHub
       link: https://github.com/dopejs/doper

@@ -69,4 +69,4 @@ root.endScroll(handle); // 交给 Core 估算 fling 速度
 真机 P95/P99 与输入延迟属于平台资格采集，不作为工程出口条件——这条界线是刻意的，
 避免用无法复现的设备数据阻塞工程进度，也避免用工程数据冒充设备承诺。
 
-在 [Playground 的滚动演示](/playground/#/scroll)里可以看到实时帧指标。
+在 [Playground 的滚动演示](/playground#/scroll)里可以看到实时帧指标。

@@ -53,4 +53,4 @@ const root = await createHostedCanvasRoot(canvas, {
 **真实屏幕阅读器（VoiceOver、NVDA、TalkBack）的行为矩阵属于平台资格采集**，
 单独跟踪，不计入工程出口——这条界线避免用未验证的设备结论冒充支持承诺。
 
-在 [Playground 的语义演示](/playground/#/semantics)里可以直接读取当前语义树。
+在 [Playground 的语义演示](/playground#/semantics)里可以直接读取当前语义树。

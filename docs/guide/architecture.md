@@ -41,7 +41,7 @@ const root = await createHostedCanvasRoot(canvas, {
 console.log(root.mode); // "sab" | "post-message" | "main-thread"
 ```
 
-本站的 [Playground](/playground/) 就是活例子：GitHub Pages 无法下发 COOP/COEP 响应头，
+本站的 [Playground](/playground) 就是活例子：GitHub Pages 无法下发 COOP/COEP 响应头，
 所以线上运行在 postMessage 路径，页面顶部的 transport 标记会如实显示。
 
 ## 失效模型
