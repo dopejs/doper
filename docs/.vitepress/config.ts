@@ -9,9 +9,9 @@ export default defineConfig({
   cleanUrls: false,
   lastUpdated: true,
   srcExclude: ["**/node_modules/**"],
-  // The playground and Storybook are separate static apps copied in beside the
-  // docs build, so they resolve at runtime but are not VitePress routes.
-  ignoreDeadLinks: [/^\/playground\/$/u, /^\/storybook\/$/u],
+  // Storybook is a separate static build copied in beside the docs output, so
+  // it resolves at runtime but is not a VitePress route.
+  ignoreDeadLinks: [/^\/storybook\/$/u],
   head: [["meta", { name: "theme-color", content: "#5aa9ff" }]],
   themeConfig: {
     nav: [

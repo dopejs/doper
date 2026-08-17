@@ -40,8 +40,6 @@
     "m3:scroll:check:run": "pnpm m2:check && pnpm m3:perf && pnpm m3:diff",
     "migration:check": "node scripts/check-migration.mjs",
     "release:check": "node scripts/check-release-package.mjs",
-    "playground:dev": "pnpm --filter @dopejs/playground dev",
-    "playground:build": "pnpm --filter @dopejs/playground exec vite build --mode pages",
     "storybook:dev": "pnpm --filter @dopejs/storybook dev",
     "storybook:build": "pnpm --filter @dopejs/storybook build",
     "docs:dev": "vitepress dev docs",
@@ -78,7 +76,8 @@
     "coverage:ts:run": "pnpm packages:build && vitest run --coverage",
     "coverage:rust": "node scripts/run-with-rust-target-cleanup.mjs pnpm coverage:rust:run",
     "coverage:rust:run": "cargo llvm-cov --workspace --no-report && cargo llvm-cov report --summary-only --fail-under-lines 85 && cargo llvm-cov report --package doper-abi --summary-only --fail-under-lines 95 && cargo llvm-cov report --package doper-scene --summary-only --fail-under-lines 95 && cargo llvm-cov report --package doper-scroll --summary-only --fail-under-lines 95 && cargo llvm-cov report --package doper-text --summary-only --fail-under-lines 94",
-    "typecheck": "pnpm packages:build && pnpm -r typecheck",
+    "typecheck": "pnpm packages:build && pnpm -r typecheck && pnpm site:typecheck",
+    "site:typecheck": "vue-tsc --noEmit -p docs/.vitepress/tsconfig.json",
     "core:wasm": "node scripts/run-with-rust-target-cleanup.mjs pnpm core:wasm:run",
     "core:wasm:run": "node scripts/build-core-wasm.mjs",
     "core:wasm:check": "node scripts/check-core-wasm.mjs",
@@ -88,6 +87,7 @@
     "wasm:budget:run": "node scripts/measure-wasm-budget.mjs"
   },
   "devDependencies": {
+    "@dopejs/doper": "workspace:*",
     "@eslint/js": "10.0.1",
     "@vitest/browser-playwright": "4.1.10",
     "@vitest/coverage-v8": "4.1.10",
@@ -102,6 +102,8 @@
     "typescript-eslint": "8.67.0",
     "vite": "8.2.1",
     "vitepress": "1.6.4",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "vue": "3.5.41",
+    "vue-tsc": "3.3.10"
   }
 }

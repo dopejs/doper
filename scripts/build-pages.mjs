@@ -10,23 +10,17 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const output = path.join(repositoryRoot, "dist-pages");
 
 // GitHub Pages is static hosting and cannot send COOP/COEP headers, so the
-// deployed site runs the postMessage/main-thread fallback. Both apps report
-// which transport capability detection selected.
+// deployed site runs the postMessage/main-thread fallback. The playground and
+// the Storybook demos report which transport capability detection selected.
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 
-// The VitePress site is the root of the deployment; the playground and the
-// Storybook catalog are separate static apps copied in beside it.
+// The VitePress site is the root of the deployment and already contains the
+// playground page. Storybook keeps its own build and is copied in beside it.
 await run("pnpm", ["exec", "vitepress", "build", "docs"], { cwd: repositoryRoot });
-await run("pnpm", ["--filter", "@dopejs/playground", "exec", "vite", "build", "--mode", "pages"], {
-  cwd: repositoryRoot,
-});
 await run("pnpm", ["--filter", "@dopejs/storybook", "build"], { cwd: repositoryRoot });
 
 await cp(path.join(repositoryRoot, "docs/.vitepress/dist"), output, { recursive: true });
-await cp(path.join(repositoryRoot, "apps/playground/dist"), path.join(output, "playground"), {
-  recursive: true,
-});
 await cp(path.join(repositoryRoot, "apps/storybook/dist"), path.join(output, "storybook"), {
   recursive: true,
 });
