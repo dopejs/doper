@@ -798,6 +798,12 @@ mod tests {
                 node_id: 18,
                 item_index: 999_999,
             },
+            Mutation::ConfigureEditable {
+                node_id: 19,
+                revision: 0x0123_4567_89ab_cdef,
+                flags: 0b101,
+                max_graphemes: 1_000_000,
+            },
         ];
         let batch = MutationBatch {
             frame_seq: 21,
@@ -810,6 +816,61 @@ mod tests {
             MutationBatch::decode(&batch.encode().expect("encode")),
             Ok(batch)
         );
+    }
+
+    #[test]
+    fn rejects_overlapping_flag_masks_hostile_counts_and_truncations() {
+        let valid_masks = MutationBatch {
+            frame_seq: 1,
+            instructions: vec![MutationInstruction {
+                flags: 0,
+                mutation: Mutation::SetFlags {
+                    node_id: 1,
+                    set: 0b01,
+                    clear: 0b10,
+                },
+            }],
+        };
+        assert!(
+            valid_masks
+                .encode()
+                .expect("encode masks")
+                .len()
+                .is_multiple_of(4)
+        );
+        // Overlapping masks are rejected by both the encoder and the decoder.
+        let mut bytes = valid_masks.encode().expect("encode masks");
+        bytes[28..32].copy_from_slice(&0b11_u32.to_le_bytes());
+        assert!(MutationBatch::decode(&bytes).is_err());
+
+        let batch = MutationBatch {
+            frame_seq: 1,
+            instructions: vec![MutationInstruction {
+                flags: 0,
+                mutation: Mutation::ConfigureEditable {
+                    node_id: 19,
+                    revision: 7,
+                    flags: 1,
+                    max_graphemes: 10,
+                },
+            }],
+        };
+        bytes = batch.encode().expect("encode editable");
+        assert_eq!(MutationBatch::decode(&bytes), Ok(batch));
+        let mut wrong_count = bytes.clone();
+        wrong_count[12..16].copy_from_slice(&3_u32.to_le_bytes());
+        assert!(MutationBatch::decode(&wrong_count).is_err());
+        let mut huge_count = bytes.clone();
+        huge_count[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(MutationBatch::decode(&huge_count).is_err());
+        for cut in 0..bytes.len() {
+            let _ = MutationBatch::decode(&bytes[..cut]);
+        }
+        for index in 0..bytes.len() {
+            let mut hostile = bytes.clone();
+            hostile[index] ^= 0xff;
+            let _ = MutationBatch::decode(&hostile);
+        }
     }
 
     #[test]

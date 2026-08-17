@@ -361,17 +361,16 @@ bidi、复杂脚本及完整 CJK 避头尾只有在核心指标稳定且通过�
 
 ### M4：编辑、事件、命中与无障碍
 
-> 当前状态：**进行中（2026-08-16）**。M4-A 已完成并收口：`dc860ef` 交付原生
-> 编辑管线主体（`ConfigureEditable`、有界版本化 Edit Transaction Stream、
-> EditContext/textarea 代理双路径、composition/clipboard/undo-redo/submit、
-> Worker 重启恢复），后续切片交付 `doper-hit` BVH 命中、Core→Host Event
-> Transaction 流、Reconciler 三阶段派发与 non-passive 区域协议，命中语义边界
-> 与帧快照命中契约已记录进 design.md §12。`lint`/`typecheck`/
-> `contracts:check`/`rust:check`（fmt+clippy -D warnings+166 项测试）/TS 208
-> 项/浏览器 15 项全部通过。editing geometry 回路的协议位已就绪但未闭合
-> （`RequestCharacterBounds` 编码、`WasmCore::editing_geometry`、
-> `requestCharacterBounds` option、`updateEditingGeometry`），在 M4-B 首项
-> 闭合。M4-B/C/D 未开始。
+> 当前状态：**M4 已完成（2026-08-17）**。M4-A/B/C/D 全部交付（见各子阶段），
+> 组合出口命令 `pnpm m4:check`（= `m3:check` + `m4:perf`，链式覆盖
+> M0→M4 全部自动门禁）全绿：TS 222 项单测、真实 Chromium 18 项、Rust
+> workspace 全套；行覆盖率 TS 81.88%、Rust workspace/ABI/Scene/Scroll/Text
+> 为 92.14%/95.62%/96.11%/99.39%/95.54%。性能门禁：M1 快集 P95/P99
+> 1.667/1.836ms，M3 百万行 20,000 帧 P95/P99 0.542/0.666µs（保留堆
+> 12,250,008 bytes），M4 编辑键击 P95/P99 0.056/0.058ms、零掉帧；产品 Core
+> WASM gzip 332,057 bytes（< 400KB 预算）。真机、真实 IME 与屏幕阅读器矩阵
+> 仍属平台资格采集，不影响工程完成；bidi 视觉导航与 widgets placeholder 为
+> 显式延后项（见子阶段与范围澄清）。
 
 目标：使 doper 达到可用于真实输入和交互页面的完整性，业务不再依赖
 EmbedDOM 呼起 HTML 输入控件。

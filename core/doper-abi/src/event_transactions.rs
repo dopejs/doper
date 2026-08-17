@@ -256,4 +256,57 @@ mod tests {
         };
         assert!(cyclic.encode().is_err());
     }
+
+    #[test]
+    fn hostile_event_records_fail_closed_on_every_validated_field() {
+        let valid = EventTransactionRecord {
+            event_id: 9,
+            kind: InputEventKind::PointerMove,
+            target: 3,
+            position: [12.0, 20.0],
+            delta: [0.0, 0.0],
+            buttons: 1,
+            modifiers: 4,
+            pointer_id: 1,
+            elapsed_micros: 16_667,
+            path: vec![1, 2, 3],
+        };
+        let reject = |mutate: fn(&mut EventTransactionRecord)| {
+            let mut record = valid.clone();
+            mutate(&mut record);
+            assert!(
+                EventTransactionBatch {
+                    records: vec![record],
+                }
+                .encode()
+                .is_err()
+            );
+        };
+        reject(|record| record.path.clear());
+        reject(|record| record.target = crate::NULL_NODE_ID);
+        reject(|record| record.path = vec![1, 2]);
+        reject(|record| record.path = vec![crate::NULL_NODE_ID, 3]);
+        reject(|record| record.buttons = 0x1_0000);
+        reject(|record| record.modifiers = 0x10);
+        reject(|record| record.elapsed_micros = 0);
+        reject(|record| record.elapsed_micros = 2_000_000);
+
+        let bytes = EventTransactionBatch {
+            records: vec![valid],
+        }
+        .encode()
+        .expect("encode");
+        // Truncations and every byte-flip either decode or fail without panic.
+        for cut in 0..bytes.len() {
+            let _ = EventTransactionBatch::decode(&bytes[..cut]);
+        }
+        for index in 0..bytes.len() {
+            let mut hostile = bytes.clone();
+            hostile[index] ^= 0xff;
+            let _ = EventTransactionBatch::decode(&hostile);
+        }
+        let mut wrong_count = bytes.clone();
+        wrong_count[12..16].copy_from_slice(&999_u32.to_le_bytes());
+        assert!(EventTransactionBatch::decode(&wrong_count).is_err());
+    }
 }

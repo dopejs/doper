@@ -332,6 +332,74 @@ mod tests {
     }
 
     #[test]
+    fn every_kind_round_trips_and_invalid_records_fail_closed() {
+        let base = EditTransactionRecord {
+            node_id: 7,
+            base_revision: 9,
+            revision: 10,
+            delta: None,
+            selection: [4, 4],
+            affinities: [WireAffinity::Downstream, WireAffinity::Downstream],
+            composition: None,
+            kind: EditTransactionKind::Edit,
+        };
+        for kind in [
+            EditTransactionKind::Edit,
+            EditTransactionKind::Composition,
+            EditTransactionKind::Undo,
+            EditTransactionKind::Redo,
+            EditTransactionKind::External,
+        ] {
+            let batch = EditTransactionBatch {
+                records: vec![EditTransactionRecord {
+                    kind,
+                    ..base.clone()
+                }],
+            };
+            let bytes = batch.encode().expect("encode kind");
+            assert_eq!(EditTransactionBatch::decode(&bytes), Ok(batch));
+        }
+
+        let reject = |mutate: fn(&mut EditTransactionRecord)| {
+            let mut record = base.clone();
+            mutate(&mut record);
+            assert!(
+                EditTransactionBatch {
+                    records: vec![record],
+                }
+                .encode()
+                .is_err()
+            );
+        };
+        reject(|record| record.revision = record.base_revision);
+        reject(|record| record.delta = Some((WireRange { start: 4, end: 2 }, String::new())));
+        reject(|record| record.composition = Some(WireRange { start: 9, end: 3 }));
+
+        let bytes = EditTransactionBatch {
+            records: vec![base],
+        }
+        .encode()
+        .expect("encode");
+        // Unknown kind, reserved flags, and unknown affinities fail closed.
+        for (offset, value) in [(64_usize, 9_u8), (65, 0xff), (66, 7), (67, 7)] {
+            let mut hostile = bytes.clone();
+            hostile[offset] = value;
+            assert!(
+                EditTransactionBatch::decode(&hostile).is_err(),
+                "byte {offset} value {value} must fail closed"
+            );
+        }
+        for cut in 0..bytes.len() {
+            let _ = EditTransactionBatch::decode(&bytes[..cut]);
+        }
+        for index in 0..bytes.len() {
+            let mut hostile = bytes.clone();
+            hostile[index] ^= 0xff;
+            let _ = EditTransactionBatch::decode(&hostile);
+        }
+    }
+
+    #[test]
     fn malformed_utf8_and_presence_bits_fail_closed() {
         let batch = EditTransactionBatch {
             records: vec![EditTransactionRecord {

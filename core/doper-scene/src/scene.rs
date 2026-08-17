@@ -2708,6 +2708,208 @@ mod tests {
                 actual: ResourceKind::Utf8String,
             })
         );
+        assert_eq!(
+            scene.commit(batch(
+                16,
+                vec![Mutation::ConfigureVirtualList {
+                    node_id: text.raw(),
+                    item_count: 1,
+                    estimated_item_height: 10.0,
+                    base_overscan_viewports: 1.0,
+                    velocity_horizon_seconds: 0.1,
+                    maximum_ahead_viewports: 2.0,
+                }],
+            )),
+            Err(SceneError::UnsupportedNodeOperation {
+                node: text,
+                kind: NodeKind::Text,
+                operation: "ConfigureVirtualList",
+            })
+        );
+        assert_eq!(
+            scene.commit(batch(
+                17,
+                vec![Mutation::SetVirtualItem {
+                    node_id: text.raw(),
+                    item_index: 0,
+                }],
+            )),
+            Err(SceneError::UnsupportedNodeOperation {
+                node: text,
+                kind: NodeKind::Text,
+                operation: "SetVirtualItem",
+            })
+        );
+        assert_eq!(
+            scene.commit(batch(
+                18,
+                vec![Mutation::ConfigureEditable {
+                    node_id: text.raw(),
+                    revision: 1,
+                    flags: 0,
+                    max_graphemes: 10,
+                }],
+            )),
+            Err(SceneError::UnsupportedNodeOperation {
+                node: text,
+                kind: NodeKind::Text,
+                operation: "ConfigureEditable",
+            })
+        );
+    }
+
+    #[test]
+    fn updating_existing_nodes_reuses_lanes_and_marks_only_changed_values() {
+        let root = id(0, 1);
+        let scroll = id(1, 1);
+        let text = id(2, 1);
+        let mut scene = Scene::new();
+        scene
+            .commit(batch(
+                1,
+                vec![
+                    create(root, NodeKind::Root, None),
+                    create(scroll, NodeKind::Scroll, Some(root)),
+                    create(text, NodeKind::Text, Some(scroll)),
+                    define(1, ResourceKind::Paint, paint(1, 2, 3, 255)),
+                    define(2, ResourceKind::Paint, paint(9, 9, 9, 255)),
+                    define(3, ResourceKind::Utf8String, b"hello".to_vec()),
+                    define(4, ResourceKind::TextStyle, text_style(1, b"sans")),
+                    Mutation::SetTextRun {
+                        node_id: text.raw(),
+                        string_id: 3,
+                        style_id: 4,
+                    },
+                ],
+            ))
+            .expect("initial tree");
+        scene
+            .commit(batch(
+                2,
+                vec![
+                    Mutation::SetF32 {
+                        node_id: scroll.raw(),
+                        prop: Prop::Width,
+                        value: 100.0,
+                    },
+                    Mutation::SetVec4 {
+                        node_id: scroll.raw(),
+                        prop: Prop::Padding,
+                        value: [1.0, 1.0, 1.0, 1.0],
+                    },
+                    Mutation::SetRef {
+                        node_id: scroll.raw(),
+                        prop: Prop::BackgroundColor,
+                        resource_id: 2,
+                    },
+                    Mutation::SetFlags {
+                        node_id: scroll.raw(),
+                        set: 0b1,
+                        clear: 0,
+                    },
+                    Mutation::SetTextRun {
+                        node_id: text.raw(),
+                        string_id: 3,
+                        style_id: 4,
+                    },
+                    Mutation::ScrollTo {
+                        node_id: scroll.raw(),
+                        x: 0.0,
+                        y: 25.0,
+                        behavior: 0,
+                    },
+                ],
+            ))
+            .expect("non-structural update");
+        assert_eq!(scene.f32_prop(scroll, Prop::Width), Some(100.0));
+        assert_eq!(
+            scene.vec4_prop(scroll, Prop::Padding),
+            Some([1.0, 1.0, 1.0, 1.0])
+        );
+        assert_eq!(scene.ref_prop(scroll, Prop::BackgroundColor), Some(2));
+        assert_eq!(scene.scroll_position(scroll), Some([0.0, 25.0]));
+        // Identical writes are change-detected and leave the Scene clean.
+        scene
+            .commit(batch(
+                3,
+                vec![
+                    Mutation::SetF32 {
+                        node_id: scroll.raw(),
+                        prop: Prop::Width,
+                        value: 100.0,
+                    },
+                    Mutation::SetRef {
+                        node_id: scroll.raw(),
+                        prop: Prop::BackgroundColor,
+                        resource_id: 2,
+                    },
+                    Mutation::SetFlags {
+                        node_id: scroll.raw(),
+                        set: 0b1,
+                        clear: 0,
+                    },
+                    Mutation::ScrollTo {
+                        node_id: scroll.raw(),
+                        x: 0.0,
+                        y: 25.0,
+                        behavior: 0,
+                    },
+                ],
+            ))
+            .expect("idempotent update");
+        assert_eq!(scene.f32_prop(scroll, Prop::Width), Some(100.0));
+    }
+
+    #[test]
+    fn clear_prop_resets_every_value_lane_and_marks_dirty() {
+        let root = id(0, 1);
+        let mut scene = Scene::new();
+        scene
+            .commit(batch(
+                1,
+                vec![
+                    create(root, NodeKind::Root, None),
+                    define(1, ResourceKind::Paint, paint(12, 34, 56, 255)),
+                    Mutation::SetF32 {
+                        node_id: root.raw(),
+                        prop: Prop::Width,
+                        value: 120.0,
+                    },
+                    Mutation::SetVec4 {
+                        node_id: root.raw(),
+                        prop: Prop::Padding,
+                        value: [1.0, 2.0, 3.0, 4.0],
+                    },
+                    Mutation::SetRef {
+                        node_id: root.raw(),
+                        prop: Prop::BackgroundColor,
+                        resource_id: 1,
+                    },
+                ],
+            ))
+            .expect("initial props");
+        scene
+            .commit(batch(
+                2,
+                vec![
+                    Mutation::ClearProp {
+                        node_id: root.raw(),
+                        prop: Prop::Width,
+                    },
+                    Mutation::ClearProp {
+                        node_id: root.raw(),
+                        prop: Prop::Padding,
+                    },
+                    Mutation::ClearProp {
+                        node_id: root.raw(),
+                        prop: Prop::BackgroundColor,
+                    },
+                ],
+            ))
+            .expect("clear props");
+        assert_eq!(scene.f32_prop(root, Prop::Width), None);
+        assert_eq!(scene.vec4_prop(root, Prop::Padding), None);
+        assert_eq!(scene.ref_prop(root, Prop::BackgroundColor), None);
     }
 
     #[test]

@@ -1046,6 +1046,48 @@ mod tests {
                 }),
                 instruction(InputCommand::ScrollEnd { node_id: 2 }),
                 instruction(InputCommand::ScrollCancel { node_id: 2 }),
+                instruction(InputCommand::RequestCharacterBounds {
+                    node_id: 1,
+                    start: 0,
+                    end: 4,
+                }),
+                instruction(InputCommand::PlaceCaret {
+                    node_id: 1,
+                    position: [42.5, -3.25],
+                    flags: 0b11,
+                }),
+                instruction(InputCommand::MoveCaret {
+                    node_id: 1,
+                    direction: CaretDirection::Down,
+                    granularity: CaretGranularity::Word,
+                    extend: true,
+                }),
+                instruction(InputCommand::MoveCaret {
+                    node_id: 1,
+                    direction: CaretDirection::LineEnd,
+                    granularity: CaretGranularity::Grapheme,
+                    extend: false,
+                }),
+                instruction(InputCommand::DispatchEvent {
+                    event_id: 19,
+                    kind: InputEventKind::Wheel,
+                    position: [12.5, 24.0],
+                    delta: [-3.0, 40.0],
+                    buttons: 1,
+                    modifiers: 9,
+                    pointer_id: 0,
+                    elapsed_micros: 16_667,
+                }),
+                instruction(InputCommand::DispatchEvent {
+                    event_id: 20,
+                    kind: InputEventKind::PointerDown,
+                    position: [1.0, 2.0],
+                    delta: [0.0, 0.0],
+                    buttons: 1,
+                    modifiers: 0,
+                    pointer_id: 7,
+                    elapsed_micros: 8_000,
+                }),
             ],
         }
     }
@@ -1151,6 +1193,118 @@ mod tests {
         assert_eq!(
             InputBatch::decode(&composition),
             Err(AbiError::InvalidValue("input text is not valid UTF-8"))
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_caret_event_and_bounds_fields_on_encode_and_decode() {
+        let encode_one = |command: InputCommand| {
+            InputBatch {
+                frame_seq: 1,
+                instructions: vec![instruction(command)],
+            }
+            .encode()
+        };
+        assert!(
+            encode_one(InputCommand::PlaceCaret {
+                node_id: 1,
+                position: [f32::NAN, 0.0],
+                flags: 0,
+            })
+            .is_err()
+        );
+        assert!(
+            encode_one(InputCommand::PlaceCaret {
+                node_id: 1,
+                position: [2_000_000_000.0, 0.0],
+                flags: 0,
+            })
+            .is_err()
+        );
+        assert!(
+            encode_one(InputCommand::PlaceCaret {
+                node_id: 1,
+                position: [0.0, 0.0],
+                flags: 0b100,
+            })
+            .is_err()
+        );
+        assert!(
+            encode_one(InputCommand::RequestCharacterBounds {
+                node_id: 1,
+                start: 4,
+                end: 2,
+            })
+            .is_err()
+        );
+        for (buttons, modifiers, elapsed, coordinate, delta) in [
+            (0x1_0000_u32, 0_u32, 1_u32, 0.0_f32, 0.0_f32),
+            (0, 0x10, 1, 0.0, 0.0),
+            (0, 0, 0, 0.0, 0.0),
+            (0, 0, 2_000_000, 0.0, 0.0),
+            (0, 0, 1, 2_000_000_000.0, 0.0),
+            (0, 0, 1, 0.0, 2_000_000.0),
+        ] {
+            assert!(
+                encode_one(InputCommand::DispatchEvent {
+                    event_id: 1,
+                    kind: InputEventKind::PointerMove,
+                    position: [coordinate, 0.0],
+                    delta: [delta, 0.0],
+                    buttons,
+                    modifiers,
+                    pointer_id: 1,
+                    elapsed_micros: elapsed,
+                })
+                .is_err()
+            );
+        }
+
+        // Decode-side rejections for hostile caret payload bytes.
+        let valid = encode_one(InputCommand::MoveCaret {
+            node_id: 1,
+            direction: CaretDirection::Backward,
+            granularity: CaretGranularity::Grapheme,
+            extend: false,
+        })
+        .expect("valid move caret");
+        for (offset, value) in [(24_usize, 9_u8), (25, 2), (26, 3), (27, 1)] {
+            let mut bytes = valid.clone();
+            bytes[offset] = value;
+            assert!(
+                InputBatch::decode(&bytes).is_err(),
+                "byte {offset} value {value} must fail closed"
+            );
+        }
+        for direction in [
+            CaretDirection::Backward,
+            CaretDirection::Forward,
+            CaretDirection::Up,
+            CaretDirection::Down,
+            CaretDirection::LineStart,
+            CaretDirection::LineEnd,
+        ] {
+            let bytes = encode_one(InputCommand::MoveCaret {
+                node_id: 1,
+                direction,
+                granularity: CaretGranularity::Grapheme,
+                extend: true,
+            })
+            .expect("directional move");
+            assert!(InputBatch::decode(&bytes).is_ok());
+        }
+        let place = encode_one(InputCommand::PlaceCaret {
+            node_id: 1,
+            position: [4.0, 8.0],
+            flags: 0,
+        })
+        .expect("valid place caret");
+        let mut hostile = place.clone();
+        hostile[32] = 0xff;
+        assert!(InputBatch::decode(&hostile).is_err());
+        assert_eq!(
+            AbiError::InvalidValue("caret placement flags are reserved").to_string(),
+            "invalid doper ABI stream: InvalidValue(\"caret placement flags are reserved\")"
         );
     }
 
