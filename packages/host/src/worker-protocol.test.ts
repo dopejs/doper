@@ -22,6 +22,7 @@ describe("render Worker protocol validation", () => {
         canvas: {},
         height: 100,
         inputRingBuffer: new SharedArrayBuffer(64),
+        devicePixelRatio: 2,
         kind: "doper:activate",
         mode: "sab",
         rasterCache: true,
@@ -34,6 +35,7 @@ describe("render Worker protocol validation", () => {
       isRenderWorkerInboundMessage({
         canvas: {},
         height: 100,
+        devicePixelRatio: 2,
         kind: "doper:activate",
         mode: "sab",
         rasterCache: true,

@@ -52,6 +52,7 @@ export interface RenderWorkerClientOptions {
 
 export interface RenderWorkerActivation {
   readonly canvas: OffscreenCanvas;
+  readonly devicePixelRatio: number;
   readonly height: number;
   readonly mode: Exclude<HostTransportMode, "main-thread">;
   readonly rasterCache: boolean;
@@ -161,6 +162,7 @@ export class RenderWorkerClient {
     this.#readyMode = undefined;
     const message: WorkerActivateMessage = {
       canvas: activation.canvas,
+      devicePixelRatio: positiveFinite(activation.devicePixelRatio, "Worker device pixel ratio"),
       height,
       kind: "doper:activate",
       mode: activation.mode,

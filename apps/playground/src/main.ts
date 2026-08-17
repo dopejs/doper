@@ -57,9 +57,11 @@ async function activate(demo: Demo): Promise<void> {
   const bounds = host.getBoundingClientRect();
   const width = Math.max(320, Math.floor(bounds.width));
   const height = Math.max(240, Math.floor(bounds.height));
-  const ratio = Math.min(2, window.devicePixelRatio || 1);
-  canvas.width = Math.floor(width * ratio);
-  canvas.height = Math.floor(height * ratio);
+  // Backing store in device pixels; the engine treats scene units as CSS
+  // pixels and applies the ratio when replaying, so no cap is needed.
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
   canvas.tabIndex = 0;
   const loading = document.createElement("p");
   loading.className = "loading";
@@ -81,8 +83,8 @@ async function activate(demo: Demo): Promise<void> {
     const context: DemoContext = {
       root: created,
       canvas,
-      width: canvas.width,
-      height: canvas.height,
+      width,
+      height,
       controls,
       setMetric: (label, value) => {
         metrics.set(label, value);

@@ -153,6 +153,32 @@ describe("CanvasFrameSink", () => {
     );
   });
 
+  it("scales replay by the device pixel ratio so logical units stay CSS pixels", () => {
+    const calls: unknown[][] = [];
+    const sink = new CanvasFrameSink(fakeContext(calls, []), {
+      commit: () => fillRectDisplayList(7),
+    });
+    sink.commit(
+      mutationFrame([
+        { type: "defineResource", resourceId: 7, kind: ResourceKind.Paint, bytes: solidPaint() },
+      ]),
+    );
+    // At ratio 1 the replay must not push a transform at all.
+    expect(calls.filter(([operation]) => operation === "scale")).toHaveLength(0);
+    expect(calls).toContainEqual(["fillRect", 1, 2, 30, 40, "#123456ff"]);
+
+    calls.length = 0;
+    sink.setDevicePixelRatio(2);
+    sink.commit(mutationFrame([]));
+    // The rect keeps its logical coordinates; the context carries the scale.
+    expect(calls).toContainEqual(["scale", 2, 2]);
+    expect(calls).toContainEqual(["fillRect", 1, 2, 30, 40, "#123456ff"]);
+    const scaleIndex = calls.findIndex(([operation]) => operation === "scale");
+    const restoreIndex = calls.findIndex(([operation]) => operation === "restore");
+    expect(scaleIndex).toBeGreaterThan(-1);
+    expect(restoreIndex).toBeGreaterThan(scaleIndex);
+  });
+
   it("reuses bounded raster tiles for an immutable picture and exposes metrics", () => {
     const targetCalls: unknown[][] = [];
     const onFrame = vi.fn();
@@ -714,6 +740,7 @@ function fakeContext(calls: unknown[][], events: string[]): Canvas2DContext {
       state.font = value;
     },
     measureText: (text: string) => ({ width: text.length * 10 }) as TextMetrics,
+    scale: (...values: number[]) => calls.push(["scale", ...values]),
     save: () => {
       events.push("canvas");
       calls.push(["save"]);

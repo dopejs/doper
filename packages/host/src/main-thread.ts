@@ -475,7 +475,7 @@ export class CanvasFrameSink implements MutationSink {
   } {
     const cache = this.#rasterCache;
     if (cache === undefined || pictureKey === undefined) {
-      return { value: this.#replayer.replay(this.#context, displayList, this.#resources) };
+      return { value: this.replayScaled(this.#context, displayList) };
     }
     const canvas = this.#context.canvas;
     const result = cache.render(
@@ -486,12 +486,32 @@ export class CanvasFrameSink implements MutationSink {
         pictureKey,
         width: canvas.width,
       },
-      (context) => this.#replayer.replay(context, displayList, this.#resources),
+      (context) => this.replayScaled(context, displayList),
     );
     return {
       rasterFrame: { bypassed: result.bypassed, hits: result.hits, misses: result.misses },
       value: result.value,
     };
+  }
+
+  /**
+   * Replays one DisplayList in logical pixels.
+   *
+   * DisplayList coordinates are logical (CSS) pixels and glyph masks are
+   * rasterized at the device pixel ratio, so the backing store scale belongs
+   * here: without it logical units land one-to-one on device pixels and the
+   * whole scene renders at 1/ratio of its intended size on HiDPI displays.
+   */
+  private replayScaled(context: Canvas2DContext, displayList: Uint8Array): ReplayStats {
+    const ratio = this.#devicePixelRatio;
+    if (ratio === 1) return this.#replayer.replay(context, displayList, this.#resources);
+    context.save();
+    context.scale(ratio, ratio);
+    try {
+      return this.#replayer.replay(context, displayList, this.#resources);
+    } finally {
+      context.restore();
+    }
   }
 
   private acceptDynamicFrame(

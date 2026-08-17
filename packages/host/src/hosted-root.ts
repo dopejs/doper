@@ -437,12 +437,13 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#transport = transport;
     await client.activate({
       canvas: offscreen,
-      height: positiveDimension(this.#canvas.height, "canvas height"),
+      devicePixelRatio: devicePixelRatioOf(this.#canvas),
+      height: positiveDimension(this.logicalHeight(), "canvas height"),
       mode: selectedMode,
       rasterCache: this.#options.rasterCache !== false,
       ...(inputRingBuffer === undefined ? {} : { inputRingBuffer }),
       ...(ringBuffer === undefined ? {} : { ringBuffer }),
-      width: positiveDimension(this.#canvas.width, "canvas width"),
+      width: positiveDimension(this.logicalWidth(), "canvas width"),
     });
     if (client.state !== "ready") throw new Error("render Worker failed during activation");
     this.#recoverableSink.install(
@@ -496,8 +497,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (this.#closing || this.#unmounted || this.#recovering) return;
     const rect = this.#canvas.getBoundingClientRect();
     if (!(rect.width > 0) || !(rect.height > 0)) return;
-    const x = ((event.clientX - rect.left) * this.#canvas.width) / rect.width;
-    const y = ((event.clientY - rect.top) * this.#canvas.height) / rect.height;
+    const x = ((event.clientX - rect.left) * this.logicalWidth()) / rect.width;
+    const y = ((event.clientY - rect.top) * this.logicalHeight()) / rect.height;
     const pointerId = kind.startsWith("pointer") ? (event as PointerEvent).pointerId >>> 0 : 0;
     const suppressionFlag =
       kind === "wheel" ? 1 : (event as PointerEvent).pointerType === "touch" ? 2 : 0;
@@ -625,8 +626,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     }
     const rect = this.#canvas.getBoundingClientRect();
     if (!(rect.width > 0) || !(rect.height > 0)) return;
-    const x = ((mouse.clientX - rect.left) * this.#canvas.width) / rect.width;
-    const y = ((mouse.clientY - rect.top) * this.#canvas.height) / rect.height;
+    const x = ((mouse.clientX - rect.left) * this.logicalWidth()) / rect.width;
+    const y = ((mouse.clientY - rect.top) * this.logicalHeight()) / rect.height;
     if (
       x < geometry.controlBounds.left ||
       x >= geometry.controlBounds.left + geometry.controlBounds.width ||
@@ -681,8 +682,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   }
 
   private async initializeMainThread(canvas: HTMLCanvasElement): Promise<void> {
-    const width = positiveDimension(canvas.width, "canvas width");
-    const height = positiveDimension(canvas.height, "canvas height");
+    const width = positiveDimension(this.logicalWidth(), "canvas width");
+    const height = positiveDimension(this.logicalHeight(), "canvas height");
     const context = canvas.getContext("2d", { alpha: true });
     if (context === null) throw new Error("Canvas2D context is unavailable");
     const core = await (this.#options.coreFactory ?? createWasmCore)(width, height);
@@ -933,6 +934,19 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     return this.#root;
   }
 
+  /**
+   * Scene coordinates are logical (CSS) pixels while the canvas backing store
+   * is sized in device pixels, so every viewport and pointer coordinate is
+   * converted here rather than at each call site.
+   */
+  private logicalWidth(): number {
+    return this.#canvas.width / devicePixelRatioOf(this.#canvas);
+  }
+
+  private logicalHeight(): number {
+    return this.#canvas.height / devicePixelRatioOf(this.#canvas);
+  }
+
   private createInputBridge(canvas: HTMLCanvasElement): NativeTextInputBridge {
     return new NativeTextInputBridge(canvas, {
       dispatch: (command) => this.sendInputCommands([command]),
@@ -1111,6 +1125,12 @@ function defaultClockAnchorDriver(): ClockAnchorDriver | null {
     request: (callback) => globalThis.requestAnimationFrame(callback),
     timeOrigin: performance.timeOrigin,
   };
+}
+
+/** Backing-store to CSS pixel ratio; the sink scales replay by the same value. */
+function devicePixelRatioOf(_canvas: HTMLCanvasElement): number {
+  const value = (globalThis as { readonly devicePixelRatio?: unknown }).devicePixelRatio;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
 }
 
 function toError(cause: unknown, message: string): Error {

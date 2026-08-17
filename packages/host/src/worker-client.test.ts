@@ -39,6 +39,7 @@ describe("RenderWorkerClient", () => {
     expect(client.state).toBe("prepared");
     await client.activate({
       canvas: {} as OffscreenCanvas,
+      devicePixelRatio: 1,
       height: 100,
       mode: "post-message",
       rasterCache: true,
@@ -124,6 +125,7 @@ describe("RenderWorkerClient", () => {
     await expect(
       client.activate({
         canvas: {} as OffscreenCanvas,
+        devicePixelRatio: 1,
         height: 1,
         mode: "sab",
         rasterCache: true,
@@ -148,6 +150,7 @@ describe("RenderWorkerClient", () => {
     await expect(
       client.activate({
         canvas: {} as OffscreenCanvas,
+        devicePixelRatio: 1,
         height: 1,
         mode: "sab",
         rasterCache: true,

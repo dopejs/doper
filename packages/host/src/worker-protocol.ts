@@ -11,7 +11,7 @@ import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
 import type { EditTransaction, EventTransaction } from "@dopejs/doper-editing";
 
-export const WORKER_PROTOCOL_VERSION = 6 as const;
+export const WORKER_PROTOCOL_VERSION = 7 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
@@ -22,6 +22,8 @@ export interface WorkerPrepareMessage {
 
 export interface WorkerActivateMessage {
   readonly canvas: OffscreenCanvas;
+  /** Main-thread device pixel ratio; a worker cannot observe it itself. */
+  readonly devicePixelRatio: number;
   readonly height: number;
   readonly kind: "doper:activate";
   readonly mode: Exclude<HostTransportMode, "main-thread">;
@@ -161,6 +163,7 @@ export function isRenderWorkerInboundMessage(value: unknown): value is RenderWor
     case "doper:activate":
       return (
         isWorkerMode(value.mode) &&
+        isPositiveFinite(value.devicePixelRatio) &&
         isPositiveFinite(value.width) &&
         isPositiveFinite(value.height) &&
         isRecord(value.canvas) &&

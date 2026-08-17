@@ -120,6 +120,9 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
     (frame) => post({ kind: "doper:editing-geometry", frame, sessionId }),
     (nodes) => post({ kind: "doper:semantics", nodes, sessionId }),
   );
+  // A worker cannot read devicePixelRatio, so the main thread supplies it;
+  // without this the replay scale and glyph raster stay at 1x on HiDPI.
+  sink.setDevicePixelRatio(message.devicePixelRatio);
   const consume = (frameSeq: number, bytes: Uint8Array): void => {
     const decoded = decodeMutationBatch(bytes);
     if (decoded.frameSeq !== frameSeq)
