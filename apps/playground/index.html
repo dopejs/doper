@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>doper playground</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <h1>doper<span>playground</span></h1>
+      <nav id="nav"></nav>
+      <footer>
+        <a href="https://github.com/dopejs/doper">GitHub</a>
+        <a href="https://www.npmjs.com/package/@dopejs/doper">npm</a>
+        <a href="../storybook/">Storybook</a>
+      </footer>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <h2 id="demo-title">…</h2>
+          <p id="demo-description"></p>
+        </div>
+        <div class="badges" id="badges"></div>
+      </header>
+      <section class="stage">
+        <div class="canvas-host" id="canvas-host"></div>
+        <aside class="hud">
+          <h3>Frame metrics</h3>
+          <dl id="hud"></dl>
+          <div id="demo-controls"></div>
+        </aside>
+      </section>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

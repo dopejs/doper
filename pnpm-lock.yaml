@@ -53,6 +53,12 @@ importers:
 
   apps/platform-probe: {}
 
+  apps/playground:
+    dependencies:
+      '@dopejs/doper':
+        specifier: workspace:*
+        version: link:../../packages/facade
+
   packages/a11y: {}
 
   packages/backend-canvas2d: {}

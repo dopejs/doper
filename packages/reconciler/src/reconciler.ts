@@ -226,6 +226,7 @@ const TEXT_KEYS = new Set([
 const EDITABLE_KEYS = new Set([
   ...TEXT_KEYS,
   "controller",
+  "inputMode",
   "maxGraphemes",
   "multiline",
   "onSubmit",

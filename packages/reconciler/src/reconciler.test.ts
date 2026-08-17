@@ -74,6 +74,31 @@ describe("reconciler", () => {
     );
   });
 
+  it("accepts every documented editable prop and still rejects unknown ones", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    // Every prop on EditableTextProps must survive the allowlist; a prop that
+    // reaches normalization but not the allowlist fails only at runtime.
+    expect(() =>
+      root.render(
+        createElement("editableText", {
+          value: "a",
+          revision: 1n,
+          multiline: true,
+          readOnly: false,
+          password: false,
+          maxGraphemes: 100,
+          inputMode: "email",
+          onTransaction: () => undefined,
+          onSubmit: () => undefined,
+        }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      root.render(createElement("editableText", { value: "a", revision: 1n, bogus: 1 })),
+    ).toThrow(/unknown editableText prop bogus/u);
+  });
+
   it("applies revisioned edit deltas to the Shell mirror without stale prop overwrite", () => {
     const sink = new RecordingSink();
     const onTransaction = vi.fn();

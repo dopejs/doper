@@ -1,0 +1,15 @@
+{
+  "name": "@dopejs/playground",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1 --port 5175",
+    "preview": "vite preview --host 127.0.0.1 --port 5175",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dopejs/doper": "workspace:*"
+  }
+}
