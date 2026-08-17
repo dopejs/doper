@@ -286,6 +286,14 @@ impl Virtualizer {
             -viewport * self.config.maximum_ahead_viewports,
             viewport * self.config.maximum_ahead_viewports,
         );
+        // Leading the gesture only helps while the viewport itself is covered.
+        // Materializing a window is a full rebuild of every item in it, so
+        // asking for a large lead while the visible range is still missing
+        // spends the Shell's budget off screen and leaves the user looking at
+        // skeletons. Collapse the lead until the viewport is served.
+        let starved = visible.clone().any(|index| !self.available[index]);
+        let travel = if starved { 0.0 } else { travel };
+        let base = if starved { base.min(viewport) } else { base };
         let (before, after) = if travel < 0.0 {
             (base + travel.abs(), base)
         } else {
@@ -415,6 +423,45 @@ mod tests {
     }
 
     #[test]
+    fn a_starved_viewport_stops_preheating_ahead_of_itself() {
+        // Regression: while the visible range was still missing, the window kept
+        // leading the gesture, so the Shell spent a full rebuild on off-screen
+        // items and the viewport stayed on skeletons.
+        let mut virtualizer = Virtualizer::new(
+            HeightIndex::with_uniform(10_000, 32.0).expect("heights"),
+            512.0,
+            ScrollPlatform::Ios,
+            VirtualizerConfig::default(),
+        )
+        .expect("virtualizer");
+        virtualizer
+            .physics_mut()
+            .wheel_notch_by(6_000.0)
+            .expect("notch");
+
+        // Nothing materialized yet: the window must not run ahead.
+        let starved = virtualizer.plan_frame().expect("frame");
+        let starved_span = starved.preheat.end - starved.preheat.start;
+        let visible_span = starved.visible.end - starved.visible.start;
+        assert!(
+            starved_span <= visible_span * 4,
+            "a starved window must stay near the viewport: {:?} vs {:?}",
+            starved.preheat,
+            starved.visible
+        );
+
+        // Once the viewport is served the lead comes back.
+        let visible = starved.visible.clone();
+        virtualizer.mark_available(visible).expect("available");
+        let served = virtualizer.plan_frame().expect("frame");
+        assert!(
+            served.preheat.end - served.preheat.start > starved_span,
+            "a served viewport must preheat ahead again: {:?}",
+            served.preheat
+        );
+    }
+
+    #[test]
     fn an_unanswered_request_is_retried_after_the_window_moves_away() {
         // Regression: `requested` was latched forever, so an item the Shell
         // never materialized could never be requested again and stayed blank.
@@ -501,6 +548,10 @@ mod tests {
             .physics_mut()
             .jump_to(1_000.0)
             .expect("position");
+        // The lead only applies once the viewport is served: a starved window
+        // stays near the visible range so the Shell is not asked to rebuild
+        // off-screen items while the user is looking at skeletons.
+        virtualizer.mark_available(0..1_000).expect("available");
         virtualizer.physics_mut().end_drag(2_000.0).expect("fling");
         let frame = virtualizer.plan_frame().expect("frame");
         assert!(frame.preheat.end - frame.visible.end > frame.visible.start - frame.preheat.start);
@@ -520,6 +571,10 @@ mod tests {
             .physics_mut()
             .jump_to(5_000.0)
             .expect("position");
+        // The lead only applies once the viewport is served: a starved window
+        // stays near the visible range so the Shell is not asked to rebuild
+        // off-screen items while the user is looking at skeletons.
+        virtualizer.mark_available(0..1_000).expect("available");
         virtualizer
             .physics_mut()
             .end_drag(-2_000.0)

@@ -3569,10 +3569,17 @@ mod tests {
         let first = engine.take_virtual_refills();
         assert_eq!(first.len(), 1, "the first frame asks for a window");
 
-        // Advance without materializing anything: the window does not move, but
-        // the demand is still outstanding.
-        engine.advance(1.0 / 60.0).expect("frame");
-        let repeated = engine.take_virtual_refills();
+        // Advance without materializing anything. The retry is deliberately not
+        // every frame -- that made the Shell thrash -- so drive enough frames to
+        // cross the bounded retry interval.
+        let mut repeated = Vec::new();
+        for _ in 0..60 {
+            engine.advance(1.0 / 60.0).expect("frame");
+            repeated = engine.take_virtual_refills();
+            if !repeated.is_empty() {
+                break;
+            }
+        }
         assert_eq!(
             repeated, first,
             "an unanswered window must be requested again"

@@ -14,6 +14,7 @@ export interface PlaygroundMessages {
   readonly sceneNodes: string;
   readonly layoutVisited: string;
   readonly dirtyPaint: string;
+  readonly placeholders: string;
   readonly scrollTitle: string;
   readonly scrollDescription: string;
   readonly listItems: string;
@@ -48,6 +49,7 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     sceneNodes: "Scene 节点",
     layoutVisited: "布局访问",
     dirtyPaint: "脏绘制",
+    placeholders: "占位",
     scrollTitle: "百万行原生虚拟滚动",
     scrollDescription:
       "一百万行由 Core 拥有的虚拟列表。滚动稳态完全在 Core 内闭环、不回调 Shell，Shell 只按 Core 规划的预热窗口物化可见区间。用滚轮或拖拽试试，右侧是实时帧指标。",
@@ -85,6 +87,7 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     sceneNodes: "Scene 節點",
     layoutVisited: "版面訪問",
     dirtyPaint: "髒繪製",
+    placeholders: "佔位",
     scrollTitle: "百萬列原生虛擬捲動",
     scrollDescription:
       "一百萬列由 Core 擁有的虛擬列表。捲動穩態完全在 Core 內閉環、不回呼 Shell，Shell 只按 Core 規劃的預熱視窗具現化可見區間。用滾輪或拖曳試試，右側是即時幀指標。",
@@ -122,6 +125,7 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     sceneNodes: "Scene ノード",
     layoutVisited: "レイアウト走査",
     dirtyPaint: "ダーティ描画",
+    placeholders: "プレースホルダー",
     scrollTitle: "100 万行のネイティブ仮想スクロール",
     scrollDescription:
       "100 万行の仮想リストを Core が所有します。スクロール中は Core 内で完結し Shell を呼び出しません。Shell は Core が計画したプリフェッチウィンドウの可視区間だけを実体化します。ホイールやドラッグで試してください。右側がリアルタイムのフレーム指標です。",
@@ -161,6 +165,7 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     sceneNodes: "Scene 노드",
     layoutVisited: "레이아웃 방문",
     dirtyPaint: "더티 그리기",
+    placeholders: "자리표시자",
     scrollTitle: "100만 행 네이티브 가상 스크롤",
     scrollDescription:
       "100만 행 가상 리스트를 Core가 소유합니다. 스크롤 중에는 Core 안에서 완결되어 Shell을 호출하지 않고, Shell은 Core가 계획한 프리페치 윈도의 보이는 구간만 실체화합니다. 휠이나 드래그로 시험해 보세요. 오른쪽이 실시간 프레임 지표입니다.",
@@ -200,6 +205,7 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     sceneNodes: "Nodos del Scene",
     layoutVisited: "Nodos de layout",
     dirtyPaint: "Nodos a repintar",
+    placeholders: "Placeholders",
     scrollTitle: "Scroll virtual nativo de un millón de filas",
     scrollDescription:
       "Una lista virtual de un millón de filas que pertenece al Core. Mientras se desplaza, todo ocurre dentro del Core y no se llama a la capa TypeScript, que sólo materializa el rango visible de la ventana de precarga que el Core planifica. Pruébalo con la rueda o arrastrando; a la derecha están las métricas de fotograma en vivo.",
@@ -239,6 +245,7 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     sceneNodes: "Nœuds du Scene",
     layoutVisited: "Nœuds de mise en page",
     dirtyPaint: "Nœuds à repeindre",
+    placeholders: "Placeholders",
     scrollTitle: "Défilement virtuel natif d'un million de lignes",
     scrollDescription:
       "Une liste virtuelle d'un million de lignes possédée par le Core. Pendant le défilement tout se passe dans le Core, sans appel à la couche TypeScript, qui ne matérialise que la plage visible de la fenêtre de préchauffe planifiée par le Core. Essayez à la molette ou en glissant ; les métriques d'image en direct sont à droite.",
@@ -279,6 +286,7 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     sceneNodes: "Scene-Knoten",
     layoutVisited: "Layout-Knoten",
     dirtyPaint: "Neu zu zeichnen",
+    placeholders: "Platzhalter",
     scrollTitle: "Natives virtuelles Scrollen über eine Million Zeilen",
     scrollDescription:
       "Eine virtuelle Liste mit einer Million Zeilen, die dem Core gehört. Während des Scrollens läuft alles im Core und die TypeScript-Schale wird nicht aufgerufen; sie materialisiert nur den sichtbaren Bereich des vom Core geplanten Vorwärmfensters. Probieren Sie es mit dem Mausrad oder durch Ziehen; rechts stehen die Frame-Metriken in Echtzeit.",
@@ -319,6 +327,7 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     sceneNodes: "Узлы Scene",
     layoutVisited: "Узлы раскладки",
     dirtyPaint: "Узлы к перерисовке",
+    placeholders: "Заглушки",
     scrollTitle: "Нативная виртуальная прокрутка миллиона строк",
     scrollDescription:
       "Виртуальный список на миллион строк принадлежит ядру. Во время прокрутки всё происходит внутри ядра и оболочка не вызывается: она лишь материализует видимый диапазон окна прогрева, которое спланировало ядро. Попробуйте колесом или перетаскиванием; справа — покадровые метрики в реальном времени.",
@@ -359,6 +368,7 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     sceneNodes: "عقد Scene",
     layoutVisited: "عقد التخطيط",
     dirtyPaint: "عقد إعادة الرسم",
+    placeholders: "عناصر نائبة",
     scrollTitle: "تمرير افتراضي أصلي لمليون صفّ",
     scrollDescription:
       "قائمة افتراضية بمليون صفّ تملكها النواة. أثناء التمرير يجري كلّ شيء داخل النواة دون استدعاء الغلاف، ولا يجسّد الغلاف سوى المجال المرئي من نافذة التسخين التي خطّطت لها النواة. جرّب بالعجلة أو بالسحب؛ وعلى اليسار مؤشّرات الإطارات لحظيًا.",
@@ -397,6 +407,7 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     sceneNodes: "צמתי Scene",
     layoutVisited: "צמתי פריסה",
     dirtyPaint: "צמתים לציור מחדש",
+    placeholders: "מצייני מקום",
     scrollTitle: "גלילה וירטואלית נייטיב של מיליון שורות",
     scrollDescription:
       "רשימה וירטואלית של מיליון שורות שבבעלות הליבה. בזמן הגלילה הכול קורה בתוך הליבה ואין קריאה למעטפת; היא רק מממשת את הטווח הנראה מתוך חלון החימום שהליבה תכננה. נסה בגלגלת או בגרירה; משמאל מדדי הפריים בזמן אמת.",

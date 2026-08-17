@@ -92,6 +92,9 @@ async function mount(demo: Demo): Promise<void> {
           metricRows.set(text.sceneNodes, String(report.core.sceneNodes));
           metricRows.set(text.layoutVisited, String(report.core.layoutVisitedNodes));
           metricRows.set(text.dirtyPaint, String(report.core.dirtyPaintNodes));
+          // Visible items still drawn as skeletons. Anything other than a brief
+          // blip here means the viewport is showing placeholders, not content.
+          metricRows.set(text.placeholders, String(report.core.visiblePlaceholders));
         }
         publish();
       },

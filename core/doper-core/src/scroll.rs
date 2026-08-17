@@ -16,6 +16,13 @@ use crate::CoreError;
 /// with real rows, and it must never be mistaken for content.
 const PLACEHOLDER_RGBA: u32 = 0xeef1_f5ff;
 
+/// Frames a starved viewport waits before asking for its window again.
+///
+/// Long enough that an in-flight answer can land first -- materializing a
+/// preheat window rebuilds a few hundred nodes -- and short enough that a lost
+/// request is recovered well inside a second.
+const REFILL_RETRY_FRAMES: u32 = 12;
+
 const MAXIMUM_CATCH_UP_SECONDS: f64 = 0.25;
 const PHYSICS_STEP_SECONDS: f64 = 1.0 / 120.0;
 const VELOCITY_FILTER_NEW_SAMPLE: f64 = 0.8;
@@ -64,6 +71,8 @@ struct VirtualAxis {
     source: VirtualListConfig,
     materialized: BTreeSet<u32>,
     planned_window: Option<(u32, u32)>,
+    /// Frames the current window has gone unanswered, for bounded retries.
+    unanswered_frames: u32,
     /// Skeletons for this frame, reused across frames without reallocating.
     placeholders: Vec<PlaceholderRect>,
     /// Width used for skeleton rectangles, tracked from the scroll viewport.
@@ -312,6 +321,7 @@ fn create_virtual_axis(
         source,
         materialized: BTreeSet::new(),
         planned_window: None,
+        unanswered_frames: 0,
         placeholders: Vec::new(),
         content_width: 0.0,
     })
@@ -616,6 +626,7 @@ impl ScrollController {
             // skeleton. Without this the viewport simply renders nothing there,
             // which is the blank canvas users see when a fast gesture outruns
             // the refill round trip.
+            let visible_range = visible.clone();
             axis.placeholders.clear();
             if missing > 0 {
                 let width = axis.content_width;
@@ -631,6 +642,8 @@ impl ScrollController {
                     });
                 }
             }
+            let visible_start = u32::try_from(visible_range.start).unwrap_or(u32::MAX);
+            let visible_end = u32::try_from(visible_range.end).unwrap_or(u32::MAX);
             let window_start = u32::try_from(preheat.start)
                 .map_err(|_| CoreError::InvalidScrollPosition(f64::MAX))?;
             let window_end = u32::try_from(preheat.end)
@@ -655,14 +668,37 @@ impl ScrollController {
                     .saturating_add(u64::from(end - start));
             }
             let planned = (window_start, window_end);
-            // Re-ask while visible items are still missing, even when the window
-            // value has not moved. Deduplicating purely on the window meant a
-            // request the Shell never answered was never repeated, so a settled
-            // viewport could sit on skeletons forever. `pending_refills` keeps
-            // one entry per node, so repeating is bounded, and it stops on its
-            // own as soon as the items materialize.
-            let outstanding = missing > 0;
-            if window_start < window_end && (axis.planned_window != Some(planned) || outstanding) {
+            // Deduplicating purely on the window value meant a request the Shell
+            // never answered was never repeated, and the viewport could sit on
+            // skeletons forever. Repeating it every frame is the opposite
+            // failure: materializing a preheat window is a full rebuild of a few
+            // hundred nodes, so asking again before the previous answer lands
+            // makes the Shell thrash and never catch up. Retry on a bounded
+            // interval instead, and only while the viewport is actually starved.
+            if missing > 0 {
+                axis.unanswered_frames = axis.unanswered_frames.saturating_add(1);
+            } else {
+                axis.unanswered_frames = 0;
+            }
+            let retry = axis.unanswered_frames >= REFILL_RETRY_FRAMES;
+            // The projected lead decays smoothly for about a second after a
+            // gesture, so the window shrinks by a few items every frame. Asking
+            // again for each of those meant the Shell rebuilt the window on
+            // every frame of the decay and never converged. Only a materially
+            // different window is worth a rebuild -- but a window that no longer
+            // covers what the user can see always is.
+            let covers_visible = axis
+                .planned_window
+                .is_some_and(|(start, end)| start <= visible_start && visible_end <= end);
+            let moved_materially = axis.planned_window.is_none_or(|(start, end)| {
+                let span = end.saturating_sub(start).max(1);
+                let drift = start.abs_diff(window_start) + end.abs_diff(window_end);
+                drift.saturating_mul(4) >= span
+            });
+            if window_start < window_end && (!covers_visible || moved_materially || retry) {
+                if retry {
+                    axis.unanswered_frames = 0;
+                }
                 axis.planned_window = Some(planned);
                 let request = VirtualRefillRequest {
                     node_id: node.raw(),
