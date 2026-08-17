@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import { mountCompatPage, type CompatFallbackReason, type LegacyRenderer } from "./index";
 
 interface FakeRootHooks {
-  onHostError?: (error: Error) => void;
+  onHostError: ((error: Error) => void) | undefined;
 }
 
 function harness(behavior: { failInit?: boolean } = {}) {
   const events: string[] = [];
   const reasons: CompatFallbackReason[] = [];
-  const hooks: FakeRootHooks = {};
+  const hooks: FakeRootHooks = { onHostError: undefined };
   const canvas = {
     width: 0,
     height: 0,

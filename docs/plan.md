@@ -493,13 +493,18 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 
 ### M5：迁移、生产化与 WebGPU 决策
 
-> 当前状态：**进行中（2026-08-17 起）**。按依赖顺序拆为四个子阶段；M5-A 是
-> M5-C 的前置，M5-B 与 M5-D 可并行。存量引擎代码不在本仓库，迁移能力以
-> 边界适配器接口 + 代表性迁移 fixture 交付；真实业务放量属于发布资格。
+> 当前状态：**M5 工程部分已完成（2026-08-17）**。四个子阶段全部交付，组合
+> 出口命令 `pnpm m5:check`（= `m4:check` + 迁移检查 + 发布包验证 + 后端
+> 差分）全绿：TS 229 项单测、真实 Chromium 21 项（含 shadow 对照与灰度/
+> 回退演练）、迁移扫描零违规、shim 依赖方向合规、发布包/source map/WASM
+> SHA-256 完整性通过、wgpu 原型与 headless oracle 零失配（ADR-0006 决策为
+> Continue Experiment）。真实业务放量、真机资格与 WebGPU 默认启用属于发布
+> 资格，不在工程出口内；存量引擎不在本仓库，迁移以边界适配器 + 代表性
+> fixture 交付。
 
 #### M5-A 迁移边界与自动检查
 
-状态：**未开始**。
+状态：**已完成（2026-08-17）**。
 
 - `@dopejs/doper-compat` 边界包：按页面粒度的挂载/卸载适配器与回退开关，
   业务经它接入 doper 并可一键切回存量渲染路径；依赖方向 compat → facade
@@ -510,7 +515,7 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 
 #### M5-B 发布包与事故诊断链路
 
-状态：**未开始**。
+状态：**已完成（2026-08-17）**。
 
 - 发布包内容验证扩展：`pnpm pack` 产物 golden、source map 存在性、类型与
   子路径入口完整性。
@@ -520,7 +525,7 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 
 #### M5-C 试点 shadow/灰度/回退演练
 
-状态：**未开始**（依赖 M5-A）。
+状态：**已完成（2026-08-17）**。
 
 - 代表性迁移 fixture 的 shadow 对照：同一输入双跑 doper 与参考 oracle，
   自动像素/语义对比门禁。
@@ -530,7 +535,7 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 
 #### M5-D WebGPU 隔离原型与数据决策
 
-状态：**未开始**。
+状态：**已完成（2026-08-17）**，决策 **Continue Experiment**（ADR-0006）。
 
 - 独立 workspace 原型 crate（不进产品 WASM）：wgpu 消费与 Canvas2D 完全
   相同的 DisplayList 渲染到离屏纹理。

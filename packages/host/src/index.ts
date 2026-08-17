@@ -16,11 +16,7 @@ export {
 } from "./main-thread";
 export { createWasmCore, type WasmCoreInput } from "./wasm";
 export { ABI_VERSION } from "./generated";
-export {
-  verifyWasmIntegrity,
-  WasmIntegrityError,
-  type WasmIntegrityManifest,
-} from "./integrity";
+export { verifyWasmIntegrity, WasmIntegrityError, type WasmIntegrityManifest } from "./integrity";
 export {
   detectHostCapabilities,
   selectHostTransport,
