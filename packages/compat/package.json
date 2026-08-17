@@ -1,7 +1,16 @@
 {
   "name": "@dopejs/doper-compat",
   "version": "0.1.0",
-  "private": true,
+  "description": "doper migration boundary: page-granular mount with legacy fallback",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dopejs/doper.git",
+    "directory": "packages/compat"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [

@@ -1,7 +1,16 @@
 {
   "name": "@dopejs/doper",
   "version": "0.1.0",
-  "private": true,
+  "description": "doper canvas rendering engine: public facade with TSX, hooks, native scrolling, and canvas-native editing",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dopejs/doper.git",
+    "directory": "packages/facade"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [

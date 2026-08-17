@@ -1,7 +1,16 @@
 {
   "name": "@dopejs/doper-reconciler",
   "version": "0.1.0",
-  "private": true,
+  "description": "doper internal: component tree reconciler and mutation stream encoder (use @dopejs/doper)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dopejs/doper.git",
+    "directory": "packages/reconciler"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [

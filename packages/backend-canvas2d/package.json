@@ -1,7 +1,16 @@
 {
   "name": "@dopejs/doper-backend-canvas2d",
   "version": "0.1.0",
-  "private": true,
+  "description": "doper internal: Canvas2D DisplayList replayer (use @dopejs/doper)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dopejs/doper.git",
+    "directory": "packages/backend-canvas2d"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [

@@ -1,7 +1,16 @@
 {
   "name": "@dopejs/doper-editing",
   "version": "0.1.0",
-  "private": true,
+  "description": "doper internal: editing transactions and native input bridge (use @dopejs/doper)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dopejs/doper.git",
+    "directory": "packages/editing"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [
