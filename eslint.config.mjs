@@ -8,6 +8,8 @@ export default tseslint.config(
       "**/dist/**",
       "**/coverage/**",
       "benchmarks/api/**",
+      // Scanner input samples for business code, not workspace sources.
+      "fixtures/migration/**",
       "**/node_modules/**",
       "**/public/wasm/**",
       "**/generated/**",

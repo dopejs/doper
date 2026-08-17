@@ -57,6 +57,12 @@ importers:
 
   packages/backend-canvas2d: {}
 
+  packages/compat:
+    dependencies:
+      '@dopejs/doper':
+        specifier: workspace:*
+        version: link:../facade
+
   packages/editing: {}
 
   packages/facade:

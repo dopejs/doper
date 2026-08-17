@@ -493,6 +493,55 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 
 ### M5：迁移、生产化与 WebGPU 决策
 
+> 当前状态：**进行中（2026-08-17 起）**。按依赖顺序拆为四个子阶段；M5-A 是
+> M5-C 的前置，M5-B 与 M5-D 可并行。存量引擎代码不在本仓库，迁移能力以
+> 边界适配器接口 + 代表性迁移 fixture 交付；真实业务放量属于发布资格。
+
+#### M5-A 迁移边界与自动检查
+
+状态：**未开始**。
+
+- `@dopejs/doper-compat` 边界包：按页面粒度的挂载/卸载适配器与回退开关，
+  业务经它接入 doper 并可一键切回存量渲染路径；依赖方向 compat → facade
+  单向，删除 shim 不改 Core（自动依赖方向检查）。
+- 迁移指南 `docs/migration.md`：接入步骤、能力矩阵、已知限制与回退操作。
+- 自动迁移检查工具：扫描业务源码中不被公开 API 支持的用法（内部包直接
+  import、每 widget HTML 输入控件、`forceUpdate` 式逃生口等）并输出报告。
+
+#### M5-B 发布包与事故诊断链路
+
+状态：**未开始**。
+
+- 发布包内容验证扩展：`pnpm pack` 产物 golden、source map 存在性、类型与
+  子路径入口完整性。
+- WASM 资源完整性：构建产物 SHA-256 manifest 与可选运行时校验。
+- 错误诊断链路：公开错误码/诊断文档 `docs/diagnostics.md`，facade 导出
+  引擎版本与 ABI 版本供事故上报。
+
+#### M5-C 试点 shadow/灰度/回退演练
+
+状态：**未开始**（依赖 M5-A）。
+
+- 代表性迁移 fixture 的 shadow 对照：同一输入双跑 doper 与参考 oracle，
+  自动像素/语义对比门禁。
+- 灰度与自动回退：per-page 开关、运行时故障（初始化失败、帧超时、Core
+  poison）自动禁用 doper 并回退，故障注入演练测试覆盖每条回退路径。
+- 运行手册 `docs/runbook.md`：灰度比例操作、观测指标、事故回退步骤。
+
+#### M5-D WebGPU 隔离原型与数据决策
+
+状态：**未开始**。
+
+- 独立 workspace 原型 crate（不进产品 WASM）：wgpu 消费与 Canvas2D 完全
+  相同的 DisplayList 渲染到离屏纹理。
+- 与 headless Canvas2D oracle 的像素差分（文档化容差）+ 同工作负载自动
+  benchmark 对照。
+- ADR 形成 Adopt / Continue Experiment / Reject 数据决策；无平台资格数据
+  的平台不默认启用，后端保持 feature-flag 可逆。
+
+自动出口命令：`pnpm m5:check` = `pnpm m4:check` + 迁移检查 + 发布包验证 +
+shadow/回退演练 + 后端差分。
+
 目标：完成可回滚的业务迁移，并用数据决定 WebGPU 后端方向。
 
 主要交付：
