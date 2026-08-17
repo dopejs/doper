@@ -13,6 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
+    # The secrets context is unavailable inside step `if:` conditions, so the
+    # token is exposed as job-level env and the publish step gates on that.
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
     steps:
       - uses: actions/checkout@v7
 
@@ -69,25 +74,27 @@ jobs:
           done
           cp packages/host/wasm/manifest.json release-artifacts/wasm-manifest.json
 
-      - name: Create GitHub release
+      # Idempotent so the workflow can be re-run for the same tag, for example
+      # after npm credentials are configured.
+      - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "doper $GITHUB_REF_NAME" \
-            --generate-notes \
-            release-artifacts/*
-
-      - name: Detect npm credentials
-        id: npm
-        run: echo "present=${{ secrets.NPM_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-artifacts/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "doper $GITHUB_REF_NAME" \
+              --generate-notes \
+              release-artifacts/*
+          fi
 
       - name: Publish to npm with provenance
-        if: steps.npm.outputs.present == 'true'
+        if: env.NPM_TOKEN != ''
         run: pnpm -r publish --access public --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Note skipped npm publish
-        if: steps.npm.outputs.present != 'true'
+        if: env.NPM_TOKEN == ''
         run: echo "::notice::NPM_TOKEN is not configured; GitHub release created without npm publish"
