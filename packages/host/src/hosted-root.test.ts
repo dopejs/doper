@@ -1,5 +1,9 @@
 import { ABI_VERSION, decodeMutationBatch } from "@dopejs/doper-reconciler";
-import { decodeInputBatch, encodeInputBatch } from "@dopejs/doper-editing";
+import {
+  decodeInputBatch,
+  encodeInputBatch,
+  EVENT_FLAG_PRECISE_WHEEL,
+} from "@dopejs/doper-editing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedCanvasRoot } from "./hosted-root";
@@ -91,6 +95,7 @@ describe("createHostedCanvasRoot", () => {
           type: "dispatchEvent",
           eventId: 1,
           kind: "pointerdown",
+          flags: 0,
           x: 40,
           y: 20,
           deltaX: 0,
@@ -146,6 +151,59 @@ describe("createHostedCanvasRoot", () => {
       timeStamp: 10,
     });
     expect(preventDefault).toHaveBeenCalledOnce();
+    await root.close();
+  });
+
+  it("classifies wheel gestures so Core animates notches but not trackpad deltas", async () => {
+    installCanvasGlobal();
+    const core = fakeCore();
+    const canvas = new FakeCanvas();
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+    root.render(undefined);
+    const wheel = (timeStamp: number, deltaY: number, wheelDeltaY?: number): void => {
+      canvas.emit("wheel", {
+        type: "wheel",
+        clientX: 30,
+        clientY: 25,
+        buttons: 0,
+        shiftKey: false,
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        cancelable: false,
+        deltaMode: 0,
+        deltaX: 0,
+        deltaY,
+        timeStamp,
+        ...(wheelDeltaY === undefined ? {} : { wheelDeltaY }),
+      });
+    };
+    const flags = (): readonly number[] =>
+      core.inputs
+        .flatMap((bytes) => decodeInputBatch(bytes).commands)
+        .filter((command) => command.type === "dispatchEvent" && command.kind === "wheel")
+        .map((command) => (command as { readonly flags: number }).flags);
+
+    // A classic notched wheel: multiple-of-120 legacy delta, far apart in time.
+    wheel(1_000, 100, -120);
+    wheel(1_400, 100, -120);
+    expect(flags()).toEqual([0, 0]);
+
+    // A trackpad: fractional legacy delta, then a continuous stream. The
+    // gesture stays high-precision once any sample shows a trackpad trait.
+    core.inputs.length = 0;
+    wheel(2_000, 12, -36);
+    wheel(2_016, 40, -120);
+    expect(flags()).toEqual([EVENT_FLAG_PRECISE_WHEEL, EVENT_FLAG_PRECISE_WHEEL]);
+
+    // An unknown platform without the legacy field applies one-to-one.
+    core.inputs.length = 0;
+    wheel(9_000, 100);
+    expect(flags()).toEqual([EVENT_FLAG_PRECISE_WHEEL]);
     await root.close();
   });
 

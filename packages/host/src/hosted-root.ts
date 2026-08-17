@@ -10,6 +10,7 @@ import { SemanticTreeMirror } from "@dopejs/doper-a11y";
 import {
   decodeInputBatch,
   encodeInputBatch,
+  EVENT_FLAG_PRECISE_WHEEL,
   NativeTextInputBridge,
   type EditTransaction,
   type EditingGeometry,
@@ -147,6 +148,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #inputSequence = 1;
   #eventSequence = 1;
   readonly #eventTimestamps = new Map<number, number>();
+  #wheelGesture: { readonly precise: boolean; readonly timestamp: number } | undefined;
   #inputDirectFrames = 0;
   #inputRing: SabMutationRing | undefined;
   #inputSabFallbackFrames = 0;
@@ -485,14 +487,51 @@ class HostedCanvasRootController implements HostedCanvasRoot {
         : event.deltaMode === 2
           ? Math.max(1, this.#canvas.clientHeight)
           : 1;
-    this.dispatchCanvasEvent("wheel", event, event.deltaX * scale, event.deltaY * scale);
+    this.dispatchCanvasEvent(
+      "wheel",
+      event,
+      event.deltaX * scale,
+      event.deltaY * scale,
+      this.classifyWheel(event),
+    );
   };
+
+  /**
+   * Classifies a wheel sample as a high-precision gesture or a discrete notch.
+   *
+   * Core applies high-precision deltas one-to-one and animates discrete
+   * notches, so a misclassification changes feel rather than distance. The
+   * decision is per gesture, not per event: a classic wheel produces
+   * multiple-of-120 legacy deltas spaced far apart, while a trackpad streams
+   * samples at display rate. A gesture that shows either trackpad trait stays
+   * high-precision until it ends, and an unknown platform stays
+   * high-precision so the applied motion matches the raw delta.
+   */
+  private classifyWheel(event: WheelEvent): number {
+    const timestamp = Number.isFinite(event.timeStamp) ? event.timeStamp : 0;
+    const previous = this.#wheelGesture;
+    const continuing =
+      previous !== undefined && timestamp - previous.timestamp <= WHEEL_GESTURE_GAP_MS;
+    if (continuing && previous.precise) {
+      this.#wheelGesture = { precise: true, timestamp };
+      return EVENT_FLAG_PRECISE_WHEEL;
+    }
+    const legacy = (event as { readonly wheelDeltaY?: unknown }).wheelDeltaY;
+    const notched =
+      event.deltaMode !== 0 ||
+      (typeof legacy === "number" && legacy !== 0 && legacy % WHEEL_NOTCH_LEGACY_DELTA === 0);
+    const streaming = continuing && timestamp - previous.timestamp < WHEEL_STREAM_INTERVAL_MS;
+    const precise = !notched || streaming;
+    this.#wheelGesture = { precise, timestamp };
+    return precise ? EVENT_FLAG_PRECISE_WHEEL : 0;
+  }
 
   private dispatchCanvasEvent(
     kind: "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel",
     event: MouseEvent,
     deltaX: number,
     deltaY: number,
+    flags = 0,
   ): void {
     if (this.#closing || this.#unmounted || this.#recovering) return;
     const rect = this.#canvas.getBoundingClientRect();
@@ -556,6 +595,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
           type: "dispatchEvent",
           eventId,
           kind,
+          flags,
           x,
           y,
           deltaX,
@@ -1058,6 +1098,13 @@ class RecoverableMutationSink implements MutationSink {
 }
 
 let sessionSequence = 1;
+
+/** Legacy wheel-delta quantum a classic notched mouse wheel always reports. */
+const WHEEL_NOTCH_LEGACY_DELTA = 120;
+/** Silence after which the next wheel sample starts a new gesture. */
+const WHEEL_GESTURE_GAP_MS = 200;
+/** Inter-sample spacing only a continuous trackpad stream stays below. */
+const WHEEL_STREAM_INTERVAL_MS = 30;
 
 const INPUT_RING_CAPACITY = 64;
 const INPUT_RING_PAYLOAD_BYTES = 4 * 1024;

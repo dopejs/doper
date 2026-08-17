@@ -178,6 +178,18 @@ impl ScrollAxes {
         Ok(x.changed || y.changed)
     }
 
+    /// Adds a discrete wheel notch to both axes' animated destinations.
+    fn wheel_notch(&mut self, delta_x: f32, delta_y: f32) -> Result<bool, CoreError> {
+        let x = self.x.wheel_notch_by(f64::from(delta_x))?;
+        let y = self.y.physics_mut().wheel_notch_by(f64::from(delta_y))?;
+        Ok(x.changed || y.changed)
+    }
+
+    /// Returns whether either axis still owes a wheel animation frame.
+    fn is_animating(&self) -> bool {
+        self.x.is_animating() || self.y.physics().is_animating()
+    }
+
     fn end(&mut self, retain_velocity: bool) -> Result<(), CoreError> {
         let velocity = if retain_velocity {
             self.estimated_velocity
@@ -413,12 +425,19 @@ impl ScrollController {
         Ok(ScrollAdvance { active, changed })
     }
 
+    /// Applies one wheel sample.
+    ///
+    /// High-precision deltas (trackpads) already arrive smoothed and already
+    /// carry platform momentum, so they move the offset one-to-one. Discrete
+    /// notches accumulate into an animated destination instead, which is what
+    /// browsers do for mouse wheels.
     pub(crate) fn apply_wheel(
         &mut self,
         scene: &mut Scene,
         node: NodeId,
         delta: [f32; 2],
         elapsed_micros: u32,
+        precise: bool,
     ) -> Result<ScrollAdvance, CoreError> {
         if scene.kind(node) != Some(NodeKind::Scroll) {
             return Err(CoreError::InvalidScrollTarget { node });
@@ -428,16 +447,19 @@ impl ScrollController {
             .get(&node)
             .ok_or(CoreError::InvalidScrollTarget { node })?
             .clone();
-        state.begin();
-        let changed = state.delta(delta[0], delta[1], elapsed_micros)?;
-        state.end(false)?;
+        let changed = if precise {
+            state.begin();
+            let moved = state.delta(delta[0], delta[1], elapsed_micros)?;
+            state.end(false)?;
+            moved
+        } else {
+            state.wheel_notch(delta[0], delta[1])?
+        };
+        let active = state.is_animating();
         scene.apply_scroll_position(node, state.position()?)?;
         self.states.insert(node, state);
         self.metrics.input_commands = self.metrics.input_commands.saturating_add(1);
-        Ok(ScrollAdvance {
-            active: false,
-            changed,
-        })
+        Ok(ScrollAdvance { active, changed })
     }
 
     pub(crate) fn begin_direct(&mut self, node: NodeId) -> Result<(), CoreError> {

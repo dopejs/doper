@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 1,
+  "abiVersion": 2,
   "endianness": "little",
   "alignment": 4,
   "nodeId": {
@@ -551,7 +551,7 @@
         {
           "name": "DispatchEvent",
           "opcode": 48,
-          "fields": ["u32", "u16", "pad16", "f32", "f32", "f32", "f32", "u32", "u32", "u32", "u32"]
+          "fields": ["u32", "u16", "u16", "f32", "f32", "f32", "f32", "u32", "u32", "u32", "u32"]
         },
         {
           "name": "Commit",

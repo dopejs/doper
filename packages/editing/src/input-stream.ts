@@ -14,6 +14,18 @@ import {
 const MAX_U64 = 0xffff_ffff_ffff_ffffn;
 const MAX_SCROLL_DELTA = 1_000_000;
 const MAX_SCROLL_DELTA_MICROS = 1_000_000;
+
+/**
+ * Marks a wheel sample as a high-precision delta such as a trackpad gesture.
+ *
+ * High-precision deltas are already smooth and already carry platform momentum,
+ * so Core applies them one-to-one. Samples without this bit are discrete wheel
+ * notches, which browsers animate rather than jump.
+ */
+export const EVENT_FLAG_PRECISE_WHEEL = 1;
+
+/** Every event flag bit defined by this ABI version. */
+export const EVENT_FLAG_MASK = EVENT_FLAG_PRECISE_WHEEL;
 const utf8Encoder = new TextEncoder();
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
@@ -106,6 +118,8 @@ export type InputCommand =
       readonly type: "dispatchEvent";
       readonly eventId: number;
       readonly kind: InputEventKind;
+      /** Event source bits; see {@link EVENT_FLAG_PRECISE_WHEEL}. */
+      readonly flags: number;
       readonly x: number;
       readonly y: number;
       readonly deltaX: number;
@@ -248,7 +262,7 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
       validateEventFields(command);
       writer.u32(command.eventId);
       writer.u16(eventKindCode(command.kind));
-      writer.u16(0);
+      writer.u16(command.flags);
       writer.f32(command.x);
       writer.f32(command.y);
       writer.f32(command.deltaX);
@@ -406,11 +420,12 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
     case InputOpcode.DispatchEvent: {
       const eventId = reader.u32();
       const kind = eventKind(reader.u16());
-      reader.zeroes(2);
+      const flags = reader.u16();
       const command = {
         type: "dispatchEvent" as const,
         eventId,
         kind,
+        flags,
         x: reader.f32(),
         y: reader.f32(),
         deltaX: reader.f32(),
@@ -550,9 +565,20 @@ function eventKind(value: number): InputEventKind {
 function validateEventFields(
   command: Pick<
     Extract<InputCommand, { readonly type: "dispatchEvent" }>,
-    "buttons" | "deltaX" | "deltaY" | "elapsedMicros" | "modifiers" | "pointerId" | "x" | "y"
+    | "buttons"
+    | "deltaX"
+    | "deltaY"
+    | "elapsedMicros"
+    | "flags"
+    | "modifiers"
+    | "pointerId"
+    | "x"
+    | "y"
   >,
 ): void {
+  if (!Number.isInteger(command.flags) || command.flags < 0 || command.flags > EVENT_FLAG_MASK) {
+    fail("event flags are invalid");
+  }
   for (const [value, label, maximum] of [
     [command.x, "event x", 1_000_000_000],
     [command.y, "event y", 1_000_000_000],

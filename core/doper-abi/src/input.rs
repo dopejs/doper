@@ -144,6 +144,16 @@ impl InputEventKind {
 const MAX_SCROLL_DELTA: f32 = 1_000_000.0;
 const MAX_SCROLL_DELTA_MICROS: u32 = 1_000_000;
 
+/// Marks a wheel sample as a high-precision delta such as a trackpad gesture.
+///
+/// High-precision deltas are already smooth and already carry platform
+/// momentum, so Core applies them one-to-one. Samples without this bit are
+/// discrete wheel notches, which browsers animate rather than jump.
+pub const EVENT_FLAG_PRECISE_WHEEL: u16 = 1;
+
+/// Every event flag bit defined by this ABI version.
+pub const EVENT_FLAG_MASK: u16 = EVENT_FLAG_PRECISE_WHEEL;
+
 /// One browser-independent editing or direct-manipulation command.
 #[derive(Clone, Debug, PartialEq)]
 pub enum InputCommand {
@@ -309,6 +319,8 @@ pub enum InputCommand {
         event_id: u32,
         /// Event category.
         kind: InputEventKind,
+        /// Event source bits; see [`EVENT_FLAG_PRECISE_WHEEL`].
+        flags: u16,
         /// Canvas-local logical coordinates.
         position: [f32; 2],
         /// Wheel delta, zero for pointer events.
@@ -617,7 +629,7 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
         InputOpcode::DispatchEvent => {
             let event_id = reader.read_u32()?;
             let kind = InputEventKind::decode(reader.read_u16()?)?;
-            reader.read_zeroes(2)?;
+            let flags = reader.read_u16()?;
             let position = [reader.read_f32()?, reader.read_f32()?];
             let delta = [reader.read_f32()?, reader.read_f32()?];
             let buttons = reader.read_u32()?;
@@ -625,9 +637,11 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
             let pointer_id = reader.read_u32()?;
             let elapsed_micros = reader.read_u32()?;
             validate_event_fields(position, delta, buttons, modifiers, elapsed_micros)?;
+            validate_event_flags(flags)?;
             InputCommand::DispatchEvent {
                 event_id,
                 kind,
+                flags,
                 position,
                 delta,
                 buttons,
@@ -761,6 +775,7 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
         InputCommand::DispatchEvent {
             event_id,
             kind,
+            flags,
             position,
             delta,
             buttons,
@@ -769,9 +784,10 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             elapsed_micros,
         } => {
             validate_event_fields(*position, *delta, *buttons, *modifiers, *elapsed_micros)?;
+            validate_event_flags(*flags)?;
             writer.u32(*event_id);
             writer.u16(*kind as u16);
-            writer.u16(0);
+            writer.u16(*flags);
             writer.f32(position[0])?;
             writer.f32(position[1])?;
             writer.f32(delta[0])?;
@@ -856,6 +872,13 @@ fn validate_place_caret_fields(position: [f32; 2], flags: u32) -> Result<(), Abi
     }
     if flags & !0x03 != 0 {
         return Err(AbiError::InvalidValue("caret placement flags are reserved"));
+    }
+    Ok(())
+}
+
+fn validate_event_flags(flags: u16) -> Result<(), AbiError> {
+    if flags & !EVENT_FLAG_MASK != 0 {
+        return Err(AbiError::InvalidValue("event flag bits are reserved"));
     }
     Ok(())
 }
@@ -1071,6 +1094,7 @@ mod tests {
                 instruction(InputCommand::DispatchEvent {
                     event_id: 19,
                     kind: InputEventKind::Wheel,
+                    flags: 0,
                     position: [12.5, 24.0],
                     delta: [-3.0, 40.0],
                     buttons: 1,
@@ -1081,6 +1105,7 @@ mod tests {
                 instruction(InputCommand::DispatchEvent {
                     event_id: 20,
                     kind: InputEventKind::PointerDown,
+                    flags: 0,
                     position: [1.0, 2.0],
                     delta: [0.0, 0.0],
                     buttons: 1,
@@ -1249,6 +1274,7 @@ mod tests {
                 encode_one(InputCommand::DispatchEvent {
                     event_id: 1,
                     kind: InputEventKind::PointerMove,
+                    flags: 0,
                     position: [coordinate, 0.0],
                     delta: [delta, 0.0],
                     buttons,
@@ -1257,6 +1283,53 @@ mod tests {
                     elapsed_micros: elapsed,
                 })
                 .is_err()
+            );
+        }
+
+        // Event flags: only defined bits encode, and reserved bits fail closed
+        // on both sides so a newer producer cannot silently change semantics.
+        let precise = InputCommand::DispatchEvent {
+            event_id: 1,
+            kind: InputEventKind::Wheel,
+            flags: EVENT_FLAG_PRECISE_WHEEL,
+            position: [4.0, 8.0],
+            delta: [0.0, 40.0],
+            buttons: 0,
+            modifiers: 0,
+            pointer_id: 0,
+            elapsed_micros: 16_667,
+        };
+        let encoded = encode_one(precise.clone()).expect("precise wheel");
+        assert_eq!(
+            InputBatch::decode(&encoded).expect("decode").instructions[0].command,
+            precise
+        );
+        assert!(
+            encode_one(InputCommand::DispatchEvent {
+                event_id: 1,
+                kind: InputEventKind::Wheel,
+                flags: EVENT_FLAG_MASK + 1,
+                position: [4.0, 8.0],
+                delta: [0.0, 40.0],
+                buttons: 0,
+                modifiers: 0,
+                pointer_id: 0,
+                elapsed_micros: 16_667,
+            })
+            .is_err(),
+            "reserved event flag bits must not encode"
+        );
+        let flags_offset = encoded
+            .windows(4)
+            .position(|window| window == [InputEventKind::Wheel as u8, 0, 1, 0])
+            .expect("encoded event kind and flags")
+            + 2;
+        for reserved in [EVENT_FLAG_MASK + 1, 0x8000] {
+            let mut bytes = encoded.clone();
+            bytes[flags_offset..flags_offset + 2].copy_from_slice(&reserved.to_le_bytes());
+            assert!(
+                InputBatch::decode(&bytes).is_err(),
+                "reserved event flags {reserved} must fail closed"
             );
         }
 

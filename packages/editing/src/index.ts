@@ -1,4 +1,6 @@
 export {
+  EVENT_FLAG_MASK,
+  EVENT_FLAG_PRECISE_WHEEL,
   InputAffinity,
   InputStreamError,
   decodeInputBatch,

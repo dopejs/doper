@@ -6,15 +6,15 @@ use std::{
 use doper_abi::{
     CaretDirection, CaretGranularity, EDITING_GEOMETRY_CHARACTER_WORDS,
     EDITING_GEOMETRY_HEADER_WORDS, EDITING_GEOMETRY_RECT_WORDS, EDITING_GEOMETRY_VERSION,
-    EventTransactionBatch, EventTransactionRecord, FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX,
-    FRAME_DIAGNOSTICS_DIRTY_LAYOUT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_PAINT_NODES_INDEX,
-    FRAME_DIAGNOSTICS_DIRTY_PAINT_SELF_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_SEMANTICS_NODES_INDEX,
-    FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX, FRAME_DIAGNOSTICS_FRAME_SEQ_INDEX,
-    FRAME_DIAGNOSTICS_LAYOUT_CHANGED_NODES_INDEX, FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX,
-    FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX, FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX,
-    FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX, FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX,
-    FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX,
-    FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
+    EVENT_FLAG_PRECISE_WHEEL, EventTransactionBatch, EventTransactionRecord,
+    FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_LAYOUT_NODES_INDEX,
+    FRAME_DIAGNOSTICS_DIRTY_PAINT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_PAINT_SELF_NODES_INDEX,
+    FRAME_DIAGNOSTICS_DIRTY_SEMANTICS_NODES_INDEX, FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX,
+    FRAME_DIAGNOSTICS_FRAME_SEQ_INDEX, FRAME_DIAGNOSTICS_LAYOUT_CHANGED_NODES_INDEX,
+    FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX, FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX,
+    FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX, FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
     InputAffinity, InputBatch, InputCommand, InputEventKind, InputPosition, InputSelection,
@@ -173,6 +173,7 @@ struct PointerGesture {
 struct EventCommand {
     event_id: u32,
     kind: InputEventKind,
+    flags: u16,
     position: [f32; 2],
     delta: [f32; 2],
     buttons: u32,
@@ -236,6 +237,7 @@ fn collect_event_commands(batch: &InputBatch) -> Vec<EventCommand> {
             InputCommand::DispatchEvent {
                 event_id,
                 kind,
+                flags,
                 position,
                 delta,
                 buttons,
@@ -245,6 +247,7 @@ fn collect_event_commands(batch: &InputBatch) -> Vec<EventCommand> {
             } => Some(EventCommand {
                 event_id: *event_id,
                 kind: *kind,
+                flags: *flags,
                 position: *position,
                 delta: *delta,
                 buttons: *buttons,
@@ -325,6 +328,7 @@ fn apply_event_scroll(
                         scroll_node,
                         command.delta,
                         command.elapsed_micros,
+                        command.flags & EVENT_FLAG_PRECISE_WHEEL != 0,
                     )?
                     .changed;
             }
@@ -1848,9 +1852,9 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use doper_abi::{
-        DisplayCommand, DisplayList, EditTransactionBatch, EventTransactionBatch,
-        GlyphResourceBatch, GlyphResourceCommand, InputBatch, InputCommand, InputEventKind,
-        InputInstruction, Mutation, MutationBatch, MutationInstruction,
+        DisplayCommand, DisplayList, EVENT_FLAG_PRECISE_WHEEL, EditTransactionBatch,
+        EventTransactionBatch, GlyphResourceBatch, GlyphResourceCommand, InputBatch, InputCommand,
+        InputEventKind, InputInstruction, Mutation, MutationBatch, MutationInstruction,
         NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX, NON_PASSIVE_REGION_HEADER_VERSION_INDEX,
         NON_PASSIVE_REGION_HEADER_WORDS, NON_PASSIVE_REGION_RECORD_BOTTOM_BITS_INDEX,
         NON_PASSIVE_REGION_RECORD_FLAGS_INDEX, NON_PASSIVE_REGION_RECORD_LEFT_BITS_INDEX,
@@ -2368,6 +2372,7 @@ mod tests {
                     vec![InputCommand::DispatchEvent {
                         event_id: 41,
                         kind: InputEventKind::PointerDown,
+                        flags: 0,
                         position: [12.0, 8.0],
                         delta: [0.0, 0.0],
                         buttons: 1,
@@ -2410,6 +2415,7 @@ mod tests {
                     vec![InputCommand::DispatchEvent {
                         event_id: 1,
                         kind: InputEventKind::Click,
+                        flags: 0,
                         position: [200.0, 200.0],
                         delta: [0.0, 0.0],
                         buttons: 0,
@@ -2429,6 +2435,7 @@ mod tests {
                 InputCommand::DispatchEvent {
                     event_id: 2,
                     kind: InputEventKind::Wheel,
+                    flags: 0,
                     position: [1.0, 1.0],
                     delta: [0.0, 10.0],
                     buttons: 0,
@@ -2480,6 +2487,58 @@ mod tests {
     }
 
     #[test]
+    fn discrete_wheel_notches_animate_while_precise_deltas_apply_immediately() {
+        let scroll = NodeId::from_raw(id(1)).expect("scroll");
+        let wheel = |flags: u16, event_id: u32| InputCommand::DispatchEvent {
+            event_id,
+            kind: InputEventKind::Wheel,
+            flags,
+            position: [20.0, 20.0],
+            delta: [0.0, 60.0],
+            buttons: 0,
+            modifiers: 0,
+            pointer_id: 0,
+            elapsed_micros: 16_667,
+        };
+
+        let mut precise = CoreEngine::new(320.0, 240.0).expect("Core");
+        precise.commit(&scroll_tree()).expect("frame");
+        precise
+            .input(&input(1, vec![wheel(EVENT_FLAG_PRECISE_WHEEL, 1)]))
+            .expect("precise wheel");
+        precise.take_event_transactions().expect("events");
+        assert_eq!(
+            precise.scene().scroll_position(scroll),
+            Some([0.0, 60.0]),
+            "a trackpad delta already carries platform smoothing and momentum"
+        );
+
+        let mut notched = CoreEngine::new(320.0, 240.0).expect("Core");
+        notched.commit(&scroll_tree()).expect("frame");
+        notched
+            .input(&input(1, vec![wheel(0, 1)]))
+            .expect("discrete wheel");
+        notched.take_event_transactions().expect("events");
+        let immediate = notched
+            .scene()
+            .scroll_position(scroll)
+            .expect("scroll position")[1];
+        assert!(
+            immediate < 60.0,
+            "a discrete notch must animate like a browser, not jump: {immediate}"
+        );
+
+        for _ in 0..240 {
+            notched.advance(1.0 / 120.0).expect("frame");
+        }
+        assert_eq!(
+            notched.scene().scroll_position(scroll),
+            Some([0.0, 60.0]),
+            "the animation must land on exactly the requested distance"
+        );
+    }
+
+    #[test]
     fn wheel_events_scroll_the_nearest_hit_ancestor_before_returning_the_path() {
         let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
         engine.commit(&scroll_tree()).expect("frame");
@@ -2489,6 +2548,7 @@ mod tests {
                 vec![InputCommand::DispatchEvent {
                     event_id: 3,
                     kind: InputEventKind::Wheel,
+                    flags: EVENT_FLAG_PRECISE_WHEEL,
                     position: [20.0, 20.0],
                     delta: [0.0, 30.0],
                     buttons: 0,
@@ -2518,6 +2578,7 @@ mod tests {
         let pointer = |kind, position, buttons| InputCommand::DispatchEvent {
             event_id: 10,
             kind,
+            flags: 0,
             position,
             delta: [0.0, 0.0],
             buttons,
@@ -2953,6 +3014,7 @@ mod tests {
         let pointer = |kind, position, buttons| InputCommand::DispatchEvent {
             event_id: 11,
             kind,
+            flags: 0,
             position,
             delta: [0.0, 0.0],
             buttons,
@@ -2988,6 +3050,7 @@ mod tests {
         let wheel = InputCommand::DispatchEvent {
             event_id: 12,
             kind: InputEventKind::Wheel,
+            flags: EVENT_FLAG_PRECISE_WHEEL,
             position: [20.0, 60.0],
             delta: [0.0, 50.0],
             buttons: 0,

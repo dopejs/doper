@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { InputOpcode } from "./generated";
 import {
+  EVENT_FLAG_PRECISE_WHEEL,
   InputAffinity,
   InputStreamError,
   decodeInputBatch,
@@ -66,6 +67,7 @@ function sampleBatch(): InputBatch {
         type: "dispatchEvent",
         eventId: 19,
         kind: "wheel",
+        flags: EVENT_FLAG_PRECISE_WHEEL,
         x: 12.5,
         y: 24,
         deltaX: -3,
@@ -150,6 +152,7 @@ describe("Input Stream", () => {
       type: "dispatchEvent" as const,
       eventId: 1,
       kind: "pointerdown" as const,
+      flags: 0,
       x: 0,
       y: 0,
       deltaX: 0,
