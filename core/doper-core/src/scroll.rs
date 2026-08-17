@@ -575,6 +575,17 @@ impl ScrollController {
     }
 
     /// Returns this frame's skeletons for a scroll node, empty when fully materialized.
+    /// Returns how many visible items are drawn as skeletons across all lists.
+    pub(crate) fn visible_placeholders(&self) -> usize {
+        self.states
+            .values()
+            .map(|state| match &state.y {
+                VerticalAxis::Virtual(axis) => axis.placeholders.len(),
+                VerticalAxis::Plain(_) => 0,
+            })
+            .sum()
+    }
+
     pub(crate) fn placeholders(&self, node: NodeId) -> &[PlaceholderRect] {
         match self.states.get(&node).map(|state| &state.y) {
             Some(VerticalAxis::Virtual(axis)) => &axis.placeholders,
@@ -644,7 +655,14 @@ impl ScrollController {
                     .saturating_add(u64::from(end - start));
             }
             let planned = (window_start, window_end);
-            if window_start < window_end && axis.planned_window != Some(planned) {
+            // Re-ask while visible items are still missing, even when the window
+            // value has not moved. Deduplicating purely on the window meant a
+            // request the Shell never answered was never repeated, so a settled
+            // viewport could sit on skeletons forever. `pending_refills` keeps
+            // one entry per node, so repeating is bounded, and it stops on its
+            // own as soon as the items materialize.
+            let outstanding = missing > 0;
+            if window_start < window_end && (axis.planned_window != Some(planned) || outstanding) {
                 axis.planned_window = Some(planned);
                 let request = VirtualRefillRequest {
                     node_id: node.raw(),

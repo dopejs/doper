@@ -16,10 +16,11 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
-    FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
-    InputAffinity, InputBatch, InputCommand, InputEventKind, InputPosition, InputSelection,
-    Mutation, MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind, Prop,
-    ResourceKind, SEMANTICS_VERSION, SystemTextMetricBatch,
+    FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX,
+    FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX, FRAME_DIAGNOSTICS_WORDS, InputAffinity,
+    InputBatch, InputCommand, InputEventKind, InputPosition, InputSelection, Mutation,
+    MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind, Prop, ResourceKind,
+    SEMANTICS_VERSION, SystemTextMetricBatch,
 };
 use doper_hit::{HitIndex, HitPoint, WorldGeometry, WorldRect};
 use doper_layout::{BoxConstraints, LayoutEngine};
@@ -89,6 +90,12 @@ pub struct FrameDiagnostics {
     pub over_invalidated_frames: u64,
     /// Deterministic FNV-1a hash of the active Picture bytes.
     pub picture_hash: u64,
+    /// Visible virtual items still drawn as skeletons this frame.
+    ///
+    /// A steady non-zero value means the Shell never caught up: the viewport is
+    /// showing placeholders instead of content, which is a defect rather than a
+    /// transient.
+    pub visible_placeholders: usize,
 }
 
 impl FrameDiagnostics {
@@ -123,6 +130,7 @@ impl FrameDiagnostics {
             u32::from_le_bytes([hash[0], hash[1], hash[2], hash[3]]);
         words[FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX] =
             u32::from_le_bytes([hash[4], hash[5], hash[6], hash[7]]);
+        words[FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX] = count_word(self.visible_placeholders);
         words
     }
 }
@@ -1531,6 +1539,7 @@ impl CoreEngine {
             picture_subtree_cache_hits: paint_metrics.subtree_cache_hits,
             over_invalidated_frames: paint_metrics.over_invalidated_frames,
             picture_hash: painted.picture.hash(),
+            visible_placeholders: self.scroll.visible_placeholders(),
         };
         self.scene.clear_dirty();
         Ok(FrameOutput {
@@ -2332,7 +2341,12 @@ mod tests {
         assert_eq!(output.diagnostics.layout_changed_nodes, 2);
         assert!(output.diagnostics.display_commands > 0);
         assert_ne!(output.diagnostics.picture_hash, 0);
-        assert_eq!(output.diagnostics.to_words().len(), 19);
+        // Compare against the generated layout rather than a literal, so a
+        // schema change cannot silently drift from the encoder.
+        assert_eq!(
+            output.diagnostics.to_words().len(),
+            doper_abi::FRAME_DIAGNOSTICS_WORDS
+        );
         assert_eq!(output.diagnostics.picture_builds, 1);
         assert_eq!(output.diagnostics.picture_cache_hits, 0);
         assert_eq!(output.diagnostics.picture_subtree_builds, 2);
@@ -3543,6 +3557,27 @@ mod tests {
             );
             assert_ne!(*rgba & 0xff, 0, "skeleton must be opaque enough to see");
         }
+    }
+
+    #[test]
+    fn an_unanswered_refill_is_repeated_until_the_shell_materializes() {
+        // Regression: the request was deduplicated on the planned window alone,
+        // so if the Shell never answered, Core never asked again and the
+        // viewport stayed on skeletons indefinitely -- the scroll looked stuck.
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&virtual_list_tree()).expect("initial frame");
+        let first = engine.take_virtual_refills();
+        assert_eq!(first.len(), 1, "the first frame asks for a window");
+
+        // Advance without materializing anything: the window does not move, but
+        // the demand is still outstanding.
+        engine.advance(1.0 / 60.0).expect("frame");
+        let repeated = engine.take_virtual_refills();
+        assert_eq!(
+            repeated, first,
+            "an unanswered window must be requested again"
+        );
+        assert!(engine.scroll_metrics().virtual_placeholders > 0);
     }
 
     #[test]

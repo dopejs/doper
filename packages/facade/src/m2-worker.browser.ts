@@ -255,6 +255,35 @@ describe("M2 production transport matrix", () => {
         3_000,
         `${preference} virtual window settles on the requested range`,
       );
+      // The picture hash below is a differential oracle across raster-cache
+      // configurations, so both runs have to be sampled in the same state.
+      // Scroll settling is time dependent, so wait for quiescence -- no new
+      // committed frame for a while -- rather than sampling mid-decay.
+      const committedFrames = (): number =>
+        reports.filter((report) => report.cause === "mutation").length;
+      const quiesce = async (): Promise<void> => {
+        for (;;) {
+          const before = committedFrames();
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+          if (committedFrames() === before) return;
+        }
+      };
+      await withTimeout(quiesce(), 5_000, `${preference} virtual scrolling reaches quiescence`);
+
+      // The real acceptance criterion: once scrolling settles the viewport must
+      // show content, not skeletons. A placeholder is a one-or-two-frame safety
+      // net; a steady non-zero count means the Shell never caught up, which is
+      // exactly the "stuck" scrolling reported from the live site.
+      expect(newestReport()?.core?.visiblePlaceholders).toBe(0);
+      // The picture hash is compared across raster-cache configurations, so it
+      // has to be sampled at a defined offset. A fling settles wherever the
+      // physics integration lands, which differs by a sub-pixel amount between
+      // runs and would change the transform bits without meaning anything about
+      // the raster cache. Land on an exact offset first.
+      const landed: typeof props & { readonly scrollY: number } = { ...props, scrollY: 4_000 };
+      root.render(createElement<typeof landed>("virtualList", landed));
+      await withTimeout(quiesce(), 5_000, `${preference} programmatic offset settles`);
+      expect(newestReport()?.core?.visiblePlaceholders).toBe(0);
 
       const movedRange = newestWindow();
       const finalReport = newestReport();

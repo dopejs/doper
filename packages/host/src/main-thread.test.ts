@@ -31,7 +31,28 @@ describe("CanvasFrameSink", () => {
         return displayList;
       },
       frame_diagnostics: () =>
-        Uint32Array.of(2, 1, 2, 2, 2, 0, 2, 2, 2, 2, 7, 1, 1, 0, 2, 0, 0, 0x89ab_cdef, 0x0123_4567),
+        Uint32Array.of(
+          3,
+          1,
+          2,
+          2,
+          2,
+          0,
+          2,
+          2,
+          2,
+          2,
+          7,
+          1,
+          1,
+          0,
+          2,
+          0,
+          0,
+          0x89ab_cdef,
+          0x0123_4567,
+          0,
+        ),
     };
     const onFrame = vi.fn((_report: FrameReport) => events.push("report"));
     const sink = new CanvasFrameSink(fakeContext(calls, events), core, onFrame);
@@ -195,7 +216,7 @@ describe("CanvasFrameSink", () => {
       {
         commit: () => emptyDisplayList(),
         frame_diagnostics: () =>
-          Uint32Array.of(2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0x1234_5678, 0),
+          Uint32Array.of(3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0x1234_5678, 0, 0),
       },
       onFrame,
       cache,
@@ -219,7 +240,7 @@ describe("CanvasFrameSink", () => {
       input: () => emptyDisplayList(),
       advance: () => (animationChanged ? emptyDisplayList() : undefined),
       frame_diagnostics: () =>
-        Uint32Array.of(2, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0x1234, 0),
+        Uint32Array.of(3, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0x1234, 0, 0),
     };
     const sink = new CanvasFrameSink(fakeContext([], []), core, (report) => reports.push(report));
     sink.commit(mutationFrame([]));

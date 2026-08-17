@@ -95,7 +95,7 @@
     ]
   },
   "frameDiagnostics": {
-    "version": 2,
+    "version": 3,
     "fields": [
       {
         "name": "version",
@@ -172,7 +172,8 @@
       {
         "name": "pictureHashHigh",
         "type": "u32"
-      }
+      },
+      { "name": "visiblePlaceholders", "type": "u32" }
     ]
   },
   "virtualRefillBatch": {

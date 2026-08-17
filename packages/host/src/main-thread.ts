@@ -41,6 +41,7 @@ import {
   FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
+  FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX,
@@ -192,6 +193,13 @@ export interface CoreFrameDiagnostics {
   readonly pictureSubtreeCacheHits: number;
   readonly overInvalidatedFrames: number;
   readonly pictureHash: bigint;
+  /**
+   * Visible virtual items still drawn as skeletons this frame.
+   *
+   * A steady non-zero value means the Shell never caught up and the viewport is
+   * showing placeholders rather than content.
+   */
+  readonly visiblePlaceholders: number;
 }
 
 /** Diagnostics emitted after one Core frame and Canvas replay both succeed. */
@@ -845,6 +853,7 @@ function parseCoreFrameDiagnostics(
     ),
     overInvalidatedFrames: requiredWord(words, FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX),
     pictureHash: BigInt(low) | (BigInt(high) << 32n),
+    visiblePlaceholders: requiredWord(words, FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX),
   };
 }
 
