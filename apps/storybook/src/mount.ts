@@ -24,9 +24,19 @@ export function mountStory(
   canvas.tabIndex = 0;
   host.append(canvas);
 
+  const loading = document.createElement("p");
+  loading.style.cssText =
+    "position:absolute;inset:0;display:grid;place-items:center;margin:0;color:#8d99ab;font-size:12px";
+  host.style.position = "relative";
+  host.append(loading);
+  loading.textContent = "正在加载引擎核心…";
+
   let root: HostedCanvasRoot | undefined;
   let disposed = false;
   void createHostedCanvasRoot(canvas, {
+    // A cold load over a slow CDN can exceed the default budget and abandon
+    // the worker path before the WASM arrives.
+    initializationTimeoutMs: 45_000,
     onHostError: (error) => {
       const box = document.createElement("pre");
       box.style.cssText = "margin:0;padding:8px;color:#b3261e;font-size:12px";
@@ -35,12 +45,14 @@ export function mountStory(
     },
   })
     .then((created) => {
+      loading.remove();
       if (disposed) return created.close();
       root = created;
       created.render(render());
       return undefined;
     })
     .catch((cause: unknown) => {
+      loading.remove();
       const box = document.createElement("pre");
       box.style.cssText = "margin:0;padding:8px;color:#b3261e;font-size:12px";
       box.textContent = String(cause);

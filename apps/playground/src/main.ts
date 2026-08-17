@@ -61,14 +61,22 @@ async function activate(demo: Demo): Promise<void> {
   canvas.width = Math.floor(width * ratio);
   canvas.height = Math.floor(height * ratio);
   canvas.tabIndex = 0;
-  host.replaceChildren(canvas);
+  const loading = document.createElement("p");
+  loading.className = "loading";
+  loading.textContent = "正在加载引擎核心（约 1MB WASM）…";
+  host.replaceChildren(canvas, loading);
 
   try {
     const created = await createHostedCanvasRoot(canvas, {
       ...demo.rootOptions,
+      // A cold load over a slow CDN can exceed the default budget; without a
+      // longer window the worker path is abandoned before the WASM arrives and
+      // the demo silently drops to the main thread.
+      initializationTimeoutMs: 45_000,
       onFrame: (report) => reportFrame(report),
       onHostError: (error) => showError(error),
     });
+    loading.remove();
     root = created;
     const context: DemoContext = {
       root: created,
@@ -85,6 +93,7 @@ async function activate(demo: Demo): Promise<void> {
     cleanup = demo.activate?.(context);
     renderBadges(created);
   } catch (cause) {
+    loading.remove();
     showError(cause instanceof Error ? cause : new Error(String(cause)));
   }
 }
