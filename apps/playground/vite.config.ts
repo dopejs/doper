@@ -10,8 +10,9 @@ const isolationHeaders = {
 };
 
 export default defineConfig(({ mode }) => ({
-  // GitHub Pages serves the project site from /doper/playground/.
-  base: mode === "pages" ? "/doper/playground/" : "/",
+  // Relative asset URLs keep the build valid under any deployment prefix,
+  // including the /<repo>/playground/ path a GitHub project site serves.
+  base: mode === "pages" ? "./" : "/",
   build: {
     sourcemap: true,
     target: "es2022",

@@ -6,6 +6,8 @@ export default tseslint.config(
   {
     ignores: [
       "**/dist/**",
+      "dist-pages/**",
+      "**/storybook-static/**",
       "**/coverage/**",
       "benchmarks/api/**",
       // Scanner input samples for business code, not workspace sources.

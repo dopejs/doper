@@ -35,6 +35,7 @@ export {
   type DoperFontLoadOptions,
   type DoperFontSource,
   type DoperFontOptions,
+  type EditableInputMode,
   type EditableTextProps,
   type FunctionComponent,
   type HostType,
