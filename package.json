@@ -17,8 +17,9 @@
     "format:check": "prettier --check . && cargo fmt --all -- --check",
     "ime:replay": "node scripts/replay-ime.mjs",
     "lint": "eslint .",
+    "lockfile:check": "pnpm install --frozen-lockfile --ignore-scripts --lockfile-only",
     "m0:check": "node scripts/run-with-rust-target-cleanup.mjs pnpm m0:check:run",
-    "m0:check:run": "pnpm format:check && pnpm build && pnpm lint && pnpm typecheck && pnpm test && pnpm contracts:check && pnpm rust:check",
+    "m0:check:run": "pnpm lockfile:check && pnpm format:check && pnpm build && pnpm lint && pnpm typecheck && pnpm test && pnpm contracts:check && pnpm rust:check",
     "m1:check": "node scripts/run-with-rust-target-cleanup.mjs pnpm m1:check:run",
     "m1:check:run": "pnpm m0:check && pnpm coverage:ts && pnpm coverage:rust && pnpm test:browser && pnpm m1:perf",
     "m1:perf": "node scripts/run-with-rust-target-cleanup.mjs pnpm m1:perf:run",
@@ -101,7 +102,6 @@
     "typescript-eslint": "8.67.0",
     "vite": "8.2.1",
     "vitepress": "1.6.4",
-    "vitest": "4.1.10",
-    "vue": "3.6.2"
+    "vitest": "4.1.10"
   }
 }
