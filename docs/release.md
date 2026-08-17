@@ -17,7 +17,29 @@
 - 内部包（`@dopejs/doper-*`，compat 除外）不承诺任何稳定性；pnpm 发布时
   facade 对它们的依赖被固定为精确版本，同版本原子发布避免内部漂移。
 
-## 2. 发布步骤
+## 2. GitHub 发版（推荐路径）
+
+推送 `v*` tag 即触发 `.github/workflows/release.yml`：
+
+1. 校验 tag 与 `ENGINE_VERSION` 一致（不一致直接失败）。
+2. 在发布提交上跑完整 `pnpm m5:check`（M0→M5 全链；CI 无 GPU 时后端差分
+   如实输出 SKIPPED）。
+3. `pnpm npm:release:verify` 校验全部 tarball。
+4. 创建 GitHub Release：自动生成 release notes，附上 10 个包的 tarball 与
+   `wasm-manifest.json`（事故时用于 CDN 资产 digest 对照）。
+5. 配置了 `NPM_TOKEN` secret 时以 npm provenance 发布全部包；未配置则在
+   Release 上注明跳过，可后续本地补发。
+
+操作序列：
+
+```sh
+node scripts/set-release-version.mjs 0.2.0 && pnpm install
+# 更新 CHANGELOG.md 的 Unreleased 段落
+git commit -am "release: v0.2.0"
+git tag v0.2.0 && git push origin main v0.2.0
+```
+
+## 3. 本地手动发布（备用路径）
 
 ```sh
 # 1. 设定版本（同步 10 个包 + ENGINE_VERSION）
@@ -41,7 +63,7 @@ pnpm npm:release:publish
 pnpm 在打包时自动把 `workspace:*` 重写为当前精确版本，
 `npm:release:verify` 已对实际 tarball 校验过该重写。
 
-## 3. 发布内容校验
+## 4. 发布内容校验
 
 `scripts/check-npm-release.mjs` 对**实际 tarball** 断言：
 
@@ -51,7 +73,7 @@ pnpm 在打包时自动把 `workspace:*` 重写为当前精确版本，
 - 无残留 `workspace:` 依赖区间；`@dopejs/*` 依赖闭包全部在发布集内。
 - 版本与 `ENGINE_VERSION` 一致、`publishConfig.access` 为 public。
 
-## 4. 回滚
+## 5. 回滚
 
 - 发布后发现缺陷：优先发 patch 版本；`npm deprecate` 标注问题版本。
   不依赖 unpublish（72 小时窗口且破坏下游 lockfile）。
