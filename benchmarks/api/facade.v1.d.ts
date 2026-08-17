@@ -68,6 +68,12 @@ export {
   type SemanticMirrorNode,
   type SemanticTreeMirrorOptions,
 } from "@dopejs/doper-a11y";
+export {
+  verifyWasmIntegrity,
+  WasmIntegrityError,
+  type WasmIntegrityManifest,
+} from "@dopejs/doper-host";
+export { ENGINE_ABI_VERSION, ENGINE_VERSION, engineIdentity } from "./version";
 export { useTextEditingController } from "./editing";
 export {
   createCanvasRoot,

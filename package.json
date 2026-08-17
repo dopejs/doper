@@ -37,6 +37,8 @@
     "m3:check:run": "pnpm m3:scroll:check && pnpm m3:text:foundation",
     "m3:scroll:check": "node scripts/run-with-rust-target-cleanup.mjs pnpm m3:scroll:check:run",
     "m3:scroll:check:run": "pnpm m2:check && pnpm m3:perf && pnpm m3:diff",
+    "migration:check": "node scripts/check-migration.mjs",
+    "release:check": "node scripts/check-release-package.mjs",
     "m4:perf": "node scripts/run-with-rust-target-cleanup.mjs pnpm m4:perf:run",
     "m4:perf:run": "node scripts/check-m4-editing-performance.mjs",
     "m4:check": "node scripts/run-with-rust-target-cleanup.mjs pnpm m4:check:run",
