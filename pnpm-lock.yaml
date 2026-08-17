@@ -53,12 +53,17 @@ importers:
 
   apps/platform-probe: {}
 
+  packages/a11y: {}
+
   packages/backend-canvas2d: {}
 
   packages/editing: {}
 
   packages/facade:
     dependencies:
+      '@dopejs/doper-a11y':
+        specifier: workspace:*
+        version: link:../a11y
       '@dopejs/doper-backend-canvas2d':
         specifier: workspace:*
         version: link:../backend-canvas2d
@@ -83,6 +88,9 @@ importers:
 
   packages/host:
     dependencies:
+      '@dopejs/doper-a11y':
+        specifier: workspace:*
+        version: link:../a11y
       '@dopejs/doper-backend-canvas2d':
         specifier: workspace:*
         version: link:../backend-canvas2d

@@ -73,6 +73,20 @@ import {
   EDITING_GEOMETRY_RECT_WORDS,
   EDITING_GEOMETRY_VERSION,
   NULL_NODE_ID,
+  SEMANTICS_HEADER_NODE_COUNT_INDEX,
+  SEMANTICS_HEADER_VERSION_INDEX,
+  SEMANTICS_HEADER_WORDS,
+  SEMANTICS_RECORD_FLAGS_INDEX,
+  SEMANTICS_RECORD_HEIGHT_BITS_INDEX,
+  SEMANTICS_RECORD_LABEL_BYTES_INDEX,
+  SEMANTICS_RECORD_LEFT_BITS_INDEX,
+  SEMANTICS_RECORD_NODE_ID_INDEX,
+  SEMANTICS_RECORD_ROLE_BYTES_INDEX,
+  SEMANTICS_RECORD_TOP_BITS_INDEX,
+  SEMANTICS_RECORD_VALUE_BYTES_INDEX,
+  SEMANTICS_RECORD_WIDTH_BITS_INDEX,
+  SEMANTICS_RECORD_WORDS,
+  SEMANTICS_VERSION,
   NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX,
   NON_PASSIVE_REGION_HEADER_VERSION_INDEX,
   NON_PASSIVE_REGION_HEADER_WORDS,
@@ -101,6 +115,7 @@ export interface CoreClient {
   take_event_transactions?(): Uint8Array;
   non_passive_regions?(): Uint32Array;
   editing_geometry?(): Uint32Array;
+  semantics?(): Uint8Array;
   take_virtual_refills?(): Uint32Array;
 }
 
@@ -145,6 +160,19 @@ export interface EditingGeometryFrame {
   readonly selectionStart: number;
 }
 
+/** One committed semantic-tree node mirrored into the accessibility DOM. */
+export interface SemanticNode {
+  readonly bounds: EditingGeometryRect;
+  /** True when the node accepts engine focus (editable primitives today). */
+  readonly focusable: boolean;
+  readonly focused: boolean;
+  readonly label: string;
+  readonly nodeId: number;
+  readonly password: boolean;
+  readonly role: string;
+  readonly value: string;
+}
+
 /** Deterministic Core phase-work and invalidation diagnostics. */
 export interface CoreFrameDiagnostics {
   readonly frameSeq: number;
@@ -185,6 +213,7 @@ export interface CanvasRootOptions extends RootOptions {
   readonly onEventTransaction?: (transaction: EventTransaction) => void;
   readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
   readonly onEditingGeometry?: (frame: EditingGeometryFrame) => void;
+  readonly onSemantics?: (nodes: readonly SemanticNode[]) => void;
 }
 
 type ResourceAction =
@@ -218,6 +247,7 @@ export class CanvasFrameSink implements MutationSink {
   readonly #onEventTransaction: ((transaction: EventTransaction) => void) | undefined;
   readonly #onNonPassiveRegions: ((regions: readonly NonPassiveRegion[]) => void) | undefined;
   readonly #onEditingGeometry: ((frame: EditingGeometryFrame) => void) | undefined;
+  readonly #onSemantics: ((nodes: readonly SemanticNode[]) => void) | undefined;
   readonly #fontSet: FontFaceSet | undefined;
   readonly #fontLoadingDone: (() => void) | undefined;
   #devicePixelRatio = 1;
@@ -236,6 +266,7 @@ export class CanvasFrameSink implements MutationSink {
     onEventTransaction?: (transaction: EventTransaction) => void,
     onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void,
     onEditingGeometry?: (frame: EditingGeometryFrame) => void,
+    onSemantics?: (nodes: readonly SemanticNode[]) => void,
   ) {
     this.#context = context;
     this.#core = core;
@@ -247,6 +278,7 @@ export class CanvasFrameSink implements MutationSink {
     this.#onEventTransaction = onEventTransaction;
     this.#onNonPassiveRegions = onNonPassiveRegions;
     this.#onEditingGeometry = onEditingGeometry;
+    this.#onSemantics = onSemantics;
     this.#resources = new Canvas2DResourceRegistry();
     this.#replayer = new Canvas2DReplayer();
     this.#fontSet = runtimeFontSet();
@@ -287,6 +319,7 @@ export class CanvasFrameSink implements MutationSink {
     this.emitVirtualRefills();
     this.emitNonPassiveRegions();
     this.emitEditingGeometry();
+    this.emitSemantics();
     if (!(displayList instanceof Uint8Array)) {
       throw new TypeError("Core commit must return Uint8Array DisplayList bytes");
     }
@@ -336,6 +369,7 @@ export class CanvasFrameSink implements MutationSink {
     this.emitVirtualRefills();
     this.emitNonPassiveRegions();
     this.emitEditingGeometry();
+    this.emitSemantics();
     this.emitEventTransactions(this.takeEventTransactions());
     if (displayList === undefined) {
       this.emitEditTransactions(this.takeEditTransactions());
@@ -362,6 +396,7 @@ export class CanvasFrameSink implements MutationSink {
     this.emitVirtualRefills();
     this.emitNonPassiveRegions();
     this.emitEditingGeometry();
+    this.emitSemantics();
     if (displayList === undefined) return this.replayLastFrame();
     this.applyDynamicGlyphResources();
     return this.acceptDynamicFrame(displayList, {
@@ -624,6 +659,13 @@ export class CanvasFrameSink implements MutationSink {
     if (snapshot === undefined) return;
     const frame = parseEditingGeometry(snapshot);
     if (frame !== undefined) this.#onEditingGeometry(frame);
+  }
+
+  private emitSemantics(): void {
+    if (this.#onSemantics === undefined) return;
+    const snapshot = this.#core.semantics?.();
+    if (snapshot === undefined) return;
+    this.#onSemantics(parseSemantics(snapshot));
   }
 }
 
@@ -902,6 +944,82 @@ function parseEditingGeometry(words: Uint32Array): EditingGeometryFrame | undefi
   return { characterBounds, controlBounds, nodeId, selectionBounds, selectionEnd, selectionStart };
 }
 
+/** Fully validates one untrusted Core semantics snapshot before use. */
+export function parseSemantics(bytes: Uint8Array): SemanticNode[] {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength % 4 !== 0) {
+    throw new TypeError("Core semantics must use the generated byte layout");
+  }
+  const headerBytes = SEMANTICS_HEADER_WORDS * 4;
+  if (bytes.byteLength < headerBytes) {
+    throw new TypeError("Core semantics snapshot is truncated");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(SEMANTICS_HEADER_VERSION_INDEX * 4, true) !== SEMANTICS_VERSION) {
+    throw new Error("Core semantics version is incompatible with Host");
+  }
+  const count = view.getUint32(SEMANTICS_HEADER_NODE_COUNT_INDEX * 4, true);
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const nodes: SemanticNode[] = [];
+  let offset = headerBytes;
+  for (let record = 0; record < count; record += 1) {
+    if (offset + SEMANTICS_RECORD_WORDS * 4 > bytes.byteLength) {
+      throw new TypeError("Core semantics record is truncated");
+    }
+    const word = (index: number): number => view.getUint32(offset + index * 4, true);
+    const float = (index: number): number => view.getFloat32(offset + index * 4, true);
+    const flags = word(SEMANTICS_RECORD_FLAGS_INDEX);
+    if ((flags & ~0b111) !== 0) throw new RangeError("Core semantics flags are reserved");
+    const bounds = {
+      left: float(SEMANTICS_RECORD_LEFT_BITS_INDEX),
+      top: float(SEMANTICS_RECORD_TOP_BITS_INDEX),
+      width: float(SEMANTICS_RECORD_WIDTH_BITS_INDEX),
+      height: float(SEMANTICS_RECORD_HEIGHT_BITS_INDEX),
+    };
+    if (
+      ![bounds.left, bounds.top, bounds.width, bounds.height].every(Number.isFinite) ||
+      bounds.width < 0 ||
+      bounds.height < 0
+    ) {
+      throw new RangeError("Core semantics bounds are invalid");
+    }
+    const roleBytes = word(SEMANTICS_RECORD_ROLE_BYTES_INDEX);
+    const labelBytes = word(SEMANTICS_RECORD_LABEL_BYTES_INDEX);
+    const valueBytes = word(SEMANTICS_RECORD_VALUE_BYTES_INDEX);
+    const stringStart = offset + SEMANTICS_RECORD_WORDS * 4;
+    const stringBytes = roleBytes + labelBytes + valueBytes;
+    const paddedEnd = stringStart + stringBytes + ((4 - (stringBytes % 4)) % 4);
+    if (
+      stringBytes > bytes.byteLength ||
+      paddedEnd > bytes.byteLength ||
+      !Number.isSafeInteger(paddedEnd)
+    ) {
+      throw new TypeError("Core semantics strings overflow the snapshot");
+    }
+    const text = (start: number, length: number): string => {
+      try {
+        return decoder.decode(bytes.subarray(start, start + length));
+      } catch {
+        throw new TypeError("Core semantics string is not valid UTF-8");
+      }
+    };
+    nodes.push({
+      bounds,
+      focusable: (flags & 1) !== 0,
+      focused: (flags & 2) !== 0,
+      label: text(stringStart + roleBytes, labelBytes),
+      nodeId: word(SEMANTICS_RECORD_NODE_ID_INDEX),
+      password: (flags & 4) !== 0,
+      role: text(stringStart, roleBytes),
+      value: text(stringStart + roleBytes + labelBytes, valueBytes),
+    });
+    offset = paddedEnd;
+  }
+  if (offset !== bytes.byteLength) {
+    throw new TypeError("Core semantics snapshot has trailing bytes");
+  }
+  return nodes;
+}
+
 /** Creates the deterministic main-thread M1 fallback rendering root. */
 export function createCanvasRoot(
   context: Canvas2DContext,
@@ -926,6 +1044,7 @@ export function createCanvasRoot(
     },
     options.onNonPassiveRegions,
     options.onEditingGeometry,
+    options.onSemantics,
   );
   const root = createRoot(sink, options);
   coreRoot.current = root;

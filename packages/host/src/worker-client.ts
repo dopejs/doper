@@ -1,6 +1,11 @@
 import { ABI_VERSION } from "./generated";
 import type { FrameReport } from "./main-thread";
-import type { EditingGeometryFrame, NonPassiveRegion, VirtualRefillRange } from "./main-thread";
+import type {
+  EditingGeometryFrame,
+  NonPassiveRegion,
+  SemanticNode,
+  VirtualRefillRange,
+} from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
 import type { EditTransaction, EventTransaction } from "@dopejs/doper-editing";
@@ -41,6 +46,7 @@ export interface RenderWorkerClientOptions {
   readonly onEventTransaction?: (transaction: EventTransaction) => void;
   readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
   readonly onEditingGeometry?: (frame: EditingGeometryFrame) => void;
+  readonly onSemantics?: (nodes: readonly SemanticNode[]) => void;
   readonly sessionId: number;
 }
 
@@ -65,6 +71,7 @@ export class RenderWorkerClient {
   readonly #onEventTransaction: ((transaction: EventTransaction) => void) | undefined;
   readonly #onNonPassiveRegions: ((regions: readonly NonPassiveRegion[]) => void) | undefined;
   readonly #onEditingGeometry: ((frame: EditingGeometryFrame) => void) | undefined;
+  readonly #onSemantics: ((nodes: readonly SemanticNode[]) => void) | undefined;
   readonly #sessionId: number;
   readonly #worker: WorkerLike;
   #capabilities: RenderWorkerCapabilities | undefined;
@@ -92,6 +99,7 @@ export class RenderWorkerClient {
     this.#onEventTransaction = options.onEventTransaction;
     this.#onNonPassiveRegions = options.onNonPassiveRegions;
     this.#onEditingGeometry = options.onEditingGeometry;
+    this.#onSemantics = options.onSemantics;
     worker.addEventListener("message", this.#handleMessage);
     worker.addEventListener("error", this.#handleError);
     worker.addEventListener("messageerror", this.#handleMessageError);
@@ -290,6 +298,9 @@ export class RenderWorkerClient {
         return;
       case "doper:editing-geometry":
         if (this.#state === "ready") this.#onEditingGeometry?.(message.frame);
+        return;
+      case "doper:semantics":
+        if (this.#state === "ready") this.#onSemantics?.(message.nodes);
         return;
       case "doper:fatal":
         this.fail(new Error(`render Worker failed: ${message.error}`));

@@ -61,6 +61,13 @@ export {
   type TextAreaProps,
   type TextFieldProps,
 } from "@dopejs/doper-widgets";
+export {
+  getByRole,
+  queryAllByRole,
+  SemanticTreeMirror,
+  type SemanticMirrorNode,
+  type SemanticTreeMirrorOptions,
+} from "@dopejs/doper-a11y";
 export { useTextEditingController } from "./editing";
 export {
   createCanvasRoot,
@@ -74,6 +81,7 @@ export {
   type HostCapabilities,
   type HostMutationTransportMetrics,
   type NonPassiveRegion,
+  type SemanticNode,
   type HostInputTransportMetrics,
   type HostTransportDecision,
   type HostTransportMode,

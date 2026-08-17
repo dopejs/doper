@@ -280,6 +280,12 @@ impl EditingController {
     pub(crate) fn session(&self, node: NodeId) -> Option<&EditSession> {
         self.sessions.get(&node).map(|active| &active.session)
     }
+
+    pub(crate) fn session_is_password(&self, node: NodeId) -> Option<bool> {
+        self.sessions
+            .get(&node)
+            .map(|active| active.flags & EDITABLE_PASSWORD != 0)
+    }
 }
 
 fn transaction_record(node: NodeId, transaction: EditTransaction) -> EditTransactionRecord {

@@ -1,12 +1,11 @@
 {
-  "name": "@dopejs/doper-host",
+  "name": "@dopejs/doper-a11y",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "sideEffects": false,
   "files": [
-    "dist",
-    "wasm"
+    "dist"
   ],
   "exports": {
     ".": {
@@ -14,14 +13,9 @@
       "import": "./dist/index.js"
     }
   },
-  "dependencies": {
-    "@dopejs/doper-backend-canvas2d": "workspace:*",
-    "@dopejs/doper-a11y": "workspace:*",
-    "@dopejs/doper-editing": "workspace:*",
-    "@dopejs/doper-reconciler": "workspace:*"
-  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
-  }
+  },
+  "dependencies": {}
 }

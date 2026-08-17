@@ -330,6 +330,7 @@ function renderRust(value) {
   const instructionHeaderBytes = wireSize(value.instructionHeader.map((field) => field.type));
   return `${renderRustBase(value)}${renderRustNonPassiveRegionLayout(value.nonPassiveRegionBatch)}
 ${renderRustEditingGeometryLayout(value.editingGeometryBatch)}
+${renderRustSemanticsLayout(value.semanticsBatch)}
 pub const EDIT_TRANSACTIONS_MAGIC: u32 = ${magicNumber(value.streams.editTransactions.magic)};
 pub const MAX_EDIT_TRANSACTIONS_BYTES: usize = ${value.streams.editTransactions.maxBytes};
 pub const MAX_EDIT_TRANSACTION_INSTRUCTIONS: u32 = ${value.limits.editTransactionInstructions};
@@ -380,6 +381,22 @@ function renderRustNonPassiveRegionLayout(layout) {
     )
     .join("\n");
   return `pub const NON_PASSIVE_REGION_VERSION: u32 = ${layout.version};\npub const NON_PASSIVE_REGION_HEADER_WORDS: usize = ${layout.headerFields.length};\npub const NON_PASSIVE_REGION_RECORD_WORDS: usize = ${layout.recordFields.length};\n${header}\n${records}`;
+}
+
+function renderRustSemanticsLayout(layout) {
+  const header = layout.headerFields
+    .map(
+      (field, index) =>
+        `pub const SEMANTICS_HEADER_${screamingSnake(field.name)}_INDEX: usize = ${index};`,
+    )
+    .join("\n");
+  const records = layout.recordFields
+    .map(
+      (field, index) =>
+        `pub const SEMANTICS_RECORD_${screamingSnake(field.name)}_INDEX: usize = ${index};`,
+    )
+    .join("\n");
+  return `pub const SEMANTICS_VERSION: u32 = ${layout.version};\npub const SEMANTICS_HEADER_WORDS: usize = ${layout.headerFields.length};\npub const SEMANTICS_RECORD_WORDS: usize = ${layout.recordFields.length};\n${header}\n${records}`;
 }
 
 function renderRustEditingGeometryLayout(layout) {
@@ -462,6 +479,7 @@ function renderTypeScript(value) {
   const instructionHeaderBytes = wireSize(value.instructionHeader.map((field) => field.type));
   return `${renderTypeScriptBase(value)}${renderTsNonPassiveRegionLayout(value.nonPassiveRegionBatch)}
 ${renderTsEditingGeometryLayout(value.editingGeometryBatch)}
+${renderTsSemanticsLayout(value.semanticsBatch)}
 export const EDIT_TRANSACTIONS_MAGIC = ${magicNumber(value.streams.editTransactions.magic)} as const;
 export const MAX_EDIT_TRANSACTIONS_BYTES = ${value.streams.editTransactions.maxBytes} as const;
 export const MAX_EDIT_TRANSACTION_INSTRUCTIONS = ${value.limits.editTransactionInstructions} as const;
@@ -513,6 +531,22 @@ function renderTsNonPassiveRegionLayout(layout) {
     )
     .join("\n");
   return `export const NON_PASSIVE_REGION_VERSION = ${layout.version} as const;\nexport const NON_PASSIVE_REGION_HEADER_WORDS = ${layout.headerFields.length} as const;\nexport const NON_PASSIVE_REGION_RECORD_WORDS = ${layout.recordFields.length} as const;\n${header}\n${records}`;
+}
+
+function renderTsSemanticsLayout(layout) {
+  const header = layout.headerFields
+    .map(
+      (field, index) =>
+        `export const SEMANTICS_HEADER_${screamingSnake(field.name)}_INDEX = ${index} as const;`,
+    )
+    .join("\n");
+  const records = layout.recordFields
+    .map(
+      (field, index) =>
+        `export const SEMANTICS_RECORD_${screamingSnake(field.name)}_INDEX = ${index} as const;`,
+    )
+    .join("\n");
+  return `export const SEMANTICS_VERSION = ${layout.version} as const;\nexport const SEMANTICS_HEADER_WORDS = ${layout.headerFields.length} as const;\nexport const SEMANTICS_RECORD_WORDS = ${layout.recordFields.length} as const;\n${header}\n${records}`;
 }
 
 function renderTsEditingGeometryLayout(layout) {

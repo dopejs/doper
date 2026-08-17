@@ -2,6 +2,8 @@ export {
   CanvasFrameSink,
   createCanvasRoot,
   createDefaultRasterCache,
+  parseSemantics,
+  type SemanticNode,
   type CanvasRootOptions,
   type CoreClient,
   type CoreFrameDiagnostics,

@@ -456,16 +456,24 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 
 #### M4-D 语义树与无障碍
 
-状态：**未开始**（仅有 M1 预留的 `semanticRole/Label/Value` prop 与
-`SEMANTICS` 失效域）。
+状态：**已完成（2026-08-17）**。
 
-- Core 语义树导出 API（role/label/value/bounds/focusable）。
-- `@dopejs/doper-a11y`：语义树到 canvas 旁绝对定位 DOM 影子树的映射与增量
-  更新。
-- 通用焦点模型（焦点顺序、焦点环）与编辑态 textbox 语义。
-- 基于 role/label/value 的 E2E 选择器、核心交互用例与键盘契约测试。
-- 编辑状态与语义树 devtools；浏览器/OS/输入法/屏幕阅读器矩阵作为平台资格
-  采集，不阻塞工程完成。
+- Core `semantics()` 导出版本化字节流（role/label/value/世界 bounds/
+  focusable/focused/password 标志），editable 默认 textbox 角色并镜像活动
+  会话文本；密码编辑器的值在 Core 侧即拒绝导出（引擎测试断言）。schema 单源
+  `semanticsBatch` 生成双端常量；Host `parseSemantics` 为 fail-closed 信任
+  边界（版本、保留位、边界、UTF-8、尾部字节 + 敌意字节 fuzz）。
+- `@dopejs/doper-a11y`：`SemanticTreeMirror` 把语义快照增量映射为 canvas 旁
+  绝对定位 DOM 影子树（role/aria-label/textContent/tabindex），并提供
+  `getByRole`/`queryAllByRole` 语义 E2E 选择器；已从 facade 导出。
+- 焦点模型：focusable/focused 随快照导出；镜像元素进入 tab 顺序，聚焦转发到
+  `focusEditable` 激活引擎编辑与原生输入服务（键盘契约浏览器测试）。
+- 真实 Chromium E2E：语义镜像填充、role/name 选择器、密码值不进入 DOM、
+  键盘聚焦转发全部通过；Worker 协议 v6 新增 `doper:semantics` 消息与结构
+  校验。
+- 语义树可观测性以 `onSemantics` 回调与 `dirtySemanticsNodes` 帧诊断提供；
+  独立 devtools UI 与真实屏幕阅读器矩阵归平台资格/后续工具链，不阻塞工程
+  完成。
 
 自动出口命令：`pnpm m4:check` = `pnpm m3:check` + 命中/事件/编辑契约与属性
 测试 + composition replay + 语义树 E2E + `pnpm m4:perf`。

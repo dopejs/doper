@@ -6,6 +6,7 @@ import {
   type MutationSink,
   type RootOptions,
 } from "@dopejs/doper-reconciler";
+import { SemanticTreeMirror } from "@dopejs/doper-a11y";
 import {
   decodeInputBatch,
   encodeInputBatch,
@@ -25,6 +26,7 @@ import {
   type EditingGeometryRect,
   type FrameReport,
   type NonPassiveRegion,
+  type SemanticNode,
   type VirtualRefillRange,
 } from "./main-thread";
 import {
@@ -95,6 +97,9 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly onEditTransaction?: (transaction: EditTransaction) => void;
   readonly onEventTransaction?: (transaction: EventTransaction) => void;
   readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
+  readonly onSemantics?: (nodes: readonly SemanticNode[]) => void;
+  /** Disables the DOM accessibility mirror; enabled whenever the canvas is mounted. */
+  readonly accessibility?: boolean;
   readonly rasterCache?: boolean;
   readonly transport?: HostTransportPolicy;
   readonly workerFactory?: () => Worker;
@@ -152,6 +157,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #nonPassiveRegions: readonly NonPassiveRegion[] = [];
   #editingGeometry: EditingGeometryFrame | undefined;
   #textDragPointer: number | undefined;
+  #semanticMirror: SemanticTreeMirror | undefined;
   #mainFrameTimestamp: number | undefined;
   #recovery: Promise<void> | undefined;
   #recovering = false;
@@ -167,6 +173,17 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#canvas = canvas;
     this.#options = options;
     this.#inputBridge = this.createInputBridge(canvas);
+    if (options.accessibility !== false && typeof canvas.insertAdjacentElement === "function") {
+      this.#semanticMirror = new SemanticTreeMirror(canvas, {
+        onFocusRequest: (nodeId) => {
+          try {
+            this.focusEditable(nodeId);
+          } catch (cause) {
+            this.#options.onHostError?.(toError(cause, "semantic focus request failed"));
+          }
+        },
+      });
+    }
     const capabilities =
       options.capabilities ?? detectHostCapabilities(canvas, options.capabilityEnvironment);
     this.#decision = selectHostTransport(capabilities, options.transport);
@@ -358,6 +375,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       onEventTransaction: (transaction) => this.handleEventTransaction(transaction),
       onNonPassiveRegions: (regions) => this.handleNonPassiveRegions(regions),
       onEditingGeometry: (frame) => this.handleEditingGeometry(frame),
+      onSemantics: (nodes) => this.handleSemantics(nodes),
       sessionId: nextSessionId(),
     };
     const client = new RenderWorkerClient(workerFactory(), clientOptions);
@@ -684,6 +702,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       (transaction) => this.handleEventTransaction(transaction),
       (regions) => this.handleNonPassiveRegions(regions),
       (frame) => this.handleEditingGeometry(frame),
+      (nodes) => this.handleSemantics(nodes),
     );
     this.#frameSink = sink;
     this.#recoverableSink.install(sink);
@@ -889,6 +908,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.closeInputRing();
     this.#frameSink?.dispose();
     this.#inputBridge.dispose();
+    this.#semanticMirror?.dispose();
+    this.#semanticMirror = undefined;
     this.#core?.free?.();
     this.#core = undefined;
     this.#frameSink = undefined;
@@ -922,6 +943,16 @@ class HostedCanvasRootController implements HostedCanvasRoot {
         this.sendInputCommands([{ type: "requestCharacterBounds", nodeId, start, end }]);
       },
     });
+  }
+
+  /** Mirrors the committed semantic tree into the accessibility DOM. */
+  private handleSemantics(nodes: readonly SemanticNode[]): void {
+    try {
+      this.#semanticMirror?.update(nodes);
+    } catch (cause) {
+      this.#options.onHostError?.(toError(cause, "semantic mirror update failed"));
+    }
+    this.#options.onSemantics?.(nodes);
   }
 
   /** Feeds Core-computed editor geometry to the IME bridge automatically. */

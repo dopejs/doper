@@ -26,6 +26,7 @@
     }
   },
   "dependencies": {
+    "@dopejs/doper-a11y": "workspace:*",
     "@dopejs/doper-backend-canvas2d": "workspace:*",
     "@dopejs/doper-editing": "workspace:*",
     "@dopejs/doper-host": "workspace:*",

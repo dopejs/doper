@@ -128,6 +128,11 @@ impl WasmCore {
         self.inner.editing_geometry()
     }
 
+    /// Serializes the committed semantic tree for the accessibility mirror.
+    pub fn semantics(&self) -> Vec<u8> {
+        self.inner.semantics()
+    }
+
     /// Applies logical viewport bounds to the next frame.
     pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<(), JsValue> {
         self.inner.set_viewport(width, height).map_err(js_error)

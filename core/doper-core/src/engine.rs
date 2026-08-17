@@ -18,8 +18,8 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_WORDS,
     InputAffinity, InputBatch, InputCommand, InputEventKind, InputPosition, InputSelection,
-    Mutation, MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind,
-    SystemTextMetricBatch,
+    Mutation, MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind, Prop,
+    ResourceKind, SEMANTICS_VERSION, SystemTextMetricBatch,
 };
 use doper_hit::{HitIndex, HitPoint, WorldGeometry, WorldRect};
 use doper_layout::{BoxConstraints, LayoutEngine};
@@ -1340,6 +1340,80 @@ impl CoreEngine {
             ]);
         }
         words
+    }
+
+    /// Serializes the committed semantic tree for the accessibility mirror.
+    ///
+    /// Records carry world bounds from the last painted frame plus role,
+    /// label, and value strings. Password editors never expose their text.
+    #[must_use]
+    pub fn semantics(&self) -> Vec<u8> {
+        let mut records = 0_u32;
+        let mut payload = Vec::new();
+        let focused = self.editing.active_visual().map(|visual| visual.node);
+        for &node in self.scene.ids() {
+            let role = self.semantic_string(node, Prop::SemanticRole);
+            let label = self.semantic_string(node, Prop::SemanticLabel);
+            let mut value = self.semantic_string(node, Prop::SemanticValue);
+            let editable = self.scene.kind(node) == Some(NodeKind::EditableText);
+            if role.is_none() && label.is_none() && value.is_none() && !editable {
+                continue;
+            }
+            let Some(geometry) = self.hit.geometry(node) else {
+                continue;
+            };
+            let role = role.or(if editable { Some("textbox") } else { None });
+            if editable && value.is_none() {
+                let password = self.editing.session_is_password(node).unwrap_or(false);
+                if !password {
+                    value = self
+                        .editing
+                        .session(node)
+                        .map(doper_edit::EditSession::text);
+                }
+            }
+            let flags = u32::from(editable)
+                | (u32::from(focused == Some(node)) << 1)
+                | (u32::from(editable && self.editing.session_is_password(node).unwrap_or(false))
+                    << 2);
+            let rect = geometry.aabb;
+            let role_bytes = role.unwrap_or_default().as_bytes();
+            let label_bytes = label.unwrap_or_default().as_bytes();
+            let value_bytes = value.unwrap_or_default().as_bytes();
+            for word in [
+                node.raw(),
+                flags,
+                rect.left.to_bits(),
+                rect.top.to_bits(),
+                (rect.right - rect.left).max(0.0).to_bits(),
+                (rect.bottom - rect.top).max(0.0).to_bits(),
+                u32::try_from(role_bytes.len()).unwrap_or(0),
+                u32::try_from(label_bytes.len()).unwrap_or(0),
+                u32::try_from(value_bytes.len()).unwrap_or(0),
+            ] {
+                payload.extend_from_slice(&word.to_le_bytes());
+            }
+            payload.extend_from_slice(role_bytes);
+            payload.extend_from_slice(label_bytes);
+            payload.extend_from_slice(value_bytes);
+            while payload.len() % 4 != 0 {
+                payload.push(0);
+            }
+            records = records.saturating_add(1);
+        }
+        let mut bytes = Vec::with_capacity(8 + payload.len());
+        bytes.extend_from_slice(&SEMANTICS_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&records.to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        bytes
+    }
+
+    fn semantic_string(&self, node: NodeId, prop: Prop) -> Option<&str> {
+        let resource_id = self.scene.ref_prop(node, prop)?;
+        self.scene
+            .resource(resource_id)
+            .filter(|resource| resource.kind == ResourceKind::Utf8String)
+            .and_then(|resource| std::str::from_utf8(&resource.bytes).ok())
     }
 
     /// Returns the latest active editor, selection, and requested character geometry.
@@ -2677,6 +2751,85 @@ mod tests {
             apply(&mut engine, move_caret(D::Up, G::Grapheme, false)),
             [0, 0]
         );
+    }
+
+    #[test]
+    fn semantics_exports_roles_bounds_focus_and_never_password_text() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let mut mutations = vec![
+            Mutation::CreateNode {
+                node_id: id(0),
+                kind: NodeKind::Root,
+                parent: NULL_NODE_ID,
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::CreateNode {
+                node_id: id(1),
+                kind: NodeKind::Container,
+                parent: id(0),
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::CreateNode {
+                node_id: id(2),
+                kind: NodeKind::EditableText,
+                parent: id(1),
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::SetF32 {
+                node_id: id(2),
+                prop: Prop::Width,
+                value: 120.0,
+            },
+            Mutation::SetF32 {
+                node_id: id(2),
+                prop: Prop::Height,
+                value: 40.0,
+            },
+            Mutation::DefineResource {
+                resource_id: 9,
+                kind: ResourceKind::Utf8String,
+                bytes: b"Secret".to_vec(),
+            },
+            Mutation::SetRef {
+                node_id: id(2),
+                prop: Prop::SemanticLabel,
+                resource_id: 9,
+            },
+        ];
+        mutations.extend(editable_resource_mutations("hunter2"));
+        // Password flag on the editable configuration.
+        if let Some(Mutation::ConfigureEditable { flags, .. }) = mutations
+            .iter_mut()
+            .find(|mutation| matches!(mutation, Mutation::ConfigureEditable { .. }))
+        {
+            *flags |= 4;
+        }
+        engine.commit(&frame(1, mutations)).expect("frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(2) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+
+        let bytes = engine.semantics();
+        let word = |index: usize| {
+            u32::from_le_bytes(bytes[index * 4..index * 4 + 4].try_into().expect("word"))
+        };
+        assert_eq!(word(0), 1, "semantics version");
+        assert_eq!(word(1), 1, "one semantic record");
+        assert_eq!(word(2), id(2));
+        // focusable + focused + password.
+        assert_eq!(word(3), 0b111);
+        assert!(f32::from_bits(word(6)) > 0.0, "width");
+        let role_len = word(8) as usize;
+        let label_len = word(9) as usize;
+        let value_len = word(10) as usize;
+        assert_eq!(value_len, 0, "password value must never be exported");
+        let strings = &bytes[11 * 4..11 * 4 + role_len + label_len];
+        assert_eq!(&strings[..role_len], b"textbox");
+        assert_eq!(&strings[role_len..], b"Secret");
     }
 
     #[test]

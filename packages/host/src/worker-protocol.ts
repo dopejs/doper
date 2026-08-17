@@ -5,12 +5,13 @@ import type {
   EditingCharacterBounds,
   EditingGeometryFrame,
   EditingGeometryRect,
+  SemanticNode,
 } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
 import type { EditTransaction, EventTransaction } from "@dopejs/doper-editing";
 
-export const WORKER_PROTOCOL_VERSION = 5 as const;
+export const WORKER_PROTOCOL_VERSION = 6 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
@@ -121,6 +122,12 @@ export interface WorkerEditingGeometryMessage {
   readonly sessionId: number;
 }
 
+export interface WorkerSemanticsMessage {
+  readonly kind: "doper:semantics";
+  readonly nodes: readonly SemanticNode[];
+  readonly sessionId: number;
+}
+
 export interface WorkerFatalMessage {
   readonly error: string;
   readonly kind: "doper:fatal";
@@ -138,6 +145,7 @@ export type RenderWorkerOutboundMessage =
   | WorkerEventTransactionMessage
   | WorkerNonPassiveRegionsMessage
   | WorkerEditingGeometryMessage
+  | WorkerSemanticsMessage
   | WorkerFatalMessage
   | WorkerFrameMessage
   | WorkerPreparedMessage
@@ -212,6 +220,8 @@ export function isRenderWorkerOutboundMessage(
       return Array.isArray(value.regions) && value.regions.every(isNonPassiveRegion);
     case "doper:editing-geometry":
       return isEditingGeometryFrame(value.frame);
+    case "doper:semantics":
+      return Array.isArray(value.nodes) && value.nodes.every(isSemanticNode);
     case "doper:fatal":
       return typeof value.error === "string";
     case "doper:shutdown-complete":
@@ -233,8 +243,24 @@ export function isRenderWorkerOutboundEnvelope(value: unknown): boolean {
     value.kind === "doper:event-transaction" ||
     value.kind === "doper:non-passive-regions" ||
     value.kind === "doper:editing-geometry" ||
+    value.kind === "doper:semantics" ||
     value.kind === "doper:fatal" ||
     value.kind === "doper:shutdown-complete"
+  );
+}
+
+function isSemanticNode(value: unknown): value is SemanticNode {
+  return (
+    isRecord(value) &&
+    isU32(value.nodeId) &&
+    typeof value.focusable === "boolean" &&
+    typeof value.focused === "boolean" &&
+    typeof value.password === "boolean" &&
+    typeof value.role === "string" &&
+    typeof value.label === "string" &&
+    typeof value.value === "string" &&
+    !(value.password && value.value !== "") &&
+    isEditingGeometryRect(value.bounds)
   );
 }
 

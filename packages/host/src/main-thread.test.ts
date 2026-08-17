@@ -12,7 +12,7 @@ import {
 } from "@dopejs/doper-reconciler";
 import { describe, expect, it, vi } from "vitest";
 
-import { CanvasFrameSink, type CoreClient, type FrameReport } from "./main-thread";
+import { CanvasFrameSink, parseSemantics, type CoreClient, type FrameReport } from "./main-thread";
 import { EDIT_TRANSACTIONS_MAGIC, EVENT_TRANSACTIONS_MAGIC } from "./generated";
 import { decodeSystemTextMetricBatch } from "./system-text-metrics";
 
@@ -415,6 +415,64 @@ describe("CanvasFrameSink", () => {
       vi.fn(),
     );
     expect(() => malformed.commit(mutationFrame([]))).toThrow(/layout/u);
+  });
+
+  it("parses semantic snapshots strictly and fails closed on hostile bytes", () => {
+    const encoder = new TextEncoder();
+    const role = encoder.encode("textbox");
+    const label = encoder.encode("Email");
+    const value = encoder.encode("a@b.c");
+    const stringBytes = role.length + label.length + value.length;
+    const padded = stringBytes + ((4 - (stringBytes % 4)) % 4);
+    const bytes = new Uint8Array(8 + 36 + padded);
+    const view = new DataView(bytes.buffer);
+    const bits = (input: number): number => {
+      const scratch = new DataView(new ArrayBuffer(4));
+      scratch.setFloat32(0, input, true);
+      return scratch.getUint32(0, true);
+    };
+    const words = [1, 1, 17, 0b011, bits(4), bits(6), bits(120), bits(30), 7, 5, 5];
+    words.forEach((word, index) => {
+      view.setUint32(index * 4, word, true);
+    });
+    bytes.set(role, 44);
+    bytes.set(label, 44 + role.length);
+    bytes.set(value, 44 + role.length + label.length);
+    expect(parseSemantics(bytes)).toEqual([
+      {
+        nodeId: 17,
+        focusable: true,
+        focused: true,
+        password: false,
+        role: "textbox",
+        label: "Email",
+        value: "a@b.c",
+        bounds: { left: 4, top: 6, width: 120, height: 30 },
+      },
+    ]);
+
+    const reserved = bytes.slice();
+    new DataView(reserved.buffer).setUint32(3 * 4, 0xff, true);
+    expect(() => parseSemantics(reserved)).toThrow(/reserved/u);
+    const truncated = bytes.slice(0, 20);
+    expect(() => parseSemantics(truncated)).toThrow(/truncated/u);
+    const overflow = bytes.slice();
+    new DataView(overflow.buffer).setUint32(8 * 4, 0xffff, true);
+    expect(() => parseSemantics(overflow)).toThrow(/overflow|truncated/u);
+    let state = 0x8badf00d;
+    for (let sample = 0; sample < 500; sample += 1) {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+      const hostile = new Uint8Array((state % 32) * 4);
+      for (let index = 0; index < hostile.length; index += 1) {
+        state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+        hostile[index] = state & 0xff;
+      }
+      try {
+        parseSemantics(hostile);
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+      }
+    }
   });
 
   it("upserts and releases browser text metrics with exact pair reference lifetimes", () => {

@@ -306,6 +306,57 @@
       }
     ]
   },
+  "semanticsBatch": {
+    "version": 1,
+    "headerFields": [
+      {
+        "name": "version",
+        "type": "u32"
+      },
+      {
+        "name": "nodeCount",
+        "type": "u32"
+      }
+    ],
+    "recordFields": [
+      {
+        "name": "nodeId",
+        "type": "u32"
+      },
+      {
+        "name": "flags",
+        "type": "u32"
+      },
+      {
+        "name": "leftBits",
+        "type": "u32"
+      },
+      {
+        "name": "topBits",
+        "type": "u32"
+      },
+      {
+        "name": "widthBits",
+        "type": "u32"
+      },
+      {
+        "name": "heightBits",
+        "type": "u32"
+      },
+      {
+        "name": "roleBytes",
+        "type": "u32"
+      },
+      {
+        "name": "labelBytes",
+        "type": "u32"
+      },
+      {
+        "name": "valueBytes",
+        "type": "u32"
+      }
+    ]
+  },
   "streams": {
     "mutation": {
       "magic": "DOPM",
