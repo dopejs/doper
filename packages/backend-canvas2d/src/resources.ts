@@ -66,6 +66,8 @@ interface TextMeasurementStyle {
 
 /** Immutable string/style resource pair requiring browser system-font metrics. */
 export interface CanvasSystemTextPair {
+  /** Whether Core needs per-code-point advances for this pair. */
+  readonly measureAdvances?: boolean;
   readonly stringId: number;
   readonly styleId: number;
 }
@@ -74,6 +76,15 @@ export interface CanvasSystemTextPair {
 export interface CanvasSystemTextMetric extends CanvasSystemTextPair {
   readonly maxLineWidth: number;
   readonly lineCount: number;
+  /**
+   * Per-code-point advance in string order, empty unless the pair asked for it.
+   *
+   * Core places the fallback caret and resolves pointer hit testing with these,
+   * so a run without them mis-selects words and paints the caret off the glyph.
+   * They cost one `measureText` call per distinct code point, which is why only
+   * editable runs request them.
+   */
+  readonly advances: readonly number[];
 }
 
 /** One portable resource lifecycle action accepted by an atomic backend transaction. */
@@ -399,7 +410,8 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
         }
         context.font = style.font;
         const measured = measureHardLines(context, text);
-        metrics.push(Object.freeze({ ...pair, ...measured }));
+        const advances = pair.measureAdvances === true ? measureAdvances(context, text) : [];
+        metrics.push(Object.freeze({ ...pair, ...measured, advances: Object.freeze(advances) }));
       }
     } finally {
       context.restore();
@@ -622,6 +634,36 @@ function decodeTextStyle(bytes: Uint8Array): {
   const family = decodeUtf8(bytes.subarray(TEXT_STYLE_FAMILY_OFFSET, familyEnd), "font family");
   if (family.length === 0) throw new Error("font family must not be empty");
   return { paintId, fontSize, lineHeight, weight, family };
+}
+
+/**
+ * Measures each code point on its own, memoized by code point.
+ *
+ * Measuring prefixes instead would capture kerning, but Core reduces these to a
+ * per-code-point table so it can keep placing the caret while the live editing
+ * value runs ahead of the Scene string. Positional fidelity would be discarded,
+ * and prefix measurement is quadratic in the field length.
+ */
+function measureAdvances(context: Canvas2DContext, text: string): number[] {
+  const cache = new Map<string, number>();
+  const advances: number[] = [];
+  for (const character of text) {
+    // The caret returns to the line start, so a newline advances nothing.
+    if (character === "\n") {
+      advances.push(0);
+      continue;
+    }
+    let advance = cache.get(character);
+    if (advance === undefined) {
+      advance = context.measureText(character).width;
+      if (!Number.isFinite(advance) || advance < 0) {
+        throw new Error("Canvas measureText returned an invalid advance");
+      }
+      cache.set(character, advance);
+    }
+    advances.push(advance);
+  }
+  return advances;
 }
 
 function measureHardLines(

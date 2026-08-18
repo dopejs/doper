@@ -5,12 +5,12 @@ use crate::codec::{
     validate_encode_instruction_count,
 };
 use crate::{
-    AbiError, MAX_SYSTEM_TEXT_LINES, MAX_SYSTEM_TEXT_METRIC_INSTRUCTIONS,
+    AbiError, MAX_SYSTEM_TEXT_ADVANCES, MAX_SYSTEM_TEXT_LINES, MAX_SYSTEM_TEXT_METRIC_INSTRUCTIONS,
     MAX_SYSTEM_TEXT_METRICS_BYTES, SYSTEM_TEXT_METRICS_MAGIC, StreamKind, SystemTextMetricOpcode,
 };
 
 /// Browser-measured dimensions for one immutable fallback string/style pair.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SystemTextMetric {
     /// Immutable UTF-8 string resource identifier.
     pub string_id: u32,
@@ -20,10 +20,19 @@ pub struct SystemTextMetric {
     pub max_line_width: f32,
     /// Number of hard lines separated by newline characters.
     pub line_count: u32,
+    /// Per-code-point horizontal advance in logical CSS pixels, in string
+    /// order, or empty when the Host did not measure this pair.
+    ///
+    /// Measured only for pairs a Scene node makes editable: caret placement and
+    /// pointer hit testing need real advances, and measuring every text run
+    /// would put one `measureText` call per character on the scroll hot path.
+    /// A newline contributes a zero advance because the caret returns to the
+    /// line start.
+    pub advances: Vec<f32>,
 }
 
 /// One transactional system-text metric cache delta.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SystemTextMetricCommand {
     /// Defines or refreshes a metric for an active immutable resource pair.
     Upsert(SystemTextMetric),
@@ -37,7 +46,7 @@ pub enum SystemTextMetricCommand {
 }
 
 /// One metric cache delta plus versioned instruction flags.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SystemTextMetricInstruction {
     /// Instruction flags. ABI v1 requires zero.
     pub flags: u8,
@@ -138,12 +147,15 @@ impl SystemTextMetricBatch {
                 SystemTextMetricOpcode::UpsertSystemTextMetric => {
                     let max_line_width = reader.read_f32()?;
                     let line_count = reader.read_u32()?;
-                    validate_metric(max_line_width, line_count)?;
+                    let advance_count = reader.read_u32()?;
+                    let advances = read_advances(&mut reader, advance_count)?;
+                    validate_metric(max_line_width, line_count, &advances)?;
                     SystemTextMetricCommand::Upsert(SystemTextMetric {
                         string_id,
                         style_id,
                         max_line_width,
                         line_count,
+                        advances,
                     })
                 }
                 SystemTextMetricOpcode::ReleaseSystemTextMetric => {
@@ -187,7 +199,7 @@ impl SystemTextMetricBatch {
                     "system text metric instruction flags must be zero",
                 ));
             }
-            let (string_id, style_id) = pair(instruction.command);
+            let (string_id, style_id) = pair(&instruction.command);
             nonzero_id(string_id, "text metric string id must be non-zero")?;
             nonzero_id(style_id, "text metric style id must be non-zero")?;
             if !seen.insert((string_id, style_id)) {
@@ -195,22 +207,28 @@ impl SystemTextMetricBatch {
                     "text metric resource pair occurs more than once in a batch",
                 ));
             }
-            match instruction.command {
+            match &instruction.command {
                 SystemTextMetricCommand::Upsert(metric) => {
-                    validate_metric(metric.max_line_width, metric.line_count)?;
+                    validate_metric(metric.max_line_width, metric.line_count, &metric.advances)?;
+                    let advance_count = u32::try_from(metric.advances.len())
+                        .map_err(|_| AbiError::ArithmeticOverflow)?;
                     writer.instruction(SystemTextMetricOpcode::UpsertSystemTextMetric as u8, 0);
                     writer.u32(metric.string_id);
                     writer.u32(metric.style_id);
                     writer.f32(metric.max_line_width)?;
                     writer.u32(metric.line_count);
+                    writer.u32(advance_count);
+                    for advance in &metric.advances {
+                        writer.f32(*advance)?;
+                    }
                 }
                 SystemTextMetricCommand::Release {
                     string_id,
                     style_id,
                 } => {
                     writer.instruction(SystemTextMetricOpcode::ReleaseSystemTextMetric as u8, 0);
-                    writer.u32(string_id);
-                    writer.u32(style_id);
+                    writer.u32(*string_id);
+                    writer.u32(*style_id);
                 }
             }
         }
@@ -218,17 +236,35 @@ impl SystemTextMetricBatch {
     }
 }
 
-fn pair(command: SystemTextMetricCommand) -> (u32, u32) {
+fn pair(command: &SystemTextMetricCommand) -> (u32, u32) {
     match command {
         SystemTextMetricCommand::Upsert(metric) => (metric.string_id, metric.style_id),
         SystemTextMetricCommand::Release {
             string_id,
             style_id,
-        } => (string_id, style_id),
+        } => (*string_id, *style_id),
     }
 }
 
-fn validate_metric(max_line_width: f32, line_count: u32) -> Result<(), AbiError> {
+/// Reads a declared advance array, bounding it before it can drive an
+/// allocation. The stream is untrusted even when this project produced it.
+fn read_advances(reader: &mut Reader<'_>, declared: u32) -> Result<Vec<f32>, AbiError> {
+    if declared > MAX_SYSTEM_TEXT_ADVANCES {
+        return Err(AbiError::InvalidValue(
+            "system text advance count is outside the supported limit",
+        ));
+    }
+    let count = usize::try_from(declared).map_err(|_| AbiError::ArithmeticOverflow)?;
+    // Reserve against the bytes that actually remain, never the declared count:
+    // a truncated stream must fail on the read, not on a huge allocation.
+    let mut advances = Vec::with_capacity(count.min(reader.remaining() / 4));
+    for _ in 0..count {
+        advances.push(reader.read_f32()?);
+    }
+    Ok(advances)
+}
+
+fn validate_metric(max_line_width: f32, line_count: u32, advances: &[f32]) -> Result<(), AbiError> {
     if !max_line_width.is_finite() || max_line_width < 0.0 {
         return Err(AbiError::InvalidValue(
             "system text width must be finite and non-negative",
@@ -237,6 +273,19 @@ fn validate_metric(max_line_width: f32, line_count: u32) -> Result<(), AbiError>
     if line_count == 0 || line_count > MAX_SYSTEM_TEXT_LINES {
         return Err(AbiError::InvalidValue(
             "system text line count is outside the supported limit",
+        ));
+    }
+    if advances.len() > MAX_SYSTEM_TEXT_ADVANCES as usize {
+        return Err(AbiError::InvalidValue(
+            "system text advance count is outside the supported limit",
+        ));
+    }
+    if advances
+        .iter()
+        .any(|advance| !advance.is_finite() || *advance < 0.0)
+    {
+        return Err(AbiError::InvalidValue(
+            "system text advance must be finite and non-negative",
         ));
     }
     Ok(())
@@ -256,9 +305,15 @@ fn validate_instruction_size(
     end: usize,
 ) -> Result<(), AbiError> {
     let actual = end.checked_sub(start).ok_or(AbiError::ArithmeticOverflow)?;
-    if let Some(expected) = opcode.fixed_bytes()
-        && actual != expected
-    {
+    // Fixed-size instructions must match exactly; a variable-size one still has
+    // a floor below which its fixed fields could not have been read.
+    let expected = match opcode.fixed_bytes() {
+        Some(fixed) if actual != fixed => Some(fixed),
+        Some(_) => None,
+        None if actual < opcode.minimum_bytes() => Some(opcode.minimum_bytes()),
+        None => None,
+    };
+    if let Some(expected) = expected {
         return Err(AbiError::InstructionLengthMismatch {
             opcode: opcode as u8,
             offset: start,
@@ -285,6 +340,7 @@ mod tests {
                         style_id: 9,
                         max_line_width: 123.5,
                         line_count: 2,
+                        advances: vec![6.5, 0.0, 12.0],
                     }),
                 },
                 SystemTextMetricInstruction {
@@ -313,7 +369,9 @@ mod tests {
     #[test]
     fn rejects_duplicate_invalid_and_truncated_records() {
         let mut duplicate = canonical();
-        duplicate.instructions.push(duplicate.instructions[0]);
+        duplicate
+            .instructions
+            .push(duplicate.instructions[0].clone());
         assert!(matches!(
             duplicate.encode(),
             Err(AbiError::InvalidValue(
@@ -327,18 +385,35 @@ mod tests {
                 style_id: 1,
                 max_line_width: 1.0,
                 line_count: 1,
+                advances: Vec::new(),
             },
             SystemTextMetric {
                 string_id: 1,
                 style_id: 1,
                 max_line_width: -1.0,
                 line_count: 1,
+                advances: Vec::new(),
             },
             SystemTextMetric {
                 string_id: 1,
                 style_id: 1,
                 max_line_width: 1.0,
                 line_count: 0,
+                advances: Vec::new(),
+            },
+            SystemTextMetric {
+                string_id: 1,
+                style_id: 1,
+                max_line_width: 1.0,
+                line_count: 1,
+                advances: vec![f32::NAN],
+            },
+            SystemTextMetric {
+                string_id: 1,
+                style_id: 1,
+                max_line_width: 1.0,
+                line_count: 1,
+                advances: vec![-1.0],
             },
         ] {
             let batch = SystemTextMetricBatch {
@@ -352,6 +427,56 @@ mod tests {
 
         let encoded = canonical().encode().expect("encode");
         assert!(SystemTextMetricBatch::decode(&encoded[..encoded.len() - 1]).is_err());
+    }
+
+    #[test]
+    fn rejects_hostile_advance_counts_without_allocating() {
+        let encoded = canonical().encode().expect("encode");
+        // The Upsert advance count sits after opcode header, both ids, the width
+        // and the line count: 16 stream header + 4 + 8 + 4 + 4.
+        let count_offset = 36;
+        assert_eq!(
+            u32::from_le_bytes(
+                encoded[count_offset..count_offset + 4]
+                    .try_into()
+                    .expect("count")
+            ),
+            3
+        );
+
+        let mut over_limit = encoded.clone();
+        over_limit[count_offset..count_offset + 4]
+            .copy_from_slice(&(MAX_SYSTEM_TEXT_ADVANCES + 1).to_le_bytes());
+        assert_eq!(
+            SystemTextMetricBatch::decode(&over_limit),
+            Err(AbiError::InvalidValue(
+                "system text advance count is outside the supported limit"
+            ))
+        );
+
+        // Under the limit but past the payload: this must fail on the read, not
+        // on a reservation sized by the attacker's number.
+        let mut beyond_payload = encoded;
+        beyond_payload[count_offset..count_offset + 4]
+            .copy_from_slice(&1_000_000_u32.to_le_bytes());
+        assert!(SystemTextMetricBatch::decode(&beyond_payload).is_err());
+
+        // Reachable only from a hand-built batch, so assert the guards directly.
+        assert_eq!(
+            validate_metric(1.0, 1, &vec![0.0; MAX_SYSTEM_TEXT_ADVANCES as usize + 1]),
+            Err(AbiError::InvalidValue(
+                "system text advance count is outside the supported limit"
+            ))
+        );
+        assert_eq!(
+            validate_instruction_size(SystemTextMetricOpcode::UpsertSystemTextMetric, 0, 20),
+            Err(AbiError::InstructionLengthMismatch {
+                opcode: SystemTextMetricOpcode::UpsertSystemTextMetric as u8,
+                offset: 0,
+                expected: 24,
+                actual: 20,
+            })
+        );
     }
 
     #[test]
@@ -369,13 +494,17 @@ mod tests {
             })
         );
 
+        // More instructions than the remaining bytes could possibly hold, even
+        // at the smallest instruction size. Derived from the encoding so growing
+        // an instruction does not silently turn this into a different assertion.
+        let payload_ceiling = u32::try_from((encoded.len() - 16) / 12).expect("ceiling");
         let mut impossible_for_payload = encoded.clone();
-        impossible_for_payload[12..16].copy_from_slice(&3_u32.to_le_bytes());
+        impossible_for_payload[12..16].copy_from_slice(&(payload_ceiling + 1).to_le_bytes());
         assert_eq!(
             SystemTextMetricBatch::decode(&impossible_for_payload),
             Err(AbiError::InstructionCountTooLarge {
-                declared: 3,
-                maximum: 2,
+                declared: payload_ceiling + 1,
+                maximum: payload_ceiling,
             })
         );
 
@@ -403,9 +532,12 @@ mod tests {
 
         let encoded = canonical().encode().expect("encode");
 
+        // The trailing Release instruction ends the stream, so its two resource
+        // ids are the last eight bytes whatever the Upsert before it encodes to.
         let mut duplicate_pair = encoded.clone();
-        duplicate_pair[40..44].copy_from_slice(&7_u32.to_le_bytes());
-        duplicate_pair[44..48].copy_from_slice(&9_u32.to_le_bytes());
+        let ids = duplicate_pair.len() - 8;
+        duplicate_pair[ids..ids + 4].copy_from_slice(&7_u32.to_le_bytes());
+        duplicate_pair[ids + 4..ids + 8].copy_from_slice(&9_u32.to_le_bytes());
         assert_eq!(
             SystemTextMetricBatch::decode(&duplicate_pair),
             Err(AbiError::InvalidValue(

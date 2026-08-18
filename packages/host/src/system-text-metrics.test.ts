@@ -10,7 +10,7 @@ import {
 const canonical: readonly SystemTextMetricDelta[] = [
   {
     type: "upsert",
-    metric: { stringId: 7, styleId: 9, maxLineWidth: 123.5, lineCount: 2 },
+    metric: { stringId: 7, styleId: 9, maxLineWidth: 123.5, lineCount: 2, advances: [6.5, 0, 12] },
   },
   { type: "release", stringId: 8, styleId: 10 },
 ];
@@ -27,11 +27,13 @@ describe("system text metric batches", () => {
       /more than once/u,
     );
     for (const metric of [
-      { stringId: 0, styleId: 1, maxLineWidth: 1, lineCount: 1 },
-      { stringId: 1, styleId: 1, maxLineWidth: -1, lineCount: 1 },
-      { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 0 },
-      { stringId: 1, styleId: 1, maxLineWidth: Number.NaN, lineCount: 1 },
-      { stringId: 1, styleId: 1, maxLineWidth: Number.MAX_VALUE, lineCount: 1 },
+      { stringId: 0, styleId: 1, maxLineWidth: 1, lineCount: 1, advances: [] },
+      { stringId: 1, styleId: 1, maxLineWidth: -1, lineCount: 1, advances: [] },
+      { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 0, advances: [] },
+      { stringId: 1, styleId: 1, maxLineWidth: Number.NaN, lineCount: 1, advances: [] },
+      { stringId: 1, styleId: 1, maxLineWidth: Number.MAX_VALUE, lineCount: 1, advances: [] },
+      { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 1, advances: [Number.NaN] },
+      { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 1, advances: [-1] },
     ]) {
       expect(() => encodeSystemTextMetricBatch([{ type: "upsert", metric }])).toThrow(
         SystemTextMetricError,

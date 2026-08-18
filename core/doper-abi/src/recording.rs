@@ -223,6 +223,7 @@ mod tests {
                     style_id: 9,
                     max_line_width: 42.0,
                     line_count: 1,
+                    advances: Vec::new(),
                 }),
             }],
         }

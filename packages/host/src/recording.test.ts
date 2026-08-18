@@ -124,7 +124,7 @@ function systemTextMetricBytes(): Uint8Array {
   return encodeSystemTextMetricBatch([
     {
       type: "upsert",
-      metric: { stringId: 7, styleId: 9, maxLineWidth: 42, lineCount: 1 },
+      metric: { stringId: 7, styleId: 9, maxLineWidth: 42, lineCount: 1, advances: [] },
     },
   ]);
 }

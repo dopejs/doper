@@ -1,5 +1,6 @@
 import {
   ABI_VERSION,
+  MAX_SYSTEM_TEXT_ADVANCES,
   MAX_SYSTEM_TEXT_LINES,
   MAX_SYSTEM_TEXT_METRIC_INSTRUCTIONS,
   MAX_SYSTEM_TEXT_METRICS_BYTES,
@@ -21,6 +22,16 @@ export interface SystemTextMetric {
   readonly styleId: number;
   readonly maxLineWidth: number;
   readonly lineCount: number;
+  /**
+   * Per-code-point horizontal advance in logical CSS pixels, in string order,
+   * or empty when this pair was not measured.
+   *
+   * Core needs these to place a caret and to resolve a pointer to a text offset
+   * on the fallback path. Measuring is one `measureText` call per code point, so
+   * only pairs a Scene node makes editable are measured; every other run keeps
+   * an empty array and Core estimates. A newline contributes a zero advance.
+   */
+  readonly advances: readonly number[];
 }
 
 /** One transactional system-font metric cache delta. */
@@ -46,7 +57,8 @@ export function encodeSystemTextMetricBatch(deltas: readonly SystemTextMetricDel
         delta.type === "upsert"
           ? SystemTextMetricOpcode.UpsertSystemTextMetric
           : SystemTextMetricOpcode.ReleaseSystemTextMetric;
-      return checkedAdd(total, requiredFixedBytes(opcode));
+      const advances = delta.type === "upsert" ? delta.metric.advances.length : 0;
+      return checkedAdd(total, checkedAdd(instructionBytes(opcode), advances * 4));
     }, 0);
   if (bytes > MAX_SYSTEM_TEXT_METRICS_BYTES) fail("text metric batch exceeds maximum size");
   const output = new Uint8Array(bytes);
@@ -72,6 +84,8 @@ export function encodeSystemTextMetricBatch(deltas: readonly SystemTextMetricDel
       writer.u32(delta.metric.styleId);
       writer.f32(delta.metric.maxLineWidth);
       writer.u32(delta.metric.lineCount);
+      writer.u32(delta.metric.advances.length);
+      for (const advance of delta.metric.advances) writer.f32(advance);
     } else {
       writer.instruction(SystemTextMetricOpcode.ReleaseSystemTextMetric);
       writer.u32(delta.stringId);
@@ -120,11 +134,23 @@ export function decodeSystemTextMetricBatch(input: Uint8Array): SystemTextMetric
     if (seen.has(key)) fail("text metric resource pair occurs more than once in a batch");
     seen.add(key);
     if (opcode === SystemTextMetricOpcode.UpsertSystemTextMetric) {
+      const maxLineWidth = reader.f32();
+      const lineCount = reader.u32();
+      const advanceCount = reader.u32();
+      if (advanceCount > MAX_SYSTEM_TEXT_ADVANCES) {
+        fail("text metric advance count is outside the supported limit");
+      }
+      // Bound against the bytes that remain before allocating: a declared count
+      // must never size an array ahead of the payload backing it.
+      if (advanceCount > Math.floor(reader.remaining / 4)) fail("truncated text metric batch");
+      const advances: number[] = [];
+      for (let index = 0; index < advanceCount; index += 1) advances.push(reader.f32());
       const metric = {
         stringId,
         styleId,
-        maxLineWidth: reader.f32(),
-        lineCount: reader.u32(),
+        maxLineWidth,
+        lineCount,
+        advances: Object.freeze(advances),
       };
       validateMetric(metric);
       deltas.push({ type: "upsert", metric: Object.freeze(metric) });
@@ -134,8 +160,7 @@ export function decodeSystemTextMetricBatch(input: Uint8Array): SystemTextMetric
       fail(`unknown text metric opcode ${String(opcode)}`);
     }
     const actual = reader.offset - start;
-    const expected = requiredFixedBytes(opcode);
-    if (actual !== expected) fail("text metric instruction length mismatch");
+    if (actual < instructionBytes(opcode)) fail("text metric instruction length mismatch");
     // A declared length that disagrees with what was consumed would let a
     // skipping reader and this one disagree about where the next one starts.
     if (reader.offset !== header.end) fail("instruction length does not match its payload");
@@ -161,6 +186,14 @@ function validateMetric(metric: SystemTextMetric): void {
   ) {
     fail("text metric line count is outside the supported limit");
   }
+  if (metric.advances.length > MAX_SYSTEM_TEXT_ADVANCES) {
+    fail("text metric advance count is outside the supported limit");
+  }
+  for (const advance of metric.advances) {
+    if (!Number.isFinite(advance) || !Number.isFinite(Math.fround(advance)) || advance < 0) {
+      fail("text metric advance must be finite, non-negative, and representable as f32");
+    }
+  }
 }
 
 function validateId(value: number, label: string): void {
@@ -183,10 +216,11 @@ function systemTextMetricOpcode(value: number): SystemTextMetricOpcode {
   return fail(`unknown text metric opcode ${String(value)}`);
 }
 
-function requiredFixedBytes(opcode: SystemTextMetricOpcode): number {
+/** Bytes an instruction occupies before any variable-size payload. */
+function instructionBytes(opcode: SystemTextMetricOpcode): number {
   const layout = SYSTEM_TEXT_METRIC_LAYOUTS[opcode];
-  if (layout === undefined || layout.fixedBytes === null) fail("unknown text metric opcode");
-  return layout.fixedBytes;
+  if (layout === undefined) fail("unknown text metric opcode");
+  return layout.minimumBytes;
 }
 
 class Reader {

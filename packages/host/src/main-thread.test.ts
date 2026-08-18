@@ -619,7 +619,10 @@ describe("CanvasFrameSink", () => {
     expect(decodeSystemTextMetricBatch(initialMetrics)).toEqual([
       {
         type: "upsert",
-        metric: { stringId: 2, styleId: 3, maxLineWidth: 40, lineCount: 2 },
+        // No node is editable, so Core gets dimensions without per-code-point
+        // advances: measuring those for every run would put one measureText call
+        // per distinct code point on the scroll hot path.
+        metric: { stringId: 2, styleId: 3, maxLineWidth: 40, lineCount: 2, advances: [] },
       },
     ]);
 
@@ -673,9 +676,64 @@ describe("CanvasFrameSink", () => {
     expect(decodeSystemTextMetricBatch(refreshedMetrics)).toEqual([
       {
         type: "upsert",
-        metric: { stringId: 2, styleId: 3, maxLineWidth: 40, lineCount: 1 },
+        metric: { stringId: 2, styleId: 3, maxLineWidth: 40, lineCount: 1, advances: [] },
       },
     ]);
+  });
+
+  it("measures per-code-point advances once a node becomes editable", () => {
+    const commit = vi.fn((_mutations: Uint8Array, _metrics?: Uint8Array) => emptyDisplayList());
+    const sink = new CanvasFrameSink(fakeContext([], []), { commit });
+    const textNode = 0x0010_0001;
+    sink.commit(
+      mutationFrame([
+        { type: "createNode", nodeId: textNode, kind: NodeKind.Text, parent: 0, beforeSibling: 0 },
+        { type: "defineResource", resourceId: 1, kind: ResourceKind.Paint, bytes: solidPaint() },
+        {
+          type: "defineResource",
+          resourceId: 2,
+          kind: ResourceKind.Utf8String,
+          bytes: new TextEncoder().encode("ab"),
+        },
+        {
+          type: "defineResource",
+          resourceId: 3,
+          kind: ResourceKind.TextStyle,
+          bytes: textStyle(1, 16, 20, 400, "Inter"),
+        },
+        { type: "setTextRun", nodeId: textNode, stringId: 2, styleId: 3 },
+      ]),
+    );
+    expect(decodeSystemTextMetricBatch(commit.mock.calls[0]?.[1] ?? new Uint8Array())).toEqual([
+      {
+        type: "upsert",
+        metric: { stringId: 2, styleId: 3, maxLineWidth: 20, lineCount: 1, advances: [] },
+      },
+    ]);
+
+    // The pair is unchanged, so nothing new is defined; only the node turning
+    // editable makes Core need advances, and that alone must force a remeasure.
+    sink.commit(
+      mutationFrame([
+        {
+          type: "configureEditable",
+          nodeId: textNode,
+          revision: 1n,
+          flags: 1,
+          maxGraphemes: 0,
+        },
+      ]),
+    );
+    expect(decodeSystemTextMetricBatch(commit.mock.calls[1]?.[1] ?? new Uint8Array())).toEqual([
+      {
+        type: "upsert",
+        metric: { stringId: 2, styleId: 3, maxLineWidth: 20, lineCount: 1, advances: [10, 10] },
+      },
+    ]);
+
+    // Already measured with advances: a later frame must not remeasure it.
+    sink.commit(mutationFrame([]));
+    expect(commit.mock.calls[2]?.[1]).toBeUndefined();
   });
 });
 

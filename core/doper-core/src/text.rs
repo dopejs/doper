@@ -9,7 +9,7 @@ use doper_abi::{
 };
 use doper_layout::{BoxConstraints, IntrinsicMeasurer, Size};
 use doper_paint::{EditorDecoration, ShapedGlyphRun, TextPaintResolver, TextStyleResource};
-use doper_scene::{NodeId, Scene};
+use doper_scene::{NodeId, Scene, TextRun};
 use doper_text::{CaretStop, FontFace, GlyphAtlas, TextEngine, TextLayout, TextOptions};
 
 use crate::editing::ActiveEditorVisual;
@@ -109,11 +109,7 @@ impl CoreTextSystem {
             .filter(|resource| resource.kind == ResourceKind::TextStyle)
             .and_then(|resource| TextStyleResource::decode(text_run.style_id, resource).ok())?;
         let value = self.text_value(scene, node)?;
-        Some(approximate_caret_stops(
-            &value,
-            style.font_size,
-            style.line_height,
-        ))
+        Some(self.fallback_caret_stops(scene, text_run, &value, &style))
     }
 
     pub(crate) fn set_edit_overrides(&mut self, overrides: HashMap<NodeId, Arc<str>>) {
@@ -147,7 +143,7 @@ impl CoreTextSystem {
             let Some(value) = self.text_value(scene, visual.node) else {
                 return;
             };
-            let carets = approximate_caret_stops(&value, style.font_size, style.line_height);
+            let carets = self.fallback_caret_stops(scene, text_run, &value, &style);
             decorations_from_carets(&carets, visual, caret_visible)
         };
         self.editor_decorations.insert(visual.node, decorations);
@@ -160,12 +156,12 @@ impl CoreTextSystem {
         let mut released = 0_usize;
         let mut inserted = 0_usize;
         for instruction in &batch.instructions {
-            match instruction.command {
+            match &instruction.command {
                 SystemTextMetricCommand::Release {
                     string_id,
                     style_id,
                 } => {
-                    if !self.system_metrics.contains_key(&(string_id, style_id)) {
+                    if !self.system_metrics.contains_key(&(*string_id, *style_id)) {
                         return Err("system text metric release references an unavailable pair");
                     }
                     released = released.saturating_add(1);
@@ -629,8 +625,20 @@ fn closest_caret(carets: &[CaretStop], offset: u32) -> Option<CaretStop> {
         .min_by_key(|caret| (i64::from(caret.utf16_offset) - i64::from(offset)).unsigned_abs())
 }
 
-fn approximate_caret_stops(text: &str, font_size: f32, line_height: f32) -> Vec<CaretStop> {
-    let advance = font_size * 0.6;
+/// Builds fallback caret stops from measured per-code-point advances.
+///
+/// A code point missing from `advances` falls back to `font_size * 0.6`, which
+/// is roughly right for Latin and badly wrong for full-width scripts. These
+/// stops both paint the caret and resolve pointer hit testing to a text offset,
+/// so an unmeasured run mis-selects words as well as painting the caret off the
+/// glyph. The Host measures every run a Scene node makes editable.
+fn caret_stops(
+    text: &str,
+    advances: Option<&HashMap<char, f32>>,
+    font_size: f32,
+    line_height: f32,
+) -> Vec<CaretStop> {
+    let estimate = font_size * 0.6;
     let mut carets = Vec::with_capacity(text.chars().count().saturating_add(1));
     let mut utf16 = 0_u32;
     let mut line = 0_usize;
@@ -649,7 +657,9 @@ fn approximate_caret_stops(text: &str, font_size: f32, line_height: f32) -> Vec<
             line = line.saturating_add(1);
             x = 0.0;
         } else {
-            x += advance;
+            x += advances
+                .and_then(|measured| measured.get(&character).copied())
+                .unwrap_or(estimate);
         }
         carets.push(CaretStop {
             byte_offset: byte_offset.saturating_add(character.len_utf8()),
@@ -664,6 +674,43 @@ fn approximate_caret_stops(text: &str, font_size: f32, line_height: f32) -> Vec<
 }
 
 impl CoreTextSystem {
+    /// Caret stops for a run that has no shaped layout yet, using the Host's
+    /// measured advances when it has published them for this pair.
+    fn fallback_caret_stops(
+        &self,
+        scene: &Scene,
+        run: TextRun,
+        value: &str,
+        style: &TextStyleResource,
+    ) -> Vec<CaretStop> {
+        let table = self.advance_table(scene, run);
+        caret_stops(value, table.as_ref(), style.font_size, style.line_height)
+    }
+
+    /// Maps every code point the Host measured for this pair to its advance.
+    ///
+    /// Advances arrive positionally, against the Scene string. The caret is
+    /// placed against the live editing value, which runs ahead of that string
+    /// until the Shell round-trips the keystroke, so a positional lookup would
+    /// desynchronize on every keypress. Reducing to a per-code-point table
+    /// survives that window; a code point typed but not yet measured falls back
+    /// to the estimate for the one or two frames before it arrives.
+    fn advance_table(&self, scene: &Scene, run: TextRun) -> Option<HashMap<char, f32>> {
+        let metric = self.system_metrics.get(&(run.string_id, run.style_id))?;
+        if metric.advances.is_empty() {
+            return None;
+        }
+        let resource = scene
+            .resource(run.string_id)
+            .filter(|resource| resource.kind == ResourceKind::Utf8String)?;
+        let text = std::str::from_utf8(&resource.bytes).ok()?;
+        Some(
+            text.chars()
+                .zip(metric.advances.iter().copied())
+                .collect::<HashMap<char, f32>>(),
+        )
+    }
+
     fn candidate_mut(&mut self) -> &mut HashMap<NodeId, PreparedRun> {
         self.candidate.get_or_insert_with(|| self.active.clone())
     }

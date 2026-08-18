@@ -59,8 +59,29 @@ describe("Canvas2DResourceRegistry", () => {
 
     expect(
       resources.measureSystemTextPairs(context, actions, [{ stringId: 2, styleId: 3 }]),
-    ).toEqual([{ stringId: 2, styleId: 3, maxLineWidth: 28, lineCount: 2 }]);
+    ).toEqual([{ stringId: 2, styleId: 3, maxLineWidth: 28, lineCount: 2, advances: [] }]);
+    // Two calls, one per hard line: an ordinary pair must not pay for advances.
     expect(fonts).toEqual(['400 16px "Inter"', '400 16px "Inter"']);
+
+    fonts.length = 0;
+    expect(
+      resources.measureSystemTextPairs(context, actions, [
+        { stringId: 2, styleId: 3, measureAdvances: true },
+      ]),
+    ).toEqual([
+      // The newline advances nothing because the caret returns to the line start.
+      {
+        stringId: 2,
+        styleId: 3,
+        measureAdvances: true,
+        maxLineWidth: 28,
+        lineCount: 2,
+        advances: [7, 7, 7, 7, 0, 7, 7],
+      },
+    ]);
+    // Two lines plus one call per distinct code point, not per occurrence: "x"
+    // appears twice and is measured once.
+    expect(fonts).toHaveLength(7);
     expect(resources.getText(2)).toBeUndefined();
     expect(resources.getTextStyle(3)).toBeUndefined();
   });

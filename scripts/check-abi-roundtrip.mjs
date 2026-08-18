@@ -111,7 +111,13 @@ async function checkAbiRoundtrip() {
   const textMetricBytes = host.encodeSystemTextMetricBatch([
     {
       type: "upsert",
-      metric: { stringId: 7, styleId: 9, maxLineWidth: 123.5, lineCount: 2 },
+      metric: {
+        stringId: 7,
+        styleId: 9,
+        maxLineWidth: 123.5,
+        lineCount: 2,
+        advances: [6.5, 0, 12],
+      },
     },
     { type: "release", stringId: 8, styleId: 10 },
   ]);

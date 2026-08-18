@@ -2894,6 +2894,62 @@ mod tests {
     }
 
     #[test]
+    fn measured_advances_place_the_caret_where_the_glyphs_actually_are() {
+        // Four full-width code points at 16px advance 16px each; the unmeasured
+        // estimate is font_size * 0.6 = 9.6px, so by the fourth stop the two
+        // models disagree by more than a whole glyph. The same stops resolve a
+        // pointer to a text offset, so an unmeasured run also selects the wrong
+        // word on a double click.
+        let text = "中文备注";
+        let measured = SystemTextMetricCommand::Upsert(SystemTextMetric {
+            string_id: 3,
+            style_id: 2,
+            max_line_width: 64.0,
+            line_count: 1,
+            advances: vec![16.0, 16.0, 16.0, 16.0],
+        });
+
+        let offset_at = |metrics: Option<Vec<u8>>| -> u32 {
+            let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+            engine
+                .commit_with_system_text_metrics(
+                    &editable_tree_with_text(1, text),
+                    metrics.as_deref(),
+                )
+                .expect("frame");
+            engine
+                .input(&input(
+                    1,
+                    vec![InputCommand::FocusEditable { node_id: id(1) }],
+                ))
+                .expect("focus");
+            engine.take_edit_transactions().expect("drain focus");
+            engine
+                .input(&input(
+                    2,
+                    vec![InputCommand::PlaceCaret {
+                        node_id: id(1),
+                        // Inside the fourth glyph, which spans 48..64 when measured.
+                        position: [44.0, 0.0],
+                        flags: 0,
+                    }],
+                ))
+                .expect("place caret");
+            let bytes = engine.take_edit_transactions().expect("edit bytes");
+            doper_abi::EditTransactionBatch::decode(&bytes)
+                .expect("decode")
+                .records
+                .last()
+                .expect("record")
+                .selection[0]
+        };
+
+        assert_eq!(offset_at(Some(system_metrics(measured))), 3);
+        // Without advances the estimate runs out of string and clamps past it.
+        assert_eq!(offset_at(None), 4);
+    }
+
+    #[test]
     fn move_caret_navigates_graphemes_words_lines_and_desired_column() {
         use doper_abi::{CaretDirection as D, CaretGranularity as G};
         let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
@@ -3432,6 +3488,7 @@ mod tests {
             style_id: 2,
             max_line_width: 80.0,
             line_count: 2,
+            advances: Vec::new(),
         });
         let output = engine
             .commit_with_system_text_metrics(
@@ -3467,6 +3524,7 @@ mod tests {
                     style_id: 2,
                     max_line_width: 120.0,
                     line_count: 3,
+                    advances: Vec::new(),
                 },
             )))
             .expect("metric refresh")

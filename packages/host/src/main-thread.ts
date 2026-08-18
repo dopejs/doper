@@ -288,6 +288,18 @@ export class CanvasFrameSink implements MutationSink {
   readonly #nodeParents = new Map<number, number>();
   readonly #nodeTextPairs = new Map<number, CanvasSystemTextPair>();
   readonly #textPairState = new Map<string, TextPairState>();
+  /**
+   * Nodes the Shell has made editable.
+   *
+   * Their text runs are the only ones measured per code point: Core needs real
+   * advances to place a caret and to resolve a pointer to a text offset, and
+   * measuring every run would put one `measureText` call per distinct code point
+   * on the scroll hot path. The reconciler never un-configures an editable node,
+   * so entries leave only with the node itself.
+   */
+  readonly #editableNodes = new Set<number>();
+  /** Pair keys currently measured with advances, to detect a node turning editable. */
+  #advancePairs: ReadonlySet<string> = new Set();
   readonly #onFrame: ((report: FrameReport) => void) | undefined;
   readonly #onVirtualRefills: ((requests: readonly VirtualRefillRange[]) => void) | undefined;
   readonly #rasterCache: RasterTileCache<ReplayStats> | undefined;
@@ -352,8 +364,16 @@ export class CanvasFrameSink implements MutationSink {
 
   /** Commits Core before mutating backend state or touching Canvas pixels. */
   public commit(bytes: Uint8Array): void {
-    const { actions, frameSeq, metricDeltas, nextKinds, nextParents, nextTextPairs } =
-      this.preflightResources(bytes);
+    const {
+      actions,
+      frameSeq,
+      metricDeltas,
+      nextAdvancePairs,
+      nextEditableNodes,
+      nextKinds,
+      nextParents,
+      nextTextPairs,
+    } = this.preflightResources(bytes);
     const metrics = metricDeltas.upserts.length
       ? this.#resources.measureSystemTextPairs(this.#context, actions, metricDeltas.upserts)
       : [];
@@ -388,6 +408,8 @@ export class CanvasFrameSink implements MutationSink {
     replaceMap(this.#nodeParents, nextParents);
     replaceMap(this.#nodeTextPairs, nextTextPairs);
     replaceMap(this.#textPairState, countTextPairs(nextTextPairs));
+    replaceSet(this.#editableNodes, nextEditableNodes);
+    this.#advancePairs = nextAdvancePairs;
     if (actions.length > 0 || glyphResources !== undefined) {
       this.#resourceRevision = nextSequence(this.#resourceRevision);
       this.#rasterCache?.clear();
@@ -576,9 +598,10 @@ export class CanvasFrameSink implements MutationSink {
   public refreshSystemTextMetrics(): ReplayStats | null {
     const update = this.#core.set_system_text_metrics?.bind(this.#core);
     if (update === undefined || this.#textPairState.size === 0) return null;
-    const pairs = [...this.#textPairState.values()].map(({ stringId, styleId }) => ({
+    const pairs = [...this.#textPairState.entries()].map(([key, { stringId, styleId }]) => ({
       stringId,
       styleId,
+      measureAdvances: this.#advancePairs.has(key),
     }));
     const metrics = this.#resources.measureSystemTextPairs(this.#context, [], pairs);
     const displayList = update(
@@ -698,6 +721,8 @@ export class CanvasFrameSink implements MutationSink {
       readonly releases: CanvasSystemTextPair[];
       readonly upserts: CanvasSystemTextPair[];
     };
+    readonly nextAdvancePairs: ReadonlySet<string>;
+    readonly nextEditableNodes: ReadonlySet<number>;
     readonly nextKinds: Map<number, ResourceKind>;
     readonly nextParents: Map<number, number>;
     readonly nextTextPairs: Map<number, CanvasSystemTextPair>;
@@ -706,6 +731,7 @@ export class CanvasFrameSink implements MutationSink {
     const nextKinds = new Map(this.#resourceKinds);
     const nextParents = new Map(this.#nodeParents);
     const nextTextPairs = new Map(this.#nodeTextPairs);
+    const nextEditableNodes = new Set(this.#editableNodes);
     const children = indexChildren(nextParents);
     const actions: ResourceAction[] = [];
     for (const mutation of batch.mutations) {
@@ -713,7 +739,7 @@ export class CanvasFrameSink implements MutationSink {
         nextParents.set(mutation.nodeId, mutation.parent);
         addChild(children, mutation.parent, mutation.nodeId);
       } else if (mutation.type === "removeNode") {
-        removeHostSubtree(mutation.nodeId, nextParents, nextTextPairs, children);
+        removeHostSubtree(mutation.nodeId, nextParents, nextTextPairs, nextEditableNodes, children);
       } else if (mutation.type === "reparent") {
         const previousParent = nextParents.get(mutation.nodeId);
         if (previousParent !== undefined) removeChild(children, previousParent, mutation.nodeId);
@@ -724,6 +750,8 @@ export class CanvasFrameSink implements MutationSink {
           mutation.nodeId,
           Object.freeze({ stringId: mutation.stringId, styleId: mutation.styleId }),
         );
+      } else if (mutation.type === "configureEditable") {
+        nextEditableNodes.add(mutation.nodeId);
       } else if (mutation.type === "defineResource") {
         if (nextKinds.has(mutation.resourceId)) {
           throw new Error(`resource ${String(mutation.resourceId)} is already defined in host`);
@@ -745,9 +773,23 @@ export class CanvasFrameSink implements MutationSink {
       }
     }
     const nextPairState = countTextPairs(nextTextPairs);
+    const nextAdvancePairs = new Set<string>();
+    for (const [nodeId, pair] of nextTextPairs) {
+      if (nextEditableNodes.has(nodeId)) nextAdvancePairs.add(textPairKey(pair));
+    }
     const upserts = [...nextPairState.entries()]
-      .filter(([key]) => !this.#textPairState.has(key))
-      .map(([, { stringId, styleId }]) => ({ stringId, styleId }));
+      // A pair is remeasured when it is new, and also when a node turning
+      // editable means Core now needs advances the last measurement omitted.
+      .filter(
+        ([key]) =>
+          !this.#textPairState.has(key) ||
+          nextAdvancePairs.has(key) !== this.#advancePairs.has(key),
+      )
+      .map(([key, { stringId, styleId }]) => ({
+        stringId,
+        styleId,
+        measureAdvances: nextAdvancePairs.has(key),
+      }));
     const releases = [...this.#textPairState.entries()]
       .filter(([key]) => !nextPairState.has(key))
       .map(([, { stringId, styleId }]) => ({ stringId, styleId }));
@@ -757,6 +799,8 @@ export class CanvasFrameSink implements MutationSink {
       actions,
       frameSeq: batch.frameSeq,
       metricDeltas: { releases, upserts },
+      nextAdvancePairs,
+      nextEditableNodes,
       nextKinds,
       nextParents,
       nextTextPairs,
@@ -905,6 +949,7 @@ function removeHostSubtree(
   root: number,
   parents: Map<number, number>,
   textPairs: Map<number, CanvasSystemTextPair>,
+  editableNodes: Set<number>,
   children: Map<number, Set<number>>,
 ): void {
   const pending = [root];
@@ -918,7 +963,13 @@ function removeHostSubtree(
     children.delete(node);
     parents.delete(node);
     textPairs.delete(node);
+    editableNodes.delete(node);
   }
+}
+
+function replaceSet<Value>(target: Set<Value>, source: ReadonlySet<Value>): void {
+  target.clear();
+  for (const value of source) target.add(value);
 }
 
 function replaceMap<Key, Value>(target: Map<Key, Value>, source: ReadonlyMap<Key, Value>): void {
