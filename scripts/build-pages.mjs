@@ -45,13 +45,29 @@ await preloadEngineAssets(output);
  * are discovered from the build rather than hardcoded.
  */
 async function preloadEngineAssets(root) {
-  const assets = await readdir(path.join(root, "assets"));
-  const worker = assets.find((name) => /^render-worker-.*\.js$/u.test(name));
-  const wasm = assets.find((name) => /^doper_core_bg-.*\.wasm$/u.test(name));
+  const assets = await collectAssets(path.join(root, "assets"));
+  const worker = assets.find((asset) => /render-worker-.*\.js$/u.test(asset));
+  const wasm = assets.find((asset) => /doper_core_bg-.*\.wasm$/u.test(asset));
   if (worker === undefined || wasm === undefined) {
     throw new Error("pages build is missing the render worker or Core WASM asset");
   }
+  // The engine chunk is whichever one names the worker: it is the module that
+  // constructs it. Deriving it that way rather than by filename means a
+  // rename or a chunking change cannot silently leave a dead preload behind.
+  const workerFile = path.basename(worker);
+  const candidates = [];
+  for (const asset of assets.filter((name) => name.endsWith(".js"))) {
+    const source = await readFile(path.join(root, "assets", asset), "utf8");
+    if (source.includes(workerFile)) candidates.push(asset);
+  }
+  const engine = candidates.at(0);
+  if (candidates.length !== 1 || engine === undefined) {
+    throw new Error(
+      `expected exactly one chunk to reference ${workerFile}, found ${String(candidates.length)}`,
+    );
+  }
   const links = [
+    `<link rel="modulepreload" href="/assets/${engine}">`,
     `<link rel="modulepreload" href="/assets/${worker}">`,
     // Fetched by the worker, not the page, so it needs an explicit type and
     // crossorigin to share the preload cache rather than download twice.
@@ -61,11 +77,25 @@ async function preloadEngineAssets(root) {
   let patched = 0;
   for (const page of await playgroundPages(root)) {
     const html = await readFile(page, "utf8");
-    if (html.includes(worker)) continue;
+    if (html.includes(workerFile)) continue;
     await writeFile(page, html.replace("</head>", `${links}</head>`));
     patched += 1;
   }
   process.stdout.write(`Preloaded engine assets on ${String(patched)} playground pages\n`);
+}
+
+/** Returns every built asset path, relative to the assets directory. */
+async function collectAssets(root, prefix = "") {
+  const found = [];
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      found.push(...(await collectAssets(path.join(root, entry.name), relative)));
+    } else {
+      found.push(relative);
+    }
+  }
+  return found;
 }
 
 /** Returns every localized playground HTML file in the build output. */
