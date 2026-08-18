@@ -30,6 +30,7 @@ use doper_hit::{HitIndex, HitPoint, WorldGeometry, WorldRect};
 use doper_layout::{BoxConstraints, LayoutEngine};
 use doper_paint::{PaintEngine, PaintMetrics};
 use doper_scene::{BitSet, DirtyDomain, NodeId, Scene, SceneMetrics};
+use doper_scroll::ScrollPlatform;
 
 use crate::{
     CoreError, CoreScrollMetrics, CoreTextMetrics,
@@ -435,12 +436,31 @@ impl CoreEngine {
     ///
     /// Returns [`CoreError::InvalidViewport`] for negative or non-finite bounds.
     pub fn new(width: f32, height: f32) -> Result<Self, CoreError> {
+        Self::for_platform(width, height, ScrollPlatform::Ios)
+    }
+
+    /// Creates an engine whose scroll physics match one platform family.
+    ///
+    /// The family decides coast distance and edge response, which is the most
+    /// visible part of "feels native": the same release velocity travels about
+    /// three times further on iOS than on Android. The host picks it from the
+    /// device rather than the engine assuming one.
+    ///
+    /// # Errors
+    ///
+    /// Returns a viewport validation error for a non-positive or non-finite
+    /// dimension.
+    pub fn for_platform(
+        width: f32,
+        height: f32,
+        platform: ScrollPlatform,
+    ) -> Result<Self, CoreError> {
         let constraints = viewport_constraints(width, height)?;
         Ok(Self {
             scene: Scene::new(),
             layout: LayoutEngine::new(),
             paint: PaintEngine::new(),
-            scroll: ScrollController::default(),
+            scroll: ScrollController::for_platform(platform),
             text: CoreTextSystem::default(),
             editing: EditingController::default(),
             hit: HitIndex::default(),

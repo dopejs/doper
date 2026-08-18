@@ -33,8 +33,14 @@ impl ScrollPhysicsConfig {
     #[must_use]
     pub const fn for_platform(platform: ScrollPlatform) -> Self {
         match platform {
+            // UIScrollView's normal `decelerationRate` is 0.998 per millisecond,
+            // so velocity follows `v0 * 0.998^(1000t)`, which is `v0 * e^(-2.002t)`.
+            // This integrator's `v /= 1 + d*dt` approaches `v0 * e^(-d*t)`, so `d`
+            // is that exponent. The previous 7.5 coasted to a stop in roughly a
+            // quarter of the distance, which reads as having almost no inertia
+            // next to a native list. (0.99 -- the "fast" rate -- would be 10.05.)
             ScrollPlatform::Ios => Self {
-                deceleration: 7.5,
+                deceleration: 2.0,
                 spring_stiffness: 260.0,
                 spring_damping: 28.0,
                 overscroll_viewport_fraction: 0.5,
@@ -857,5 +863,40 @@ mod tests {
         .expect("physics");
         let frame = scrollable.drag_by(-40.0).expect("overscroll");
         assert!(frame.position < 0.0, "a scrollable axis still rubber-bands");
+    }
+    #[test]
+    fn an_ios_flick_coasts_about_as_far_as_uiscrollview_does() {
+        // Reported from a phone: the list had almost no inertia next to a native
+        // one. The integrator approaches `v0 * e^(-d*t)`, so a flick travels
+        // `v0 / d`. UIScrollView's normal rate is 0.998 per millisecond, which
+        // is an exponent of 2.002, so a 2000 px/s release should coast about a
+        // thousand pixels. At the previous 7.5 it managed under three hundred.
+        let coast = |platform| {
+            let mut physics = ScrollPhysics::new(
+                1_000_000.0,
+                800.0,
+                ScrollPhysicsConfig::for_platform(platform),
+            )
+            .expect("physics");
+            physics.begin_drag();
+            physics.end_drag(2_000.0).expect("release");
+            for _ in 0..600 {
+                physics.advance(1.0 / 60.0).expect("frame");
+            }
+            physics.position()
+        };
+
+        let ios = coast(ScrollPlatform::Ios);
+        assert!(
+            (900.0..1_100.0).contains(&ios),
+            "an iOS flick should coast about v0/2.002 pixels, travelled {ios}"
+        );
+        // Android's tighter coast is the shorter of the two, which is what makes
+        // picking the wrong family so visible.
+        let android = coast(ScrollPlatform::Android);
+        assert!(
+            android < ios / 2.0,
+            "android should coast far less than iOS: {android} against {ios}"
+        );
     }
 }

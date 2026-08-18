@@ -15,8 +15,16 @@ pub struct WasmCore {
 impl WasmCore {
     /// Creates a Core instance bounded by the initial logical viewport.
     #[wasm_bindgen(constructor)]
-    pub fn new(width: f32, height: f32) -> Result<Self, JsValue> {
-        CoreEngine::new(width, height)
+    pub fn new(width: f32, height: f32, ios_physics: bool) -> Result<Self, JsValue> {
+        // The host knows the device; the engine should not guess. Coast distance
+        // is the most visible part of "feels native" and the two families differ
+        // by about three times for the same release velocity.
+        let platform = if ios_physics {
+            crate::ScrollPlatform::Ios
+        } else {
+            crate::ScrollPlatform::Android
+        };
+        CoreEngine::for_platform(width, height, platform)
             .map(|inner| Self {
                 inner,
                 last_diagnostics: None,

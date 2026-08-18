@@ -9,6 +9,7 @@ mod error;
 mod scroll;
 mod text;
 
+pub use doper_scroll::ScrollPlatform;
 pub use engine::{CoreEngine, CoreMetrics, FrameDiagnostics, FrameOutput};
 pub use error::CoreError;
 pub use scroll::{CoreScrollMetrics, VirtualRefillRequest};

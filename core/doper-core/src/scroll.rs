@@ -347,11 +347,23 @@ pub(crate) struct ScrollController {
     pending_refills: Vec<VirtualRefillRequest>,
 }
 
+impl ScrollController {
+    /// Creates a controller whose physics match one platform family.
+    pub(crate) fn for_platform(platform: ScrollPlatform) -> Self {
+        Self {
+            platform,
+            ..Self::default()
+        }
+    }
+}
+
 impl Default for ScrollController {
     fn default() -> Self {
         Self {
             states: BTreeMap::new(),
-            platform: ScrollPlatform::Android,
+            // Overridden at construction. The default only decides the feel for
+            // a caller that never states a platform.
+            platform: ScrollPlatform::Ios,
             last_input_sequence: None,
             metrics: CoreScrollMetrics::default(),
             pending_refills: Vec::new(),
