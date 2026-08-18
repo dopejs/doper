@@ -4,7 +4,12 @@ import { RasterTileCache, type RasterSurface } from "./raster-cache";
 import type { Canvas2DContext } from "./replayer";
 
 describe("RasterTileCache", () => {
-  it("rasterizes tiles once and composites exact cached surfaces on later frames", () => {
+  it("draws a new picture directly and only tiles one that repeats", () => {
+    // A tile is keyed by the picture it came from, so nothing is reusable
+    // across two different pictures: every tile would miss, and a miss replays
+    // the whole list into that tile. Tiling a picture the first time it appears
+    // therefore draws it once per tile instead of once, which is what made
+    // scrolling -- where the picture changes every frame -- seven times slower.
     const surfaces: FakeContext[] = [];
     const target = new FakeContext("target");
     const cache = new RasterTileCache<number>({
@@ -14,14 +19,42 @@ describe("RasterTileCache", () => {
     });
     let paints = 0;
     const request = { devicePixelRatio: 1, height: 300, pictureKey: "picture-a", width: 300 };
+    // Seen once: drawn straight to the target, no surfaces allocated.
     const first = cache.render(target.context, request, () => ++paints);
+    expect(first).toMatchObject({ bypassed: true, hits: 0, misses: 0, value: 1 });
+    expect(surfaces).toHaveLength(0);
+    // Seen again: worth rasterizing, so the tiles are populated.
     const second = cache.render(target.context, request, () => ++paints);
-
-    expect(first).toMatchObject({ bypassed: false, hits: 0, misses: 4, value: 1 });
-    expect(second).toMatchObject({ bypassed: false, hits: 4, misses: 0, value: 1 });
-    expect(paints).toBe(4);
+    expect(second).toMatchObject({ bypassed: false, hits: 0, misses: 4, value: 2 });
+    // And served from then on.
+    const third = cache.render(target.context, request, () => ++paints);
+    expect(third).toMatchObject({ bypassed: false, hits: 4, misses: 0, value: 2 });
+    expect(paints).toBe(5);
     expect(target.draws.filter(([operation]) => operation === "drawImage")).toHaveLength(8);
     expect(cache.metrics()).toMatchObject({ entries: 4, hits: 4, misses: 4 });
+  });
+
+  it("never tiles a picture that changes every frame", () => {
+    const surfaces: FakeContext[] = [];
+    const target = new FakeContext("target");
+    const cache = new RasterTileCache<number>({
+      budgetBytes: 1_000 * 1_000 * 4,
+      surfaceFactory: (width, height) => surface(width, height, surfaces),
+      tileSize: 256,
+    });
+    let paints = 0;
+    for (let frame = 0; frame < 8; frame += 1) {
+      const result = cache.render(
+        target.context,
+        { devicePixelRatio: 1, height: 300, pictureKey: `frame-${String(frame)}`, width: 300 },
+        () => ++paints,
+      );
+      expect(result.bypassed).toBe(true);
+    }
+    // One paint per frame, not one per tile per frame.
+    expect(paints).toBe(8);
+    expect(surfaces).toHaveLength(0);
+    expect(cache.metrics()).toMatchObject({ bypassedFrames: 8, entries: 0, hits: 0, misses: 0 });
   });
 
   it("bypasses without allocating when one frame exceeds the hard budget", () => {
@@ -53,11 +86,17 @@ describe("RasterTileCache", () => {
         { devicePixelRatio: 1, height: 64, pictureKey, width: 64 },
         () => pictureKey,
       );
-    render("a");
-    render("b");
-    expect(render("a").hits).toBe(1);
-    render("c");
-    expect(render("b").misses).toBe(1);
+    // Each picture is rendered twice: the first sight of a key is drawn
+    // directly, and only a repeat is worth rasterizing into tiles.
+    const tile = (key: string) => {
+      render(key);
+      return render(key);
+    };
+    tile("a");
+    tile("b");
+    expect(tile("a").hits).toBe(1);
+    tile("c");
+    expect(tile("b").misses).toBe(1);
     expect(cache.metrics()).toMatchObject({ entries: 2, evictions: 2 });
     expect(cache.metrics().bytes).toBeLessThanOrEqual(cache.metrics().budgetBytes);
   });
@@ -72,13 +111,11 @@ describe("RasterTileCache", () => {
         throw new Error("out of memory");
       },
     });
-    expect(
-      allocationFailure.render(
-        target.context,
-        { devicePixelRatio: 1, height: 64, pictureKey: "a", width: 64 },
-        () => 1,
-      ).bypassed,
-    ).toBe(true);
+    const failing = { devicePixelRatio: 1, height: 64, pictureKey: "a", width: 64 };
+    // The first sight of a picture never allocates, so the repeat is what
+    // reaches the allocation path this test is about.
+    allocationFailure.render(target.context, failing, () => 1);
+    expect(allocationFailure.render(target.context, failing, () => 1).bypassed).toBe(true);
     expect(onError).toHaveBeenCalledOnce();
     expect(target.draws).toContainEqual(["clearRect", 0, 0, 64, 64]);
 
@@ -106,11 +143,10 @@ describe("RasterTileCache", () => {
       budgetBytes: 64 * 64 * 4,
       surfaceFactory: (width, height) => surface(width, height, []),
     });
-    cache.render(
-      target.context,
-      { devicePixelRatio: 1, height: 64, pictureKey: "a", width: 64 },
-      () => 1,
-    );
+    const request = { devicePixelRatio: 1, height: 64, pictureKey: "a", width: 64 };
+    // Twice, so a tile actually exists for the budget change to evict.
+    cache.render(target.context, request, () => 1);
+    cache.render(target.context, request, () => 1);
     cache.setBudgetBytes(0);
     expect(cache.metrics()).toMatchObject({ budgetBytes: 0, bytes: 0, entries: 0, evictions: 1 });
     expect(() => new RasterTileCache({ budgetBytes: -1 })).toThrow(/budget/u);
@@ -137,7 +173,18 @@ describe("RasterTileCache", () => {
       );
       expect(cache.metrics().bytes).toBeLessThanOrEqual(cache.metrics().budgetBytes);
     }
-    expect(cache.metrics()).toMatchObject({ entries: 4, evictions: 4_996, misses: 5_000 });
+    // Sustained churn no longer allocates at all: a picture that is never seen
+    // twice can never be served from a tile, so rasterizing it only costs an
+    // extra draw per tile. The budget is respected trivially because nothing is
+    // retained, and the surface factory is never reached.
+    expect(cache.metrics()).toMatchObject({
+      bypassedFrames: 5_000,
+      entries: 0,
+      evictions: 0,
+      hits: 0,
+      misses: 0,
+    });
+    expect(created).toBe(0);
     expect(created - disposed).toBe(cache.metrics().entries);
     cache.clear();
     expect(disposed).toBe(created);

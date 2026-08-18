@@ -86,6 +86,12 @@ async function mount(demo: Demo): Promise<void> {
   try {
     const created = await engine.createHostedCanvasRoot(canvas, {
       ...demo.rootOptions,
+      // Devtools affordance: `?rasterCache=off` runs the same scene without the
+      // backend's tile cache, so its effect can be compared on the deployed
+      // site rather than only on a developer's machine.
+      ...(new URLSearchParams(location.search).get("rasterCache") === "off"
+        ? { rasterCache: false }
+        : {}),
       // A cold load over a slow CDN can exceed the default budget and would
       // otherwise abandon the worker path before the WASM arrives.
       initializationTimeoutMs: 45_000,
@@ -104,6 +110,7 @@ async function mount(demo: Demo): Promise<void> {
           report.core?.layoutVisitedNodes ?? 0,
           report.commands,
           report.replayMs ?? 0,
+          report.coreMs ?? 0,
         ]);
         if (log.length > 600) log.splice(0, log.length - 600);
         frames += 1;

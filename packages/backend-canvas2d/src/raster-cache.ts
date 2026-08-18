@@ -64,6 +64,7 @@ export class RasterTileCache<T> {
   #hits = 0;
   #misses = 0;
   #useSequence = 0;
+  #lastPictureKey: string | undefined;
 
   public constructor(options: RasterTileCacheOptions) {
     this.#budgetBytes = budget(options.budgetBytes);
@@ -85,6 +86,16 @@ export class RasterTileCache<T> {
     if (request.pictureKey.length === 0) throw new RangeError("pictureKey must not be empty");
     const frameBytes = checkedPixelBytes(width, height);
     if (frameBytes > this.#budgetBytes) return this.bypass(target, width, height, paint);
+    // A tile is keyed by the picture it was rasterized from, so nothing can be
+    // reused across two different pictures: every tile misses, and a miss
+    // replays the whole DisplayList into that tile. Tiling a picture that
+    // changed therefore draws it once per tile instead of once. During a scroll
+    // the picture changes every frame, which measured as a sevenfold replay
+    // cost and was the whole of the observed jank. Only spend tiles on a
+    // picture that has repeated at least once.
+    const repeated = this.#lastPictureKey === request.pictureKey;
+    this.#lastPictureKey = request.pictureKey;
+    if (!repeated) return this.bypass(target, width, height, paint);
 
     const prepared: Array<{
       readonly entry: CacheEntry<T>;

@@ -239,6 +239,13 @@ export interface FrameReport extends ReplayStats {
   readonly animationDeltaMs?: number;
   readonly mutationBytes: number;
   readonly displayListBytes: number;
+  /**
+   * Milliseconds Core spent producing this frame's DisplayList.
+   *
+   * Reported next to `replayMs` because a slow frame is otherwise ambiguous
+   * between Core building the list and the backend drawing it.
+   */
+  readonly coreMs?: number;
   /** Milliseconds the backend spent replaying this frame onto the canvas. */
   readonly replayMs?: number;
   readonly core?: CoreFrameDiagnostics;
@@ -274,6 +281,8 @@ export class CanvasFrameSink implements MutationSink {
   readonly #context: Canvas2DContext;
   readonly #core: CoreClient;
   readonly #resources: Canvas2DResourceRegistry;
+  /** Milliseconds the most recent Core entry point took, for the frame report. */
+  #coreMs = 0;
   readonly #replayer: Canvas2DReplayer;
   readonly #resourceKinds = new Map<number, ResourceKind>();
   readonly #nodeParents = new Map<number, number>();
@@ -355,7 +364,9 @@ export class CanvasFrameSink implements MutationSink {
             ...metrics.map((metric) => ({ type: "upsert" as const, metric })),
             ...metricDeltas.releases.map((pair) => ({ type: "release" as const, ...pair })),
           ]);
+    const coreStart = performance.now();
     const displayList = this.#core.commit(bytes, metricBytes);
+    this.#coreMs = performance.now() - coreStart;
     this.emitVirtualRefills();
     this.emitNonPassiveRegions();
     this.emitEditingGeometry();
@@ -399,6 +410,7 @@ export class CanvasFrameSink implements MutationSink {
       inputBytes: 0,
       mutationBytes: bytes.byteLength,
       displayListBytes: displayList.byteLength,
+      coreMs: this.#coreMs,
       replayMs,
       ...(coreDiagnostics === undefined ? {} : { core: coreDiagnostics }),
       ...(this.#rasterCache === undefined ? {} : { rasterCache: this.#rasterCache.metrics() }),
@@ -425,7 +437,9 @@ export class CanvasFrameSink implements MutationSink {
     let latest: Uint8Array | undefined;
     let inputBytes = 0;
     for (const bytes of batches) {
+      const coreStart = performance.now();
       const displayList = core.input(bytes);
+      this.#coreMs = performance.now() - coreStart;
       inputBytes += bytes.byteLength;
       this.emitVirtualRefills();
       this.emitNonPassiveRegions();
@@ -455,7 +469,9 @@ export class CanvasFrameSink implements MutationSink {
   public input(bytes: Uint8Array): ReplayStats | null {
     const core = this.#core;
     if (core.input === undefined) throw new Error("Core does not implement Input Stream dispatch");
+    const coreStart = performance.now();
     const displayList = core.input(bytes);
+    this.#coreMs = performance.now() - coreStart;
     this.emitVirtualRefills();
     this.emitNonPassiveRegions();
     this.emitEditingGeometry();
@@ -482,7 +498,9 @@ export class CanvasFrameSink implements MutationSink {
     }
     const core = this.#core;
     if (core.advance === undefined) return this.replayLastFrame();
+    const coreStart = performance.now();
     const displayList = core.advance(elapsedSeconds);
+    this.#coreMs = performance.now() - coreStart;
     this.emitVirtualRefills();
     this.emitNonPassiveRegions();
     this.emitEditingGeometry();

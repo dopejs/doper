@@ -42,7 +42,9 @@ describe("M2 production transport matrix", () => {
     const cached = await renderMode("post-message", true);
     const uncached = await renderMode("post-message", false);
     expect(cached.report.rasterCache).toBeDefined();
-    expect(cached.report.rasterFrame).toMatchObject({ bypassed: false });
+    // A picture seen once is drawn straight to the canvas: tiles are keyed by
+    // the picture they came from, so they can only ever serve a repeat of it.
+    expect(cached.report.rasterFrame).toMatchObject({ bypassed: true });
     expect(uncached.report.rasterCache).toBeUndefined();
     expect(uncached.report.commands).toBe(cached.report.commands);
     expect(uncached.report.core?.pictureHash).toBe(cached.report.core?.pictureHash);

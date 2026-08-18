@@ -219,11 +219,17 @@ describe("CanvasFrameSink", () => {
       cache,
     );
 
+    // A picture seen once is drawn straight to the canvas: a tile keyed by that
+    // picture could only ever serve a repeat of it, and rasterizing it first
+    // costs one full replay per tile. Re-replaying the same picture is exactly
+    // the case tiles are for, so that is where they get populated and served.
     sink.commit(mutationFrame([]));
     expect(onFrame.mock.calls[0]?.[0]).toMatchObject({
-      rasterCache: { bytes: 64 * 64 * 4, entries: 1, hits: 0, misses: 1 },
-      rasterFrame: { bypassed: false, hits: 0, misses: 1 },
+      rasterCache: { bytes: 0, entries: 0, hits: 0, misses: 0 },
+      rasterFrame: { bypassed: true, hits: 0, misses: 0 },
     });
+    expect(sink.replayLastFrame()).toMatchObject({ commands: 0 });
+    expect(sink.rasterCacheMetrics()).toMatchObject({ entries: 1, hits: 0, misses: 1 });
     expect(sink.replayLastFrame()).toMatchObject({ commands: 0 });
     expect(sink.rasterCacheMetrics()).toMatchObject({ entries: 1, hits: 1, misses: 1 });
     expect(targetCalls.filter(([operation]) => operation === "drawImage")).toHaveLength(2);
