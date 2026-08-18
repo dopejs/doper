@@ -499,7 +499,10 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     // replayed for a picture that the next event superseded before it could be
     // seen. Merging a frame's worth of deltas into one command keeps every
     // pixel of motion while paying for one replay instead of dozens.
-    // preventDefault and the suppression check stay synchronous, above.
+    // Suppression has to stay synchronous: a deferred preventDefault arrives
+    // after the browser has already scrolled the page, so the canvas and the
+    // page move together.
+    this.suppressWheelDefault(event);
     const pending = this.#pendingWheel;
     if (pending !== undefined && pending.flags === flags) {
       pending.deltaX += event.deltaX * scale;
@@ -523,6 +526,29 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       this.flushWheel();
     }
   };
+
+  /**
+   * Cancels the browser's own scrolling when Core owns the wheel here.
+   *
+   * Runs on the event itself rather than on the coalesced flush, because
+   * `preventDefault` is only honoured while the event is being dispatched.
+   */
+  private suppressWheelDefault(event: WheelEvent): void {
+    if (!event.cancelable || this.#nonPassiveRegions.length === 0) return;
+    const rect = this.#canvas.getBoundingClientRect();
+    if (!(rect.width > 0) || !(rect.height > 0)) return;
+    const x = ((event.clientX - rect.left) * this.logicalWidth()) / rect.width;
+    const y = ((event.clientY - rect.top) * this.logicalHeight()) / rect.height;
+    const suppressed = this.#nonPassiveRegions.some(
+      (region) =>
+        (region.flags & 1) !== 0 &&
+        x >= region.left &&
+        x < region.right &&
+        y >= region.top &&
+        y < region.bottom,
+    );
+    if (suppressed) event.preventDefault();
+  }
 
   /** Sends the merged wheel delta collected during this frame, if any. */
   private flushWheel(): void {
@@ -575,8 +601,11 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     const x = ((event.clientX - rect.left) * this.logicalWidth()) / rect.width;
     const y = ((event.clientY - rect.top) * this.logicalHeight()) / rect.height;
     const pointerId = kind.startsWith("pointer") ? (event as PointerEvent).pointerId >>> 0 : 0;
+    // Wheel suppression runs on the listener instead, because this dispatch is
+    // deferred to the coalescing frame and `preventDefault` is only honoured
+    // while the event is being dispatched.
     const suppressionFlag =
-      kind === "wheel" ? 1 : (event as PointerEvent).pointerType === "touch" ? 2 : 0;
+      kind === "wheel" ? 0 : (event as PointerEvent).pointerType === "touch" ? 2 : 0;
     const suppressed =
       suppressionFlag !== 0 &&
       this.#nonPassiveRegions.some(

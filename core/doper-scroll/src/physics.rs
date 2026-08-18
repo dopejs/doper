@@ -507,6 +507,13 @@ impl ScrollPhysics {
     }
 
     fn overscroll_limit(&self) -> f64 {
+        // An axis with nothing to scroll does not rubber-band. A trackpad emits
+        // a small cross-axis delta throughout an ordinary vertical gesture, so
+        // without this a list whose content is exactly as wide as its viewport
+        // wobbles sideways the whole way down.
+        if self.maximum_position() <= 0.0 {
+            return 0.0;
+        }
         self.viewport_extent * self.config.overscroll_viewport_fraction
     }
 
@@ -813,5 +820,42 @@ mod tests {
                 prop_assert!(frame.position.is_finite());
             }
         }
+    }
+
+    #[test]
+    fn an_axis_with_nothing_to_scroll_does_not_rubber_band() {
+        // Reported from the playground: a list whose content is exactly as wide
+        // as its viewport wobbled sideways for the whole of a vertical gesture.
+        // A trackpad carries a small cross-axis delta throughout, and the
+        // horizontal axis rubber-banded it even though there was nowhere to go.
+        let mut physics = ScrollPhysics::new(
+            640.0,
+            640.0,
+            ScrollPhysicsConfig::for_platform(ScrollPlatform::Ios),
+        )
+        .expect("physics");
+        assert!(physics.maximum_position() <= 0.0);
+
+        for _ in 0..30 {
+            let frame = physics.drag_by(6.0).expect("cross-axis delta");
+            assert!(
+                frame.position.abs() < f64::EPSILON,
+                "a non-scrollable axis must not move"
+            );
+            assert!(!frame.overscrolled, "a non-scrollable axis must not bounce");
+        }
+        physics.end_drag(0.0).expect("release");
+        physics.advance(1.0 / 60.0).expect("settle");
+        assert!(physics.position().abs() < f64::EPSILON);
+
+        // A scrollable axis still bounces at its edge.
+        let mut scrollable = ScrollPhysics::new(
+            2_000.0,
+            640.0,
+            ScrollPhysicsConfig::for_platform(ScrollPlatform::Ios),
+        )
+        .expect("physics");
+        let frame = scrollable.drag_by(-40.0).expect("overscroll");
+        assert!(frame.position < 0.0, "a scrollable axis still rubber-bands");
     }
 }
