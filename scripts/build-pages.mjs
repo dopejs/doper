@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -31,5 +31,58 @@ const version = JSON.parse(
 
 // Jekyll would otherwise drop files and directories starting with an underscore.
 await writeFile(path.join(output, ".nojekyll"), "");
+
+await preloadEngineAssets(output);
+
+/**
+ * Starts the render worker and the Core WASM downloading with the page.
+ *
+ * Both are reached only through `await import()` inside the playground
+ * component, so without this they queue behind the framework chunk, the theme
+ * chunk and the page chunk -- four serialized round trips before the engine
+ * begins to load at all. Measured on the deployed site the worker script did
+ * not start until nine seconds in. The filenames are content-hashed, so they
+ * are discovered from the build rather than hardcoded.
+ */
+async function preloadEngineAssets(root) {
+  const assets = await readdir(path.join(root, "assets"));
+  const worker = assets.find((name) => /^render-worker-.*\.js$/u.test(name));
+  const wasm = assets.find((name) => /^doper_core_bg-.*\.wasm$/u.test(name));
+  if (worker === undefined || wasm === undefined) {
+    throw new Error("pages build is missing the render worker or Core WASM asset");
+  }
+  const links = [
+    `<link rel="modulepreload" href="/assets/${worker}">`,
+    // Fetched by the worker, not the page, so it needs an explicit type and
+    // crossorigin to share the preload cache rather than download twice.
+    `<link rel="preload" as="fetch" type="application/wasm" crossorigin href="/assets/${wasm}">`,
+  ].join("");
+
+  let patched = 0;
+  for (const page of await playgroundPages(root)) {
+    const html = await readFile(page, "utf8");
+    if (html.includes(worker)) continue;
+    await writeFile(page, html.replace("</head>", `${links}</head>`));
+    patched += 1;
+  }
+  process.stdout.write(`Preloaded engine assets on ${String(patched)} playground pages\n`);
+}
+
+/** Returns every localized playground HTML file in the build output. */
+async function playgroundPages(root) {
+  const pages = [];
+  const walk = async (directory) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "assets" && entry.name !== "storybook") await walk(full);
+      } else if (entry.name === "playground.html") {
+        pages.push(full);
+      }
+    }
+  };
+  await walk(root);
+  return pages;
+}
 
 process.stdout.write(`Pages site built at dist-pages (doper v${version})\n`);
