@@ -248,7 +248,10 @@ describe("CanvasFrameSink", () => {
     const sink = new CanvasFrameSink(fakeContext([], []), core, (report) => reports.push(report));
     sink.commit(mutationFrame([]));
     expect(sink.input(Uint8Array.of(1, 2, 3, 4))).toMatchObject({ commands: 0 });
-    expect(sink.advance(1 / 60)).toMatchObject({ commands: 0 });
+    // A tick that changes nothing draws nothing: the canvas already holds the
+    // last accepted frame, and redrawing it cost a full replay on every clock
+    // frame of a scroll.
+    expect(sink.advance(1 / 60)).toBeNull();
     animationChanged = true;
     expect(sink.advance(1 / 60)).toMatchObject({ commands: 0 });
 

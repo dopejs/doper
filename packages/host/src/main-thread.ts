@@ -436,10 +436,13 @@ export class CanvasFrameSink implements MutationSink {
     if (core.input === undefined) throw new Error("Core does not implement Input Stream dispatch");
     let latest: Uint8Array | undefined;
     let inputBytes = 0;
+    let coreMs = 0;
     for (const bytes of batches) {
       const coreStart = performance.now();
       const displayList = core.input(bytes);
-      this.#coreMs = performance.now() - coreStart;
+      // Accumulated, not assigned: a batch applies several transactions and
+      // reporting only the last one understates the frame's Core cost.
+      coreMs += performance.now() - coreStart;
       inputBytes += bytes.byteLength;
       this.emitVirtualRefills();
       this.emitNonPassiveRegions();
@@ -451,6 +454,7 @@ export class CanvasFrameSink implements MutationSink {
       // transaction.
       if (displayList !== undefined) latest = displayList;
     }
+    this.#coreMs = coreMs;
     if (latest === undefined) {
       this.emitEditTransactions(this.takeEditTransactions());
       return null;
@@ -497,7 +501,11 @@ export class CanvasFrameSink implements MutationSink {
       throw new RangeError("elapsedSeconds must be finite and non-negative");
     }
     const core = this.#core;
-    if (core.advance === undefined) return this.replayLastFrame();
+    // Nothing to advance and nothing new to draw: the canvas still holds the
+    // last accepted frame, so redrawing it would be a full replay that changes
+    // no pixel. Callers that genuinely need the canvas repainted -- a resize,
+    // a device pixel ratio change, a transport recovery -- ask for it directly.
+    if (core.advance === undefined) return null;
     const coreStart = performance.now();
     const displayList = core.advance(elapsedSeconds);
     this.#coreMs = performance.now() - coreStart;
@@ -505,7 +513,11 @@ export class CanvasFrameSink implements MutationSink {
     this.emitNonPassiveRegions();
     this.emitEditingGeometry();
     this.emitSemantics();
-    if (displayList === undefined) return this.replayLastFrame();
+    // Core produced no new picture this tick, so the canvas already shows the
+    // right thing. Replaying it again was costing a full canvas redraw on every
+    // clock frame of a scroll, which measured as the single largest term in the
+    // worker's frame budget.
+    if (displayList === undefined) return null;
     this.applyDynamicGlyphResources();
     return this.acceptDynamicFrame(displayList, {
       animationDeltaMs: elapsedSeconds * 1000,

@@ -92,6 +92,9 @@ async function mount(demo: Demo): Promise<void> {
       ...(new URLSearchParams(location.search).get("rasterCache") === "off"
         ? { rasterCache: false }
         : {}),
+      ...(new URLSearchParams(location.search).get("a11y") === "off"
+        ? { accessibility: false }
+        : {}),
       // A cold load over a slow CDN can exceed the default budget and would
       // otherwise abandon the worker path before the WASM arrives.
       initializationTimeoutMs: 45_000,

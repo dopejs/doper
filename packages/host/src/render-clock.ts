@@ -26,6 +26,12 @@ export interface RenderClockMetrics {
   readonly frames: number;
   readonly ignoredAnchors: number;
   readonly maximumFrameGapMs: number;
+  /** Delay most recently asked of the timer, before it fired. */
+  readonly lastRequestedDelayMs: number;
+  /** How late the timer actually fired against that request. */
+  readonly maximumTimerLatenessMs: number;
+  /** Longest the frame callback itself took. */
+  readonly maximumCallbackMs: number;
   readonly overruns: number;
   readonly running: boolean;
   readonly selfDrivenFrames: number;
@@ -48,6 +54,10 @@ export class HybridRenderClock {
   #ignoredAnchors = 0;
   #lastFrameTimestamp: number | undefined;
   #maximumFrameGapMs = 0;
+  #lastRequestedDelayMs = 0;
+  #requestedAt = 0;
+  #maximumTimerLatenessMs = 0;
+  #maximumCallbackMs = 0;
   #nextDeadline = 0;
   #overruns = 0;
   #running = false;
@@ -105,6 +115,9 @@ export class HybridRenderClock {
       frames: this.#frames,
       ignoredAnchors: this.#ignoredAnchors,
       maximumFrameGapMs: this.#maximumFrameGapMs,
+      lastRequestedDelayMs: this.#lastRequestedDelayMs,
+      maximumTimerLatenessMs: this.#maximumTimerLatenessMs,
+      maximumCallbackMs: this.#maximumCallbackMs,
       overruns: this.#overruns,
       running: this.#running,
       selfDrivenFrames: this.#selfDrivenFrames,
@@ -115,6 +128,10 @@ export class HybridRenderClock {
     this.#timer = undefined;
     if (!this.#running) return;
     const now = this.#scheduler.now();
+    if (this.#requestedAt !== 0) {
+      const lateness = now - this.#requestedAt - this.#lastRequestedDelayMs;
+      this.#maximumTimerLatenessMs = Math.max(this.#maximumTimerLatenessMs, lateness);
+    }
     const previousTimestamp = this.#lastFrameTimestamp;
     const deltaMs = previousTimestamp === undefined ? 0 : Math.max(0, now - previousTimestamp);
     if (previousTimestamp !== undefined) {
@@ -148,6 +165,7 @@ export class HybridRenderClock {
     this.#frames += 1;
     this.#lastFrameTimestamp = now;
     this.#nextDeadline = nextDeadline;
+    const callbackStart = this.#scheduler.now();
     try {
       this.#callback?.({
         anchorFresh,
@@ -163,10 +181,16 @@ export class HybridRenderClock {
       this.#onError?.(error);
       return;
     }
+    this.#maximumCallbackMs = Math.max(
+      this.#maximumCallbackMs,
+      this.#scheduler.now() - callbackStart,
+    );
     if (this.#running) this.schedule(Math.max(0, nextDeadline - this.#scheduler.now()));
   };
 
   private schedule(delayMs: number): void {
+    this.#lastRequestedDelayMs = delayMs;
+    this.#requestedAt = this.#scheduler.now();
     this.#timer = this.#scheduler.setTimer(this.tick, delayMs);
   }
 }
