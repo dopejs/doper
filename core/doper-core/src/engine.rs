@@ -4085,6 +4085,119 @@ mod tests {
     }
 
     #[test]
+    fn content_that_overflows_a_child_box_is_still_scrollable() {
+        // Reported from a phone: a list row is wider than the viewport and the
+        // content is visibly cut off, but the list refuses to scroll sideways.
+        // The row declares a width, so its own box fits; what overflows is
+        // inside it. Scrolling has to follow the reach, not the clipped box.
+        let mut engine = CoreEngine::new(200.0, 200.0).expect("Core");
+        engine
+            .commit(&frame(
+                1,
+                vec![
+                    Mutation::CreateNode {
+                        node_id: id(0),
+                        kind: NodeKind::Root,
+                        parent: NULL_NODE_ID,
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(1),
+                        kind: NodeKind::Scroll,
+                        parent: id(0),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(1),
+                        prop: Prop::Width,
+                        value: 200.0,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(1),
+                        prop: Prop::Height,
+                        value: 200.0,
+                    },
+                    // A row that fits, holding a child that does not.
+                    Mutation::CreateNode {
+                        node_id: id(2),
+                        kind: NodeKind::Container,
+                        parent: id(1),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(2),
+                        prop: Prop::Width,
+                        value: 200.0,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(2),
+                        prop: Prop::Height,
+                        value: 50.0,
+                    },
+                    // A row of cells that each fit on their own but whose
+                    // accumulated offsets run past the row, which is the shape
+                    // a real list cell has.
+                    Mutation::SetF32 {
+                        node_id: id(2),
+                        prop: Prop::Direction,
+                        value: 1.0,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(3),
+                        kind: NodeKind::Container,
+                        parent: id(2),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(3),
+                        prop: Prop::Width,
+                        value: 150.0,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(3),
+                        prop: Prop::Height,
+                        value: 50.0,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(4),
+                        kind: NodeKind::Container,
+                        parent: id(2),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(4),
+                        prop: Prop::Width,
+                        value: 150.0,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(4),
+                        prop: Prop::Height,
+                        value: 50.0,
+                    },
+                ],
+            ))
+            .expect("frame");
+
+        let scroll = NodeId::from_raw(id(1)).expect("scroll");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::ScrollDelta {
+                    node_id: id(1),
+                    delta_x: 120.0,
+                    delta_y: 0.0,
+                    elapsed_micros: 16_667,
+                }],
+            ))
+            .expect("horizontal scroll");
+        let offset = engine.scene().scroll_position(scroll).expect("position");
+        assert!(
+            offset[0] > 0.0,
+            "a row wider than the viewport must scroll sideways, offset {offset:?}"
+        );
+    }
+
+    #[test]
     fn virtual_item_measurements_relayout_global_offsets_in_the_same_commit() {
         let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
         engine.commit(&virtual_list_tree()).expect("initial frame");

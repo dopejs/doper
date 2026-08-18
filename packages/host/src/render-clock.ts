@@ -175,8 +175,13 @@ export class HybridRenderClock {
         timestamp: now,
       });
     } catch (cause) {
+      // A thrown value is not always an Error: wasm-bindgen rejects with a
+      // JsValue, and reporting only the wrapper's message loses the one thing
+      // that says what actually failed.
       const error =
-        cause instanceof Error ? cause : new Error("render clock callback failed", { cause });
+        cause instanceof Error
+          ? cause
+          : new Error(`render clock callback failed: ${describe(cause)}`, { cause });
       this.stop();
       this.#onError?.(error);
       return;
@@ -243,4 +248,13 @@ function positiveFinite(value: number, label: string): number {
 function nonNegativeFinite(value: number, label: string): number {
   if (!Number.isFinite(value) || value < 0) throw new RangeError(`${label} must be non-negative`);
   return value;
+}
+
+/** Renders a thrown non-Error value well enough to diagnose it. */
+function describe(cause: unknown): string {
+  if (typeof cause === "string") return cause;
+  if (typeof cause === "object" && cause !== null && "message" in cause) {
+    return String(cause.message);
+  }
+  return String(cause);
 }

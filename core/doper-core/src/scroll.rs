@@ -824,15 +824,36 @@ fn extents(
     let (_, viewport_size) = layout
         .geometry(node)
         .ok_or(CoreError::MissingScrollGeometry { node })?;
+    // How far the content reaches, not how large the direct children's boxes
+    // are. A child with an explicit size still lays its own children out at
+    // their natural extent, so content routinely runs past the box that clips
+    // it -- a list row wider than the viewport is exactly that -- and scrolling
+    // is defined against the reach, the way the DOM defines `scrollWidth`.
+    //
+    // Computed here rather than stored per node in the layout snapshot: layout
+    // stops propagating a size change at a fixed-size ancestor, and reach is
+    // the one quantity that has to cross that boundary. Only scroll nodes need
+    // it, and only over their materialized subtree.
     let mut content = [0.0_f64; 2];
+    let mut stack: Vec<(NodeId, f32, f32)> = Vec::new();
     let mut child = scene.first_child(node);
     while let Some(current) = child {
+        stack.push((current, 0.0, 0.0));
+        child = scene.next_sibling(current);
+    }
+    while let Some((current, base_x, base_y)) = stack.pop() {
         let (offset, size) = layout
             .geometry(current)
             .ok_or(CoreError::MissingScrollGeometry { node: current })?;
-        content[0] = content[0].max(f64::from(offset.x + size.width));
-        content[1] = content[1].max(f64::from(offset.y + size.height));
-        child = scene.next_sibling(current);
+        let x = base_x + offset.x;
+        let y = base_y + offset.y;
+        content[0] = content[0].max(f64::from(x + size.width));
+        content[1] = content[1].max(f64::from(y + size.height));
+        let mut inner = scene.first_child(current);
+        while let Some(next) = inner {
+            stack.push((next, x, y));
+            inner = scene.next_sibling(next);
+        }
     }
     Ok((
         content,

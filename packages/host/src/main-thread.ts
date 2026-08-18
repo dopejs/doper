@@ -449,24 +449,24 @@ export class CanvasFrameSink implements MutationSink {
       this.emitEditingGeometry();
       this.emitSemantics();
       this.emitEventTransactions(this.takeEventTransactions());
+      // Drained per transaction, not per batch: Core refuses an input frame
+      // while a reverse stream is still pending, so a batch whose first
+      // transaction produced one would make the second fail.
+      this.emitEditTransactions(this.takeEditTransactions());
       // The final transaction of a burst can be one that draws nothing, such as
       // the end of a drag, so keep the newest picture rather than the newest
       // transaction.
       if (displayList !== undefined) latest = displayList;
     }
     this.#coreMs = coreMs;
-    if (latest === undefined) {
-      this.emitEditTransactions(this.takeEditTransactions());
-      return null;
-    }
+    // No trailing drain: the loop already drained after the final transaction.
+    if (latest === undefined) return null;
     this.applyDynamicGlyphResources();
-    const result = this.acceptDynamicFrame(latest, {
+    return this.acceptDynamicFrame(latest, {
       cause: "input",
       inputBytes,
       mutationBytes: 0,
     });
-    this.emitEditTransactions(this.takeEditTransactions());
-    return result;
   }
 
   /** Applies one Core Input Stream transaction and replays only changed pixels. */

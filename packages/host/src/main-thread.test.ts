@@ -261,6 +261,47 @@ describe("CanvasFrameSink", () => {
     expect(() => sink.advance(Number.NaN)).toThrow(/elapsedSeconds/u);
   });
 
+  it("drains a reverse stream between the transactions of one batch", () => {
+    // Core refuses an input frame while a reverse stream is still pending, so a
+    // batch whose first transaction produced one made the second throw. Two
+    // pointer events coalesced into a single frame is enough to hit it, which
+    // is what clicking between editable fields does.
+    const onEditTransaction = vi.fn();
+    let pending = true;
+    const applied: number[] = [];
+    const sink = new CanvasFrameSink(
+      fakeContext([], []),
+      {
+        commit: () => emptyDisplayList(),
+        input: (bytes: Uint8Array) => {
+          if (pending) throw new Error("Core frame rejected: EditTransactionsNotDrained");
+          applied.push(bytes.byteLength);
+          pending = true;
+          return undefined;
+        },
+        take_edit_transactions: () => {
+          pending = false;
+          return selectionTransactionStream();
+        },
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onEditTransaction,
+    );
+    // The fake refuses any input while a transaction is outstanding, so this
+    // only completes if each one is drained before the next is applied.
+    pending = false;
+    sink.inputBatch([
+      Uint8Array.of(1, 2, 3, 4),
+      Uint8Array.of(5, 6, 7, 8),
+      Uint8Array.of(9, 0, 1, 2),
+    ]);
+    expect(applied).toEqual([4, 4, 4]);
+    expect(onEditTransaction).toHaveBeenCalledTimes(3);
+  });
+
   it("drains validated edit transactions even when selection input does not repaint", () => {
     const onEditTransaction = vi.fn();
     const sink = new CanvasFrameSink(
