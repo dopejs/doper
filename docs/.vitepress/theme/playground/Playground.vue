@@ -137,6 +137,11 @@ async function mount(demo: Demo): Promise<void> {
         }
         publish();
       },
+      // Devtools affordance: the worker's own clock, so a frame that never
+      // arrived can be told apart from one the clock never produced.
+      onClockMetrics: (metrics) => {
+        (globalThis as { __doperClock?: unknown }).__doperClock = metrics;
+      },
       onHostError: (error) => {
         if (token === generation) failure.value = `${error.name}: ${error.message}`;
       },
