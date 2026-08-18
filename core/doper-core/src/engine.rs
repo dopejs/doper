@@ -3523,6 +3523,88 @@ mod tests {
         assert!(engine.scroll_metrics().physics_frames <= 30);
     }
 
+    /// Materializes a half-open window of virtual items as direct children.
+    fn virtual_window(frame_seq: u32, start: u32, end: u32) -> Vec<u8> {
+        let mut mutations = Vec::new();
+        for index in start..end {
+            let node = id(2 + index);
+            mutations.push(Mutation::CreateNode {
+                node_id: node,
+                kind: NodeKind::Container,
+                parent: id(1),
+                before_sibling: NULL_NODE_ID,
+            });
+            mutations.push(Mutation::SetF32 {
+                node_id: node,
+                prop: Prop::Width,
+                value: 100.0,
+            });
+            mutations.push(Mutation::SetF32 {
+                node_id: node,
+                prop: Prop::Height,
+                value: 20.0,
+            });
+            mutations.push(Mutation::SetVirtualItem {
+                node_id: node,
+                item_index: index,
+            });
+        }
+        frame(frame_seq, mutations)
+    }
+
+    #[test]
+    #[ignore = "known limitation: a window shift still costs a full-Scene layout pass"]
+    fn shifting_a_virtual_window_costs_the_change_not_the_whole_scene() {
+        // Scrolling moves the window by an item or two per frame. If that costs
+        // a layout pass over the entire Scene, the cost of scrolling grows with
+        // the window size, which is why a large preheat window and smooth
+        // scrolling could not both be had.
+        let mut engine = CoreEngine::new(100.0, 100.0).expect("Core");
+        engine.commit(&virtual_list_tree()).expect("list");
+        engine.commit(&virtual_window(2, 0, 40)).expect("window");
+
+        // Drop one item off the front and add one at the back: two nodes change
+        // out of a 41-node Scene.
+        let shift = frame(
+            3,
+            vec![
+                Mutation::RemoveNode { node_id: id(2) },
+                Mutation::CreateNode {
+                    node_id: id(42),
+                    kind: NodeKind::Container,
+                    parent: id(1),
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::SetF32 {
+                    node_id: id(42),
+                    prop: Prop::Width,
+                    value: 100.0,
+                },
+                Mutation::SetF32 {
+                    node_id: id(42),
+                    prop: Prop::Height,
+                    value: 20.0,
+                },
+                Mutation::SetVirtualItem {
+                    node_id: id(42),
+                    item_index: 40,
+                },
+            ],
+        );
+        let output = engine.commit(&shift).expect("shift");
+        let visited = output.diagnostics.layout_visited_nodes;
+        let scene_nodes = output.diagnostics.scene_nodes;
+        // Currently 42 of 42: the layout engine only reuses geometry while the
+        // topology is unchanged, and a window shift changes it by definition, so
+        // scrolling costs a pass over the whole Scene. See the virtual scrolling
+        // section of docs/design.md for why the first attempt at fixing this was
+        // withdrawn.
+        assert!(
+            visited * 2 < scene_nodes,
+            "a two-node window shift visited {visited} of {scene_nodes} nodes"
+        );
+    }
+
     #[test]
     fn unmaterialized_visible_items_paint_a_skeleton_instead_of_blank_canvas() {
         // Regression: the placeholder path existed only as a metric counter, so
