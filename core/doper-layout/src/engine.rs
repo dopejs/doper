@@ -565,7 +565,17 @@ impl EdgeInsets {
     fn horizontal(self) -> f32 {
         self.left + self.right
     }
+
+    fn vertical(self) -> f32 {
+        self.top + self.bottom
+    }
 }
+
+/// Value of [`Prop::Direction`] that lays children out along the main axis.
+///
+/// The prop is an `f32` because the Mutation Stream has no integer prop value
+/// type; anything other than exactly this value keeps the default column flow.
+const DIRECTION_ROW: f32 = 1.0;
 
 struct Frame {
     node: NodeId,
@@ -576,8 +586,16 @@ struct Frame {
     padding: EdgeInsets,
     fixed_width: Option<f32>,
     fixed_height: Option<f32>,
-    content_y: f32,
-    content_width: f32,
+    /// Offset already consumed along the flow axis, including leading padding.
+    main: f32,
+    /// Largest child extent across the flow axis.
+    cross: f32,
+    /// Whether children flow left to right rather than top to bottom.
+    row: bool,
+    /// Space inserted between adjacent children.
+    gap: f32,
+    /// Whether a child has been placed, so `gap` applies from the second on.
+    placed: bool,
 }
 
 fn compute_subtree(
@@ -617,10 +635,17 @@ fn compute_subtree(
             }
             frame.child_constraints.constrain(measured)
         };
-        let natural = Size::new(
-            frame.content_width.max(intrinsic.width) + frame.padding.horizontal(),
-            (frame.content_y + intrinsic.height) + frame.padding.bottom,
-        );
+        let natural = if frame.row {
+            Size::new(
+                frame.main + intrinsic.width + frame.padding.right,
+                frame.cross.max(intrinsic.height) + frame.padding.vertical(),
+            )
+        } else {
+            Size::new(
+                frame.cross.max(intrinsic.width) + frame.padding.horizontal(),
+                frame.main + intrinsic.height + frame.padding.bottom,
+            )
+        };
         let requested = Size::new(
             frame.fixed_width.unwrap_or(natural.width),
             frame.fixed_height.unwrap_or(natural.height),
@@ -635,11 +660,23 @@ fn compute_subtree(
                 let offset = virtual_item_offset(scene, parent.node, item_index, virtual_layout)?;
                 output.offsets[frame.index] =
                     Point::new(parent.padding.left, parent.padding.top + offset);
+                // A virtual list is always a column, so its cross axis is width.
+                parent.cross = parent.cross.max(size.width);
             } else {
-                output.offsets[frame.index] = Point::new(parent.padding.left, parent.content_y);
-                parent.content_y += size.height;
+                if parent.placed {
+                    parent.main += parent.gap;
+                }
+                parent.placed = true;
+                if parent.row {
+                    output.offsets[frame.index] = Point::new(parent.main, parent.padding.top);
+                    parent.main += size.width;
+                    parent.cross = parent.cross.max(size.height);
+                } else {
+                    output.offsets[frame.index] = Point::new(parent.padding.left, parent.main);
+                    parent.main += size.height;
+                    parent.cross = parent.cross.max(size.width);
+                }
             }
-            parent.content_width = parent.content_width.max(size.width);
         }
     }
     Ok(())
@@ -738,8 +775,27 @@ fn make_frame(
         child_constraints.max_width = f32::INFINITY;
         child_constraints.max_height = f32::INFINITY;
     }
-    let content_y = match scene.virtual_list(node) {
+    // A virtual list always flows vertically: its item offsets come from Core's
+    // height index, not from sibling accumulation.
+    let virtual_list = scene.virtual_list(node);
+    let row = virtual_list.is_none()
+        && scene
+            .f32_prop(node, Prop::Direction)
+            .is_some_and(|value| value == DIRECTION_ROW);
+    let gap = match scene.f32_prop(node, Prop::Gap) {
+        Some(value) if value.is_finite() && value >= 0.0 => value,
+        Some(value) => {
+            return Err(LayoutError::InvalidStyle {
+                node,
+                prop: Prop::Gap,
+                value,
+            });
+        }
+        None => 0.0,
+    };
+    let main = match virtual_list {
         Some(_) => padding.top + virtual_content_height(scene, node, virtual_layout)?,
+        None if row => padding.left,
         None => padding.top,
     };
     Ok(Frame {
@@ -751,8 +807,11 @@ fn make_frame(
         padding,
         fixed_width,
         fixed_height,
-        content_y,
-        content_width: 0.0,
+        main,
+        cross: 0.0,
+        row,
+        gap,
+        placed: false,
     })
 }
 
@@ -945,6 +1004,137 @@ mod tests {
         assert_eq!(
             engine.snapshot().geometry(second),
             Some((Point::new(5.0, 30.0), Size::new(60.0, 30.0)))
+        );
+    }
+
+    fn set_vec4(node: NodeId, prop: Prop, value: [f32; 4]) -> Mutation {
+        Mutation::SetVec4 {
+            node_id: node.raw(),
+            prop,
+            value,
+        }
+    }
+
+    #[test]
+    fn a_row_flows_children_horizontally_with_gaps_and_sizes_to_them() {
+        // A realistic list cell puts a thumbnail, a text column, a tag and a
+        // button on one line. Without a flow direction each of those stacked
+        // vertically, so the cell could only ever be a paragraph.
+        let root = id(0);
+        let row = id(1);
+        let thumbnail = id(2);
+        let body = id(3);
+        let tag = id(4);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(row, NodeKind::Container, Some(root)),
+                create(thumbnail, NodeKind::Container, Some(row)),
+                create(body, NodeKind::Container, Some(row)),
+                create(tag, NodeKind::Container, Some(row)),
+                set_f32(row, Prop::Direction, DIRECTION_ROW),
+                set_f32(row, Prop::Gap, 8.0),
+                set_f32(thumbnail, Prop::Width, 40.0),
+                set_f32(thumbnail, Prop::Height, 40.0),
+                set_f32(body, Prop::Width, 100.0),
+                set_f32(body, Prop::Height, 24.0),
+                set_f32(tag, Prop::Width, 30.0),
+                set_f32(tag, Prop::Height, 16.0),
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(400.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        let snapshot = engine.snapshot();
+        assert_eq!(
+            snapshot.geometry(thumbnail),
+            Some((Point::ZERO, Size::new(40.0, 40.0)))
+        );
+        assert_eq!(
+            snapshot.geometry(body),
+            Some((Point::new(48.0, 0.0), Size::new(100.0, 24.0)))
+        );
+        assert_eq!(
+            snapshot.geometry(tag),
+            Some((Point::new(156.0, 0.0), Size::new(30.0, 16.0)))
+        );
+        // The row's natural size is the run along the flow axis and the tallest
+        // child across it: gaps count once between each pair, never trailing.
+        assert_eq!(
+            snapshot.geometry(row).map(|(_, size)| size),
+            Some(Size::new(186.0, 40.0))
+        );
+    }
+
+    #[test]
+    fn a_row_honours_padding_on_both_axes() {
+        let root = id(0);
+        let row = id(1);
+        let child = id(2);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(row, NodeKind::Container, Some(root)),
+                create(child, NodeKind::Container, Some(row)),
+                set_f32(row, Prop::Direction, DIRECTION_ROW),
+                set_vec4(row, Prop::Padding, [6.0, 12.0, 6.0, 12.0]),
+                set_f32(child, Prop::Width, 50.0),
+                set_f32(child, Prop::Height, 20.0),
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(400.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        let snapshot = engine.snapshot();
+        assert_eq!(
+            snapshot.geometry(child),
+            Some((Point::new(12.0, 6.0), Size::new(50.0, 20.0)))
+        );
+        assert_eq!(
+            snapshot.geometry(row).map(|(_, size)| size),
+            Some(Size::new(74.0, 32.0))
+        );
+    }
+
+    #[test]
+    fn a_negative_gap_is_rejected_rather_than_silently_overlapping() {
+        let root = id(0);
+        let row = id(1);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(row, NodeKind::Container, Some(root)),
+                set_f32(row, Prop::Gap, -4.0),
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        assert!(
+            engine
+                .layout(
+                    &scene,
+                    BoxConstraints::tight(Size::new(400.0, 200.0)).expect("viewport"),
+                    &mut ZeroIntrinsicMeasurer,
+                )
+                .is_err()
         );
     }
 

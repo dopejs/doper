@@ -1,5 +1,6 @@
 export { DOPER_ELEMENT_TYPE, createElement, isDoperElement, normalizeChildren } from "./element";
 export { DoperFont, createFont, type DoperFontOptions } from "./font";
+export { DoperImage, createImage, type DoperImageOptions } from "./image";
 export {
   DoperFontLoadError,
   loadFont,
@@ -25,6 +26,7 @@ export {
   type ElementType,
   type FunctionComponent,
   type HostType,
+  type ImageProps,
   type JSX,
   type Key,
   type NodeHandle,

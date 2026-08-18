@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 2,
+  "abiVersion": 3,
   "endianness": "little",
   "alignment": 4,
   "nodeId": {
@@ -173,11 +173,26 @@
         "name": "pictureHashHigh",
         "type": "u32"
       },
-      { "name": "visiblePlaceholders", "type": "u32" },
-      { "name": "virtualVisibleStart", "type": "u32" },
-      { "name": "virtualVisibleEnd", "type": "u32" },
-      { "name": "virtualMaterializedStart", "type": "u32" },
-      { "name": "virtualMaterializedEnd", "type": "u32" }
+      {
+        "name": "visiblePlaceholders",
+        "type": "u32"
+      },
+      {
+        "name": "virtualVisibleStart",
+        "type": "u32"
+      },
+      {
+        "name": "virtualVisibleEnd",
+        "type": "u32"
+      },
+      {
+        "name": "virtualMaterializedStart",
+        "type": "u32"
+      },
+      {
+        "name": "virtualMaterializedEnd",
+        "type": "u32"
+      }
     ]
   },
   "virtualRefillBatch": {
@@ -1050,6 +1065,39 @@
             "type": "f32"
           }
         ]
+      },
+      {
+        "name": "ImageBitmap",
+        "resourceKind": "Image",
+        "variant": 1,
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "variant",
+            "type": "u8"
+          },
+          "pad16",
+          {
+            "name": "width",
+            "type": "u32"
+          },
+          {
+            "name": "height",
+            "type": "u32"
+          },
+          {
+            "name": "pixelBytes",
+            "type": "u32"
+          },
+          {
+            "name": "pixels",
+            "type": "bytes"
+          },
+          "align4"
+        ]
       }
     ]
   },
@@ -1097,6 +1145,18 @@
       "invalidation": ["layout", "paint"]
     },
     {
+      "name": "Direction",
+      "id": 8,
+      "valueType": "f32",
+      "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "Gap",
+      "id": 9,
+      "valueType": "f32",
+      "invalidation": ["layout", "paint"]
+    },
+    {
       "name": "Color",
       "id": 16,
       "valueType": "ref",
@@ -1141,6 +1201,13 @@
       "id": 34,
       "valueType": "ref",
       "resourceKind": "Font",
+      "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "Image",
+      "id": 35,
+      "valueType": "ref",
+      "resourceKind": "Image",
       "invalidation": ["layout", "paint"]
     },
     {

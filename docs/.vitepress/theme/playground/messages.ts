@@ -18,6 +18,10 @@ export interface PlaygroundMessages {
   readonly scrollTitle: string;
   readonly scrollDescription: string;
   readonly listItems: string;
+  readonly nodesPerRow: string;
+  readonly selectedRows: string;
+  readonly lastAction: string;
+  readonly viewOrder: string;
   readonly jumpToRow: (row: string) => string;
   readonly editingTitle: string;
   readonly editingDescription: string;
@@ -54,6 +58,10 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     scrollDescription:
       "一百万行由 Core 拥有的虚拟列表。滚动稳态完全在 Core 内闭环、不回调 Shell，Shell 只按 Core 规划的预热窗口物化可见区间。用滚轮或拖拽试试，右侧是实时帧指标。",
     listItems: "列表项",
+    nodesPerRow: "每行节点数",
+    selectedRows: "已选中",
+    lastAction: "最近操作",
+    viewOrder: "查看",
     jumpToRow: (row) => `跳到第 ${row} 行`,
     editingTitle: "canvas 原生编辑与 IME",
     editingDescription:
@@ -92,6 +100,10 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     scrollDescription:
       "一百萬列由 Core 擁有的虛擬列表。捲動穩態完全在 Core 內閉環、不回呼 Shell，Shell 只按 Core 規劃的預熱視窗具現化可見區間。用滾輪或拖曳試試，右側是即時幀指標。",
     listItems: "列表項",
+    nodesPerRow: "每列節點數",
+    selectedRows: "已選取",
+    lastAction: "最近操作",
+    viewOrder: "查看",
     jumpToRow: (row) => `跳到第 ${row} 列`,
     editingTitle: "canvas 原生編輯與 IME",
     editingDescription:
@@ -130,6 +142,10 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     scrollDescription:
       "100 万行の仮想リストを Core が所有します。スクロール中は Core 内で完結し Shell を呼び出しません。Shell は Core が計画したプリフェッチウィンドウの可視区間だけを実体化します。ホイールやドラッグで試してください。右側がリアルタイムのフレーム指標です。",
     listItems: "リスト項目",
+    nodesPerRow: "行あたりノード数",
+    selectedRows: "選択済み",
+    lastAction: "最後の操作",
+    viewOrder: "表示",
     jumpToRow: (row) => `${row} 行目へ移動`,
     editingTitle: "canvas ネイティブ編集と IME",
     editingDescription:
@@ -170,6 +186,10 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     scrollDescription:
       "100만 행 가상 리스트를 Core가 소유합니다. 스크롤 중에는 Core 안에서 완결되어 Shell을 호출하지 않고, Shell은 Core가 계획한 프리페치 윈도의 보이는 구간만 실체화합니다. 휠이나 드래그로 시험해 보세요. 오른쪽이 실시간 프레임 지표입니다.",
     listItems: "리스트 항목",
+    nodesPerRow: "행당 노드 수",
+    selectedRows: "선택됨",
+    lastAction: "최근 작업",
+    viewOrder: "보기",
     jumpToRow: (row) => `${row}번째 행으로 이동`,
     editingTitle: "canvas 네이티브 편집과 IME",
     editingDescription:
@@ -210,6 +230,10 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     scrollDescription:
       "Una lista virtual de un millón de filas que pertenece al Core. Mientras se desplaza, todo ocurre dentro del Core y no se llama a la capa TypeScript, que sólo materializa el rango visible de la ventana de precarga que el Core planifica. Pruébalo con la rueda o arrastrando; a la derecha están las métricas de fotograma en vivo.",
     listItems: "Elementos",
+    nodesPerRow: "Nodos por fila",
+    selectedRows: "Seleccionadas",
+    lastAction: "Última acción",
+    viewOrder: "Ver",
     jumpToRow: (row) => `Ir a la fila ${row}`,
     editingTitle: "Edición nativa en canvas e IME",
     editingDescription:
@@ -250,6 +274,10 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     scrollDescription:
       "Une liste virtuelle d'un million de lignes possédée par le Core. Pendant le défilement tout se passe dans le Core, sans appel à la couche TypeScript, qui ne matérialise que la plage visible de la fenêtre de préchauffe planifiée par le Core. Essayez à la molette ou en glissant ; les métriques d'image en direct sont à droite.",
     listItems: "Éléments",
+    nodesPerRow: "Nœuds par ligne",
+    selectedRows: "Sélectionnées",
+    lastAction: "Dernière action",
+    viewOrder: "Voir",
     jumpToRow: (row) => `Aller à la ligne ${row}`,
     editingTitle: "Édition native dans le canvas et IME",
     editingDescription:
@@ -291,6 +319,10 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     scrollDescription:
       "Eine virtuelle Liste mit einer Million Zeilen, die dem Core gehört. Während des Scrollens läuft alles im Core und die TypeScript-Schale wird nicht aufgerufen; sie materialisiert nur den sichtbaren Bereich des vom Core geplanten Vorwärmfensters. Probieren Sie es mit dem Mausrad oder durch Ziehen; rechts stehen die Frame-Metriken in Echtzeit.",
     listItems: "Einträge",
+    nodesPerRow: "Knoten pro Zeile",
+    selectedRows: "Ausgewählt",
+    lastAction: "Letzte Aktion",
+    viewOrder: "Ansehen",
     jumpToRow: (row) => `Zu Zeile ${row} springen`,
     editingTitle: "canvas-native Bearbeitung und IME",
     editingDescription:
@@ -332,6 +364,10 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     scrollDescription:
       "Виртуальный список на миллион строк принадлежит ядру. Во время прокрутки всё происходит внутри ядра и оболочка не вызывается: она лишь материализует видимый диапазон окна прогрева, которое спланировало ядро. Попробуйте колесом или перетаскиванием; справа — покадровые метрики в реальном времени.",
     listItems: "Элементы",
+    nodesPerRow: "Узлов в строке",
+    selectedRows: "Выбрано",
+    lastAction: "Последнее действие",
+    viewOrder: "Открыть",
     jumpToRow: (row) => `Перейти к строке ${row}`,
     editingTitle: "Нативное редактирование в canvas и IME",
     editingDescription:
@@ -373,6 +409,10 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     scrollDescription:
       "قائمة افتراضية بمليون صفّ تملكها النواة. أثناء التمرير يجري كلّ شيء داخل النواة دون استدعاء الغلاف، ولا يجسّد الغلاف سوى المجال المرئي من نافذة التسخين التي خطّطت لها النواة. جرّب بالعجلة أو بالسحب؛ وعلى اليسار مؤشّرات الإطارات لحظيًا.",
     listItems: "العناصر",
+    nodesPerRow: "عقد لكل صف",
+    selectedRows: "المحدد",
+    lastAction: "آخر إجراء",
+    viewOrder: "عرض",
     jumpToRow: (row) => `الانتقال إلى الصف ${row}`,
     editingTitle: "تحرير أصلي داخل canvas وIME",
     editingDescription:
@@ -412,6 +452,10 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
     scrollDescription:
       "רשימה וירטואלית של מיליון שורות שבבעלות הליבה. בזמן הגלילה הכול קורה בתוך הליבה ואין קריאה למעטפת; היא רק מממשת את הטווח הנראה מתוך חלון החימום שהליבה תכננה. נסה בגלגלת או בגרירה; משמאל מדדי הפריים בזמן אמת.",
     listItems: "פריטים",
+    nodesPerRow: "צמתים בשורה",
+    selectedRows: "נבחרו",
+    lastAction: "פעולה אחרונה",
+    viewOrder: "הצג",
     jumpToRow: (row) => `מעבר לשורה ${row}`,
     editingTitle: "עריכה נייטיב ב-canvas ו-IME",
     editingDescription:

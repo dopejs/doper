@@ -3,9 +3,12 @@ use std::sync::Arc;
 
 use doper_abi::{
     AFFINE_A_OFFSET, AFFINE_RESOURCE_FIXED_BYTES, AFFINE_RESOURCE_VARIANT, AFFINE_VARIANT_OFFSET,
-    AFFINE_VERSION_OFFSET, Invalidation, MAX_RESOURCE_BYTES, MAX_VIRTUAL_ITEMS, Mutation,
-    MutationBatch, NULL_NODE_ID, NodeKind, Prop, PropValueType, RESOURCE_ENCODING_VERSION,
-    ResourceKind, SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
+    AFFINE_VERSION_OFFSET, IMAGE_BITMAP_HEIGHT_OFFSET, IMAGE_BITMAP_PIXEL_BYTES_OFFSET,
+    IMAGE_BITMAP_PIXELS_OFFSET, IMAGE_BITMAP_RESOURCE_MINIMUM_BYTES, IMAGE_BITMAP_RESOURCE_VARIANT,
+    IMAGE_BITMAP_VARIANT_OFFSET, IMAGE_BITMAP_VERSION_OFFSET, IMAGE_BITMAP_WIDTH_OFFSET,
+    Invalidation, MAX_RESOURCE_BYTES, MAX_VIRTUAL_ITEMS, Mutation, MutationBatch, NULL_NODE_ID,
+    NodeKind, Prop, PropValueType, RESOURCE_ENCODING_VERSION, ResourceKind,
+    SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
     SFNT_FONT_RESOURCE_MINIMUM_BYTES, SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET,
     SFNT_FONT_VERSION_OFFSET, SOLID_PAINT_RED_OFFSET, SOLID_PAINT_RESOURCE_FIXED_BYTES,
     SOLID_PAINT_RESOURCE_VARIANT, SOLID_PAINT_VARIANT_OFFSET, SOLID_PAINT_VERSION_OFFSET,
@@ -979,7 +982,8 @@ fn validate_resource(resource_id: u32, kind: ResourceKind, bytes: &[u8]) -> Resu
         }
         ResourceKind::TextStyle => validate_text_style_resource(resource_id, bytes)?,
         ResourceKind::Font => validate_sfnt_font_resource(resource_id, bytes)?,
-        ResourceKind::Image | ResourceKind::Path | ResourceKind::GlyphSpan => {}
+        ResourceKind::Image => validate_image_resource(resource_id, bytes)?,
+        ResourceKind::Path | ResourceKind::GlyphSpan => {}
     }
     Ok(())
 }
@@ -1072,6 +1076,46 @@ fn validate_sfnt_font_resource(resource_id: u32, bytes: &[u8]) -> Result<(), Sce
         || data_end > bytes.len()
         || bytes[data_end..].iter().any(|padding| *padding != 0)
         || !is_sfnt(&bytes[SFNT_FONT_DATA_OFFSET..data_end])
+    {
+        return Err(SceneError::InvalidResourceEncoding { resource_id });
+    }
+    Ok(())
+}
+
+/// Validates an image payload before any consumer indexes into its pixels.
+///
+/// The declared dimensions and the pixel length are checked against each other
+/// rather than trusted: a width and height that do not describe the bytes that
+/// follow would otherwise let a decoder read past the resource.
+fn validate_image_resource(resource_id: u32, bytes: &[u8]) -> Result<(), SceneError> {
+    validate_portable_header(
+        resource_id,
+        bytes,
+        None,
+        IMAGE_BITMAP_RESOURCE_VARIANT,
+        IMAGE_BITMAP_VERSION_OFFSET,
+        IMAGE_BITMAP_VARIANT_OFFSET,
+        IMAGE_BITMAP_WIDTH_OFFSET,
+    )?;
+    if bytes.len() < IMAGE_BITMAP_RESOURCE_MINIMUM_BYTES || !bytes.len().is_multiple_of(4) {
+        return Err(SceneError::InvalidResourceEncoding { resource_id });
+    }
+    let width = read_resource_u32(bytes, IMAGE_BITMAP_WIDTH_OFFSET);
+    let height = read_resource_u32(bytes, IMAGE_BITMAP_HEIGHT_OFFSET);
+    let declared = read_resource_u32(bytes, IMAGE_BITMAP_PIXEL_BYTES_OFFSET);
+    let expected = u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|pixels| pixels.checked_mul(4));
+    let declared_end = usize::try_from(declared)
+        .ok()
+        .and_then(|length| IMAGE_BITMAP_PIXELS_OFFSET.checked_add(length));
+    if width == 0
+        || height == 0
+        || expected != Some(u64::from(declared))
+        || declared_end.is_none_or(|end| end > bytes.len())
+        || bytes[declared_end.unwrap_or(bytes.len())..]
+            .iter()
+            .any(|padding| *padding != 0)
     {
         return Err(SceneError::InvalidResourceEncoding { resource_id });
     }

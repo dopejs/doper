@@ -1,4 +1,4 @@
-import type { Color, DoperFont } from "@dopejs/doper-jsx";
+import type { Color, DoperFont, DoperImage } from "@dopejs/doper-jsx";
 
 import {
   AFFINE_A_OFFSET,
@@ -37,6 +37,14 @@ import {
   TEXT_STYLE_VARIANT_OFFSET,
   TEXT_STYLE_VERSION_OFFSET,
   TEXT_STYLE_WEIGHT_OFFSET,
+  IMAGE_BITMAP_HEIGHT_OFFSET,
+  IMAGE_BITMAP_PIXEL_BYTES_OFFSET,
+  IMAGE_BITMAP_PIXELS_OFFSET,
+  IMAGE_BITMAP_RESOURCE_MINIMUM_BYTES,
+  IMAGE_BITMAP_RESOURCE_VARIANT,
+  IMAGE_BITMAP_VARIANT_OFFSET,
+  IMAGE_BITMAP_VERSION_OFFSET,
+  IMAGE_BITMAP_WIDTH_OFFSET,
 } from "./generated";
 import type { ResourceKind } from "./generated";
 import type { Mutation } from "./mutation-stream";
@@ -228,6 +236,35 @@ export function encodeSfntFont(font: DoperFont): Uint8Array {
   bytes.set(data, SFNT_FONT_DATA_OFFSET);
   if (bytes.byteLength < SFNT_FONT_RESOURCE_MINIMUM_BYTES) {
     throw new Error("generated SFNT font layout is inconsistent");
+  }
+  return bytes;
+}
+
+/** Encodes one copied RGBA8 bitmap for Core-owned image drawing. */
+export function encodeImageBitmap(image: DoperImage): Uint8Array {
+  const pixels = image.copyPixels();
+  const expected = image.width * image.height * 4;
+  if (pixels.byteLength !== expected) {
+    throw new RangeError("image pixels do not match the declared dimensions");
+  }
+  const byteLength = align4(IMAGE_BITMAP_PIXELS_OFFSET + pixels.byteLength);
+  if (byteLength > MAX_RESOURCE_BYTES) {
+    throw new RangeError(
+      `image resource is ${String(byteLength)} bytes, over the ${String(
+        MAX_RESOURCE_BYTES,
+      )} byte budget: downsample the bitmap before handing it to the engine`,
+    );
+  }
+  const bytes = new Uint8Array(byteLength);
+  const view = new DataView(bytes.buffer);
+  bytes[IMAGE_BITMAP_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
+  bytes[IMAGE_BITMAP_VARIANT_OFFSET] = IMAGE_BITMAP_RESOURCE_VARIANT;
+  view.setUint32(IMAGE_BITMAP_WIDTH_OFFSET, image.width, true);
+  view.setUint32(IMAGE_BITMAP_HEIGHT_OFFSET, image.height, true);
+  view.setUint32(IMAGE_BITMAP_PIXEL_BYTES_OFFSET, pixels.byteLength, true);
+  bytes.set(pixels, IMAGE_BITMAP_PIXELS_OFFSET);
+  if (bytes.byteLength < IMAGE_BITMAP_RESOURCE_MINIMUM_BYTES) {
+    throw new Error("generated image bitmap layout is inconsistent");
   }
   return bytes;
 }

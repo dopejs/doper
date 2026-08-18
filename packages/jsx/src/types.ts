@@ -1,11 +1,12 @@
 import type { DoperFont } from "./font";
+import type { DoperImage } from "./image";
 import type { EditTransaction, TextEditingController } from "@dopejs/doper-editing";
 
 /** Stable list identity used by localized reconciliation. */
 export type Key = string | number;
 
 /** Engine-native host element names. */
-export type HostType = "container" | "editableText" | "scroll" | "text" | "virtualList";
+export type HostType = "container" | "editableText" | "image" | "scroll" | "text" | "virtualList";
 
 /** Mounted host handle exposed through refs without leaking internal instances. */
 export interface NodeHandle {
@@ -71,6 +72,16 @@ export interface CommonProps {
   readonly maxWidth?: number;
   readonly maxHeight?: number;
   readonly padding?: EdgeInsets;
+  /**
+   * Child flow axis. Defaults to `"column"`.
+   *
+   * Children are placed one after another along this axis and the container's
+   * natural size is the run along it by the tallest/widest child across it.
+   * There is no cross-axis alignment yet: children sit at the leading edge.
+   */
+  readonly direction?: "column" | "row";
+  /** Space inserted between adjacent children, never before or after them. */
+  readonly gap?: number;
   readonly backgroundColor?: Color;
   readonly opacity?: number;
   readonly transform?: readonly [number, number, number, number, number, number];
@@ -94,6 +105,16 @@ export interface CommonProps {
 
 /** Generic grouping element. */
 export type ContainerProps = CommonProps;
+
+/**
+ * Engine-drawn bitmap.
+ *
+ * With no explicit `width`/`height` the node takes the image's pixel
+ * dimensions; with one, the image is scaled into that box.
+ */
+export interface ImageProps extends Omit<CommonProps, "children"> {
+  readonly source: DoperImage;
+}
 
 /** Clipped Core-owned scrolling element. */
 export interface ScrollProps extends CommonProps {
@@ -190,6 +211,7 @@ export declare namespace JSX {
   export interface IntrinsicElements {
     container: ContainerProps;
     editableText: EditableTextProps;
+    image: ImageProps;
     scroll: ScrollProps;
     text: TextProps;
     virtualList: VirtualListProps;

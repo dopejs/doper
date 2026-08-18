@@ -12,7 +12,9 @@ import {
   type DoperEventHandler,
   type EditableTextProps,
   type FunctionComponent,
+  DoperImage,
   type HostType,
+  type ImageProps,
   type Key,
   type NodeHandle,
   type Ref,
@@ -27,6 +29,7 @@ import { NodeIdAllocator } from "./node-id";
 import {
   ResourcePool,
   encodeAffine,
+  encodeImageBitmap,
   encodeSfntFont,
   encodeSolidPaint,
   encodeTextStyle,
@@ -158,6 +161,7 @@ interface NormalizedHostProps {
         readonly fontWeight: number;
       }
     | undefined;
+  readonly image: Uint8Array | undefined;
   readonly scrollPosition: readonly [number, number] | undefined;
   readonly virtualItemIndex: number | undefined;
   readonly virtualList: NormalizedVirtualList | undefined;
@@ -195,6 +199,8 @@ interface CallbackEntry {
 const COMMON_KEYS = new Set([
   "backgroundColor",
   "children",
+  "direction",
+  "gap",
   "height",
   "key",
   "maxHeight",
@@ -246,6 +252,7 @@ const EDITABLE_KEYS = new Set([
   "revision",
 ]);
 const SCROLL_KEYS = new Set([...COMMON_KEYS, "scrollX", "scrollY"]);
+const IMAGE_KEYS = new Set([...[...COMMON_KEYS].filter((key) => key !== "children"), "source"]);
 const VIRTUAL_LIST_KEYS = new Set([
   ...[...SCROLL_KEYS].filter((key) => key !== "children"),
   "baseOverscanViewports",
@@ -900,6 +907,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
     this.replaceCallback(instance, next.onTap);
     instance.eventHandlers = next.eventHandlers;
     this.replaceResourceProp(instance, "text:font", Prop.Font, ResourceKind.Font, next.text?.font);
+    this.replaceResourceProp(instance, "image", Prop.Image, ResourceKind.Image, next.image);
     if (next.text !== undefined) this.replaceTextRun(instance, next.text);
     if (next.editable !== undefined) {
       if (!equalEditable(instance.editable, next.editable)) {
@@ -1322,6 +1330,20 @@ function normalizeHostProps(
     }
     scalars.set(Prop.Opacity, common.opacity);
   }
+  if (common.direction !== undefined) {
+    if (common.direction !== "column" && common.direction !== "row") {
+      throw new TypeError(`unsupported direction ${String(common.direction)}`);
+    }
+    // The Mutation Stream has no integer prop value type, so the flow axis
+    // travels as the exact f32 the layout engine compares against.
+    if (common.direction === "row") scalars.set(Prop.Direction, 1);
+  }
+  if (common.gap !== undefined) {
+    if (!Number.isFinite(common.gap) || common.gap < 0) {
+      throw new RangeError("gap must be finite and non-negative");
+    }
+    scalars.set(Prop.Gap, common.gap);
+  }
   const vectors = new Map<Prop, readonly [number, number, number, number]>();
   if (common.padding !== undefined) vectors.set(Prop.Padding, normalizePadding(common.padding));
   const semantics = new Map<Prop, string>();
@@ -1367,6 +1389,18 @@ function normalizeHostProps(
       lineHeight,
       fontWeight,
     };
+  }
+
+  let image: Uint8Array | undefined;
+  if (type === "image") {
+    const source = (props as unknown as ImageProps).source;
+    if (!(source instanceof DoperImage)) {
+      throw new TypeError("image source must be created by createImage");
+    }
+    image = encodeImageBitmap(source);
+    if (source.label !== "" && !semantics.has(Prop.SemanticLabel)) {
+      semantics.set(Prop.SemanticLabel, source.label);
+    }
   }
 
   let scrollPosition: readonly [number, number] | undefined;
@@ -1485,6 +1519,7 @@ function normalizeHostProps(
     semantics,
     onTap,
     text,
+    image,
     scrollPosition,
     virtualItemIndex,
     virtualList,
@@ -1501,6 +1536,8 @@ function hostNodeKind(type: HostType): NodeKind {
       return NodeKind.Text;
     case "editableText":
       return NodeKind.EditableText;
+    case "image":
+      return NodeKind.Image;
     case "scroll":
     case "virtualList":
       return NodeKind.Scroll;
@@ -1798,7 +1835,9 @@ function assertAllowedProps(type: HostType, props: Readonly<Record<string, unkno
           ? VIRTUAL_LIST_KEYS
           : type === "scroll"
             ? SCROLL_KEYS
-            : COMMON_KEYS;
+            : type === "image"
+              ? IMAGE_KEYS
+              : COMMON_KEYS;
   for (const key of Object.keys(props)) {
     if (!allowed.has(key)) throw new TypeError(`unknown ${type} prop ${key}`);
   }

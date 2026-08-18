@@ -6,6 +6,14 @@ import {
   AFFINE_RESOURCE_VARIANT,
   AFFINE_VARIANT_OFFSET,
   AFFINE_VERSION_OFFSET,
+  IMAGE_BITMAP_HEIGHT_OFFSET,
+  IMAGE_BITMAP_PIXEL_BYTES_OFFSET,
+  IMAGE_BITMAP_PIXELS_OFFSET,
+  IMAGE_BITMAP_RESOURCE_MINIMUM_BYTES,
+  IMAGE_BITMAP_RESOURCE_VARIANT,
+  IMAGE_BITMAP_VARIANT_OFFSET,
+  IMAGE_BITMAP_VERSION_OFFSET,
+  IMAGE_BITMAP_WIDTH_OFFSET,
   RESOURCE_ENCODING_VERSION,
   ResourceKind,
   SFNT_FONT_DATA_BYTES_OFFSET,
@@ -189,6 +197,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
     const textMeasurementStyles = new Map(this.#textMeasurementStyles);
     const fonts = new Map(this.#fonts);
     const encodedKinds = new Map(this.#encodedKinds);
+    const images = new Map(this.#images);
     const glyphSpans = new Map(this.#glyphSpans);
     const glyphRasters = new Map(this.#glyphRasters);
 
@@ -238,6 +247,9 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
           case ResourceKind.Font:
             define(fonts, action.id, decodeSfntFont(action.bytes), "font");
             break;
+          case ResourceKind.Image:
+            define(images, action.id, decodeImageBitmap(action.bytes), "image");
+            break;
           case ResourceKind.Affine:
             validateAffine(action.bytes);
             break;
@@ -267,6 +279,8 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
               return textStyles.delete(action.id);
             case ResourceKind.Font:
               return fonts.delete(action.id);
+            case ResourceKind.Image:
+              return images.delete(action.id);
             case ResourceKind.Affine:
               return true;
             default:
@@ -308,6 +322,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
     replaceMap(this.#textStyles, textStyles);
     replaceMap(this.#textMeasurementStyles, textMeasurementStyles);
     replaceMap(this.#fonts, fonts);
+    replaceMap(this.#images, images);
     replaceMap(this.#encodedKinds, encodedKinds);
     replaceMap(this.#glyphSpans, glyphSpans);
     replaceMap(this.#glyphRasters, glyphRasters);
@@ -489,6 +504,45 @@ function glyphSurfaceContext(
   return typeof OffscreenCanvas === "function" && surface instanceof OffscreenCanvas
     ? surface.getContext("2d")
     : (surface as HTMLCanvasElement).getContext("2d");
+}
+
+/**
+ * Turns an RGBA8 image resource into a drawable surface.
+ *
+ * Synchronous by construction: resource transactions are applied atomically at
+ * a commit boundary, so an asynchronous decode of an encoded format could not
+ * participate. That is why the resource carries pixels rather than PNG bytes.
+ */
+function decodeImageBitmap(bytes: Uint8Array): CanvasImageSource {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (
+    bytes.byteLength < IMAGE_BITMAP_RESOURCE_MINIMUM_BYTES ||
+    bytes[IMAGE_BITMAP_VERSION_OFFSET] !== RESOURCE_ENCODING_VERSION ||
+    bytes[IMAGE_BITMAP_VARIANT_OFFSET] !== IMAGE_BITMAP_RESOURCE_VARIANT
+  ) {
+    throw new Error("image resource header is malformed");
+  }
+  const width = view.getUint32(IMAGE_BITMAP_WIDTH_OFFSET, true);
+  const height = view.getUint32(IMAGE_BITMAP_HEIGHT_OFFSET, true);
+  const pixelBytes = view.getUint32(IMAGE_BITMAP_PIXEL_BYTES_OFFSET, true);
+  if (
+    width === 0 ||
+    height === 0 ||
+    pixelBytes !== width * height * 4 ||
+    IMAGE_BITMAP_PIXELS_OFFSET + pixelBytes > bytes.byteLength
+  ) {
+    throw new Error("image resource dimensions do not describe its pixels");
+  }
+  if (!canCreateGlyphSurface()) throw new Error("image surfaces are unavailable");
+  const surface = createGlyphSurface(width, height);
+  const context = glyphSurfaceContext(surface);
+  if (context === null) throw new Error("image surface has no Canvas2D context");
+  const image = context.createImageData(width, height);
+  image.data.set(
+    bytes.subarray(IMAGE_BITMAP_PIXELS_OFFSET, IMAGE_BITMAP_PIXELS_OFFSET + pixelBytes),
+  );
+  context.putImageData(image, 0, 0);
+  return surface;
 }
 
 function canCreateGlyphSurface(): boolean {

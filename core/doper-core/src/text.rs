@@ -436,7 +436,9 @@ impl CoreTextSystem {
 impl IntrinsicMeasurer for CoreTextSystem {
     fn measure(&mut self, scene: &Scene, node: NodeId, constraints: BoxConstraints) -> Size {
         let Some(text_run) = scene.text_run(node) else {
-            return Size::ZERO;
+            // An image with no explicit box takes its pixel dimensions, so a
+            // thumbnail does not silently collapse to nothing.
+            return image_intrinsic_size(scene, node).unwrap_or(Size::ZERO);
         };
         let Some(font_id) = scene.ref_prop(node, doper_abi::Prop::Font) else {
             return self.measure_system_fallback(scene, node, constraints);
@@ -813,4 +815,28 @@ fn span_wire_bytes(span: &GlyphSpanResource) -> usize {
     24_usize
         .saturating_add(bitmap_bytes)
         .saturating_add(span.placements.len().saturating_mul(12))
+}
+
+/// Returns an image node's natural size from its resource, in logical pixels.
+///
+/// Interpreting stored pixels as logical units keeps the demo-scale case simple
+/// and predictable; a device-pixel-ratio-aware image box is a separate decision.
+fn image_intrinsic_size(scene: &Scene, node: NodeId) -> Option<Size> {
+    let resource_id = scene.ref_prop(node, doper_abi::Prop::Image)?;
+    let resource = scene.resource(resource_id)?;
+    if resource.kind != doper_abi::ResourceKind::Image {
+        return None;
+    }
+    // Converted through `u16` so the cast is lossless rather than merely
+    // unlikely to lose precision: the resource byte budget puts any real image
+    // far below this bound, and a larger one is rejected instead of rounded.
+    let read = |offset: usize| -> Option<f32> {
+        let bytes = resource.bytes.get(offset..offset + 4)?;
+        let value = u32::from_le_bytes(bytes.try_into().ok()?);
+        u16::try_from(value).ok().map(f32::from)
+    };
+    Some(Size::new(
+        read(doper_abi::IMAGE_BITMAP_WIDTH_OFFSET)?,
+        read(doper_abi::IMAGE_BITMAP_HEIGHT_OFFSET)?,
+    ))
 }

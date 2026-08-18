@@ -4,8 +4,8 @@ use std::{
 };
 
 use doper_abi::{
-    DisplayCommand, DisplayInstruction, DisplayList, EditorDecorationKind, NodeKind, Prop,
-    ResourceKind,
+    DisplayCommand, DisplayInstruction, DisplayList, EditorDecorationKind,
+    IMAGE_BITMAP_HEIGHT_OFFSET, IMAGE_BITMAP_WIDTH_OFFSET, NodeKind, Prop, ResourceKind,
 };
 use doper_layout::LayoutSnapshot;
 use doper_scene::{BitSet, DirtyDomain, NodeId, Scene};
@@ -484,6 +484,21 @@ fn build_node(
             },
         );
     }
+    if let Some(image_id) = scene.ref_prop(node, Prop::Image) {
+        // The whole image is drawn into the node's box. Scene validation has
+        // already checked that the declared dimensions describe the pixels that
+        // follow, so the source rectangle here cannot exceed the resource.
+        let resource = typed_resource(scene, image_id, ResourceKind::Image)?;
+        let (image_width, image_height) = image_dimensions(image_id, resource)?;
+        push(
+            &mut instructions,
+            DisplayCommand::DrawImage {
+                image_id,
+                source: [0.0, 0.0, image_width, image_height],
+                destination: [0.0, 0.0, size.width, size.height],
+            },
+        );
+    }
     let editor_decorations = text.editor_decorations(node);
     for decoration in editor_decorations
         .iter()
@@ -590,6 +605,27 @@ fn typed_resource(
         });
     }
     Ok(resource)
+}
+
+/// Reads an image resource's pixel dimensions for the source rectangle.
+fn image_dimensions(
+    resource_id: u32,
+    resource: &doper_scene::Resource,
+) -> Result<(f32, f32), PaintError> {
+    // Converted through `u16` so the cast is lossless: the resource byte budget
+    // puts any real image far below this bound.
+    let read = |offset: usize| -> Option<f32> {
+        let bytes = resource.bytes.get(offset..offset + 4)?;
+        let value = u32::from_le_bytes(bytes.try_into().ok()?);
+        u16::try_from(value).ok().map(f32::from)
+    };
+    let (Some(width), Some(height)) = (
+        read(IMAGE_BITMAP_WIDTH_OFFSET),
+        read(IMAGE_BITMAP_HEIGHT_OFFSET),
+    ) else {
+        return Err(PaintError::MissingResource { resource_id });
+    };
+    Ok((width, height))
 }
 
 fn push(instructions: &mut Vec<DisplayInstruction>, command: DisplayCommand) {
