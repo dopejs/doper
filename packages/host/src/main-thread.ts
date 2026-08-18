@@ -41,6 +41,8 @@ import {
   FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
+  FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX,
+  FRAME_DIAGNOSTICS_SKIPPED_INSTRUCTIONS_INDEX,
   FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX,
   FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_START_INDEX,
   FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_END_INDEX,
@@ -217,6 +219,17 @@ export interface CoreFrameDiagnostics {
   /** Item range the Shell has materialized, as Core sees it. */
   readonly virtualMaterializedStart: number;
   readonly virtualMaterializedEnd: number;
+  /**
+   * Instructions Core stepped over because it does not know the opcode.
+   *
+   * Non-zero means a producer newer than this Core is driving it and part of
+   * what it sent was dropped. Skipping is the defined downgrade for an
+   * instruction its producer marked optional, but a downgrade nobody can see is
+   * indistinguishable from a decoder that lost data, so it is counted here.
+   */
+  readonly skippedInstructions: number;
+  /** Highest ABI version Core has observed on an accepted stream. */
+  readonly producerAbiVersion: number;
 }
 
 /** Diagnostics emitted after one Core frame and Canvas replay both succeed. */
@@ -922,6 +935,8 @@ function parseCoreFrameDiagnostics(
       FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_START_INDEX,
     ),
     virtualMaterializedEnd: requiredWord(words, FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX),
+    skippedInstructions: requiredWord(words, FRAME_DIAGNOSTICS_SKIPPED_INSTRUCTIONS_INDEX),
+    producerAbiVersion: requiredWord(words, FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX),
   };
 }
 

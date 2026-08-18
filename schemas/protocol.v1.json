@@ -96,7 +96,7 @@
     ]
   },
   "frameDiagnostics": {
-    "version": 4,
+    "version": 5,
     "fields": [
       {
         "name": "version",
@@ -192,6 +192,14 @@
       },
       {
         "name": "virtualMaterializedEnd",
+        "type": "u32"
+      },
+      {
+        "name": "skippedInstructions",
+        "type": "u32"
+      },
+      {
+        "name": "producerAbiVersion",
         "type": "u32"
       }
     ]

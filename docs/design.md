@@ -756,8 +756,19 @@ u32 字节长度。长度字必须紧跟在头之后而不是放在指令末尾�
 不符）；跨语言 `pnpm contracts:check` 通过；6 个 golden 字节夹具与所有手写指令夹具随
 abiVersion 3→4 显式重基；`doper-abi` 行覆盖 95.04%（门槛 95%）。
 
-**回滚**：schema 的 `instructionHeader` 恢复 `reserved`、`read_header` 恢复严格相等即可，
-但那会同时回到"没有前向兼容"的状态。
+**降级是可见的**（frameDiagnostics v5）。Core 在 commit 与 input 两条路径上都用
+`decode_with_report`，把跳过计数与观测到的最高生产方版本累加进 `CoreMetrics`，再经
+`skippedInstructions` / `producerAbiVersion` 两个诊断字段浮到宿主与 playground HUD——
+HUD 只在非零时显示这一行。此前这两个值在 8 条流里都是产出后即丢弃，等于没有降级可观测性；
+`doper-core` 有一条端到端断言"被跳过的指令必须计数并出现在诊断字长里，而同一条指令未标记
+时仍然致命"。
+
+**worker 握手也放宽了**。它原本对 `abiVersion` 做严格相等，即使流层已经能读——那会让一次
+混合版本部署在握手阶段硬失败，而流层本可以承载。现在同样按 `>= MINIMUM_READABLE_ABI_VERSION`
+判定。
+
+**回滚**：schema 的 `instructionHeader` 恢复 `reserved`、`read_header` 与 worker 握手恢复
+严格相等即可，但那会同时回到"没有前向兼容、降级不可见"的状态。
 
 ### 富单元格暴露的能力缺口
 

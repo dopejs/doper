@@ -106,6 +106,15 @@ async function mount(demo: Demo): Promise<void> {
           // Visible items still drawn as skeletons. Anything other than a brief
           // blip here means the viewport is showing placeholders, not content.
           metricRows.set(text.placeholders, String(report.core.visiblePlaceholders));
+          // Anything other than zero means a newer producer is driving this
+          // Core and part of what it sent was dropped. The downgrade is
+          // defined; it is shown so it is never silent.
+          if (report.core.skippedInstructions !== 0) {
+            metricRows.set(
+              text.skippedInstructions,
+              `${String(report.core.skippedInstructions)} (abi v${String(report.core.producerAbiVersion)})`,
+            );
+          }
         }
         publish();
       },

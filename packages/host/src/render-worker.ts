@@ -3,7 +3,7 @@
 import { decodeMutationBatch } from "@dopejs/doper-reconciler";
 import { decodeInputBatch } from "@dopejs/doper-editing";
 
-import { ABI_VERSION } from "./generated";
+import { MINIMUM_READABLE_ABI_VERSION } from "./generated";
 import { CanvasFrameSink, createDefaultRasterCache, type CoreClient } from "./main-thread";
 import { PostMessageMutationReceiver } from "./post-message";
 import { HybridRenderClock } from "./render-clock";
@@ -56,7 +56,13 @@ async function handle(message: RenderWorkerInboundMessage): Promise<void> {
       if (message.protocolVersion !== WORKER_PROTOCOL_VERSION) {
         throw new Error("render Worker protocol version mismatch");
       }
-      if (message.abiVersion !== ABI_VERSION) throw new Error("render Worker ABI version mismatch");
+      // The streams themselves are self-describing, so a main thread newer than
+      // this worker is workable: unknown instructions its producer marked
+      // optional get stepped over. Refusing the handshake on inequality would
+      // hard-fail a deploy the stream layer could have carried.
+      if (message.abiVersion < MINIMUM_READABLE_ABI_VERSION) {
+        throw new Error("render Worker ABI version predates self-describing instructions");
+      }
       sessionId = positiveU32(message.sessionId, "sessionId");
       await verifyWasmStartup();
       prepared = true;

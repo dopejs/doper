@@ -15,9 +15,10 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX, FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
-    FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
-    FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX,
-    FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX,
+    FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
+    FRAME_DIAGNOSTICS_SKIPPED_INSTRUCTIONS_INDEX, FRAME_DIAGNOSTICS_VERSION,
+    FRAME_DIAGNOSTICS_VERSION_INDEX, FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX,
     FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_START_INDEX,
     FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_END_INDEX, FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_START_INDEX,
     FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX, FRAME_DIAGNOSTICS_WORDS, InputAffinity,
@@ -54,6 +55,15 @@ pub struct CoreMetrics {
     pub input_rejections: u64,
     /// Worker clock frames that changed a Core-owned scroll position.
     pub scroll_frames: u64,
+    /// Instructions stepped over because this build does not know the opcode.
+    ///
+    /// Non-zero means a producer newer than this Core is driving it and some of
+    /// what it sent was dropped. That is the defined downgrade, but it has to be
+    /// visible: silently rendering less than was asked for is indistinguishable
+    /// from a decoder that lost data.
+    pub skipped_instructions: u64,
+    /// Highest ABI version observed on an accepted stream.
+    pub producer_abi_version: u32,
 }
 
 /// Deterministic work and invalidation diagnostics for one accepted frame.
@@ -108,6 +118,13 @@ pub struct FrameDiagnostics {
     pub virtual_visible: (usize, usize),
     /// Item range the Shell has actually materialized, as Core sees it.
     pub virtual_materialized: (usize, usize),
+    /// Instructions this build stepped over, cumulative across the session.
+    ///
+    /// Non-zero means a newer producer is driving this Core and some of what it
+    /// sent was dropped. That downgrade is defined, but it has to be visible.
+    pub skipped_instructions: u64,
+    /// Highest ABI version observed on an accepted stream.
+    pub producer_abi_version: u32,
 }
 
 impl FrameDiagnostics {
@@ -149,6 +166,9 @@ impl FrameDiagnostics {
             count_word(self.virtual_materialized.0);
         words[FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX] =
             count_word(self.virtual_materialized.1);
+        words[FRAME_DIAGNOSTICS_SKIPPED_INSTRUCTIONS_INDEX] =
+            count_u64_word(self.skipped_instructions);
+        words[FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX] = self.producer_abi_version;
         words
     }
 }
@@ -463,13 +483,14 @@ impl CoreEngine {
         system_text_metrics: Option<&[u8]>,
     ) -> Result<FrameOutput, CoreError> {
         self.ensure_reverse_streams_drained()?;
-        let batch = match MutationBatch::decode(bytes) {
-            Ok(batch) => batch,
+        let (batch, report) = match MutationBatch::decode_with_report(bytes) {
+            Ok(decoded) => decoded,
             Err(error) => {
                 self.metrics.abi_rejections += 1;
                 return Err(CoreError::Abi(error));
             }
         };
+        self.note_decode_report(report);
         let metric_batch = self.decode_metric_batch(system_text_metrics)?;
         if let Some(metric_batch) = &metric_batch {
             self.text
@@ -613,6 +634,18 @@ impl CoreEngine {
         Ok(Some(output))
     }
 
+    /// Records what a decoder had to tolerate to read a stream.
+    fn note_decode_report(&mut self, report: doper_abi::DecodeReport) {
+        self.metrics.skipped_instructions = self
+            .metrics
+            .skipped_instructions
+            .saturating_add(u64::from(report.skipped_instructions));
+        self.metrics.producer_abi_version = self
+            .metrics
+            .producer_abi_version
+            .max(u32::from(report.producer_abi_version));
+    }
+
     /// Atomically applies one Input Stream transaction to Core-owned subsystems.
     ///
     /// Returns a new `DisplayList` only when direct manipulation changed pixels.
@@ -622,13 +655,14 @@ impl CoreEngine {
     /// partially applying the input batch.
     pub fn input(&mut self, bytes: &[u8]) -> Result<Option<FrameOutput>, CoreError> {
         self.ensure_reverse_streams_drained()?;
-        let batch = match InputBatch::decode(bytes) {
-            Ok(batch) => batch,
+        let (batch, report) = match InputBatch::decode_with_report(bytes) {
+            Ok(decoded) => decoded,
             Err(error) => {
                 self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
                 return Err(CoreError::Abi(error));
             }
         };
+        self.note_decode_report(report);
         if let Some(previous) = self.last_input_sequence
             && !is_newer_sequence(batch.frame_seq, previous)
         {
@@ -1560,6 +1594,8 @@ impl CoreEngine {
             visible_placeholders: self.scroll.visible_placeholders(),
             virtual_visible: self.scroll.visible_item_range(),
             virtual_materialized: self.scroll.materialized_range(),
+            skipped_instructions: self.metrics.skipped_instructions,
+            producer_abi_version: self.metrics.producer_abi_version,
         };
         self.scene.clear_dirty();
         Ok(FrameOutput {
@@ -3947,6 +3983,56 @@ mod tests {
                  with a {latency}-frame Shell round trip",
             );
         }
+    }
+
+    #[test]
+    fn a_skipped_instruction_reaches_the_host_diagnostics() {
+        // The downgrade is only defensible if an operator can see it. Producing
+        // the count inside the decoder and dropping it would leave a Core that
+        // silently renders less than it was asked for.
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let canonical = painted_tree();
+        let commit = canonical.len() - 8;
+        let mut bytes = canonical;
+        // An opcode no build will ever define, marked skippable, two words wide.
+        bytes.splice(
+            commit..commit,
+            [
+                0xfe_u8,
+                doper_abi::INSTRUCTION_FLAG_OPTIONAL,
+                2,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+        );
+        let length = u32::try_from(bytes.len()).expect("length");
+        bytes[8..12].copy_from_slice(&length.to_le_bytes());
+        let count = u32::from_le_bytes(bytes[12..16].try_into().expect("count")) + 1;
+        bytes[12..16].copy_from_slice(&count.to_le_bytes());
+
+        let output = engine.commit(&bytes).expect("frame");
+        assert_eq!(output.diagnostics.skipped_instructions, 1);
+        assert_eq!(
+            output.diagnostics.producer_abi_version,
+            u32::from(doper_abi::ABI_VERSION)
+        );
+        let words = output.diagnostics.to_words();
+        assert_eq!(
+            words[doper_abi::FRAME_DIAGNOSTICS_SKIPPED_INSTRUCTIONS_INDEX],
+            1
+        );
+
+        // The same instruction unmarked is still fatal: a structural mutation
+        // this build cannot read must never be dropped behind the operator.
+        let mut fatal = bytes.clone();
+        fatal[commit + 1] = 0;
+        assert!(matches!(
+            CoreEngine::new(320.0, 240.0).expect("Core").commit(&fatal),
+            Err(CoreError::Abi(_))
+        ));
     }
 
     #[test]
