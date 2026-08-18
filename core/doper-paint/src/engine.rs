@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use doper_abi::{
     DisplayCommand, DisplayInstruction, DisplayList, EditorDecorationKind, NodeKind, Prop,
@@ -139,6 +142,12 @@ pub struct PaintEngine {
 #[derive(Debug)]
 struct CachedSubtree {
     children: Arc<[Arc<CachedSubtree>]>,
+    /// Child identifiers this subtree was built from.
+    ///
+    /// A window shift removes one item and adds another, so a parent's child
+    /// count can stay the same while its children change; only the identifiers
+    /// reveal that its own instructions are stale.
+    child_ids: Arc<[NodeId]>,
     command_count: usize,
     local: Arc<[DisplayInstruction]>,
 }
@@ -232,7 +241,7 @@ impl PaintEngine {
             });
         }
 
-        let rebuild = rebuild_subtrees(scene, geometry_changed, topology_unchanged, force_full);
+        let rebuild = rebuild_subtrees(scene, geometry_changed, &self.subtrees, force_full);
         let (display_list, updates, subtree_builds, subtree_cache_hits) =
             build_display_list(scene, layout, &self.subtrees, &rebuild, text, virtual_items)?;
         let command_count = display_list.instructions.len();
@@ -250,10 +259,11 @@ impl PaintEngine {
             self.metrics.over_invalidated_frames += 1;
         }
         self.current = Some(picture.clone());
-        if topology_unchanged {
-            self.subtrees.extend(updates);
-        } else {
-            self.subtrees = updates;
+        self.subtrees.extend(updates);
+        if !topology_unchanged {
+            // Keep the cache bounded by the live Scene rather than by history.
+            let live: HashSet<NodeId> = scene.ids().iter().copied().collect();
+            self.subtrees.retain(|node, _| live.contains(node));
         }
         self.topology.clear();
         self.topology.extend_from_slice(scene.ids());
@@ -274,33 +284,54 @@ impl PaintEngine {
 fn rebuild_subtrees(
     scene: &Scene,
     geometry_changed: &BitSet,
-    topology_unchanged: bool,
+    current: &HashMap<NodeId, Arc<CachedSubtree>>,
     force_full: bool,
 ) -> Vec<bool> {
-    let mut rebuild = vec![force_full || !topology_unchanged; scene.len()];
-    if topology_unchanged && !force_full {
-        let paint = scene.dirty(DirtyDomain::Paint);
-        let paint_self = scene.dirty(DirtyDomain::PaintSelf);
-        for (index, dirty) in rebuild.iter_mut().enumerate() {
-            *dirty = paint.contains(index)
-                || paint_self.contains(index)
-                || geometry_changed.contains(index);
+    if force_full {
+        return vec![true; scene.len()];
+    }
+    // A topology change used to rebuild every node and throw the subtree cache
+    // away, which made scrolling a virtual list repaint the entire Scene every
+    // frame. Cached subtrees are keyed by NodeId, so a node that survived with
+    // the same children and the same paint state is still valid; only the new
+    // nodes and the parents whose child list changed have to be rebuilt.
+    let paint = scene.dirty(DirtyDomain::Paint);
+    let paint_self = scene.dirty(DirtyDomain::PaintSelf);
+    let mut rebuild = vec![false; scene.len()];
+    for (index, node) in scene.ids().iter().copied().enumerate() {
+        let cached = current.get(&node);
+        rebuild[index] = paint.contains(index)
+            || paint_self.contains(index)
+            || geometry_changed.contains(index)
+            || cached.is_none_or(|entry| !children_match(scene, node, entry));
+    }
+    for index in (0..scene.len()).rev() {
+        if !rebuild[index] {
+            continue;
         }
-        for index in (0..scene.len()).rev() {
-            if !rebuild[index] {
-                continue;
-            }
-            let Some(node) = scene.ids().get(index).copied() else {
-                continue;
-            };
-            if let Some(parent) = scene.parent(node)
-                && let Some(parent_index) = scene.resolve(parent)
-            {
-                rebuild[parent_index] = true;
-            }
+        let Some(node) = scene.ids().get(index).copied() else {
+            continue;
+        };
+        if let Some(parent) = scene.parent(node)
+            && let Some(parent_index) = scene.resolve(parent)
+        {
+            rebuild[parent_index] = true;
         }
     }
     rebuild
+}
+
+/// Whether a cached subtree was built from the node's current children.
+fn children_match(scene: &Scene, node: NodeId, cached: &CachedSubtree) -> bool {
+    let mut expected = cached.child_ids.iter().copied();
+    let mut child = scene.first_child(node);
+    while let Some(current) = child {
+        if expected.next() != Some(current) {
+            return false;
+        }
+        child = scene.next_sibling(current);
+    }
+    expected.next().is_none()
 }
 
 type SubtreeBuild = (DisplayList, HashMap<NodeId, Arc<CachedSubtree>>, u64, u64);
@@ -345,9 +376,19 @@ fn build_display_list(
             children.push(cached);
             child = scene.next_sibling(child_id);
         }
+        let child_ids: Arc<[NodeId]> = {
+            let mut ids = Vec::new();
+            let mut walk = scene.first_child(node);
+            while let Some(child_id) = walk {
+                ids.push(child_id);
+                walk = scene.next_sibling(child_id);
+            }
+            Arc::from(ids)
+        };
         updates.insert(
             node,
             Arc::new(CachedSubtree {
+                child_ids,
                 children: Arc::from(children),
                 command_count,
                 local,
