@@ -80,6 +80,8 @@ function transactionStream(fixture: Fixture): Uint8Array {
   view.setUint32(8, bytes.byteLength, true);
   view.setUint32(12, 1, true);
   bytes[16] = 1;
+  // Instruction length in four-byte words, covering the header and payload.
+  view.setUint16(18, (bytes.byteLength - 16) / 4, true);
   view.setUint32(20, fixture.nodeId, true);
   writeU64(view, 24, fixture.baseRevision);
   writeU64(view, 32, fixture.revision);

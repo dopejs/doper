@@ -20,6 +20,20 @@ mod system_text_metrics;
 
 use core::fmt;
 
+/// What a decoder had to tolerate to read a stream.
+///
+/// A stream produced by a newer build may carry instructions this decoder does
+/// not know. Skipping them is the defined downgrade, but a downgrade nobody can
+/// see is indistinguishable from a decoder that simply lost data, so every skip
+/// is counted and the producer's version is reported alongside it.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DecodeReport {
+    /// Instructions stepped over because this build does not know the opcode.
+    pub skipped_instructions: u32,
+    /// ABI version the producer was built against.
+    pub producer_abi_version: u16,
+}
+
 pub use display_list::{DisplayCommand, DisplayInstruction, DisplayList, EditorDecorationKind};
 pub use edit_transactions::{
     EditTransactionBatch, EditTransactionKind, EditTransactionRecord, WireAffinity, WireRange,

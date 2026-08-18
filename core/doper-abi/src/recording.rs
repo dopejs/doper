@@ -50,9 +50,30 @@ pub struct ReplayRecording {
 
 impl ReplayRecording {
     /// Decodes and recursively validates an untrusted recording before returning any record.
+    /// Decodes without reporting what the decoder had to tolerate.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::decode_with_report`].
     pub fn decode(bytes: &[u8]) -> Result<Self, AbiError> {
+        Self::decode_with_report(bytes).map(|(value, _)| value)
+    }
+
+    /// Decodes and reports what this build had to tolerate to read the stream.
+    ///
+    /// Instructions with an opcode this build does not know are stepped over
+    /// when the producer marked them optional, and counted in the report.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AbiError`] for a malformed, truncated, oversized, or
+    /// too-old stream, and for an unknown instruction that was not marked
+    /// optional.
+    pub fn decode_with_report(bytes: &[u8]) -> Result<(Self, crate::DecodeReport), AbiError> {
         let mut reader = Reader::new(bytes);
-        let declared_count = read_header(&mut reader, RECORDING_MAGIC, MAX_RECORDING_BYTES)?;
+        let stream = read_header(&mut reader, RECORDING_MAGIC, MAX_RECORDING_BYTES)?;
+        let declared_count = stream.declared_count;
+        let mut skipped = 0_u32;
         if declared_count > MAX_RECORDING_RECORDS {
             return Err(AbiError::InstructionCountTooLarge {
                 declared: declared_count,
@@ -71,12 +92,23 @@ impl ReplayRecording {
         let capacity = usize::try_from(declared_count).map_err(|_| AbiError::ArithmeticOverflow)?;
         let mut records = Vec::with_capacity(capacity);
         while reader.remaining() != 0 {
-            let (offset, raw_kind, _) = read_instruction_header(&mut reader)?;
-            let kind = RecordingRecordKind::from_u8(raw_kind).ok_or(AbiError::UnknownOpcode {
-                stream: StreamKind::Recording,
-                opcode: raw_kind,
-                offset,
-            })?;
+            let header = read_instruction_header(&mut reader)?;
+            let (offset, raw_kind) = (header.offset, header.opcode);
+            // A stream from a newer build may carry instructions this decoder has
+            // never heard of. Skipping one is only safe when the producer marked it
+            // optional, so an unmarked unknown instruction is still fatal.
+            let Some(kind) = RecordingRecordKind::from_u8(raw_kind) else {
+                if header.optional() {
+                    skipped = skipped.saturating_add(1);
+                    reader.seek_to(header.end)?;
+                    continue;
+                }
+                return Err(AbiError::UnknownOpcode {
+                    stream: StreamKind::Recording,
+                    opcode: raw_kind,
+                    offset,
+                });
+            };
             let length =
                 usize::try_from(reader.read_u32()?).map_err(|_| AbiError::ArithmeticOverflow)?;
             if !length.is_multiple_of(crate::PROTOCOL_ALIGNMENT) {
@@ -101,14 +133,25 @@ impl ReplayRecording {
             };
             records.push(record);
         }
-        let actual = u32::try_from(records.len()).map_err(|_| AbiError::ArithmeticOverflow)?;
+        // A skipped record was still in the stream, so it counts toward the
+        // declared total; otherwise the count check rejects every downgrade.
+        let actual = u32::try_from(records.len())
+            .map_err(|_| AbiError::ArithmeticOverflow)?
+            .checked_add(skipped)
+            .ok_or(AbiError::ArithmeticOverflow)?;
         if actual != declared_count {
             return Err(AbiError::InstructionCountMismatch {
                 declared: declared_count,
                 actual,
             });
         }
-        Ok(Self { records })
+        Ok((
+            Self { records },
+            crate::DecodeReport {
+                skipped_instructions: skipped,
+                producer_abi_version: stream.producer_version,
+            },
+        ))
     }
 
     /// Encodes a canonical recording after recursively validating all nested streams.
@@ -243,5 +286,35 @@ mod tests {
         fn arbitrary_bytes_never_panic(bytes in prop::collection::vec(any::<u8>(), 0..4096)) {
             let _ = ReplayRecording::decode(&bytes);
         }
+    }
+    #[test]
+    fn an_unknown_record_is_skipped_only_when_the_producer_allowed_it() {
+        // A recording outlives the build that wrote it, so a file carrying a
+        // record kind this build never had must stay replayable for the kinds
+        // it does know -- but only where the producer said dropping one is safe.
+        let build = |flags: u8| {
+            let canonical = ReplayRecording {
+                records: vec![ReplayRecord::Mutation(mutation(1))],
+            }
+            .encode()
+            .expect("encode");
+            let mut bytes = canonical;
+            bytes.extend_from_slice(&[0xfe, flags, 2, 0, 0, 0, 0, 0]);
+            let length = u32::try_from(bytes.len()).expect("length");
+            bytes[8..12].copy_from_slice(&length.to_le_bytes());
+            bytes[12..16].copy_from_slice(&2_u32.to_le_bytes());
+            bytes
+        };
+
+        let (recording, report) =
+            ReplayRecording::decode_with_report(&build(crate::INSTRUCTION_FLAG_OPTIONAL))
+                .expect("skipped");
+        assert_eq!(report.skipped_instructions, 1);
+        assert_eq!(recording.records.len(), 1);
+
+        assert!(matches!(
+            ReplayRecording::decode(&build(0)),
+            Err(AbiError::UnknownOpcode { opcode: 0xfe, .. })
+        ));
     }
 }

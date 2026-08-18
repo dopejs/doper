@@ -12,6 +12,10 @@ import {
   RECORDING_MAGIC,
   RecordingRecordKind,
   STREAM_HEADER_BYTES,
+  INSTRUCTION_FLAG_MASK,
+  INSTRUCTION_FLAG_OPTIONAL,
+  INSTRUCTION_LENGTH_ESCAPE,
+  MINIMUM_READABLE_ABI_VERSION,
 } from "./generated";
 
 const MUTATION_RECORD_KIND = Number(RecordingRecordKind.Mutation);
@@ -61,6 +65,12 @@ export function encodeReplayRecording(recording: ReplayRecording): Uint8Array {
   let offset = STREAM_HEADER_BYTES;
   for (const record of recording.records) {
     output[offset] = kindFor(record);
+    // Records carry their length like every other instruction, so a reader that
+    // does not know the kind can step over one instead of refusing the file.
+    const total = RECORD_HEADER_BYTES + record.bytes.byteLength;
+    const words = total / PROTOCOL_ALIGNMENT;
+    if (words >= INSTRUCTION_LENGTH_ESCAPE) fail("recording record is too large to frame");
+    view.setUint16(offset + 2, words, true);
     view.setUint32(offset + 4, record.bytes.byteLength, true);
     offset += RECORD_HEADER_BYTES;
     output.set(record.bytes, offset);
@@ -75,7 +85,9 @@ export function decodeReplayRecording(input: Uint8Array): ReplayRecording {
   if (input.byteLength % PROTOCOL_ALIGNMENT !== 0) fail("recording is not aligned");
   const reader = new RecordingReader(input);
   if (reader.u32() !== RECORDING_MAGIC) fail("wrong recording magic");
-  if (reader.u16() !== ABI_VERSION) fail("unsupported recording ABI version");
+  // Newer producers stay readable through the self-describing instruction
+  // framing; anything older than it cannot be stepped through safely.
+  if (reader.u16() < MINIMUM_READABLE_ABI_VERSION) fail("unsupported recording ABI version");
   if (reader.u16() !== STREAM_HEADER_BYTES) fail("invalid recording header length");
   if (reader.u32() !== input.byteLength) fail("declared recording length does not match input");
   const declaredCount = reader.u32();
@@ -86,12 +98,22 @@ export function decodeReplayRecording(input: Uint8Array): ReplayRecording {
 
   const records: ReplayRecord[] = [];
   while (reader.remaining > 0) {
+    const start = reader.offset;
     const kind = reader.u8();
-    if (reader.u8() !== 0) fail("unsupported recording flags");
-    reader.zeroes(2);
+    const flags = reader.u8();
+    if ((flags & ~INSTRUCTION_FLAG_MASK) !== 0) fail("unsupported recording flags");
+    // A record header now carries the instruction length like every other
+    // stream, so a reader that does not know the record kind can step over it.
+    const words = reader.u16();
+    const total = words === INSTRUCTION_LENGTH_ESCAPE ? reader.u32() : words * PROTOCOL_ALIGNMENT;
     const length = reader.u32();
     if (length % PROTOCOL_ALIGNMENT !== 0) fail("nested stream is not aligned");
     const bytes = reader.bytes(length);
+    if (reader.offset !== start + total) fail("record length does not match its payload");
+    if (!(kind in RecordingRecordKind)) {
+      if ((flags & INSTRUCTION_FLAG_OPTIONAL) === 0) fail("unknown recording record kind");
+      continue;
+    }
     const record = recordFor(kind, bytes);
     validateRecord(record);
     records.push(record);
@@ -180,6 +202,10 @@ class RecordingReader {
 
   public get remaining(): number {
     return this.#input.byteLength - this.#offset;
+  }
+
+  public get offset(): number {
+    return this.#offset;
   }
 
   public u8(): number {

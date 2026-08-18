@@ -1,5 +1,5 @@
 use crate::codec::{
-    Reader, Writer, checked_padding, read_header, read_instruction_header,
+    Reader, Writer, checked_padding, finish_instruction, read_header, read_instruction_header,
     validate_encode_instruction_count,
 };
 use crate::{
@@ -356,9 +356,30 @@ pub struct InputBatch {
 
 impl InputBatch {
     /// Decodes an untrusted input transaction without mutating editing state.
+    /// Decodes without reporting what the decoder had to tolerate.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::decode_with_report`].
     pub fn decode(bytes: &[u8]) -> Result<Self, AbiError> {
+        Self::decode_with_report(bytes).map(|(value, _)| value)
+    }
+
+    /// Decodes and reports what this build had to tolerate to read the stream.
+    ///
+    /// Instructions with an opcode this build does not know are stepped over
+    /// when the producer marked them optional, and counted in the report.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AbiError`] for a malformed, truncated, oversized, or
+    /// too-old stream, and for an unknown instruction that was not marked
+    /// optional.
+    pub fn decode_with_report(bytes: &[u8]) -> Result<(Self, crate::DecodeReport), AbiError> {
         let mut reader = Reader::new(bytes);
-        let declared_count = read_header(&mut reader, INPUT_MAGIC, MAX_INPUT_BYTES)?;
+        let stream = read_header(&mut reader, INPUT_MAGIC, MAX_INPUT_BYTES)?;
+        let declared_count = stream.declared_count;
+        let mut skipped = 0_u32;
         validate_declared_count(declared_count, reader.remaining())?;
         let capacity = usize::try_from(declared_count).map_err(|_| AbiError::ArithmeticOverflow)?;
         let mut instructions = Vec::with_capacity(capacity.saturating_sub(1));
@@ -366,21 +387,33 @@ impl InputBatch {
         let mut frame_seq = None;
 
         while reader.remaining() != 0 {
-            let (offset, raw_opcode, flags) = read_instruction_header(&mut reader)?;
+            let header = read_instruction_header(&mut reader)?;
+            let (offset, raw_opcode, flags) = (header.offset, header.opcode, header.flags);
             actual_count = actual_count
                 .checked_add(1)
                 .ok_or(AbiError::ArithmeticOverflow)?;
             if frame_seq.is_some() {
                 return Err(AbiError::CommitNotLast { offset });
             }
-            let opcode = InputOpcode::from_u8(raw_opcode).ok_or(AbiError::UnknownOpcode {
-                stream: StreamKind::Input,
-                opcode: raw_opcode,
-                offset,
-            })?;
+            // A stream from a newer build may carry instructions this decoder has
+            // never heard of. Skipping one is only safe when the producer marked it
+            // optional, so an unmarked unknown instruction is still fatal.
+            let Some(opcode) = InputOpcode::from_u8(raw_opcode) else {
+                if header.optional() {
+                    skipped = skipped.saturating_add(1);
+                    reader.seek_to(header.end)?;
+                    continue;
+                }
+                return Err(AbiError::UnknownOpcode {
+                    stream: StreamKind::Input,
+                    opcode: raw_opcode,
+                    offset,
+                });
+            };
             if opcode == InputOpcode::Commit {
                 frame_seq = Some(reader.read_u32()?);
                 validate_instruction_size(opcode, offset, reader.offset())?;
+                finish_instruction(&reader, header)?;
                 continue;
             }
             let command = decode_command(opcode, &mut reader)?;
@@ -393,10 +426,16 @@ impl InputBatch {
                 actual: actual_count,
             });
         }
-        Ok(Self {
-            frame_seq: frame_seq.ok_or(AbiError::MissingCommit)?,
-            instructions,
-        })
+        Ok((
+            Self {
+                frame_seq: frame_seq.ok_or(AbiError::MissingCommit)?,
+                instructions,
+            },
+            crate::DecodeReport {
+                skipped_instructions: skipped,
+                producer_abi_version: stream.producer_version,
+            },
+        ))
     }
 
     /// Encodes one canonical little-endian input transaction.
@@ -983,6 +1022,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::INSTRUCTION_FLAG_OPTIONAL;
 
     fn instruction(command: InputCommand) -> InputInstruction {
         InputInstruction { flags: 0, command }
@@ -1430,7 +1470,8 @@ mod tests {
         }
         .encode()
         .expect("commit");
-        extra.extend_from_slice(&[InputOpcode::Undo as u8, 0, 0, 0]);
+        // One word: a header-only instruction.
+        extra.extend_from_slice(&[InputOpcode::Undo as u8, 0, 1, 0]);
         extra.extend_from_slice(&1_u32.to_le_bytes());
         extra.extend_from_slice(&0_u64.to_le_bytes());
         let length = u32::try_from(extra.len()).expect("short fixture");
@@ -1471,5 +1512,32 @@ mod tests {
         fn arbitrary_bytes_never_panic(bytes in prop::collection::vec(any::<u8>(), 0..4096)) {
             let _ = InputBatch::decode(&bytes);
         }
+    }
+    #[test]
+    fn an_unknown_input_command_is_skipped_only_when_the_producer_allowed_it() {
+        // Input carries what the user did, so dropping an unmarked unknown
+        // command could silently change the gesture. Dropping one the producer
+        // marked skippable is the defined downgrade.
+        let build = |flags: u8| {
+            let canonical = sample_batch().encode().expect("sample encodes");
+            let commit = canonical.len() - 8;
+            let mut bytes = canonical;
+            bytes.splice(commit..commit, [0xfe_u8, flags, 2, 0, 0, 0, 0, 0]);
+            let length = u32::try_from(bytes.len()).expect("length");
+            bytes[8..12].copy_from_slice(&length.to_le_bytes());
+            let count = u32::from_le_bytes(bytes[12..16].try_into().expect("count")) + 1;
+            bytes[12..16].copy_from_slice(&count.to_le_bytes());
+            bytes
+        };
+
+        let (batch, report) =
+            InputBatch::decode_with_report(&build(INSTRUCTION_FLAG_OPTIONAL)).expect("skipped");
+        assert_eq!(report.skipped_instructions, 1);
+        assert_eq!(batch, sample_batch());
+
+        assert!(matches!(
+            InputBatch::decode(&build(0)),
+            Err(AbiError::UnknownOpcode { opcode: 0xfe, .. })
+        ));
     }
 }

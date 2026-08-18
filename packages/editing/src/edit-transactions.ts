@@ -1,9 +1,12 @@
 import {
-  ABI_VERSION,
   EDIT_TRANSACTIONS_MAGIC,
   EDIT_TRANSACTION_LAYOUTS,
   EditTransactionOpcode,
+  INSTRUCTION_FLAG_MASK,
+  INSTRUCTION_FLAG_OPTIONAL,
   INSTRUCTION_HEADER_BYTES,
+  INSTRUCTION_LENGTH_ESCAPE,
+  MINIMUM_READABLE_ABI_VERSION,
   MAX_EDIT_TRANSACTIONS_BYTES,
   MAX_EDIT_TRANSACTION_INSTRUCTIONS,
   MAX_RESOURCE_BYTES,
@@ -50,7 +53,9 @@ export function decodeEditTransactionBatch(input: Uint8Array): readonly EditTran
   if (input.byteLength % PROTOCOL_ALIGNMENT !== 0) fail("edit transaction stream is not aligned");
   const reader = new Reader(input);
   if (reader.u32() !== EDIT_TRANSACTIONS_MAGIC) fail("wrong edit transaction magic");
-  if (reader.u16() !== ABI_VERSION) fail("unsupported edit transaction ABI version");
+  // Newer producers stay readable through the self-describing instruction
+  // framing; anything older than it cannot be stepped through safely.
+  if (reader.u16() < MINIMUM_READABLE_ABI_VERSION) fail("unsupported edit transaction ABI version");
   if (reader.u16() !== STREAM_HEADER_BYTES) fail("invalid edit transaction header length");
   if (reader.u32() !== input.byteLength) fail("edit transaction length does not match input");
   const declared = reader.u32();
@@ -64,13 +69,23 @@ export function decodeEditTransactionBatch(input: Uint8Array): readonly EditTran
   const transactions: EditTransaction[] = [];
   while (reader.remaining > 0) {
     const offset = reader.offset;
-    const opcode = reader.instruction();
-    if (opcode !== EditTransactionOpcode.Transaction) fail("unknown edit transaction opcode");
+    const header = reader.instruction();
+    if (header.opcode !== Number(EditTransactionOpcode.Transaction)) {
+      // Skipping is the producer's call: an unmarked unknown instruction is
+      // still fatal, because losing it could change what the stream means.
+      if (!header.optional) fail("unknown edit transaction opcode");
+      reader.seekTo(header.end);
+      continue;
+    }
     transactions.push(decodeTransaction(reader));
     const consumed = reader.offset - offset;
-    if (consumed < EDIT_TRANSACTION_LAYOUTS[opcode].minimumBytes || consumed % 4 !== 0) {
+    if (
+      consumed < EDIT_TRANSACTION_LAYOUTS[EditTransactionOpcode.Transaction].minimumBytes ||
+      consumed % 4 !== 0
+    ) {
       fail("edit transaction instruction has invalid length");
     }
+    if (reader.offset !== header.end) fail("instruction length does not match its payload");
   }
   if (transactions.length !== declared) fail("edit transaction count does not match input");
   return transactions;
@@ -158,13 +173,28 @@ class Reader {
     return this.#bytes.byteLength - this.#offset;
   }
 
-  public instruction(): EditTransactionOpcode {
-    if (this.#offset % PROTOCOL_ALIGNMENT !== 0) fail("edit transaction instruction is unaligned");
+  /** Reads one instruction header, including where the instruction ends. */
+  public instruction(): { opcode: number; optional: boolean; end: number } {
+    const offset = this.#offset;
+    if (offset % PROTOCOL_ALIGNMENT !== 0) fail("instruction is not aligned");
     this.require(INSTRUCTION_HEADER_BYTES);
     const opcode = this.u8();
-    if (this.u8() !== 0) fail("edit transaction instruction flags are unsupported");
-    if (this.u16() !== 0) fail("edit transaction reserved bytes must be zero");
-    return opcode;
+    const flags = this.u8();
+    if ((flags & ~INSTRUCTION_FLAG_MASK) !== 0) fail("unsupported instruction flags");
+    const words = this.u16();
+    const length = words === INSTRUCTION_LENGTH_ESCAPE ? this.u32() : words * PROTOCOL_ALIGNMENT;
+    const end = offset + length;
+    if (length < INSTRUCTION_HEADER_BYTES || length % PROTOCOL_ALIGNMENT !== 0) {
+      fail("instruction length is invalid");
+    }
+    if (end > this.#bytes.byteLength) fail("instruction length runs past the stream");
+    return { opcode, optional: (flags & INSTRUCTION_FLAG_OPTIONAL) !== 0, end };
+  }
+
+  /** Moves the cursor forward to an instruction boundary. */
+  public seekTo(offset: number): void {
+    if (offset < this.#offset || offset > this.#bytes.byteLength) fail("invalid instruction skip");
+    this.#offset = offset;
   }
 
   public u8(): number {

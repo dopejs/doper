@@ -119,8 +119,14 @@ function validateList(
   let saveDepth = 0;
   while (reader.remaining > 0) {
     const offset = reader.offset;
-    const opcode = reader.instruction();
+    const header = reader.instruction();
     actualCount += 1;
+    if (!isKnownOpcode(DisplayOpcode, header.opcode)) {
+      if (!header.optional) replayFail(`unknown display-list opcode ${String(header.opcode)}`);
+      reader.seekTo(header.end);
+      continue;
+    }
+    const opcode = header.opcode;
     if (opcode === DisplayOpcode.Save) saveDepth += 1;
     if (opcode === DisplayOpcode.Restore) {
       if (saveDepth === 0) replayFail("Restore underflows the graphics-state stack");
@@ -128,6 +134,7 @@ function validateList(
     }
     validateCommand(reader, opcode, resources, state, depth);
     validateInstructionSize(opcode, offset, reader.offset);
+    if (reader.offset !== header.end) replayFail("instruction length does not match its payload");
   }
   if (actualCount !== declaredCount) replayFail("instruction count does not match input");
   if (saveDepth !== 0) replayFail("display list has unmatched Save commands");
@@ -241,8 +248,15 @@ function replayList(
 ): void {
   const { reader } = readDisplayListHeader(bytes);
   while (reader.remaining > 0) {
-    const opcode = reader.instruction();
-    replayCommand(context, reader, opcode, resources);
+    const header = reader.instruction();
+    // Validation already ran over these bytes, so an unknown opcode here can
+    // only be one the validator agreed to skip.
+    if (typeof DisplayOpcode[header.opcode] !== "string") {
+      reader.seekTo(header.end);
+      continue;
+    }
+    replayCommand(context, reader, header.opcode, resources);
+    reader.seekTo(header.end);
   }
 }
 
@@ -443,4 +457,12 @@ function replayFail(message: string): never {
 
 function assertNeverOpcode(opcode: never): never {
   return replayFail(`unsupported display opcode ${String(opcode)}`);
+}
+
+/** Whether an opcode byte names a member this build knows. */
+function isKnownOpcode<T extends Record<string, string | number>>(
+  values: T,
+  value: number,
+): value is T[keyof T] & number {
+  return typeof values[value] === "string";
 }

@@ -671,6 +671,7 @@ function selectionTransactionStream(): Uint8Array {
   view.setUint32(8, bytes.byteLength, true);
   view.setUint32(12, 1, true);
   bytes[16] = 1;
+  view.setUint16(18, (bytes.byteLength - 16) / 4, true);
   view.setUint32(20, 7, true);
   view.setUint32(32, 1, true);
   view.setUint32(48, 1, true);
@@ -690,6 +691,7 @@ function eventTransactionStream(): Uint8Array {
   view.setUint32(8, bytes.byteLength, true);
   view.setUint32(12, 1, true);
   bytes[16] = 1;
+  view.setUint16(18, (bytes.byteLength - 16) / 4, true);
   view.setUint32(20, 9, true);
   view.setUint16(24, 5, true);
   view.setUint32(28, 3, true);
@@ -708,6 +710,8 @@ function fillRectDisplayList(paintId: number): Uint8Array {
   const command = new Uint8Array(24);
   const view = new DataView(command.buffer);
   command[0] = FILL_RECT_OPCODE;
+  // Instruction length in four-byte words, covering the header.
+  view.setUint16(2, command.length / 4, true);
   view.setFloat32(4, 1, true);
   view.setFloat32(8, 2, true);
   view.setFloat32(12, 30, true);

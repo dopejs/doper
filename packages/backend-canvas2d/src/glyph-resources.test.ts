@@ -86,7 +86,8 @@ function sampleBatch(): Uint8Array {
   u32(2);
   u8(GlyphResourceOpcode.DefineGlyphSpan);
   u8(0);
-  u16(0);
+  // Instruction length in four-byte words, covering the header and payload.
+  u16(17);
   u32(7);
   u32(3);
   u32(1);
@@ -107,7 +108,7 @@ function sampleBatch(): Uint8Array {
   f32(12);
   u8(GlyphResourceOpcode.ReleaseGlyphSpan);
   u8(0);
-  u16(0);
+  u16(2);
   u32(8);
   expect(offset).toBe(bytes.byteLength);
   return bytes;

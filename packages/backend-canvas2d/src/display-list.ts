@@ -1,9 +1,12 @@
 import {
-  ABI_VERSION,
   DISPLAY_LIST_MAGIC,
   DISPLAY_LAYOUTS,
   DisplayOpcode,
+  INSTRUCTION_FLAG_MASK,
+  INSTRUCTION_FLAG_OPTIONAL,
   INSTRUCTION_HEADER_BYTES,
+  INSTRUCTION_LENGTH_ESCAPE,
+  MINIMUM_READABLE_ABI_VERSION,
   MAX_DISPLAY_INSTRUCTIONS,
   MAX_DISPLAY_LIST_BYTES,
   MAX_RESOURCE_BYTES,
@@ -92,7 +95,13 @@ export function decodeDisplayList(input: Uint8Array): DisplayList {
 
   while (reader.remaining > 0) {
     const offset = reader.offset;
-    const opcode = reader.instruction();
+    const header = reader.instruction();
+    if (!isKnownOpcode(DisplayOpcode, header.opcode)) {
+      if (!header.optional) fail(`unknown display-list opcode ${String(header.opcode)}`);
+      reader.seekTo(header.end);
+      continue;
+    }
+    const opcode = header.opcode;
     if (opcode === DisplayOpcode.Save) saveDepth += 1;
     if (opcode === DisplayOpcode.Restore) {
       if (saveDepth === 0) fail("Restore underflows the graphics-state stack");
@@ -100,6 +109,7 @@ export function decodeDisplayList(input: Uint8Array): DisplayList {
     }
     commands.push(decodeCommand(reader, opcode));
     validateInstructionSize(opcode, offset, reader.offset);
+    if (reader.offset !== header.end) fail("instruction length does not match its payload");
   }
   if (commands.length !== declaredCount) fail("instruction count does not match input");
   if (saveDepth !== 0) fail("display list has unmatched Save commands");
@@ -115,7 +125,10 @@ export function readDisplayListHeader(input: Uint8Array): {
   if (input.byteLength % PROTOCOL_ALIGNMENT !== 0) fail("display list is not four-byte aligned");
   const reader = new DisplayListReader(input);
   if (reader.u32() !== DISPLAY_LIST_MAGIC) fail("wrong display-list magic");
-  if (reader.u16() !== ABI_VERSION) fail("unsupported display-list ABI version");
+  // A newer producer stays readable: every instruction carries its own length,
+  // so an unknown one the producer marked optional can be stepped over. Losing a
+  // draw command costs a visual detail, which is the defined downgrade.
+  if (reader.u16() < MINIMUM_READABLE_ABI_VERSION) fail("unsupported display-list ABI version");
   if (reader.u16() !== STREAM_HEADER_BYTES) fail("invalid display-list header length");
   if (reader.u32() !== input.byteLength) fail("declared display-list length does not match input");
   const declaredCount = reader.u32();
@@ -235,17 +248,28 @@ export class DisplayListReader {
     return this.#offset;
   }
 
-  public instruction(): DisplayOpcode {
-    if (this.#offset % PROTOCOL_ALIGNMENT !== 0) fail("instruction is not aligned");
+  /** Reads one instruction header, including where the instruction ends. */
+  public instruction(): { opcode: number; optional: boolean; end: number } {
+    const offset = this.#offset;
+    if (offset % PROTOCOL_ALIGNMENT !== 0) fail("instruction is not aligned");
     this.require(INSTRUCTION_HEADER_BYTES);
     const opcode = this.u8();
     const flags = this.u8();
-    if (flags !== 0) fail("unsupported instruction flags");
-    if (this.u16() !== 0) fail("reserved instruction bytes must be zero");
-    if (typeof DisplayOpcode[opcode] !== "string") {
-      fail(`unknown display-list opcode ${String(opcode)}`);
+    if ((flags & ~INSTRUCTION_FLAG_MASK) !== 0) fail("unsupported instruction flags");
+    const words = this.u16();
+    const length = words === INSTRUCTION_LENGTH_ESCAPE ? this.u32() : words * PROTOCOL_ALIGNMENT;
+    const end = offset + length;
+    if (length < INSTRUCTION_HEADER_BYTES || length % PROTOCOL_ALIGNMENT !== 0) {
+      fail("instruction length is invalid");
     }
-    return opcode;
+    if (end > this.#length) fail("instruction length runs past the stream");
+    return { opcode, optional: (flags & INSTRUCTION_FLAG_OPTIONAL) !== 0, end };
+  }
+
+  /** Moves the cursor forward to an instruction boundary. */
+  public seekTo(offset: number): void {
+    if (offset < this.#offset || offset > this.#length) fail("invalid instruction skip");
+    this.#offset = offset;
   }
 
   public u8(): number {
@@ -337,4 +361,12 @@ export function validateInstructionSize(opcode: DisplayOpcode, offset: number, e
   ) {
     fail(`display-list opcode ${String(opcode)} consumed an invalid variable length`);
   }
+}
+
+/** Whether an opcode byte names a member this build knows. */
+function isKnownOpcode<T extends Record<string, string | number>>(
+  values: T,
+  value: number,
+): value is T[keyof T] & number {
+  return typeof values[value] === "string";
 }

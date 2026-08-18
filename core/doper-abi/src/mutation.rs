@@ -1,5 +1,5 @@
 use crate::codec::{
-    Reader, Writer, checked_padding, read_header, read_instruction_header,
+    Reader, Writer, checked_padding, finish_instruction, read_header, read_instruction_header,
     validate_encode_instruction_count,
 };
 use crate::{
@@ -167,9 +167,30 @@ pub struct MutationBatch {
 
 impl MutationBatch {
     /// Decodes and validates a complete transaction without mutating caller state.
+    /// Decodes without reporting what the decoder had to tolerate.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::decode_with_report`].
     pub fn decode(bytes: &[u8]) -> Result<Self, AbiError> {
+        Self::decode_with_report(bytes).map(|(value, _)| value)
+    }
+
+    /// Decodes and reports what this build had to tolerate to read the stream.
+    ///
+    /// Instructions with an opcode this build does not know are stepped over
+    /// when the producer marked them optional, and counted in the report.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AbiError`] for a malformed, truncated, oversized, or
+    /// too-old stream, and for an unknown instruction that was not marked
+    /// optional.
+    pub fn decode_with_report(bytes: &[u8]) -> Result<(Self, crate::DecodeReport), AbiError> {
         let mut reader = Reader::new(bytes);
-        let declared_count = read_header(&mut reader, MUTATION_MAGIC, MAX_MUTATION_BYTES)?;
+        let stream = read_header(&mut reader, MUTATION_MAGIC, MAX_MUTATION_BYTES)?;
+        let declared_count = stream.declared_count;
+        let mut skipped = 0_u32;
         if declared_count > MAX_MUTATION_INSTRUCTIONS {
             return Err(AbiError::InstructionCountTooLarge {
                 declared: declared_count,
@@ -190,22 +211,34 @@ impl MutationBatch {
         let mut frame_seq = None;
 
         while reader.remaining() != 0 {
-            let (offset, raw_opcode, flags) = read_instruction_header(&mut reader)?;
+            let header = read_instruction_header(&mut reader)?;
+            let (offset, raw_opcode, flags) = (header.offset, header.opcode, header.flags);
             actual_count = actual_count
                 .checked_add(1)
                 .ok_or(AbiError::ArithmeticOverflow)?;
             if frame_seq.is_some() {
                 return Err(AbiError::CommitNotLast { offset });
             }
-            let opcode = MutationOpcode::from_u8(raw_opcode).ok_or(AbiError::UnknownOpcode {
-                stream: StreamKind::Mutation,
-                opcode: raw_opcode,
-                offset,
-            })?;
+            // A stream from a newer build may carry instructions this decoder has
+            // never heard of. Skipping one is only safe when the producer marked it
+            // optional, so an unmarked unknown instruction is still fatal.
+            let Some(opcode) = MutationOpcode::from_u8(raw_opcode) else {
+                if header.optional() {
+                    skipped = skipped.saturating_add(1);
+                    reader.seek_to(header.end)?;
+                    continue;
+                }
+                return Err(AbiError::UnknownOpcode {
+                    stream: StreamKind::Mutation,
+                    opcode: raw_opcode,
+                    offset,
+                });
+            };
 
             if opcode == MutationOpcode::Commit {
                 frame_seq = Some(reader.read_u32()?);
                 validate_instruction_size(opcode, offset, reader.offset())?;
+                finish_instruction(&reader, header)?;
                 continue;
             }
 
@@ -220,10 +253,16 @@ impl MutationBatch {
                 actual: actual_count,
             });
         }
-        Ok(Self {
-            frame_seq: frame_seq.ok_or(AbiError::MissingCommit)?,
-            instructions,
-        })
+        Ok((
+            Self {
+                frame_seq: frame_seq.ok_or(AbiError::MissingCommit)?,
+                instructions,
+            },
+            crate::DecodeReport {
+                skipped_instructions: skipped,
+                producer_abi_version: stream.producer_version,
+            },
+        ))
     }
 
     /// Encodes a canonical, little-endian transaction.
@@ -680,7 +719,9 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::{ABI_VERSION, NULL_NODE_ID};
+    use crate::{
+        ABI_VERSION, INSTRUCTION_FLAG_OPTIONAL, MINIMUM_READABLE_ABI_VERSION, NULL_NODE_ID,
+    };
 
     fn sample_batch() -> MutationBatch {
         MutationBatch {
@@ -874,16 +915,27 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_version_and_trailing_command() {
-        let mut version = sample_batch().encode().expect("sample encodes");
-        version[4..6].copy_from_slice(&(ABI_VERSION + 1).to_le_bytes());
+    fn accepts_newer_versions_but_rejects_pre_framing_ones_and_trailing_commands() {
+        // Forward compatibility is the point of the self-describing framing: a
+        // stream from a newer build decodes as long as every instruction it
+        // carries is one this build knows, or is marked skippable.
+        let mut newer = sample_batch().encode().expect("sample encodes");
+        newer[4..6].copy_from_slice(&(ABI_VERSION + 1).to_le_bytes());
+        assert!(MutationBatch::decode(&newer).is_ok());
+
+        // Before that framing existed an instruction carried no length, so an
+        // unknown one could not be stepped over. Such a stream is refused
+        // rather than parsed into garbage.
+        let mut older = sample_batch().encode().expect("sample encodes");
+        older[4..6].copy_from_slice(&(MINIMUM_READABLE_ABI_VERSION - 1).to_le_bytes());
         assert!(matches!(
-            MutationBatch::decode(&version),
+            MutationBatch::decode(&older),
             Err(AbiError::UnsupportedVersion { .. })
         ));
 
         let mut trailing = sample_batch().encode().expect("sample encodes");
-        trailing.extend_from_slice(&[MutationOpcode::RemoveNode as u8, 0, 0, 0, 7, 0, 0, 0]);
+        // Two words: the header plus the node id it removes.
+        trailing.extend_from_slice(&[MutationOpcode::RemoveNode as u8, 0, 2, 0, 7, 0, 0, 0]);
         let length = u32::try_from(trailing.len()).expect("test length");
         trailing[8..12].copy_from_slice(&length.to_le_bytes());
         trailing[12..16].copy_from_slice(&6_u32.to_le_bytes());
@@ -914,11 +966,50 @@ mod tests {
             Err(AbiError::InstructionCountTooLarge { .. })
         ));
 
+        // Bit zero is the defined "skippable" flag; every other bit is still
+        // undefined and must be refused rather than ignored.
         let mut flags = sample_batch().encode().expect("sample encodes");
-        flags[17] = 1;
+        flags[17] = INSTRUCTION_FLAG_OPTIONAL << 1;
         assert!(matches!(
             MutationBatch::decode(&flags),
             Err(AbiError::UnsupportedFlags { .. })
+        ));
+    }
+
+    #[test]
+    fn an_unknown_instruction_is_skipped_only_when_the_producer_allowed_it() {
+        // This is the whole point of the framing: a stream from a newer build
+        // stays usable, but only for instructions its producer said were safe
+        // to lose. Skipping an unmarked one could drop a CreateNode and leave
+        // every later mutation addressing a node that does not exist.
+        let build = |flags: u8| {
+            let mut bytes = sample_batch().encode().expect("sample encodes");
+            // The commit instruction is a header plus the frame sequence.
+            let commit = bytes.len() - 8;
+            assert_eq!(
+                bytes[commit],
+                MutationOpcode::Commit as u8,
+                "commit is last"
+            );
+            // An opcode no build will ever define, two words wide.
+            let unknown = [0xfe_u8, flags, 2, 0, 0, 0, 0, 0];
+            bytes.splice(commit..commit, unknown);
+            let length = u32::try_from(bytes.len()).expect("length");
+            bytes[8..12].copy_from_slice(&length.to_le_bytes());
+            let count = u32::from_le_bytes(bytes[12..16].try_into().expect("count")) + 1;
+            bytes[12..16].copy_from_slice(&count.to_le_bytes());
+            bytes
+        };
+
+        let (batch, report) =
+            MutationBatch::decode_with_report(&build(INSTRUCTION_FLAG_OPTIONAL)).expect("skipped");
+        assert_eq!(report.skipped_instructions, 1);
+        assert_eq!(report.producer_abi_version, ABI_VERSION);
+        assert_eq!(batch, sample_batch());
+
+        assert!(matches!(
+            MutationBatch::decode(&build(0)),
+            Err(AbiError::UnknownOpcode { opcode: 0xfe, .. })
         ));
     }
 

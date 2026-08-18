@@ -1,5 +1,5 @@
 use crate::codec::{
-    Reader, Writer, checked_padding, read_header, read_instruction_header,
+    Reader, Writer, checked_padding, finish_instruction, read_header, read_instruction_header,
     validate_encode_instruction_count,
 };
 use crate::{
@@ -105,13 +105,34 @@ pub struct EditTransactionBatch {
 
 impl EditTransactionBatch {
     /// Fully decodes and validates an untrusted reverse editing stream.
+    /// Decodes without reporting what the decoder had to tolerate.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::decode_with_report`].
     pub fn decode(bytes: &[u8]) -> Result<Self, AbiError> {
+        Self::decode_with_report(bytes).map(|(value, _)| value)
+    }
+
+    /// Decodes and reports what this build had to tolerate to read the stream.
+    ///
+    /// Instructions with an opcode this build does not know are stepped over
+    /// when the producer marked them optional, and counted in the report.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AbiError`] for a malformed, truncated, oversized, or
+    /// too-old stream, and for an unknown instruction that was not marked
+    /// optional.
+    pub fn decode_with_report(bytes: &[u8]) -> Result<(Self, crate::DecodeReport), AbiError> {
         let mut reader = Reader::new(bytes);
-        let declared = read_header(
+        let stream = read_header(
             &mut reader,
             EDIT_TRANSACTIONS_MAGIC,
             MAX_EDIT_TRANSACTIONS_BYTES,
         )?;
+        let declared = stream.declared_count;
+        let mut skipped = 0_u32;
         if declared > MAX_EDIT_TRANSACTION_INSTRUCTIONS {
             return Err(AbiError::InstructionCountTooLarge {
                 declared,
@@ -128,22 +149,44 @@ impl EditTransactionBatch {
             usize::try_from(declared).map_err(|_| AbiError::ArithmeticOverflow)?,
         );
         while reader.remaining() != 0 {
-            let (offset, raw_opcode, _) = read_instruction_header(&mut reader)?;
-            let opcode =
-                EditTransactionOpcode::from_u8(raw_opcode).ok_or(AbiError::UnknownOpcode {
+            let header = read_instruction_header(&mut reader)?;
+            let (offset, raw_opcode) = (header.offset, header.opcode);
+            // A stream from a newer build may carry instructions this decoder has
+            // never heard of. Skipping one is only safe when the producer marked it
+            // optional, so an unmarked unknown instruction is still fatal.
+            let Some(opcode) = EditTransactionOpcode::from_u8(raw_opcode) else {
+                if header.optional() {
+                    skipped = skipped.saturating_add(1);
+                    reader.seek_to(header.end)?;
+                    continue;
+                }
+                return Err(AbiError::UnknownOpcode {
                     stream: StreamKind::EditTransactions,
                     opcode: raw_opcode,
                     offset,
-                })?;
+                });
+            };
             let record = decode_record(&mut reader)?;
             validate_instruction_size(opcode, offset, reader.offset())?;
+            finish_instruction(&reader, header)?;
             records.push(record);
         }
-        let actual = u32::try_from(records.len()).map_err(|_| AbiError::ArithmeticOverflow)?;
+        // A skipped record was still in the stream, so it counts toward the
+        // declared total; otherwise the count check rejects every downgrade.
+        let actual = u32::try_from(records.len())
+            .map_err(|_| AbiError::ArithmeticOverflow)?
+            .checked_add(skipped)
+            .ok_or(AbiError::ArithmeticOverflow)?;
         if actual != declared {
             return Err(AbiError::InstructionCountMismatch { declared, actual });
         }
-        Ok(Self { records })
+        Ok((
+            Self { records },
+            crate::DecodeReport {
+                skipped_instructions: skipped,
+                producer_abi_version: stream.producer_version,
+            },
+        ))
     }
 
     /// Encodes one canonical reverse editing batch.

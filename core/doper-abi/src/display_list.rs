@@ -1,5 +1,5 @@
 use crate::codec::{
-    Reader, Writer, checked_padding, read_header, read_instruction_header,
+    Reader, Writer, checked_padding, finish_instruction, read_header, read_instruction_header,
     validate_encode_instruction_count,
 };
 use crate::{
@@ -149,9 +149,30 @@ pub struct DisplayList {
 
 impl DisplayList {
     /// Decodes a complete list and validates the graphics-state stack.
+    /// Decodes without reporting what the decoder had to tolerate.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::decode_with_report`].
     pub fn decode(bytes: &[u8]) -> Result<Self, AbiError> {
+        Self::decode_with_report(bytes).map(|(value, _)| value)
+    }
+
+    /// Decodes and reports what this build had to tolerate to read the stream.
+    ///
+    /// Instructions with an opcode this build does not know are stepped over
+    /// when the producer marked them optional, and counted in the report.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AbiError`] for a malformed, truncated, oversized, or
+    /// too-old stream, and for an unknown instruction that was not marked
+    /// optional.
+    pub fn decode_with_report(bytes: &[u8]) -> Result<(Self, crate::DecodeReport), AbiError> {
         let mut reader = Reader::new(bytes);
-        let declared_count = read_header(&mut reader, DISPLAY_LIST_MAGIC, MAX_DISPLAY_LIST_BYTES)?;
+        let stream = read_header(&mut reader, DISPLAY_LIST_MAGIC, MAX_DISPLAY_LIST_BYTES)?;
+        let declared_count = stream.declared_count;
+        let mut skipped = 0_u32;
         if declared_count > MAX_DISPLAY_INSTRUCTIONS {
             return Err(AbiError::InstructionCountTooLarge {
                 declared: declared_count,
@@ -172,12 +193,28 @@ impl DisplayList {
         let mut save_depth = 0_u32;
 
         while reader.remaining() != 0 {
-            let (offset, raw_opcode, flags) = read_instruction_header(&mut reader)?;
-            let opcode = DisplayOpcode::from_u8(raw_opcode).ok_or(AbiError::UnknownOpcode {
-                stream: StreamKind::DisplayList,
-                opcode: raw_opcode,
-                offset,
-            })?;
+            let header = read_instruction_header(&mut reader)?;
+            let (offset, raw_opcode, flags) = (header.offset, header.opcode, header.flags);
+            // A stream from a newer build may carry instructions this decoder has
+            // never heard of. Skipping one is only safe when the producer marked it
+            // optional, so an unmarked unknown instruction is still fatal.
+            let Some(opcode) = DisplayOpcode::from_u8(raw_opcode) else {
+                if header.optional() {
+                    // A skipped instruction was still in the stream, so it counts
+                    // toward the declared total.
+                    skipped = skipped.saturating_add(1);
+                    actual_count = actual_count
+                        .checked_add(1)
+                        .ok_or(AbiError::ArithmeticOverflow)?;
+                    reader.seek_to(header.end)?;
+                    continue;
+                }
+                return Err(AbiError::UnknownOpcode {
+                    stream: StreamKind::DisplayList,
+                    opcode: raw_opcode,
+                    offset,
+                });
+            };
             actual_count = actual_count
                 .checked_add(1)
                 .ok_or(AbiError::ArithmeticOverflow)?;
@@ -192,6 +229,7 @@ impl DisplayList {
             }
             let command = decode_command(opcode, &mut reader)?;
             validate_instruction_size(opcode, offset, reader.offset())?;
+            finish_instruction(&reader, header)?;
             instructions.push(DisplayInstruction { flags, command });
         }
 
@@ -204,7 +242,13 @@ impl DisplayList {
         if save_depth != 0 {
             return Err(AbiError::UnbalancedState { depth: save_depth });
         }
-        Ok(Self { instructions })
+        Ok((
+            Self { instructions },
+            crate::DecodeReport {
+                skipped_instructions: skipped,
+                producer_abi_version: stream.producer_version,
+            },
+        ))
     }
 
     /// Encodes a canonical list after validating graphics-state balance.
@@ -662,5 +706,47 @@ mod tests {
             let bytes = list.encode().expect("finite list encodes");
             prop_assert_eq!(DisplayList::decode(&bytes), Ok(list));
         }
+    }
+    #[test]
+    fn an_unknown_draw_command_is_skipped_only_when_the_producer_allowed_it() {
+        // Losing a draw command costs a visual detail, which is the defined
+        // downgrade for a list produced by a newer build. Losing one the
+        // producer did not mark skippable is not: it could be the Restore that
+        // balances a Save.
+        let canonical = DisplayList {
+            instructions: vec![
+                DisplayInstruction {
+                    flags: 0,
+                    command: DisplayCommand::Save,
+                },
+                DisplayInstruction {
+                    flags: 0,
+                    command: DisplayCommand::Restore,
+                },
+            ],
+        }
+        .encode()
+        .expect("encode");
+
+        let build = |flags: u8| {
+            let mut bytes = canonical.clone();
+            bytes.extend_from_slice(&[0xfe, flags, 2, 0, 0, 0, 0, 0]);
+            let length = u32::try_from(bytes.len()).expect("length");
+            bytes[8..12].copy_from_slice(&length.to_le_bytes());
+            bytes[12..16].copy_from_slice(&3_u32.to_le_bytes());
+            bytes
+        };
+
+        let (list, report) =
+            DisplayList::decode_with_report(&build(crate::INSTRUCTION_FLAG_OPTIONAL))
+                .expect("skipped");
+        assert_eq!(report.skipped_instructions, 1);
+        assert_eq!(report.producer_abi_version, crate::ABI_VERSION);
+        assert_eq!(list.instructions.len(), 2);
+
+        assert!(matches!(
+            DisplayList::decode(&build(0)),
+            Err(AbiError::UnknownOpcode { opcode: 0xfe, .. })
+        ));
     }
 }

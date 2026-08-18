@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use crate::codec::{
-    Reader, Writer, checked_padding, read_header, read_instruction_header,
+    Reader, Writer, checked_padding, finish_instruction, read_header, read_instruction_header,
     validate_encode_instruction_count,
 };
 use crate::{
@@ -83,13 +83,34 @@ pub struct GlyphResourceBatch {
 
 impl GlyphResourceBatch {
     /// Decodes and fully validates a glyph-resource batch.
+    /// Decodes without reporting what the decoder had to tolerate.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::decode_with_report`].
     pub fn decode(bytes: &[u8]) -> Result<Self, AbiError> {
+        Self::decode_with_report(bytes).map(|(value, _)| value)
+    }
+
+    /// Decodes and reports what this build had to tolerate to read the stream.
+    ///
+    /// Instructions with an opcode this build does not know are stepped over
+    /// when the producer marked them optional, and counted in the report.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AbiError`] for a malformed, truncated, oversized, or
+    /// too-old stream, and for an unknown instruction that was not marked
+    /// optional.
+    pub fn decode_with_report(bytes: &[u8]) -> Result<(Self, crate::DecodeReport), AbiError> {
         let mut reader = Reader::new(bytes);
-        let declared_count = read_header(
+        let stream = read_header(
             &mut reader,
             GLYPH_RESOURCES_MAGIC,
             MAX_GLYPH_RESOURCES_BYTES,
         )?;
+        let declared_count = stream.declared_count;
+        let mut skipped = 0_u32;
         if declared_count > MAX_GLYPH_RESOURCE_INSTRUCTIONS {
             return Err(AbiError::InstructionCountTooLarge {
                 declared: declared_count,
@@ -109,13 +130,28 @@ impl GlyphResourceBatch {
         let mut seen = HashSet::with_capacity(capacity);
         let mut actual_count = 0_u32;
         while reader.remaining() != 0 {
-            let (offset, raw_opcode, flags) = read_instruction_header(&mut reader)?;
-            let opcode =
-                GlyphResourceOpcode::from_u8(raw_opcode).ok_or(AbiError::UnknownOpcode {
+            let header = read_instruction_header(&mut reader)?;
+            let (offset, raw_opcode, flags) = (header.offset, header.opcode, header.flags);
+            // A stream from a newer build may carry instructions this decoder has
+            // never heard of. Skipping one is only safe when the producer marked it
+            // optional, so an unmarked unknown instruction is still fatal.
+            let Some(opcode) = GlyphResourceOpcode::from_u8(raw_opcode) else {
+                if header.optional() {
+                    // A skipped instruction was still in the stream, so it counts
+                    // toward the declared total.
+                    skipped = skipped.saturating_add(1);
+                    actual_count = actual_count
+                        .checked_add(1)
+                        .ok_or(AbiError::ArithmeticOverflow)?;
+                    reader.seek_to(header.end)?;
+                    continue;
+                }
+                return Err(AbiError::UnknownOpcode {
                     stream: StreamKind::GlyphResources,
                     opcode: raw_opcode,
                     offset,
-                })?;
+                });
+            };
             actual_count = actual_count
                 .checked_add(1)
                 .ok_or(AbiError::ArithmeticOverflow)?;
@@ -137,6 +173,7 @@ impl GlyphResourceBatch {
                 ));
             }
             validate_instruction_size(opcode, offset, reader.offset())?;
+            finish_instruction(&reader, header)?;
             instructions.push(GlyphResourceInstruction { flags, command });
         }
         if actual_count != declared_count {
@@ -145,7 +182,13 @@ impl GlyphResourceBatch {
                 actual: actual_count,
             });
         }
-        Ok(Self { instructions })
+        Ok((
+            Self { instructions },
+            crate::DecodeReport {
+                skipped_instructions: skipped,
+                producer_abi_version: stream.producer_version,
+            },
+        ))
     }
 
     /// Encodes a canonical glyph-resource batch.
@@ -526,7 +569,9 @@ mod tests {
     #[test]
     fn decoder_rejects_hostile_opcode_headers_counts_and_payload_fields() {
         let canonical = sample_batch().encode().expect("encode");
-        for (offset, value) in [(16, 99), (17, 1), (18, 1)] {
+        // Byte 17 is the instruction flags: bit zero now means "skippable", so
+        // an undefined bit is what must still be refused.
+        for (offset, value) in [(16, 99), (17, 2), (18, 1)] {
             let mut bytes = canonical.clone();
             bytes[offset] = value;
             assert!(GlyphResourceBatch::decode(&bytes).is_err());

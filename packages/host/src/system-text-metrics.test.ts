@@ -42,13 +42,21 @@ describe("system text metric batches", () => {
   it("fails closed for truncation, flags, reserved bytes, and hostile counts", () => {
     const canonicalBytes = encodeSystemTextMetricBatch(canonical);
     for (let length = 0; length < canonicalBytes.byteLength; length += 1) {
-      expect(() => decodeSystemTextMetricBatch(canonicalBytes.slice(0, length))).toThrow(
-        SystemTextMetricError,
-      );
+      expect(
+        () => decodeSystemTextMetricBatch(canonicalBytes.slice(0, length)),
+        `truncated at ${String(length)}`,
+      ).toThrow(SystemTextMetricError);
     }
-    for (const offset of [17, 18, 19]) {
+    // Byte 17 is the instruction flags: bit zero now means "skippable", so an
+    // undefined bit is what must still be refused. Bytes 18 and 19 are the
+    // declared length, where any change desynchronizes the payload.
+    for (const [offset, value] of [
+      [17, 2],
+      [18, 1],
+      [19, 1],
+    ] as const) {
       const malformed = canonicalBytes.slice();
-      malformed[offset] = 1;
+      malformed[offset] = value;
       expect(() => decodeSystemTextMetricBatch(malformed)).toThrow(SystemTextMetricError);
     }
     const hostile = canonicalBytes.slice(0, 16);

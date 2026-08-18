@@ -17,6 +17,8 @@ function eventBytes(path: readonly number[] = [1, 2, 3]): Uint8Array {
   view.setUint32(8, bytes.byteLength, true);
   view.setUint32(12, 1, true);
   view.setUint8(16, EventTransactionOpcode.Event);
+  // Instruction length in four-byte words, covering the header and payload.
+  view.setUint16(18, (bytes.byteLength - 16) / 4, true);
   view.setUint32(20, 9, true);
   view.setUint16(24, 1, true);
   view.setUint32(28, path.at(-1) ?? 0xffff_ffff, true);
@@ -56,9 +58,11 @@ describe("event transactions", () => {
   it("rejects cycles, truncation, non-finite values, and reserved bytes", () => {
     expect(() => decodeEventTransactionBatch(eventBytes([1, 1]))).toThrow(/repeated/u);
 
+    // Truncation is now caught by the instruction framing, before the payload
+    // parser ever runs: the declared length no longer fits the stream.
     const truncated = eventBytes().slice(0, -4);
     new DataView(truncated.buffer).setUint32(8, truncated.byteLength, true);
-    expect(() => decodeEventTransactionBatch(truncated)).toThrow(/path exceeds/u);
+    expect(() => decodeEventTransactionBatch(truncated)).toThrow(/runs past the stream/u);
 
     const nonFinite = eventBytes();
     new DataView(nonFinite.buffer).setFloat32(32, Number.NaN, true);

@@ -12,6 +12,10 @@ import {
   PROTOCOL_ALIGNMENT,
   ResourceKind,
   STREAM_HEADER_BYTES,
+  INSTRUCTION_FLAG_MASK,
+  INSTRUCTION_FLAG_OPTIONAL,
+  INSTRUCTION_LENGTH_ESCAPE,
+  MINIMUM_READABLE_ABI_VERSION,
 } from "./generated";
 import type { Prop } from "./generated";
 
@@ -107,6 +111,18 @@ export interface MutationBatch {
   readonly mutations: readonly Mutation[];
 }
 
+/**
+ * What a decoder had to tolerate to read a stream.
+ *
+ * A downgrade nobody can see is indistinguishable from a decoder that simply
+ * lost data, so every skipped instruction is counted and reported alongside the
+ * producer's version.
+ */
+export interface DecodeReport {
+  readonly skippedInstructions: number;
+  readonly producerAbiVersion: number;
+}
+
 /** A deterministic contract violation detected before bytes are emitted or consumed. */
 export class MutationEncodingError extends Error {
   public constructor(message: string) {
@@ -149,35 +165,65 @@ export function encodeMutationBatch(batch: MutationBatch): Uint8Array {
 
 /** Decodes transaction bytes for contract testing, recording, and diagnostics. */
 export function decodeMutationBatch(input: Uint8Array): MutationBatch {
+  return decodeMutationBatchWithReport(input).batch;
+}
+
+/** Decodes and reports what this build had to tolerate to read the stream. */
+export function decodeMutationBatchWithReport(input: Uint8Array): {
+  readonly batch: MutationBatch;
+  readonly report: DecodeReport;
+} {
   if (input.byteLength > MAX_MUTATION_BYTES) fail("mutation stream exceeds maximum size");
   if (input.byteLength % PROTOCOL_ALIGNMENT !== 0) fail("mutation stream is not four-byte aligned");
   const reader = new ByteReader(input);
   if (reader.u32() !== MUTATION_MAGIC) fail("wrong mutation stream magic");
-  if (reader.u16() !== ABI_VERSION) fail("unsupported mutation ABI version");
+  // A stream from a newer build stays readable: every instruction carries its
+  // own length, so one this build has never heard of can be stepped over when
+  // its producer marked it optional. A stream from before that framing existed
+  // cannot be stepped through, so it is refused rather than parsed into garbage.
+  const producerVersion = reader.u16();
+  if (producerVersion < MINIMUM_READABLE_ABI_VERSION) fail("unsupported mutation ABI version");
   if (reader.u16() !== STREAM_HEADER_BYTES) fail("invalid mutation header length");
   if (reader.u32() !== input.byteLength) fail("declared mutation length does not match input");
   const declaredCount = reader.u32();
   if (declaredCount > MAX_MUTATION_INSTRUCTIONS) fail("mutation instruction count exceeds limit");
   const mutations: Mutation[] = [];
   let actualCount = 0;
+  let skipped = 0;
   let frameSeq: number | undefined;
 
   while (reader.remaining > 0) {
     if (frameSeq !== undefined) fail("Commit must be the last instruction");
     const offset = reader.offset;
-    const opcode = reader.instruction();
+    const header = reader.instruction();
     actualCount += 1;
+    // Skipping is the producer's call, not the reader's: dropping an unknown
+    // structural mutation would leave every later one addressing a node that
+    // does not exist.
+    if (!isKnownOpcode(MutationOpcode, header.opcode)) {
+      if (!header.optional) fail(`unknown mutation opcode ${String(header.opcode)}`);
+      skipped += 1;
+      reader.seekTo(header.end);
+      continue;
+    }
+    const opcode = header.opcode;
     if (opcode === MutationOpcode.Commit) {
       frameSeq = reader.u32();
       validateInstructionSize(opcode, offset, reader.offset);
-      continue;
+    } else {
+      mutations.push(decodeMutation(reader, opcode));
+      validateInstructionSize(opcode, offset, reader.offset);
     }
-    mutations.push(decodeMutation(reader, opcode));
-    validateInstructionSize(opcode, offset, reader.offset);
+    // A declared length that disagrees with what was consumed would let a
+    // skipping reader and this one disagree about where the next one starts.
+    if (reader.offset !== header.end) fail("instruction length does not match its payload");
   }
   if (actualCount !== declaredCount) fail("instruction count does not match input");
   if (frameSeq === undefined) fail("mutation stream is missing Commit");
-  return { frameSeq, mutations };
+  return {
+    batch: { frameSeq, mutations },
+    report: { skippedInstructions: skipped, producerAbiVersion: producerVersion },
+  };
 }
 
 function encodeMutation(writer: ByteWriter, mutation: Mutation): void {
@@ -495,10 +541,39 @@ class ByteWriter {
     return Uint8Array.from(this.#bytes);
   }
 
+  /**
+   * Closes the instruction that just ended, writing its length into the header.
+   *
+   * The length is not known when the header goes out, so it is patched in here
+   * rather than at any call site. Instructions are four-byte aligned, so the
+   * length is stored in words and a `u16` reaches 256 KiB; a resource may be
+   * far larger, so an oversized instruction writes the escape value and carries
+   * its byte length in the word right after the header, where a reader that
+   * does not know the opcode can still find it.
+   */
   private validateInstruction(): void {
     if (this.#instructionOpcode === undefined) return;
     validateInstructionSize(this.#instructionOpcode, this.#instructionStart, this.#bytes.length);
     this.#instructionOpcode = undefined;
+    const start = this.#instructionStart;
+    const length = this.#bytes.length - start;
+    const words = length / PROTOCOL_ALIGNMENT;
+    if (words < INSTRUCTION_LENGTH_ESCAPE) {
+      this.#bytes[start + 2] = words & 0xff;
+      this.#bytes[start + 3] = (words >>> 8) & 0xff;
+      return;
+    }
+    this.#bytes[start + 2] = INSTRUCTION_LENGTH_ESCAPE & 0xff;
+    this.#bytes[start + 3] = (INSTRUCTION_LENGTH_ESCAPE >>> 8) & 0xff;
+    const total = length + PROTOCOL_ALIGNMENT;
+    this.#bytes.splice(
+      start + INSTRUCTION_HEADER_BYTES,
+      0,
+      total & 0xff,
+      (total >>> 8) & 0xff,
+      (total >>> 16) & 0xff,
+      (total >>> 24) & 0xff,
+    );
   }
 }
 
@@ -520,15 +595,30 @@ class ByteReader {
     return this.#offset;
   }
 
-  public instruction(): MutationOpcode {
-    if (this.#offset % PROTOCOL_ALIGNMENT !== 0) fail("instruction is not aligned");
+  /** Reads one instruction header, including where the instruction ends. */
+  public instruction(): { opcode: number; optional: boolean; end: number } {
+    const offset = this.#offset;
+    if (offset % PROTOCOL_ALIGNMENT !== 0) fail("instruction is not aligned");
     this.require(INSTRUCTION_HEADER_BYTES);
     const opcode = this.u8();
     const flags = this.u8();
-    if (flags !== 0) fail("unsupported instruction flags");
-    this.zeroes(2);
-    assertEnum(MutationOpcode, opcode, "mutation opcode");
-    return opcode;
+    if ((flags & ~INSTRUCTION_FLAG_MASK) !== 0) fail("unsupported instruction flags");
+    const words = this.u16();
+    const length = words === INSTRUCTION_LENGTH_ESCAPE ? this.u32() : words * PROTOCOL_ALIGNMENT;
+    const end = offset + length;
+    // A length that is too small, misaligned, or past the end of the stream
+    // would let a skipping reader resume mid-instruction.
+    if (length < INSTRUCTION_HEADER_BYTES || length % PROTOCOL_ALIGNMENT !== 0) {
+      fail("instruction length is invalid");
+    }
+    if (end > this.#input.byteLength) fail("instruction length runs past the stream");
+    return { opcode, optional: (flags & INSTRUCTION_FLAG_OPTIONAL) !== 0, end };
+  }
+
+  /** Moves the cursor forward to an instruction boundary. */
+  public seekTo(offset: number): void {
+    if (offset < this.#offset || offset > this.#input.byteLength) fail("invalid instruction skip");
+    this.#offset = offset;
   }
 
   public u8(): number {
@@ -636,4 +726,12 @@ function validateInstructionSize(opcode: MutationOpcode, offset: number, end: nu
 
 function fail(message: string): never {
   throw new MutationEncodingError(message);
+}
+
+/** Whether an opcode byte names a member this build knows. */
+function isKnownOpcode<T extends Record<string, string | number>>(
+  values: T,
+  value: number,
+): value is T[keyof T] & number {
+  return typeof values[value] === "string";
 }

@@ -75,8 +75,10 @@ describe("binary replay recording", () => {
     const canonical = encodeReplayRecording({
       records: [{ type: "mutation", bytes: mutationBytes() }],
     });
+    // Bit zero of the record flags now means "skippable"; an undefined bit is
+    // what must still be refused.
     const flagged = canonical.slice();
-    flagged[17] = 1;
+    flagged[17] = 2;
     expect(() => decodeReplayRecording(flagged)).toThrow(/flags/u);
 
     const unknown = canonical.slice();

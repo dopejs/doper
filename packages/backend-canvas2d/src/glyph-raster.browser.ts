@@ -60,6 +60,8 @@ function glyphDisplayList(): Uint8Array {
   view.setUint32(8, bytes.byteLength, true);
   view.setUint32(12, 1, true);
   bytes[16] = DisplayOpcode.DrawGlyphRun;
+  // Instruction length in four-byte words, covering the header.
+  view.setUint16(18, (bytes.byteLength - 16) / 4, true);
   view.setUint32(20, 4, true);
   view.setFloat32(24, 10, true);
   view.setFloat32(28, 2, true);

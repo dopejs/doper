@@ -5,7 +5,11 @@ import {
   GLYPH_RESOURCE_LAYOUTS,
   GLYPH_RESOURCES_MAGIC,
   GlyphResourceOpcode,
+  INSTRUCTION_FLAG_MASK,
+  INSTRUCTION_FLAG_OPTIONAL,
   INSTRUCTION_HEADER_BYTES,
+  INSTRUCTION_LENGTH_ESCAPE,
+  MINIMUM_READABLE_ABI_VERSION,
   MAX_GLYPH_BITMAP_PIXELS,
   MAX_GLYPH_RESOURCE_INSTRUCTIONS,
   MAX_GLYPH_RESOURCES_BYTES,
@@ -58,7 +62,9 @@ export function decodeGlyphResourceBatch(input: Uint8Array): readonly GlyphResou
   if (input.byteLength % PROTOCOL_ALIGNMENT !== 0) fail("glyph batch is not aligned");
   const reader = new Reader(input);
   if (reader.u32() !== GLYPH_RESOURCES_MAGIC) fail("wrong glyph-resource magic");
-  if (reader.u16() !== ABI_VERSION) fail("unsupported glyph-resource ABI version");
+  // Newer producers stay readable through the self-describing instruction
+  // framing; anything older than it cannot be stepped through safely.
+  if (reader.u16() < MINIMUM_READABLE_ABI_VERSION) fail("unsupported glyph-resource ABI version");
   if (reader.u16() !== STREAM_HEADER_BYTES) fail("invalid glyph-resource header length");
   if (reader.u32() !== input.byteLength) fail("glyph-resource length does not match input");
   const declaredCount = reader.u32();
@@ -71,7 +77,15 @@ export function decodeGlyphResourceBatch(input: Uint8Array): readonly GlyphResou
   const seen = new Set<number>();
   while (reader.remaining > 0) {
     const start = reader.offset;
-    const opcode = reader.instruction();
+    const header = reader.instruction();
+    if (!isKnownOpcode(GlyphResourceOpcode, header.opcode)) {
+      // Skipping is the producer's call: a glyph span this build cannot decode
+      // is only safe to drop when the producer said so.
+      if (!header.optional) fail(`unknown glyph-resource opcode ${String(header.opcode)}`);
+      reader.seekTo(header.end);
+      continue;
+    }
+    const opcode = header.opcode;
     const delta =
       opcode === GlyphResourceOpcode.DefineGlyphSpan
         ? { type: "define" as const, span: decodeSpan(reader) }
@@ -87,6 +101,7 @@ export function decodeGlyphResourceBatch(input: Uint8Array): readonly GlyphResou
     ) {
       fail("glyph-resource instruction length does not match schema");
     }
+    if (reader.offset !== header.end) fail("instruction length does not match its payload");
     deltas.push(delta);
   }
   if (deltas.length !== declaredCount) fail("glyph-resource instruction count does not match");
@@ -109,13 +124,11 @@ export function encodeGlyphResourceBatch(deltas: readonly GlyphResourceDelta[]):
     nonzeroId(spanId, "span");
     if (seen.has(spanId)) fail("glyph span id occurs more than once in a batch");
     seen.add(spanId);
-    writer.u8(
+    writer.instruction(
       delta.type === "define"
         ? GlyphResourceOpcode.DefineGlyphSpan
         : GlyphResourceOpcode.ReleaseGlyphSpan,
     );
-    writer.u8(0);
-    writer.u16(0);
     if (delta.type === "release") {
       writer.u32(delta.spanId);
       continue;
@@ -267,16 +280,28 @@ class Reader {
     return this.#input.byteLength - this.#offset;
   }
 
-  public instruction(): GlyphResourceOpcode {
-    if (this.#offset % PROTOCOL_ALIGNMENT !== 0) fail("glyph-resource instruction is not aligned");
+  /** Reads one instruction header, including where the instruction ends. */
+  public instruction(): { opcode: number; optional: boolean; end: number } {
+    const offset = this.#offset;
+    if (offset % PROTOCOL_ALIGNMENT !== 0) fail("instruction is not aligned");
     this.require(INSTRUCTION_HEADER_BYTES);
     const opcode = this.u8();
-    if (this.u8() !== 0) fail("glyph-resource flags are unsupported");
-    if (this.u16() !== 0) fail("glyph-resource reserved bytes must be zero");
-    if (typeof GlyphResourceOpcode[opcode] !== "string") {
-      fail(`unknown glyph-resource opcode ${String(opcode)}`);
+    const flags = this.u8();
+    if ((flags & ~INSTRUCTION_FLAG_MASK) !== 0) fail("unsupported instruction flags");
+    const words = this.u16();
+    const length = words === INSTRUCTION_LENGTH_ESCAPE ? this.u32() : words * PROTOCOL_ALIGNMENT;
+    const end = offset + length;
+    if (length < INSTRUCTION_HEADER_BYTES || length % PROTOCOL_ALIGNMENT !== 0) {
+      fail("instruction length is invalid");
     }
-    return opcode;
+    if (end > this.#input.byteLength) fail("instruction length runs past the stream");
+    return { opcode, optional: (flags & INSTRUCTION_FLAG_OPTIONAL) !== 0, end };
+  }
+
+  /** Moves the cursor forward to an instruction boundary. */
+  public seekTo(offset: number): void {
+    if (offset < this.#offset || offset > this.#input.byteLength) fail("invalid instruction skip");
+    this.#offset = offset;
   }
 
   public u8(): number {
@@ -321,6 +346,47 @@ class Reader {
 
 class Writer {
   readonly #bytes: number[] = [];
+  #instructionStart: number | undefined;
+
+  /** Opens an instruction; its length is patched in when the next one starts. */
+  public instruction(opcode: GlyphResourceOpcode): void {
+    this.closeInstruction();
+    this.#instructionStart = this.#bytes.length;
+    this.u8(opcode);
+    this.u8(0);
+    this.u16(0);
+  }
+
+  /**
+   * Writes the length of the instruction that just ended.
+   *
+   * A glyph span carries its bitmaps inline and can exceed the 256 KiB a `u16`
+   * word count reaches, so an oversized one writes the escape and carries its
+   * byte length in the word right after the header.
+   */
+  public closeInstruction(): void {
+    const start = this.#instructionStart;
+    if (start === undefined) return;
+    this.#instructionStart = undefined;
+    const length = this.#bytes.length - start;
+    const words = length / PROTOCOL_ALIGNMENT;
+    if (words < INSTRUCTION_LENGTH_ESCAPE) {
+      this.#bytes[start + 2] = words & 0xff;
+      this.#bytes[start + 3] = (words >>> 8) & 0xff;
+      return;
+    }
+    this.#bytes[start + 2] = INSTRUCTION_LENGTH_ESCAPE & 0xff;
+    this.#bytes[start + 3] = (INSTRUCTION_LENGTH_ESCAPE >>> 8) & 0xff;
+    const total = length + PROTOCOL_ALIGNMENT;
+    this.#bytes.splice(
+      start + INSTRUCTION_HEADER_BYTES,
+      0,
+      total & 0xff,
+      (total >>> 8) & 0xff,
+      (total >>> 16) & 0xff,
+      (total >>> 24) & 0xff,
+    );
+  }
 
   public u8(value: number): void {
     if (!Number.isInteger(value) || value < 0 || value > 0xff) fail("value is outside u8");
@@ -353,6 +419,7 @@ class Writer {
   }
 
   public finish(): Uint8Array {
+    this.closeInstruction();
     if (this.#bytes.length % PROTOCOL_ALIGNMENT !== 0) fail("encoded glyph batch is not aligned");
     return Uint8Array.from(this.#bytes);
   }
@@ -377,4 +444,12 @@ function checkedAdd(left: number, right: number): number {
 
 function fail(message: string): never {
   throw new GlyphResourceError(message);
+}
+
+/** Whether an opcode byte names a member this build knows. */
+function isKnownOpcode<T extends Record<string, string | number>>(
+  values: T,
+  value: number,
+): value is T[keyof T] & number {
+  return typeof values[value] === "string";
 }

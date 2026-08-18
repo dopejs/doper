@@ -14,7 +14,7 @@ describe("Canvas2DReplayer", () => {
     const context = fakeContext(calls);
     const resources = new Canvas2DResourceRegistry();
     const golden = fromHex(
-      "444f504403001000440000000400000001000000040000000000000000000000000020440000f0431000000000008040000000410000c8420000a0410200000002000000",
+      "444f504404001000440000000400000001000100040005000000000000000000000020440000f0431000060000008040000000410000c8420000a0410200000002000100",
     );
 
     expect(() => new Canvas2DReplayer().replay(context, golden, resources)).toThrow(
@@ -270,6 +270,9 @@ function command(
   const result = new Uint8Array(4 + payloadBytes);
   result[0] = opcode;
   write(new DataView(result.buffer));
+  // Written after the payload so a writer cannot clobber it: the instruction
+  // length in four-byte words, covering the header.
+  new DataView(result.buffer).setUint16(2, result.length / 4, true);
   return result;
 }
 

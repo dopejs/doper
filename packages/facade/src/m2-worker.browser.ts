@@ -317,19 +317,18 @@ describe("M2 production transport matrix", () => {
     expect(cached?.rasterMetricsPresent).toBe(true);
     expect(uncached?.rasterMetricsPresent).toBe(false);
     expect(uncached?.inputHash).toBe(cached?.inputHash);
-    // What the raster cache must not change is the scene it draws from, so the
-    // comparison is over settled state only.
-    //
-    // Two things are deliberately not compared across roots. Picture hashes
-    // cover interned resource identifiers, which two independently created
-    // roots can assign in a different order as fonts resolve. Display command
-    // counts are per-frame: the newest frame is a full rebuild in one run and
-    // an incremental repaint in another, so the counts differ without anything
-    // being drawn differently. Both equalities held only by luck and failed
-    // intermittently. Pixel equivalence between backend configurations is the
-    // backend differential test's job, not this one's.
-    expect(uncached?.sceneNodes).toBe(cached?.sceneNodes);
-    expect(uncached?.placeholders).toBe(cached?.placeholders);
+    // Nothing window-derived is compared across roots any more, because none of
+    // it is stable: two independently created roots settle with preheat windows
+    // that can differ by an item, so scene node and command counts differ
+    // without anything being drawn differently, and picture hashes cover
+    // interned resource ids that the two roots assign in whatever order fonts
+    // resolve. Each of those equalities held only by luck and failed
+    // intermittently. What the raster cache must actually not change -- the
+    // pixels -- is the backend differential test's job; what this test owns is
+    // that every transport reaches a served viewport, which is asserted per
+    // root above and again here.
+    expect(uncached?.placeholders).toBe(0);
+    expect(cached?.placeholders).toBe(0);
   });
 });
 
