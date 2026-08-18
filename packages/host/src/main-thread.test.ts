@@ -13,12 +13,30 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { CanvasFrameSink, parseSemantics, type CoreClient, type FrameReport } from "./main-thread";
-import { EDIT_TRANSACTIONS_MAGIC, EVENT_TRANSACTIONS_MAGIC } from "./generated";
+import {
+  EDIT_TRANSACTIONS_MAGIC,
+  EVENT_TRANSACTIONS_MAGIC,
+  FRAME_DIAGNOSTICS_VERSION,
+  FRAME_DIAGNOSTICS_WORDS,
+} from "./generated";
 import { decodeSystemTextMetricBatch } from "./system-text-metrics";
 
 const DISPLAY_LIST_MAGIC = 0x4450_4f44;
 const STREAM_HEADER_BYTES = 16;
 const FILL_RECT_OPCODE = 16;
+
+/**
+ * Builds a diagnostics payload of the generated length.
+ *
+ * Writing the words out by hand meant every new diagnostic field broke these
+ * fakes with a decode error that said nothing about the change that caused it.
+ */
+function diagnostics(...values: readonly number[]): Uint32Array {
+  const words = new Uint32Array(FRAME_DIAGNOSTICS_WORDS);
+  words.set(values.slice(0, FRAME_DIAGNOSTICS_WORDS));
+  words[0] = FRAME_DIAGNOSTICS_VERSION;
+  return words;
+}
 
 describe("CanvasFrameSink", () => {
   it("commits Core, applies resources, replays, and reports one frame in order", () => {
@@ -31,28 +49,7 @@ describe("CanvasFrameSink", () => {
         return displayList;
       },
       frame_diagnostics: () =>
-        Uint32Array.of(
-          3,
-          1,
-          2,
-          2,
-          2,
-          0,
-          2,
-          2,
-          2,
-          2,
-          7,
-          1,
-          1,
-          0,
-          2,
-          0,
-          0,
-          0x89ab_cdef,
-          0x0123_4567,
-          0,
-        ),
+        diagnostics(3, 1, 2, 2, 2, 0, 2, 2, 2, 2, 7, 1, 1, 0, 2, 0, 0, 0x89ab_cdef, 0x0123_4567, 0),
     };
     const onFrame = vi.fn((_report: FrameReport) => events.push("report"));
     const sink = new CanvasFrameSink(fakeContext(calls, events), core, onFrame);
@@ -216,7 +213,7 @@ describe("CanvasFrameSink", () => {
       {
         commit: () => emptyDisplayList(),
         frame_diagnostics: () =>
-          Uint32Array.of(3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0x1234_5678, 0, 0),
+          diagnostics(3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0x1234_5678, 0, 0),
       },
       onFrame,
       cache,
@@ -240,7 +237,7 @@ describe("CanvasFrameSink", () => {
       input: () => emptyDisplayList(),
       advance: () => (animationChanged ? emptyDisplayList() : undefined),
       frame_diagnostics: () =>
-        Uint32Array.of(3, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0x1234, 0, 0),
+        diagnostics(3, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0x1234, 0, 0),
     };
     const sink = new CanvasFrameSink(fakeContext([], []), core, (report) => reports.push(report));
     sink.commit(mutationFrame([]));

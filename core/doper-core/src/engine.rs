@@ -17,6 +17,9 @@ use doper_abi::{
     FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_VERSION, FRAME_DIAGNOSTICS_VERSION_INDEX,
+    FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX,
+    FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_START_INDEX,
+    FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_END_INDEX, FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_START_INDEX,
     FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX, FRAME_DIAGNOSTICS_WORDS, InputAffinity,
     InputBatch, InputCommand, InputEventKind, InputPosition, InputSelection, Mutation,
     MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind, Prop, ResourceKind,
@@ -96,6 +99,15 @@ pub struct FrameDiagnostics {
     /// showing placeholders instead of content, which is a defect rather than a
     /// transient.
     pub visible_placeholders: usize,
+    /// First and last-plus-one virtual item the viewport intersects.
+    ///
+    /// Together with `virtual_materialized` this says whether the Shell is
+    /// answering the window Core is actually looking at. Without it, a viewport
+    /// stuck on skeletons is indistinguishable from one whose Shell is simply
+    /// slow, because both look like a steady placeholder count.
+    pub virtual_visible: (usize, usize),
+    /// Item range the Shell has actually materialized, as Core sees it.
+    pub virtual_materialized: (usize, usize),
 }
 
 impl FrameDiagnostics {
@@ -131,6 +143,12 @@ impl FrameDiagnostics {
         words[FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX] =
             u32::from_le_bytes([hash[4], hash[5], hash[6], hash[7]]);
         words[FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX] = count_word(self.visible_placeholders);
+        words[FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_START_INDEX] = count_word(self.virtual_visible.0);
+        words[FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_END_INDEX] = count_word(self.virtual_visible.1);
+        words[FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_START_INDEX] =
+            count_word(self.virtual_materialized.0);
+        words[FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX] =
+            count_word(self.virtual_materialized.1);
         words
     }
 }
@@ -1540,6 +1558,8 @@ impl CoreEngine {
             over_invalidated_frames: paint_metrics.over_invalidated_frames,
             picture_hash: painted.picture.hash(),
             visible_placeholders: self.scroll.visible_placeholders(),
+            virtual_visible: self.scroll.visible_item_range(),
+            virtual_materialized: self.scroll.materialized_range(),
         };
         self.scene.clear_dirty();
         Ok(FrameOutput {
@@ -2272,6 +2292,46 @@ mod tests {
                     node_id: id(2),
                     prop: Prop::Height,
                     value: 1_000.0,
+                },
+            ],
+        )
+    }
+
+    /// Builds a virtual list sized like the playground's, so a refill window
+    /// covers a hundred rows rather than a handful.
+    fn sized_virtual_list_tree(viewport: f32, item_height: f32) -> Vec<u8> {
+        frame(
+            1,
+            vec![
+                Mutation::CreateNode {
+                    node_id: id(0),
+                    kind: NodeKind::Root,
+                    parent: NULL_NODE_ID,
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::CreateNode {
+                    node_id: id(1),
+                    kind: NodeKind::Scroll,
+                    parent: id(0),
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Width,
+                    value: 640.0,
+                },
+                Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Height,
+                    value: viewport,
+                },
+                Mutation::ConfigureVirtualList {
+                    node_id: id(1),
+                    item_count: 1_000_000,
+                    estimated_item_height: item_height,
+                    base_overscan_viewports: 1.0,
+                    velocity_horizon_seconds: 0.25,
+                    maximum_ahead_viewports: 4.0,
                 },
             ],
         )
@@ -3733,6 +3793,160 @@ mod tests {
         assert!(!requests.is_empty());
         assert!(requests.iter().all(|request| request.node_id == id(1)));
         assert!(requests.iter().all(|request| request.start < request.end));
+    }
+
+    /// A Shell that answers every refill window the frame it is asked.
+    ///
+    /// This is the reconciler's behaviour reduced to mutations: wrappers inside
+    /// the window exist and carry their item index, wrappers outside it are
+    /// removed. Answering with no latency isolates Core's own bookkeeping from
+    /// the worker round trip.
+    struct ShellStub {
+        next_node: u32,
+        materialized: std::collections::BTreeMap<u32, u32>,
+    }
+
+    impl ShellStub {
+        fn new() -> Self {
+            Self {
+                // Scene slots are dense, so item nodes continue from the list.
+                next_node: 2,
+                materialized: std::collections::BTreeMap::new(),
+            }
+        }
+
+        fn answer(&mut self, engine: &mut CoreEngine, frame_seq: u32, start: u32, end: u32) {
+            let mut mutations = Vec::new();
+            let stale: Vec<u32> = self
+                .materialized
+                .keys()
+                .copied()
+                .filter(|index| *index < start || *index >= end)
+                .collect();
+            for index in stale {
+                let node = self.materialized.remove(&index).expect("materialized node");
+                mutations.push(Mutation::RemoveNode { node_id: node });
+            }
+            for index in start..end {
+                if self.materialized.contains_key(&index) {
+                    continue;
+                }
+                let node = id(self.next_node);
+                self.next_node += 1;
+                self.materialized.insert(index, node);
+                mutations.push(Mutation::CreateNode {
+                    node_id: node,
+                    kind: NodeKind::Container,
+                    parent: id(1),
+                    before_sibling: NULL_NODE_ID,
+                });
+                mutations.push(Mutation::SetF32 {
+                    node_id: node,
+                    prop: Prop::Height,
+                    value: 32.0,
+                });
+                mutations.push(Mutation::SetVirtualItem {
+                    node_id: node,
+                    item_index: index,
+                });
+            }
+            if mutations.is_empty() {
+                return;
+            }
+            engine
+                .commit(&frame(frame_seq, mutations))
+                .expect("refill commit");
+        }
+    }
+
+    /// Runs a sustained wheel gesture and returns the frames the viewport spent
+    /// on skeletons after the input stopped.
+    ///
+    /// `latency` is how many frames the Shell takes to answer a window, which
+    /// is the worker round trip the deployed transport actually pays.
+    fn frames_to_materialize_after_a_gesture(latency: usize) -> Option<usize> {
+        const VIEWPORT: f32 = 900.0;
+        const ROW_HEIGHT: f32 = 32.0;
+        let mut engine = CoreEngine::new(640.0, VIEWPORT).expect("Core");
+        engine
+            .commit(&sized_virtual_list_tree(VIEWPORT, ROW_HEIGHT))
+            .expect("initial frame");
+        let mut shell = ShellStub::new();
+        let mut frame_seq = 1;
+        let mut inflight: std::collections::VecDeque<Option<(u32, u32)>> =
+            std::collections::VecDeque::from(vec![None; latency]);
+        let answer =
+            |engine: &mut CoreEngine,
+             shell: &mut ShellStub,
+             seq: &mut u32,
+             inflight: &mut std::collections::VecDeque<Option<(u32, u32)>>| {
+                // The host keeps only the newest window per list, so a superseded
+                // request is never rendered.
+                let request = engine
+                    .take_virtual_refills()
+                    .last()
+                    .map(|request| (request.start, request.end));
+                inflight.push_back(request);
+                if let Some(Some((start, end))) = inflight.pop_front() {
+                    *seq += 1;
+                    shell.answer(engine, *seq, start, end);
+                }
+            };
+        answer(&mut engine, &mut shell, &mut frame_seq, &mut inflight);
+
+        // A sustained gesture: one discrete notch per frame, the shape a
+        // trackpad flick produces once the host has classified it.
+        for event_id in 0..40 {
+            engine
+                .input(&input(
+                    event_id + 1,
+                    vec![InputCommand::DispatchEvent {
+                        event_id: event_id + 1,
+                        kind: InputEventKind::Wheel,
+                        flags: 0,
+                        position: [50.0, 50.0],
+                        delta: [0.0, 400.0],
+                        buttons: 0,
+                        modifiers: 0,
+                        pointer_id: 0,
+                        elapsed_micros: 16_667,
+                    }],
+                ))
+                .expect("wheel input");
+            engine.take_event_transactions().expect("events");
+            engine.advance(1.0 / 60.0).expect("frame");
+            answer(&mut engine, &mut shell, &mut frame_seq, &mut inflight);
+        }
+
+        // Input has stopped. The notch animation lands within 120ms, so once
+        // the last answer arrives there is nothing left to wait for.
+        for tick in 0..60 {
+            engine.advance(1.0 / 60.0).expect("settle frame");
+            answer(&mut engine, &mut shell, &mut frame_seq, &mut inflight);
+            if engine.scroll.visible_placeholders() == 0 {
+                return Some(tick);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn a_settled_viewport_stops_showing_skeletons_once_the_shell_answers() {
+        // Reported from the deployed playground: after a fast trackpad flick
+        // the rows stayed grey for hundreds of milliseconds even though the
+        // offset had stopped and the main thread was idle. A Shell that answers
+        // instantly hides the defect, so the round trip is part of the test.
+        for latency in [0, 1, 2, 3, 4, 5, 6, 8] {
+            let settled = frames_to_materialize_after_a_gesture(latency).unwrap_or_else(|| {
+                panic!("viewport never materialized with a {latency}-frame Shell round trip")
+            });
+            println!("latency {latency} -> settled after {settled} frames");
+            assert!(
+                settled <= latency + 8,
+                "a viewport at rest took {settled} frames to lose its skeletons \
+                 with a {latency}-frame Shell round trip",
+            );
+        }
     }
 
     #[test]

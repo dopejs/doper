@@ -149,6 +149,12 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #eventSequence = 1;
   readonly #eventTimestamps = new Map<number, number>();
   #wheelGesture: { readonly precise: boolean; readonly timestamp: number } | undefined;
+  #pendingWheel:
+    { deltaX: number; deltaY: number; event: WheelEvent; readonly flags: number } | undefined;
+  #wheelFrame: number | undefined;
+  /** Newest requested window per virtual list, awaiting a single render. */
+  readonly #pendingRefills = new Map<number, VirtualRefillRange>();
+  #refillFrame: number | undefined;
   #inputDirectFrames = 0;
   #inputRing: SabMutationRing | undefined;
   #inputSabFallbackFrames = 0;
@@ -487,14 +493,44 @@ class HostedCanvasRootController implements HostedCanvasRoot {
         : event.deltaMode === 2
           ? Math.max(1, this.#canvas.clientHeight)
           : 1;
-    this.dispatchCanvasEvent(
-      "wheel",
+    const flags = this.classifyWheel(event);
+    // A pointing device emits one event per display refresh, and each one used
+    // to become its own Core transaction: a frame painted and the whole canvas
+    // replayed for a picture that the next event superseded before it could be
+    // seen. Merging a frame's worth of deltas into one command keeps every
+    // pixel of motion while paying for one replay instead of dozens.
+    // preventDefault and the suppression check stay synchronous, above.
+    const pending = this.#pendingWheel;
+    if (pending !== undefined && pending.flags === flags) {
+      pending.deltaX += event.deltaX * scale;
+      pending.deltaY += event.deltaY * scale;
+      pending.event = event;
+      return;
+    }
+    this.flushWheel();
+    this.#pendingWheel = {
+      deltaX: event.deltaX * scale,
+      deltaY: event.deltaY * scale,
       event,
-      event.deltaX * scale,
-      event.deltaY * scale,
-      this.classifyWheel(event),
-    );
+      flags,
+    };
+    if (typeof requestAnimationFrame === "function") {
+      this.#wheelFrame = requestAnimationFrame(() => {
+        this.#wheelFrame = undefined;
+        this.flushWheel();
+      });
+    } else {
+      this.flushWheel();
+    }
   };
+
+  /** Sends the merged wheel delta collected during this frame, if any. */
+  private flushWheel(): void {
+    const pending = this.#pendingWheel;
+    if (pending === undefined) return;
+    this.#pendingWheel = undefined;
+    this.dispatchCanvasEvent("wheel", pending.event, pending.deltaX, pending.deltaY, pending.flags);
+  }
 
   /**
    * Classifies a wheel sample as a high-precision gesture or a discrete notch.
@@ -709,6 +745,16 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   }
 
   private detachCanvasEventListeners(): void {
+    if (this.#wheelFrame !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(this.#wheelFrame);
+    }
+    this.#wheelFrame = undefined;
+    this.#pendingWheel = undefined;
+    if (this.#refillFrame !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(this.#refillFrame);
+    }
+    this.#refillFrame = undefined;
+    this.#pendingRefills.clear();
     if (!this.#eventListenersAttached) return;
     if (typeof this.#canvas.removeEventListener !== "function") return;
     this.#canvas.removeEventListener("pointerdown", this.handleCanvasPointerEvent);
@@ -840,10 +886,35 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     });
   }
 
+  /**
+   * Renders the newest requested window for each virtual list, once.
+   *
+   * A window request is an absolute range rather than a delta, so a later
+   * request for the same node replaces an earlier one outright. Rendering each
+   * batch separately makes the Shell walk windows the offset has already left,
+   * and during a gesture those stale renders queue up faster than they drain,
+   * which is what left the viewport on placeholders long after the fingers
+   * stopped. Dropping a superseded window cannot lose work: Core re-requests
+   * any window it still lacks after {@link REFILL_RETRY_FRAMES}.
+   */
   private deferVirtualRefills(requests: readonly VirtualRefillRange[]): void {
     if (requests.length === 0) return;
-    const owned = requests.map(({ end, nodeId, start }) => ({ end, nodeId, start }));
-    queueMicrotask(() => {
+    const pending = this.#pendingRefills;
+    const scheduled = pending.size > 0;
+    for (const { end, nodeId, start } of requests) pending.set(nodeId, { end, nodeId, start });
+    if (scheduled) return;
+    // Flushed per frame, not per microtask. Core emits a window every render
+    // frame, and each arrives in its own message, so a microtask flush gave
+    // every one of them its own render: during a gesture the Shell rebuilt the
+    // whole window nine times in sixty milliseconds, each rebuild one stride
+    // behind the last, and the commits queued up so Core kept seeing windows
+    // the offset had long left. Coalescing to one flush per frame renders only
+    // the newest window and costs at most a frame of latency on a path that is
+    // already asynchronous.
+    const flush = (): void => {
+      this.#refillFrame = undefined;
+      const owned = [...pending.values()];
+      pending.clear();
       if (this.#closing || this.#unmounted) return;
       try {
         this.#root?.refillVirtualRanges(owned);
@@ -851,7 +922,12 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       } catch (cause) {
         this.#options.onHostError?.(toError(cause, "virtual refill handler failed"));
       }
-    });
+    };
+    if (typeof requestAnimationFrame === "function") {
+      this.#refillFrame = requestAnimationFrame(flush);
+    } else {
+      queueMicrotask(flush);
+    }
   }
 
   private async recoverToMainThread(error: Error): Promise<void> {

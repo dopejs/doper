@@ -431,6 +431,11 @@ impl ScrollPhysics {
             target,
             elapsed_seconds: 0.0,
         });
+        // The animation covers this distance in a fixed time, so it is also the
+        // speed the viewport is about to travel at. Recording it lets preheat
+        // lead the gesture; without it, the only prediction available is the
+        // animation target, which never reaches beyond the notch in flight.
+        self.note_input_speed((target - self.position) / WHEEL_ANIMATION_SECONDS);
         Ok(self.frame(false))
     }
 
@@ -452,9 +457,6 @@ impl ScrollPhysics {
     /// driving the offset.
     #[must_use]
     pub fn lookahead_position(&self, horizon_seconds: f64) -> f64 {
-        if let Some(animation) = self.wheel_animation {
-            return animation.target;
-        }
         let speed = if self.velocity.abs() >= self.preheat_velocity.abs() {
             self.velocity
         } else {
@@ -465,7 +467,17 @@ impl ScrollPhysics {
         } else {
             0.0
         };
-        self.position + speed * horizon
+        let projected = self.position + speed * horizon;
+        // A notch animation only ever aims one notch ahead, so on a sustained
+        // gesture it under-predicts badly: the offset outruns the preheat
+        // window every frame and the viewport lands on rows nobody asked for.
+        // Take whichever prediction reaches further along the travel, and never
+        // predict against it.
+        match self.wheel_animation {
+            Some(animation) if animation.target >= self.position => projected.max(animation.target),
+            Some(animation) => projected.min(animation.target),
+            None => projected,
+        }
     }
 
     /// Returns whether a discrete wheel animation is still running.

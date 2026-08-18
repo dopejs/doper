@@ -71,12 +71,16 @@ struct VirtualAxis {
     source: VirtualListConfig,
     materialized: BTreeSet<u32>,
     planned_window: Option<(u32, u32)>,
+    /// Whether a refill request is still waiting for the Shell to answer.
+    refill_in_flight: bool,
     /// Frames the current window has gone unanswered, for bounded retries.
     unanswered_frames: u32,
     /// Skeletons for this frame, reused across frames without reallocating.
     placeholders: Vec<PlaceholderRect>,
     /// Width used for skeleton rectangles, tracked from the scroll viewport.
     content_width: f32,
+    /// Item range the viewport intersects, as of the last plan.
+    visible: (usize, usize),
 }
 
 #[derive(Clone, Debug)]
@@ -274,6 +278,11 @@ impl ScrollAxes {
                 .map_err(|_| CoreError::InvalidScrollTarget { node: list })?;
             axis.planner.mark_available(index..index + 1)?;
         }
+        if next != axis.materialized {
+            // The Shell answered: whatever it rendered is now in the Scene, so
+            // the planner may ask for a different window on the next frame.
+            axis.refill_in_flight = false;
+        }
         axis.materialized = next;
 
         let mut corrected = false;
@@ -321,6 +330,8 @@ fn create_virtual_axis(
         source,
         materialized: BTreeSet::new(),
         planned_window: None,
+        visible: (0, 0),
+        refill_in_flight: false,
         unanswered_frames: 0,
         placeholders: Vec::new(),
         content_width: 0.0,
@@ -585,6 +596,33 @@ impl ScrollController {
     }
 
     /// Returns this frame's skeletons for a scroll node, empty when fully materialized.
+    /// Returns the viewport's item range, or an empty range without a list.
+    pub(crate) fn visible_item_range(&self) -> (usize, usize) {
+        self.states
+            .values()
+            .find_map(|state| match &state.y {
+                VerticalAxis::Virtual(axis) => Some(axis.visible),
+                VerticalAxis::Plain(_) => None,
+            })
+            .unwrap_or((0, 0))
+    }
+
+    /// Returns the item range the Shell has materialized, empty without a list.
+    pub(crate) fn materialized_range(&self) -> (usize, usize) {
+        self.states
+            .values()
+            .find_map(|state| match &state.y {
+                VerticalAxis::Virtual(axis) => Some(axis.materialized.clone()),
+                VerticalAxis::Plain(_) => None,
+            })
+            .and_then(|items| {
+                let first = *items.first()?;
+                let last = *items.last()?;
+                Some((first as usize, last as usize + 1))
+            })
+            .unwrap_or((0, 0))
+    }
+
     /// Returns how many visible items are drawn as skeletons across all lists.
     pub(crate) fn visible_placeholders(&self) -> usize {
         self.states
@@ -627,6 +665,7 @@ impl ScrollController {
             // which is the blank canvas users see when a fast gesture outruns
             // the refill round trip.
             let visible_range = visible.clone();
+            axis.visible = (visible_range.start, visible_range.end);
             axis.placeholders.clear();
             if missing > 0 {
                 let width = axis.content_width;
@@ -680,7 +719,15 @@ impl ScrollController {
             } else {
                 axis.unanswered_frames = 0;
             }
-            let retry = axis.unanswered_frames >= REFILL_RETRY_FRAMES;
+            // A window that still covers the viewport is not worth rebuilding
+            // while the Shell is still working on the last request. Once that
+            // answer has landed and the viewport is still short, waiting is
+            // pure latency: the answer was for a window the offset has left,
+            // and nothing else is coming. Ask again immediately instead. The
+            // frame count stays as a backstop for a Shell that answers a
+            // request without materializing anything at all.
+            let answered = !axis.refill_in_flight;
+            let retry = (missing > 0 && answered) || axis.unanswered_frames >= REFILL_RETRY_FRAMES;
             // The projected lead decays smoothly for about a second after a
             // gesture, so the window shrinks by a few items every frame. Asking
             // again for each of those meant the Shell rebuilt the window on
@@ -699,6 +746,7 @@ impl ScrollController {
                 if retry {
                     axis.unanswered_frames = 0;
                 }
+                axis.refill_in_flight = true;
                 axis.planned_window = Some(planned);
                 let request = VirtualRefillRequest {
                     node_id: node.raw(),

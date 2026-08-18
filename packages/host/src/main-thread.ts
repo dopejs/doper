@@ -41,6 +41,10 @@ import {
   FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
+  FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX,
+  FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_START_INDEX,
+  FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_END_INDEX,
+  FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_START_INDEX,
   FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
@@ -200,6 +204,19 @@ export interface CoreFrameDiagnostics {
    * showing placeholders rather than content.
    */
   readonly visiblePlaceholders: number;
+  /**
+   * First and last-plus-one virtual item the viewport intersects.
+   *
+   * Compare against the windows reported by `onVirtualRefills`: a viewport
+   * outside every window Core asked for means the request and the answer have
+   * diverged, which a placeholder count alone cannot distinguish from a Shell
+   * that is merely slow.
+   */
+  readonly virtualVisibleStart: number;
+  readonly virtualVisibleEnd: number;
+  /** Item range the Shell has materialized, as Core sees it. */
+  readonly virtualMaterializedStart: number;
+  readonly virtualMaterializedEnd: number;
 }
 
 /** Diagnostics emitted after one Core frame and Canvas replay both succeed. */
@@ -367,6 +384,50 @@ export class CanvasFrameSink implements MutationSink {
       ...(replay.rasterFrame === undefined ? {} : { rasterFrame: replay.rasterFrame }),
     });
     this.emitEditTransactions(this.takeEditTransactions());
+  }
+
+  /**
+   * Applies several Input Stream transactions and replays the canvas once.
+   *
+   * A pointing device emits one event per display refresh, and applying each
+   * one separately replays the whole canvas for a picture the next event
+   * supersedes before it can be seen. When a replay costs more than a frame,
+   * that backlog grows for as long as the gesture lasts and the offset keeps
+   * catching up long after the fingers stop. Core state still advances for
+   * every transaction and the reverse streams still drain; only the
+   * intermediate pictures are skipped.
+   */
+  public inputBatch(batches: readonly Uint8Array[]): ReplayStats | null {
+    if (batches.length === 0) return null;
+    const core = this.#core;
+    if (core.input === undefined) throw new Error("Core does not implement Input Stream dispatch");
+    let latest: Uint8Array | undefined;
+    let inputBytes = 0;
+    for (const bytes of batches) {
+      const displayList = core.input(bytes);
+      inputBytes += bytes.byteLength;
+      this.emitVirtualRefills();
+      this.emitNonPassiveRegions();
+      this.emitEditingGeometry();
+      this.emitSemantics();
+      this.emitEventTransactions(this.takeEventTransactions());
+      // The final transaction of a burst can be one that draws nothing, such as
+      // the end of a drag, so keep the newest picture rather than the newest
+      // transaction.
+      if (displayList !== undefined) latest = displayList;
+    }
+    if (latest === undefined) {
+      this.emitEditTransactions(this.takeEditTransactions());
+      return null;
+    }
+    this.applyDynamicGlyphResources();
+    const result = this.acceptDynamicFrame(latest, {
+      cause: "input",
+      inputBytes,
+      mutationBytes: 0,
+    });
+    this.emitEditTransactions(this.takeEditTransactions());
+    return result;
   }
 
   /** Applies one Core Input Stream transaction and replays only changed pixels. */
@@ -854,6 +915,13 @@ function parseCoreFrameDiagnostics(
     overInvalidatedFrames: requiredWord(words, FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX),
     pictureHash: BigInt(low) | (BigInt(high) << 32n),
     visiblePlaceholders: requiredWord(words, FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX),
+    virtualVisibleStart: requiredWord(words, FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_START_INDEX),
+    virtualVisibleEnd: requiredWord(words, FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_END_INDEX),
+    virtualMaterializedStart: requiredWord(
+      words,
+      FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_START_INDEX,
+    ),
+    virtualMaterializedEnd: requiredWord(words, FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX),
   };
 }
 

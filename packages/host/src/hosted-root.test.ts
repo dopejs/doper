@@ -251,6 +251,70 @@ describe("createHostedCanvasRoot", () => {
     await root.close();
   });
 
+  it("renders only the newest virtual window when Core asks several times a frame", async () => {
+    // Regression: each refill message was rendered in its own microtask, so a
+    // gesture made the Shell rebuild the whole window once per message, every
+    // rebuild one stride behind the last. The commits queued up and Core kept
+    // being handed windows the offset had already left, which left the viewport
+    // on skeletons long after it had stopped moving.
+    installCanvasGlobal();
+    const frames: Array<() => void> = [];
+    const globals = globalThis as {
+      requestAnimationFrame?: unknown;
+      cancelAnimationFrame?: unknown;
+    };
+    const previousRequest = globals.requestAnimationFrame;
+    const previousCancel = globals.cancelAnimationFrame;
+    globals.requestAnimationFrame = (callback: () => void): number => frames.push(callback);
+    globals.cancelAnimationFrame = (): void => {};
+    try {
+      const core = fakeCore() as FakeCore & { take_virtual_refills(): Uint32Array };
+      const renderItem = vi.fn((index: number) => hostElement("text", { value: `item ${index}` }));
+      let listNode: number | undefined;
+      const windows: Array<[number, number]> = [
+        [0, 3],
+        [10, 13],
+        [20, 23],
+      ];
+      core.take_virtual_refills = () => {
+        if (core.commits.length === 0) return new Uint32Array([VIRTUAL_REFILL_VERSION, 0]);
+        listNode ??= decodeMutationBatch(core.commits[0] ?? new Uint8Array()).mutations.find(
+          (mutation) => mutation.type === "configureVirtualList",
+        )?.nodeId;
+        const next = windows.shift();
+        if (listNode === undefined || next === undefined)
+          return new Uint32Array([VIRTUAL_REFILL_VERSION, 0]);
+        return new Uint32Array([VIRTUAL_REFILL_VERSION, 1, listNode, next[0], next[1]]);
+      };
+      const root = await createHostedCanvasRoot(new FakeCanvas() as unknown as HTMLCanvasElement, {
+        capabilities: allCapabilities(),
+        coreFactory: () => Promise.resolve(core),
+        transport: { pageWorkerEnabled: false },
+      });
+
+      const list = (height: number) =>
+        hostElement("virtualList", {
+          height,
+          itemCount: 1_000_000,
+          estimatedItemHeight: 20,
+          renderItem,
+        });
+      // Three windows arrive before the frame runs; the first two are dead.
+      root.render(list(80));
+      root.render(list(81));
+      root.render(list(82));
+      await Promise.resolve();
+      expect(renderItem).not.toHaveBeenCalled();
+
+      for (const frame of frames.splice(0, frames.length)) frame();
+      expect(renderItem.mock.calls.map(([index]) => index)).toEqual([20, 21, 22]);
+      await root.close();
+    } finally {
+      globals.requestAnimationFrame = previousRequest;
+      globals.cancelAnimationFrame = previousCancel;
+    }
+  });
+
   it("routes scroll input to the active Worker without a mutation round trip", async () => {
     installCanvasGlobal();
     const worker = readyWorker();

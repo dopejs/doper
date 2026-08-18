@@ -286,14 +286,18 @@ impl Virtualizer {
             -viewport * self.config.maximum_ahead_viewports,
             viewport * self.config.maximum_ahead_viewports,
         );
-        // Leading the gesture only helps while the viewport itself is covered.
-        // Materializing a window is a full rebuild of every item in it, so
-        // asking for a large lead while the visible range is still missing
-        // spends the Shell's budget off screen and leaves the user looking at
-        // skeletons. Collapse the lead until the viewport is served.
-        let starved = visible.clone().any(|index| !self.available[index]);
-        let travel = if starved { 0.0 } else { travel };
-        let base = if starved { base.min(viewport) } else { base };
+        // The window is a function of the offset and where it is heading, and
+        // deliberately not of what happens to be materialized.
+        //
+        // Narrowing it while the viewport is starved looks like it protects the
+        // Shell's budget, but starvation is an output of this plan, not an
+        // input: a narrow window is asked for, the Shell answers it, the
+        // viewport is briefly covered, the next plan asks for the wide window
+        // instead, and materializing that one drops the rows the narrow one
+        // held. Core then emits both shapes in alternation, the Shell rebuilds
+        // a different window every time, and the viewport never converges --
+        // which is the stall that left rows grey after the offset had stopped.
+        // `maximum_ahead_viewports` already bounds the rebuild.
         let (before, after) = if travel < 0.0 {
             (base + travel.abs(), base)
         } else {
@@ -423,10 +427,13 @@ mod tests {
     }
 
     #[test]
-    fn a_starved_viewport_stops_preheating_ahead_of_itself() {
-        // Regression: while the visible range was still missing, the window kept
-        // leading the gesture, so the Shell spent a full rebuild on off-screen
-        // items and the viewport stayed on skeletons.
+    fn the_preheat_window_does_not_change_shape_when_items_are_materialized() {
+        // Regression: the window used to narrow while the viewport was starved
+        // and widen once it was served. Because starvation is an output of the
+        // plan, that made Core alternate between two window shapes on
+        // successive frames; the Shell rebuilt a different window each time and
+        // dropped the rows the other one needed, so a settled viewport could
+        // stay on skeletons indefinitely.
         let mut virtualizer = Virtualizer::new(
             HeightIndex::with_uniform(10_000, 32.0).expect("heights"),
             512.0,
@@ -439,25 +446,26 @@ mod tests {
             .wheel_notch_by(6_000.0)
             .expect("notch");
 
-        // Nothing materialized yet: the window must not run ahead.
         let starved = virtualizer.plan_frame().expect("frame");
-        let starved_span = starved.preheat.end - starved.preheat.start;
-        let visible_span = starved.visible.end - starved.visible.start;
+        let (window, visible) = (starved.preheat.clone(), starved.visible.clone());
         assert!(
-            starved_span <= visible_span * 4,
-            "a starved window must stay near the viewport: {:?} vs {:?}",
-            starved.preheat,
-            starved.visible
+            window.start <= visible.start && visible.end <= window.end,
+            "the window must always cover the viewport: {window:?} vs {visible:?}"
+        );
+        // A bounded rebuild is what the Shell needs protecting from, and the
+        // ahead policy already provides it: one viewport of base overscan plus
+        // at most `maximum_ahead_viewports` of lead on either side.
+        let visible_span = visible.end - visible.start;
+        assert!(
+            window.end - window.start <= visible_span * 11,
+            "the window must stay bounded: {window:?} vs {visible:?}"
         );
 
-        // Once the viewport is served the lead comes back.
-        let visible = starved.visible.clone();
         virtualizer.mark_available(visible).expect("available");
         let served = virtualizer.plan_frame().expect("frame");
-        assert!(
-            served.preheat.end - served.preheat.start > starved_span,
-            "a served viewport must preheat ahead again: {:?}",
-            served.preheat
+        assert_eq!(
+            served.preheat, window,
+            "materializing the viewport must not move the window Core asks for"
         );
     }
 

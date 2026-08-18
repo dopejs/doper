@@ -81,7 +81,9 @@ async function handle(message: RenderWorkerInboundMessage): Promise<void> {
     case "doper:input":
       if (!active || message.sessionId !== sessionId) return;
       drainInputRing();
-      sink?.input(message.bytes);
+      // Queue rather than apply: the render clock drains the queue once per
+      // frame, so a burst costs one canvas replay instead of one per event.
+      pendingInput.push(message.bytes);
       return;
     case "doper:input-wake":
       if (!active || message.sessionId !== sessionId) return;
@@ -127,6 +129,9 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
     const decoded = decodeMutationBatch(bytes);
     if (decoded.frameSeq !== frameSeq)
       throw new Error("transport and Mutation Stream sequences differ");
+    // Deferring input must not reorder it against a commit: a queued drag delta
+    // applied after a programmatic scroll would overwrite it.
+    drainPendingInput();
     sink?.commit(bytes);
   };
   if (message.mode === "sab") {
@@ -150,6 +155,7 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
   clock.start((frame) => {
     sabReceiver?.drain();
     drainInputRing();
+    drainPendingInput();
     sink?.advance(frame.deltaMs / 1000);
     clockFramesSinceReport += 1;
     if (clockFramesSinceReport >= 60) {
@@ -175,6 +181,15 @@ function disposeRuntime(): void {
   sink = undefined;
   core = undefined;
   active = false;
+}
+
+/** Input batches received since the last frame, applied together. */
+const pendingInput: Uint8Array[] = [];
+
+/** Applies every queued input batch, replaying the canvas once for the group. */
+function drainPendingInput(): void {
+  if (pendingInput.length === 0) return;
+  sink?.inputBatch(pendingInput.splice(0, pendingInput.length));
 }
 
 function drainInputRing(): void {
