@@ -27,7 +27,15 @@ let frames = 0;
 let generation = 0;
 const metricRows = new Map<string, string>();
 
-function publish(): void {
+let lastPublish = 0;
+
+function publish(force = false): void {
+  // The HUD is diagnostics, not content. Rebuilding this array and re-rendering
+  // it on every engine frame put Vue work on the main thread in direct
+  // competition with the refill microtask that materializes rows.
+  const now = performance.now();
+  if (!force && now - lastPublish < 100) return;
+  lastPublish = now;
   metrics.value = [...metricRows];
 }
 
@@ -83,6 +91,9 @@ async function mount(demo: Demo): Promise<void> {
       initializationTimeoutMs: 45_000,
       onFrame: (report) => {
         if (token !== generation) return;
+        // Devtools affordance: the HUD is throttled, so expose the unthrottled
+        // report for inspection and measurement from the console.
+        (globalThis as { __doperFrame?: unknown }).__doperFrame = report;
         frames += 1;
         const text = messages.value;
         metricRows.set(text.frames, String(frames));
@@ -100,6 +111,15 @@ async function mount(demo: Demo): Promise<void> {
       },
       onHostError: (error) => {
         if (token === generation) failure.value = `${error.name}: ${error.message}`;
+      },
+      onVirtualRefills: (requests) => {
+        // Devtools affordance: when Core asked for a window, so the round trip
+        // to a materialized window can be measured from the console.
+        const log = ((globalThis as { __doperRefills?: unknown[] }).__doperRefills ??= []);
+        for (const request of requests) {
+          log.push({ at: performance.now(), start: request.start, end: request.end });
+        }
+        if (log.length > 200) log.splice(0, log.length - 200);
       },
     });
     if (token !== generation) {

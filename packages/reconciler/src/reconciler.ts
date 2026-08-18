@@ -91,6 +91,14 @@ interface BaseInstance {
   readonly key: Key | null;
   parent: Owner;
   mounted: boolean;
+  /**
+   * The descriptor this instance was last updated from.
+   *
+   * Re-diffing the identical element object cannot produce a mutation, so a
+   * caller that deliberately reuses one -- as a virtual list does for the items
+   * that stayed inside the window -- can skip the walk entirely.
+   */
+  descriptor?: ChildDescriptor;
 }
 
 interface HostInstance extends BaseInstance {
@@ -107,6 +115,8 @@ interface HostInstance extends BaseInstance {
   scrollPosition: readonly [number, number] | undefined;
   virtualItemIndex: number | undefined;
   virtualItems: Map<number, DoperNode>;
+  /** Wrapper elements per index, reused so unchanged items skip re-diffing. */
+  virtualWrappers: Map<number, DoperNode>;
   virtualList: NormalizedVirtualList | undefined;
   virtualRange: readonly [number, number] | undefined;
   editable: NormalizedEditable | undefined;
@@ -680,7 +690,12 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
       const candidate = key === null ? unkeyed[unkeyedIndex++] : keyed.get(key);
       if (candidate !== undefined && compatible(candidate, descriptor)) {
         used.add(candidate);
-        next.push(this.updateInstance(candidate, descriptor, coreParent));
+        if (candidate.descriptor === descriptor) {
+          // Same element object as last time: nothing below it can differ.
+          next.push(candidate);
+        } else {
+          next.push(this.updateInstance(candidate, descriptor, coreParent));
+        }
       } else {
         if (candidate !== undefined) {
           used.add(candidate);
@@ -697,6 +712,16 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
   }
 
   private mountInstance(owner: Owner, descriptor: ChildDescriptor, coreParent: number): Instance {
+    const instance = this.mountInstanceInner(owner, descriptor, coreParent);
+    instance.descriptor = descriptor;
+    return instance;
+  }
+
+  private mountInstanceInner(
+    owner: Owner,
+    descriptor: ChildDescriptor,
+    coreParent: number,
+  ): Instance {
     if (typeof descriptor === "string") {
       return this.mountHost(owner, "text", null, { value: descriptor }, coreParent);
     }
@@ -746,6 +771,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
       scrollPosition: undefined,
       virtualItemIndex: undefined,
       virtualItems: new Map(),
+      virtualWrappers: new Map(),
       virtualList: undefined,
       virtualRange: undefined,
       editable: undefined,
@@ -782,6 +808,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
     descriptor: ChildDescriptor,
     coreParent: number,
   ): Instance {
+    instance.descriptor = descriptor;
     if (instance.kind === "component") {
       if (typeof descriptor === "string" || !isDoperElement(descriptor)) {
         throw new Error("component descriptor changed unexpectedly");
@@ -814,6 +841,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
       const itemCount = instance.virtualList?.itemCount ?? 0;
       if (previousVirtualList?.renderItem !== instance.virtualList?.renderItem) {
         instance.virtualItems.clear();
+        instance.virtualWrappers.clear();
       }
       instance.virtualRange = undefined;
       this.materializeVirtualWindow(instance, Math.min(start, itemCount), Math.min(end, itemCount));
@@ -954,22 +982,25 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
     if (config === undefined) throw new Error("virtual list instance has no configuration");
     const children: DoperNode[] = [];
     for (let index = start; index < end; index += 1) {
-      let child = instance.virtualItems.get(index);
-      if (!instance.virtualItems.has(index)) {
-        child = config.renderItem(index);
-        instance.virtualItems.set(index, child);
-      }
-      const props = {
-        children: child,
-        [VIRTUAL_ITEM_INDEX]: index,
-      } as Record<string | symbol, unknown>;
-      children.push(
-        createElement(
+      let wrapper = instance.virtualWrappers.get(index);
+      if (wrapper === undefined) {
+        let child = instance.virtualItems.get(index);
+        if (!instance.virtualItems.has(index)) {
+          child = config.renderItem(index);
+          instance.virtualItems.set(index, child);
+        }
+        const props = {
+          children: child,
+          [VIRTUAL_ITEM_INDEX]: index,
+        } as Record<string | symbol, unknown>;
+        wrapper = createElement(
           "container",
           props as unknown as Record<string, unknown>,
           `doper:virtual:${String(index)}`,
-        ),
-      );
+        );
+        instance.virtualWrappers.set(index, wrapper);
+      }
+      children.push(wrapper);
     }
     instance.children = this.reconcileChildren(
       instance,
@@ -979,6 +1010,9 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
     );
     for (const index of instance.virtualItems.keys()) {
       if (index < start || index >= end) instance.virtualItems.delete(index);
+    }
+    for (const index of instance.virtualWrappers.keys()) {
+      if (index < start || index >= end) instance.virtualWrappers.delete(index);
     }
     instance.virtualRange = [start, end];
   }
