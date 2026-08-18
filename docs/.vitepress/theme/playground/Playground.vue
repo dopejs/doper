@@ -94,6 +94,18 @@ async function mount(demo: Demo): Promise<void> {
         // Devtools affordance: the HUD is throttled, so expose the unthrottled
         // report for inspection and measurement from the console.
         (globalThis as { __doperFrame?: unknown }).__doperFrame = report;
+        // Devtools affordance: when each frame was actually delivered, so frame
+        // pacing can be measured from the console. A requestAnimationFrame
+        // sampler measures the display's cadence, not the engine's.
+        const log = ((globalThis as { __doperFrameLog?: number[][] }).__doperFrameLog ??= []);
+        log.push([
+          performance.now(),
+          report.core?.dirtyPaintNodes ?? 0,
+          report.core?.layoutVisitedNodes ?? 0,
+          report.commands,
+          report.replayMs ?? 0,
+        ]);
+        if (log.length > 600) log.splice(0, log.length - 600);
         frames += 1;
         const text = messages.value;
         metricRows.set(text.frames, String(frames));

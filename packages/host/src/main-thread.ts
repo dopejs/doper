@@ -239,6 +239,8 @@ export interface FrameReport extends ReplayStats {
   readonly animationDeltaMs?: number;
   readonly mutationBytes: number;
   readonly displayListBytes: number;
+  /** Milliseconds the backend spent replaying this frame onto the canvas. */
+  readonly replayMs?: number;
   readonly core?: CoreFrameDiagnostics;
   readonly rasterCache?: RasterTileCacheMetrics;
   readonly rasterFrame?: Pick<RasterFrameResult<ReplayStats>, "bypassed" | "hits" | "misses">;
@@ -383,7 +385,12 @@ export class CanvasFrameSink implements MutationSink {
       coreDiagnostics === undefined
         ? undefined
         : `${coreDiagnostics.pictureHash.toString(16)}:${String(this.#resourceRevision)}`;
+    // Frame phases are part of the observability contract: without the replay
+    // cost split out, a slow frame is indistinguishable between Core producing
+    // the list and the backend drawing it.
+    const replayStart = performance.now();
     const replay = this.replay(displayList, pictureKey);
+    const replayMs = performance.now() - replayStart;
     this.#lastDisplayList = displayList;
     this.#lastPictureKey = pictureKey;
     this.#onFrame?.({
@@ -392,6 +399,7 @@ export class CanvasFrameSink implements MutationSink {
       inputBytes: 0,
       mutationBytes: bytes.byteLength,
       displayListBytes: displayList.byteLength,
+      replayMs,
       ...(coreDiagnostics === undefined ? {} : { core: coreDiagnostics }),
       ...(this.#rasterCache === undefined ? {} : { rasterCache: this.#rasterCache.metrics() }),
       ...(replay.rasterFrame === undefined ? {} : { rasterFrame: replay.rasterFrame }),

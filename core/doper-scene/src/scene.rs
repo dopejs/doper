@@ -1278,8 +1278,15 @@ impl Scene {
             })
             .collect();
         let mut staged_resources = BTreeMap::new();
+        // Property edits in this batch land on the plan, not on `self`, so
+        // their invalidation would otherwise be lost when paint dirt is carried
+        // across by id. Every node the batch names repaints.
+        let mut touched: BTreeSet<u32> = BTreeSet::new();
 
         for instruction in batch.instructions {
+            if let Some(node) = mutation_target(&instruction.mutation) {
+                touched.insert(node);
+            }
             match instruction.mutation {
                 Mutation::CreateNode {
                     node_id,
@@ -1333,6 +1340,7 @@ impl Scene {
         validate_virtual_plan(&nodes)?;
         let order = topology_order(&nodes)?;
         let mut next = Self::build_from_plan(nodes, slots, order)?;
+        next.carry_paint_dirty_from(self, &touched);
         next.resources = self.resources.clone();
         next.resources.extend(staged_resources);
         validate_resource_graph(&next.resources, &BTreeMap::new())?;
@@ -1373,6 +1381,30 @@ impl Scene {
             }
         }
         result
+    }
+
+    /// Carries paint invalidation across a topology compaction, by id.
+    ///
+    /// Compaction renumbers indices, so the other domains conservatively mark
+    /// everything rather than track the renumbering. Paint cannot afford that:
+    /// a virtual list changes topology on every window shift, so filling the
+    /// bitmap marked the whole Scene paint-dirty on every scrolling frame --
+    /// measured at `dirtyPaintNodes == sceneNodes` for every frame of a steady
+    /// scroll. A node that survived the compaction is as clean as it was
+    /// before; a node that did not exist is dirty. Structural rebuilds are the
+    /// paint engine's own business: it compares each cached subtree against the
+    /// node's current children and propagates upward from there.
+    fn carry_paint_dirty_from(&mut self, previous: &Self, touched: &BTreeSet<u32>) {
+        self.dirty_paint.clear();
+        for (index, id) in self.ids.iter().copied().enumerate() {
+            let clean = !touched.contains(&id.raw())
+                && previous
+                    .resolve(id)
+                    .is_some_and(|before| !previous.dirty_paint.contains(before));
+            if !clean {
+                self.dirty_paint.insert(index);
+            }
+        }
     }
 
     fn build_from_plan(
@@ -1441,11 +1473,30 @@ impl Scene {
         next.dirty_hit = BitSet::with_len(length);
         next.dirty_semantics = BitSet::with_len(length);
         next.dirty_layout.fill();
-        next.dirty_paint.fill();
         next.dirty_hit.fill();
         next.dirty_semantics.fill();
         next.validate_invariants()?;
         Ok(next)
+    }
+}
+
+/// Returns the node a mutation names, when it names one.
+const fn mutation_target(mutation: &Mutation) -> Option<u32> {
+    match mutation {
+        Mutation::CreateNode { node_id, .. }
+        | Mutation::RemoveNode { node_id }
+        | Mutation::Reparent { node_id, .. }
+        | Mutation::SetF32 { node_id, .. }
+        | Mutation::SetVec4 { node_id, .. }
+        | Mutation::SetRef { node_id, .. }
+        | Mutation::SetFlags { node_id, .. }
+        | Mutation::ClearProp { node_id, .. }
+        | Mutation::SetTextRun { node_id, .. }
+        | Mutation::ScrollTo { node_id, .. }
+        | Mutation::ConfigureVirtualList { node_id, .. }
+        | Mutation::SetVirtualItem { node_id, .. }
+        | Mutation::ConfigureEditable { node_id, .. } => Some(*node_id),
+        Mutation::DefineResource { .. } | Mutation::ReleaseResource { .. } => None,
     }
 }
 
@@ -3810,5 +3861,66 @@ mod tests {
                 frame = frame.wrapping_add(1);
             }
         }
+    }
+    #[test]
+    fn a_topology_change_does_not_repaint_nodes_it_did_not_touch() {
+        // A virtual list changes topology on every window shift. Filling the
+        // paint bitmap there marked the whole Scene dirty on every scrolling
+        // frame, which is the difference between repainting two rows and
+        // repainting the viewport.
+        let mut scene = Scene::new();
+        scene
+            .commit(batch(
+                1,
+                vec![
+                    create(id(0, 1), NodeKind::Root, None),
+                    create(id(1, 1), NodeKind::Container, Some(id(0, 1))),
+                    create(id(2, 1), NodeKind::Container, Some(id(0, 1))),
+                ],
+            ))
+            .expect("initial commit");
+        scene.clear_dirty();
+        assert_eq!(scene.dirty(DirtyDomain::Paint).iter_ones().count(), 0);
+
+        // Adding a sibling is a structural edit: only the new node repaints.
+        scene
+            .commit(batch(
+                2,
+                vec![create(id(3, 1), NodeKind::Container, Some(id(0, 1)))],
+            ))
+            .expect("structural commit");
+        let dirty: Vec<NodeId> = scene
+            .dirty(DirtyDomain::Paint)
+            .iter_ones()
+            .filter_map(|index| scene.ids().get(index).copied())
+            .collect();
+        assert_eq!(dirty, vec![id(3, 1)], "only the created node repaints");
+
+        // A node dirtied before a compaction stays dirty through it.
+        scene.clear_dirty();
+        scene
+            .commit(batch(
+                3,
+                vec![
+                    Mutation::SetF32 {
+                        node_id: id(1, 1).raw(),
+                        prop: Prop::Width,
+                        value: 10.0,
+                    },
+                    create(id(4, 1), NodeKind::Container, Some(id(0, 1))),
+                ],
+            ))
+            .expect("mixed commit");
+        let dirty: Vec<NodeId> = scene
+            .dirty(DirtyDomain::Paint)
+            .iter_ones()
+            .filter_map(|index| scene.ids().get(index).copied())
+            .collect();
+        assert!(
+            dirty.contains(&id(1, 1)),
+            "an edited node survives compaction dirty"
+        );
+        assert!(dirty.contains(&id(4, 1)), "the created node is dirty");
+        assert!(!dirty.contains(&id(2, 1)), "an untouched node stays clean");
     }
 }
