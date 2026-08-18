@@ -141,9 +141,15 @@ impl WasmCore {
         self.inner.semantics()
     }
 
-    /// Applies logical viewport bounds to the next frame.
-    pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<(), JsValue> {
-        self.inner.set_viewport(width, height).map_err(js_error)
+    /// Applies logical viewport bounds, returning a reflowed DisplayList.
+    pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<Option<Vec<u8>>, JsValue> {
+        let output = self.inner.set_viewport(width, height).map_err(js_error)?;
+        if let Some(output) = output {
+            self.last_diagnostics = Some(output.diagnostics);
+            Ok(Some(output.display_list.to_vec()))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Rebuilds DPR-sensitive glyph resources and returns a replacement DisplayList when needed.

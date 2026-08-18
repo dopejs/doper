@@ -1266,15 +1266,44 @@ impl CoreEngine {
     ///
     /// Returns [`CoreError::InvalidViewport`] for invalid bounds or
     /// [`CoreError::Poisoned`] when the instance must be replaced.
-    pub fn set_viewport(&mut self, width: f32, height: f32) -> Result<(), CoreError> {
+    pub fn set_viewport(
+        &mut self,
+        width: f32,
+        height: f32,
+    ) -> Result<Option<FrameOutput>, CoreError> {
         if self.poisoned {
             return Err(CoreError::Poisoned);
         }
         if self.text.has_pending_resources() {
             return Err(CoreError::GlyphResourcesNotDrained);
         }
-        self.constraints = viewport_constraints(width, height)?;
-        Ok(())
+        let next = viewport_constraints(width, height)?;
+        if next == self.constraints {
+            return Ok(None);
+        }
+        self.constraints = next;
+        // Constraints alone change nothing on screen. Layout has to run again
+        // against them and the frame has to be rebuilt, or the canvas keeps
+        // showing content measured for the old box -- clipped at the new one
+        // rather than reflowed into it.
+        let Some(frame_seq) = self.last_frame_seq else {
+            return Ok(None);
+        };
+        self.text.begin_frame();
+        let geometry = match self.layout.layout_with_virtual(
+            &self.scene,
+            self.constraints,
+            &mut self.text,
+            &self.scroll,
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => return self.poison(CoreError::Layout(error)),
+        };
+        let output = self.paint_frame(frame_seq, &geometry.changed, geometry.visited, true)?;
+        if let Err(error) = self.text.commit_frame() {
+            return self.poison(CoreError::GlyphResources(error));
+        }
+        Ok(Some(output))
     }
 
     /// Updates DPR-sensitive glyph resources and returns a replacement frame when needed.

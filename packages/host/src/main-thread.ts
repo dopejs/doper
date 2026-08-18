@@ -113,7 +113,7 @@ export interface CoreClient {
   advance?(elapsedSeconds: number): Uint8Array | undefined;
   frame_diagnostics?(): Uint32Array;
   free?(): void;
-  set_viewport?(width: number, height: number): void;
+  set_viewport?(width: number, height: number): Uint8Array | undefined;
   set_device_pixel_ratio?(value: number): Uint8Array | undefined;
   set_system_text_metrics?(metrics: Uint8Array): Uint8Array | undefined;
   is_poisoned?(): boolean;
@@ -525,6 +525,33 @@ export class CanvasFrameSink implements MutationSink {
       inputBytes: 0,
       mutationBytes: 0,
     });
+  }
+
+  /**
+   * Resizes the drawing surface and repaints the frame it already accepted.
+   *
+   * The backing store is set in device pixels while Core lays out in logical
+   * ones. Resizing a canvas clears it, so the last frame has to be replayed
+   * here: no tick will do it, because a tick that changes nothing no longer
+   * draws.
+   */
+  public resize(width: number, height: number, devicePixelRatio: number): void {
+    if (![width, height, devicePixelRatio].every((value) => Number.isFinite(value) && value > 0)) {
+      throw new RangeError("resize dimensions must be positive and finite");
+    }
+    const canvas = this.#context.canvas;
+    canvas.width = Math.max(1, Math.round(width * devicePixelRatio));
+    canvas.height = Math.max(1, Math.round(height * devicePixelRatio));
+    this.#rasterCache?.clear();
+    const reflowed = this.#core.set_viewport?.(width, height);
+    if (reflowed === undefined) {
+      // Nothing to reflow, but resizing a canvas clears it, so the frame that
+      // is already correct still has to be put back.
+      this.replayLastFrame();
+      return;
+    }
+    this.applyDynamicGlyphResources();
+    this.acceptDynamicFrame(reflowed, { cause: "mutation", inputBytes: 0, mutationBytes: 0 });
   }
 
   /** Replays the last fully accepted immutable frame for a Worker-owned render tick. */

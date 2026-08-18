@@ -11,7 +11,7 @@ import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
 import type { EditTransaction, EventTransaction } from "@dopejs/doper-editing";
 
-export const WORKER_PROTOCOL_VERSION = 7 as const;
+export const WORKER_PROTOCOL_VERSION = 8 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
@@ -52,6 +52,15 @@ export interface WorkerInputMessage {
   readonly sessionId: number;
 }
 
+/** New canvas size, in logical pixels and the ratio they are drawn at. */
+export interface WorkerResizeMessage {
+  readonly devicePixelRatio: number;
+  readonly height: number;
+  readonly kind: "doper:resize";
+  readonly sessionId: number;
+  readonly width: number;
+}
+
 export interface WorkerInputWakeMessage {
   readonly kind: "doper:input-wake";
   readonly sessionId: number;
@@ -63,6 +72,7 @@ export type RenderWorkerInboundMessage =
   | WorkerInputMessage
   | WorkerInputWakeMessage
   | WorkerPrepareMessage
+  | WorkerResizeMessage
   | WorkerShutdownMessage;
 
 export interface RenderWorkerCapabilities {
@@ -160,6 +170,12 @@ export function isRenderWorkerInboundMessage(value: unknown): value is RenderWor
   switch (value.kind) {
     case "doper:prepare":
       return isPositiveU32(value.abiVersion) && isPositiveU32(value.protocolVersion);
+    case "doper:resize":
+      return (
+        isPositiveFinite(value.devicePixelRatio) &&
+        isPositiveFinite(value.width) &&
+        isPositiveFinite(value.height)
+      );
     case "doper:activate":
       return (
         isWorkerMode(value.mode) &&
@@ -188,6 +204,7 @@ export function isRenderWorkerInboundEnvelope(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
     value.kind === "doper:prepare" ||
+    value.kind === "doper:resize" ||
     value.kind === "doper:activate" ||
     value.kind === "doper:clock-anchor" ||
     value.kind === "doper:input" ||

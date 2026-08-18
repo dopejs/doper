@@ -17,6 +17,7 @@ import {
   type WorkerActivateMessage,
   type WorkerClockAnchorMessage,
   type WorkerInputMessage,
+  type WorkerResizeMessage,
   type WorkerInputWakeMessage,
   type WorkerPrepareMessage,
   type WorkerShutdownMessage,
@@ -211,6 +212,19 @@ export class RenderWorkerClient {
       sessionId: this.#sessionId,
     };
     this.#worker.postMessage(message, [owned.buffer]);
+  }
+
+  /** Tells the Worker the canvas changed size, in logical pixels. */
+  public postResize(width: number, height: number, devicePixelRatio: number): void {
+    this.requireState("ready");
+    const message: WorkerResizeMessage = {
+      devicePixelRatio,
+      height,
+      kind: "doper:resize",
+      sessionId: this.#sessionId,
+      width,
+    };
+    this.#worker.postMessage(message);
   }
 
   /** Wakes the Worker to drain committed Input Stream slots without copying payload bytes. */

@@ -84,6 +84,12 @@ async function handle(message: RenderWorkerInboundMessage): Promise<void> {
       post({ kind: "doper:shutdown-complete", sessionId });
       scope.close();
       return;
+    case "doper:resize":
+      if (!active || message.sessionId !== sessionId) return;
+      // Applied straight away rather than queued: the canvas is already the new
+      // size on screen, so every frame until this lands would be stretched.
+      sink?.resize(message.width, message.height, message.devicePixelRatio);
+      return;
     case "doper:input":
       if (!active || message.sessionId !== sessionId) return;
       drainInputRing();

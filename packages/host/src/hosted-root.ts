@@ -121,6 +121,7 @@ export interface HostedCanvasRoot extends DoperRoot {
   blurEditable(): void;
   updateEditingGeometry(geometry: EditingGeometry): void;
   inputTransportMetrics(): HostInputTransportMetrics;
+  resize(width: number, height: number): void;
   transportMetrics(): HostMutationTransportMetrics | undefined;
 }
 
@@ -155,6 +156,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   /** Newest requested window per virtual list, awaiting a single render. */
   readonly #pendingRefills = new Map<number, VirtualRefillRange>();
   #refillFrame: number | undefined;
+  #resizeObserver: ResizeObserver | undefined;
+  #observedSize: string | undefined;
   #inputDirectFrames = 0;
   #inputRing: SabMutationRing | undefined;
   #inputSabFallbackFrames = 0;
@@ -751,6 +754,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   };
 
   private attachCanvasEventListeners(): void {
+    this.observeCanvasSize();
     if (this.#eventListenersAttached) return;
     if (typeof this.#canvas.addEventListener !== "function") return;
     const pointerPassive = !this.#nonPassiveRegions.some((region) => (region.flags & 2) !== 0);
@@ -795,6 +799,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#canvas.removeEventListener("dblclick", this.handleCanvasDoubleClick);
     this.#canvas.removeEventListener("wheel", this.handleCanvasWheel);
     this.applyTouchAction(false);
+    this.#resizeObserver?.disconnect();
+    this.#resizeObserver = undefined;
     this.#eventListenersAttached = false;
   }
 
@@ -895,6 +901,54 @@ class HostedCanvasRootController implements HostedCanvasRoot {
    * scrolling must say so in CSS as well -- otherwise a drag scrolls the page
    * and the list never moves.
    */
+  /**
+   * Resizes the drawing surface to a new logical size.
+   *
+   * The canvas keeps a backing store in device pixels while Core lays out in
+   * logical ones, so a size change has to reach both or the frame is drawn at
+   * one size and stretched to another.
+   */
+  public resize(width: number, height: number): void {
+    if (this.#closing || this.#unmounted) return;
+    if (![width, height].every((value) => Number.isFinite(value) && value > 0)) {
+      throw new RangeError("resize dimensions must be positive and finite");
+    }
+    const ratio = devicePixelRatioOf(this.#canvas);
+    if (this.#client !== undefined && this.#mode !== "main-thread") {
+      // The worker owns the transferred canvas, so it does the resizing.
+      this.#client.postResize(width, height, ratio);
+      return;
+    }
+    this.#frameSink?.resize(width, height, ratio);
+  }
+
+  /**
+   * Follows the canvas's own box so an application does not have to.
+   *
+   * Every canvas-backed application faces this the moment a window is resized
+   * or a phone is rotated, and a missed resize does not fail loudly: the last
+   * frame is simply stretched to the new box. Observing here makes the default
+   * correct; `resize` stays public for a caller that drives its own layout.
+   */
+  private observeCanvasSize(): void {
+    if (typeof ResizeObserver !== "function" || this.#resizeObserver !== undefined) return;
+    this.#observedSize = `${String(this.#canvas.width)}x${String(this.#canvas.height)}`;
+    this.#resizeObserver = new ResizeObserver((entries) => {
+      const box = entries.at(-1)?.contentRect;
+      if (box === undefined || box.width <= 0 || box.height <= 0) return;
+      const ratio = devicePixelRatioOf(this.#canvas);
+      const next = `${String(Math.round(box.width * ratio))}x${String(Math.round(box.height * ratio))}`;
+      if (next === this.#observedSize) return;
+      this.#observedSize = next;
+      try {
+        this.resize(box.width, box.height);
+      } catch (cause) {
+        this.#options.onHostError?.(toError(cause, "canvas resize failed"));
+      }
+    });
+    this.#resizeObserver.observe(this.#canvas);
+  }
+
   private applyTouchAction(owned: boolean): void {
     const style = (this.#canvas as { style?: { touchAction?: string } }).style;
     if (style === undefined) return;

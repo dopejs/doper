@@ -144,6 +144,35 @@ describe("createHostedCanvasRoot", () => {
     expect(canvas.style.touchAction).toBe("");
   });
 
+  it("reflows the canvas when it changes size", async () => {
+    // A missed resize does not fail loudly: the last frame is simply stretched
+    // to the new box, or clipped by it. Both halves have to move -- the backing
+    // store in device pixels and Core's viewport in logical ones.
+    installCanvasGlobal();
+    const core = fakeCore() as FakeCore & {
+      set_viewport?: (width: number, height: number) => Uint8Array | undefined;
+      viewports: Array<readonly [number, number]>;
+    };
+    core.viewports = [];
+    core.set_viewport = (width, height) => {
+      core.viewports.push([width, height]);
+      return undefined;
+    };
+    const canvas = new FakeCanvas();
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+    root.render(undefined);
+
+    root.resize(320, 200);
+    expect(core.viewports).toEqual([[320, 200]]);
+    expect([canvas.width, canvas.height]).toEqual([320, 200]);
+    expect(() => root.resize(0, 200)).toThrow(/positive/u);
+    await root.close();
+  });
+
   it("accepts a fractional device pixel ratio", async () => {
     // A phone reports ratios like 2.75, so the logical size -- the backing
     // store divided by that ratio -- almost never lands on an integer.
