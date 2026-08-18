@@ -9,11 +9,37 @@ pub enum ScrollPlatform {
     Android,
 }
 
+/// How a released flick coasts to a stop.
+///
+/// The two platform families do not merely differ by a constant. iOS decays
+/// velocity exponentially, so distance is proportional to the release speed.
+/// Android follows a spline whose distance grows as roughly `v^1.74`, so a
+/// single decay coefficient can only agree with it at one speed: calibrated at
+/// a firm flick it overshoots a gentle one by nearly three times and falls the
+/// same factor short of a hard one, which reads as the list not responding in
+/// proportion to the gesture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FlingModel {
+    /// `v(t) = v0 * e^(-deceleration * t)`, which is what `UIScrollView` does.
+    ExponentialDecay,
+    /// AOSP's spline fling, reproduced from its distance and duration.
+    ///
+    /// `coefficient` is `ViewConfiguration.getScrollFriction()` times
+    /// `SensorManager.GRAVITY_EARTH * 39.37 * ppi * 0.84`, evaluated in logical
+    /// pixels, which AOSP calls `mFlingFriction * mPhysicalCoeff`.
+    AndroidSpline { coefficient: f64 },
+}
+
+/// AOSP's `INFLEXION`: the ratio of a fling's mean speed to its release speed.
+const ANDROID_INFLEXION: f64 = 0.35;
+
 /// Validated coefficients for deterministic one-dimensional scrolling.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScrollPhysicsConfig {
-    /// Per-second velocity decay coefficient.
+    /// Per-second velocity decay coefficient, used by the exponential model.
     pub deceleration: f64,
+    /// How a released flick coasts.
+    pub fling: FlingModel,
     /// Spring acceleration applied per logical pixel beyond a bound.
     pub spring_stiffness: f64,
     /// Velocity damping while outside a bound.
@@ -26,6 +52,14 @@ pub struct ScrollPhysicsConfig {
     pub stop_distance: f64,
     /// Maximum accepted integration step; larger elapsed time is split by the caller.
     pub maximum_step_seconds: f64,
+    /// Ceiling on the release speed a flick may hand to the fling.
+    ///
+    /// A velocity estimate is a measurement, and a single fast sample can imply
+    /// a speed no finger produced. Unclamped, AOSP's spline turns 24000 px/s
+    /// into a five-second, thirty-thousand-pixel coast. Real toolkits clamp for
+    /// the same reason: AOSP publishes 8000 as
+    /// `ViewConfiguration.getScaledMaximumFlingVelocity`.
+    pub maximum_fling_velocity: f64,
 }
 
 impl ScrollPhysicsConfig {
@@ -41,14 +75,24 @@ impl ScrollPhysicsConfig {
             // next to a native list. (0.99 -- the "fast" rate -- would be 10.05.)
             ScrollPlatform::Ios => Self {
                 deceleration: 2.0,
+                fling: FlingModel::ExponentialDecay,
                 spring_stiffness: 260.0,
                 spring_damping: 28.0,
                 overscroll_viewport_fraction: 0.5,
                 stop_velocity: 2.0,
                 stop_distance: 0.25,
                 maximum_step_seconds: 1.0 / 30.0,
+                // iOS publishes no equivalent constant, so this is a guard
+                // against a noisy estimate rather than a platform value.
+                maximum_fling_velocity: 8_000.0,
             },
             ScrollPlatform::Android => Self {
+                // 0.015 friction times 9.80665 * 39.37 * 160 * 0.84, the
+                // physical coefficient at one logical pixel per density unit.
+                fling: FlingModel::AndroidSpline {
+                    coefficient: 0.015 * 9.806_65 * 39.37 * 160.0 * 0.84,
+                },
+                // Unused by the spline model; retained for the preheat decay.
                 deceleration: 11.5,
                 spring_stiffness: 340.0,
                 spring_damping: 38.0,
@@ -56,6 +100,7 @@ impl ScrollPhysicsConfig {
                 stop_velocity: 2.0,
                 stop_distance: 0.25,
                 maximum_step_seconds: 1.0 / 30.0,
+                maximum_fling_velocity: 8_000.0,
             },
         }
     }
@@ -63,6 +108,12 @@ impl ScrollPhysicsConfig {
     fn validate(self) -> Result<Self, ScrollError> {
         for (field, value, minimum, maximum) in [
             ("deceleration", self.deceleration, f64::EPSILON, 1_000.0),
+            (
+                "maximum fling velocity",
+                self.maximum_fling_velocity,
+                f64::EPSILON,
+                1_000_000.0,
+            ),
             (
                 "spring stiffness",
                 self.spring_stiffness,
@@ -138,6 +189,57 @@ pub struct ScrollFrame {
 /// distance is right.
 const WHEEL_ANIMATION_SECONDS: f64 = 0.12;
 
+/// Plans a fling from AOSP's closed forms for distance and duration.
+fn plan_spline_fling(start: f64, velocity: f64, coefficient: f64) -> SplineFling {
+    // AOSP: l = ln(INFLEXION * |v| / (friction * physicalCoeff)),
+    // distance = friction * physicalCoeff * exp(rate / (rate - 1) * l),
+    // duration = 1000ms * exp(l / (rate - 1)), with rate = ln(0.78) / ln(0.9).
+    let rate = 0.78_f64.ln() / 0.9_f64.ln();
+    let decel_minus_one = rate - 1.0;
+    let l = (ANDROID_INFLEXION * velocity.abs() / coefficient).ln();
+    let distance = coefficient * (rate / decel_minus_one * l).exp();
+    let duration_seconds = (l / decel_minus_one).exp();
+    SplineFling {
+        start,
+        distance: distance.copysign(velocity),
+        duration_seconds: duration_seconds.max(f64::EPSILON),
+        elapsed_seconds: 0.0,
+    }
+}
+
+/// One in-flight AOSP-style spline fling.
+///
+/// Distance and duration come straight from AOSP's closed forms. Its velocity
+/// then follows `v0 * (1 - t/T)^k`, whose mean is `v0 / (k + 1)`; AOSP defines
+/// that mean to be `INFLEXION * v0`, which fixes `k` and makes this reproduce
+/// both the distance and the duration exactly at every release speed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SplineFling {
+    start: f64,
+    /// Signed distance the flick will travel.
+    distance: f64,
+    duration_seconds: f64,
+    elapsed_seconds: f64,
+}
+
+impl SplineFling {
+    /// Velocity decay exponent implied by AOSP's mean-to-release speed ratio.
+    const DECAY: f64 = 1.0 / ANDROID_INFLEXION - 1.0;
+
+    /// Fraction of the total distance covered after `elapsed / duration`.
+    fn travelled_fraction(self) -> f64 {
+        let progress = (self.elapsed_seconds / self.duration_seconds).clamp(0.0, 1.0);
+        1.0 - (1.0 - progress).powf(Self::DECAY + 1.0)
+    }
+
+    /// Current speed, so cache planning can still look ahead of the motion.
+    fn velocity(self) -> f64 {
+        let progress = (self.elapsed_seconds / self.duration_seconds).clamp(0.0, 1.0);
+        let peak = self.distance / (ANDROID_INFLEXION * self.duration_seconds);
+        peak * (1.0 - progress).powf(Self::DECAY)
+    }
+}
+
 /// One in-flight discrete wheel animation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct WheelAnimation {
@@ -160,6 +262,8 @@ pub struct ScrollPhysics {
     dragging: bool,
     /// Pending animated destination for discrete wheel notches.
     wheel_animation: Option<WheelAnimation>,
+    /// In-flight spline fling, on platforms that coast that way.
+    spline_fling: Option<SplineFling>,
     /// Recent input speed used only to look ahead when planning caches.
     ///
     /// This is deliberately separate from `velocity`: a trackpad gesture must
@@ -191,6 +295,7 @@ impl ScrollPhysics {
             velocity: 0.0,
             dragging: false,
             wheel_animation: None,
+            spline_fling: None,
             preheat_velocity: 0.0,
             metrics: ScrollPhysicsMetrics::default(),
         })
@@ -210,8 +315,12 @@ impl ScrollPhysics {
 
     /// Returns the current logical pixels per second.
     #[must_use]
-    pub const fn velocity(&self) -> f64 {
-        self.velocity
+    pub fn velocity(&self) -> f64 {
+        // A spline fling carries the motion instead of `velocity`, so report its
+        // current speed or the virtualizer stops preheating mid-flick.
+        self.spline_fling.map_or(self.velocity, |fling| {
+            fling.velocity().copysign(fling.distance)
+        })
     }
 
     /// Returns the maximum in-bounds content offset.
@@ -269,6 +378,7 @@ impl ScrollPhysics {
         // Direct manipulation and high-precision deltas take over immediately;
         // a pending notch animation must not keep pulling the position.
         self.wheel_animation = None;
+        self.spline_fling = None;
     }
 
     /// Applies a logical content-offset delta with bounded edge resistance.
@@ -282,6 +392,7 @@ impl ScrollPhysics {
             self.begin_drag();
         }
         self.wheel_animation = None;
+        self.spline_fling = None;
         let previous = self.position;
         let maximum = self.maximum_position();
         let proposed = self.position + delta;
@@ -307,10 +418,21 @@ impl ScrollPhysics {
     /// Returns [`ScrollError::InvalidScalar`] when `velocity` is non-finite.
     pub fn end_drag(&mut self, velocity: f64) -> Result<(), ScrollError> {
         validate_finite(velocity, "fling velocity")?;
+        let velocity = velocity.clamp(
+            -self.config.maximum_fling_velocity,
+            self.config.maximum_fling_velocity,
+        );
         self.dragging = false;
         self.velocity = velocity;
+        self.spline_fling = None;
         if velocity.abs() > f64::EPSILON {
             self.metrics.flings = self.metrics.flings.saturating_add(1);
+            if let FlingModel::AndroidSpline { coefficient } = self.config.fling {
+                self.spline_fling = Some(plan_spline_fling(self.position, velocity, coefficient));
+                // The spline owns the motion from here; leaving a velocity
+                // behind would let the exponential path move it as well.
+                self.velocity = 0.0;
+            }
         }
         Ok(())
     }
@@ -331,6 +453,7 @@ impl ScrollPhysics {
         self.velocity = 0.0;
         self.dragging = false;
         self.wheel_animation = None;
+        self.spline_fling = None;
         Ok(self.frame(changed(previous, clamped)))
     }
 
@@ -372,6 +495,9 @@ impl ScrollPhysics {
         }
         if self.wheel_animation.is_some() {
             return Ok(self.advance_wheel_animation(elapsed_seconds));
+        }
+        if self.spline_fling.is_some() {
+            return Ok(self.advance_spline_fling(elapsed_seconds));
         }
         let previous = self.position;
         let maximum = self.maximum_position();
@@ -428,6 +554,7 @@ impl ScrollPhysics {
             let previous = self.position;
             self.position = target;
             self.wheel_animation = None;
+            self.spline_fling = None;
             return Ok(self.frame(changed(self.position, previous)));
         }
         // A notch arriving mid-animation retargets from where the offset is
@@ -463,8 +590,12 @@ impl ScrollPhysics {
     /// driving the offset.
     #[must_use]
     pub fn lookahead_position(&self, horizon_seconds: f64) -> f64 {
-        let speed = if self.velocity.abs() >= self.preheat_velocity.abs() {
-            self.velocity
+        // The accessor, not the field: a spline fling carries the motion
+        // outside `velocity`, and reading the field leaves preheat blind for
+        // the whole coast.
+        let moving = self.velocity();
+        let speed = if moving.abs() >= self.preheat_velocity.abs() {
+            moving
         } else {
             self.preheat_velocity
         };
@@ -486,10 +617,39 @@ impl ScrollPhysics {
         }
     }
 
+    /// Advances an AOSP-style fling and hands over to the spring at a bound.
+    fn advance_spline_fling(&mut self, elapsed_seconds: f64) -> ScrollFrame {
+        let Some(mut fling) = self.spline_fling else {
+            return self.frame(false);
+        };
+        let previous = self.position;
+        fling.elapsed_seconds += elapsed_seconds;
+        let target = fling.start + fling.distance * fling.travelled_fraction();
+        let maximum = self.maximum_position();
+        if target < 0.0 || target > maximum {
+            // Past the edge the spring owns the motion, so the fling stops and
+            // hands it the speed it had when it arrived.
+            self.spline_fling = None;
+            self.velocity = fling.velocity().copysign(fling.distance);
+            self.position =
+                target.clamp(-self.overscroll_limit(), maximum + self.overscroll_limit());
+            return self.frame(changed(self.position, previous));
+        }
+        self.position = target;
+        if fling.elapsed_seconds >= fling.duration_seconds {
+            self.spline_fling = None;
+            self.velocity = 0.0;
+        } else {
+            self.spline_fling = Some(fling);
+        }
+        self.metrics.frames = self.metrics.frames.saturating_add(1);
+        self.frame(changed(self.position, previous))
+    }
+
     /// Returns whether a discrete wheel animation is still running.
     #[must_use]
     pub const fn is_animating(&self) -> bool {
-        self.wheel_animation.is_some()
+        self.wheel_animation.is_some() || self.spline_fling.is_some()
     }
 
     fn advance_wheel_animation(&mut self, elapsed_seconds: f64) -> ScrollFrame {
@@ -505,6 +665,7 @@ impl ScrollPhysics {
         if progress >= 1.0 {
             self.position = animation.target;
             self.wheel_animation = None;
+            self.spline_fling = None;
         } else {
             self.wheel_animation = Some(animation);
         }
@@ -891,12 +1052,109 @@ mod tests {
             (900.0..1_100.0).contains(&ios),
             "an iOS flick should coast about v0/2.002 pixels, travelled {ios}"
         );
-        // Android's tighter coast is the shorter of the two, which is what makes
-        // picking the wrong family so visible.
+        // Android is not a scaled iOS: AOSP's spline puts a 2000 px/s release at
+        // 647 pixels over 925ms, and that exact number is what this reproduces.
         let android = coast(ScrollPlatform::Android);
         assert!(
-            android < ios / 2.0,
-            "android should coast far less than iOS: {android} against {ios}"
+            (640.0..655.0).contains(&android),
+            "an Android flick should coast AOSP's 647 pixels, travelled {android}"
+        );
+    }
+    #[test]
+    fn an_android_flick_scales_with_the_gesture_the_way_aosp_does() {
+        // The reason a single decay coefficient feels wrong on Android is not
+        // that it is the wrong size: AOSP's spline puts distance at roughly
+        // `v^1.74`, while exponential decay is linear in `v`. Calibrating one
+        // coefficient at a firm flick therefore overshoots a gentle one by
+        // nearly three times and falls the same factor short of a hard one, so
+        // the list stops responding in proportion to the gesture.
+        let coast = |velocity: f64| {
+            let mut physics = ScrollPhysics::new(
+                10_000_000.0,
+                800.0,
+                ScrollPhysicsConfig::for_platform(ScrollPlatform::Android),
+            )
+            .expect("physics");
+            physics.begin_drag();
+            physics.end_drag(velocity).expect("release");
+            for _ in 0..1_200 {
+                physics.advance(1.0 / 120.0).expect("frame");
+            }
+            physics.position()
+        };
+
+        // AOSP's closed form at 160dpi-equivalent logical pixels.
+        for (velocity, expected) in [(500.0, 58.3), (2_000.0, 647.4), (8_000.0, 7_186.4)] {
+            let travelled = coast(velocity);
+            let error = (travelled - expected).abs() / expected;
+            assert!(
+                error < 0.02,
+                "{velocity} px/s should coast {expected}, travelled {travelled}"
+            );
+        }
+
+        // The point of the spline, stated as the property it gives: four times
+        // the release speed travels far more than four times the distance.
+        assert!(coast(8_000.0) / coast(2_000.0) > 8.0);
+    }
+
+    #[test]
+    fn a_flick_that_reaches_the_edge_hands_over_to_the_spring() {
+        // The spline owns the motion until a bound, where the existing rebound
+        // has to take it; otherwise a fling would run straight through the edge.
+        let mut physics = ScrollPhysics::new(
+            2_000.0,
+            800.0,
+            ScrollPhysicsConfig::for_platform(ScrollPlatform::Android),
+        )
+        .expect("physics");
+        physics.begin_drag();
+        physics.end_drag(20_000.0).expect("release");
+        for _ in 0..600 {
+            physics.advance(1.0 / 120.0).expect("frame");
+        }
+        assert!(
+            !physics.is_animating(),
+            "the fling must not outlive the edge"
+        );
+        assert!(
+            (physics.position() - physics.maximum_position()).abs() < 0.5,
+            "it should settle exactly on the bound, at {}",
+            physics.position()
+        );
+    }
+    #[test]
+    fn a_release_speed_no_finger_produced_is_clamped() {
+        // A velocity estimate is a measurement: one fast sample can imply a
+        // speed no gesture produced. AOSP's spline turns 24000 px/s into a
+        // five-second, thirty-thousand-pixel coast, so the release is clamped
+        // the way real toolkits clamp it.
+        let coast = |velocity: f64| {
+            let mut physics = ScrollPhysics::new(
+                10_000_000.0,
+                800.0,
+                ScrollPhysicsConfig::for_platform(ScrollPlatform::Android),
+            )
+            .expect("physics");
+            physics.begin_drag();
+            physics.end_drag(velocity).expect("release");
+            let mut frames = 0;
+            while physics.is_animating() && frames < 2_000 {
+                physics.advance(1.0 / 120.0).expect("frame");
+                frames += 1;
+            }
+            (physics.position(), frames)
+        };
+
+        let (clamped, frames) = coast(24_000.0);
+        let (ceiling, _) = coast(8_000.0);
+        assert!(
+            (clamped - ceiling).abs() < 1.0,
+            "beyond the ceiling every release should coast the same: {clamped} against {ceiling}"
+        );
+        assert!(
+            frames < 2_000,
+            "a clamped fling must still finish, took {frames} frames"
         );
     }
 }

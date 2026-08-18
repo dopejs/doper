@@ -85,7 +85,9 @@ struct VirtualAxis {
 
 #[derive(Clone, Debug)]
 enum VerticalAxis {
-    Plain(ScrollPhysics),
+    // Boxed for the same reason the virtual variant is: the physics grew a
+    // pending fling and the enum is stored per scroll node.
+    Plain(Box<ScrollPhysics>),
     Virtual(Box<VirtualAxis>),
 }
 
@@ -129,7 +131,11 @@ impl ScrollAxes {
                     viewport[1],
                     platform,
                 )?)),
-                None => VerticalAxis::Plain(ScrollPhysics::new(content[1], viewport[1], config)?),
+                None => VerticalAxis::Plain(Box::new(ScrollPhysics::new(
+                    content[1],
+                    viewport[1],
+                    config,
+                )?)),
             },
             estimated_velocity: [0.0; 2],
         };
@@ -169,7 +175,7 @@ impl ScrollAxes {
                     ScrollPhysicsConfig::for_platform(platform),
                 )?;
                 physics.jump_to(position)?;
-                self.y = VerticalAxis::Plain(physics);
+                self.y = VerticalAxis::Plain(Box::new(physics));
             }
         }
         Ok(())
