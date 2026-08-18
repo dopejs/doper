@@ -755,6 +755,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (typeof this.#canvas.addEventListener !== "function") return;
     const pointerPassive = !this.#nonPassiveRegions.some((region) => (region.flags & 2) !== 0);
     const wheelPassive = !this.#nonPassiveRegions.some((region) => (region.flags & 1) !== 0);
+    this.applyTouchAction(!pointerPassive);
     this.#canvas.addEventListener("pointerdown", this.handleCanvasPointerEvent, {
       passive: pointerPassive,
     });
@@ -793,6 +794,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#canvas.removeEventListener("click", this.handleCanvasClick);
     this.#canvas.removeEventListener("dblclick", this.handleCanvasDoubleClick);
     this.#canvas.removeEventListener("wheel", this.handleCanvasWheel);
+    this.applyTouchAction(false);
     this.#eventListenersAttached = false;
   }
 
@@ -881,6 +883,22 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     } catch (cause) {
       this.#options.onHostError?.(new Error(`editable auto-focus failed: ${String(cause)}`));
     }
+  }
+
+  /**
+   * Tells the browser not to claim touch gestures Core owns.
+   *
+   * A non-passive listener and `preventDefault` are not enough on a touch
+   * screen: the browser decides at pointerdown whether the compositor pans the
+   * page, and once it has, the events are no longer cancelable. `touch-action`
+   * is the only thing consulted for that decision, so a canvas that owns
+   * scrolling must say so in CSS as well -- otherwise a drag scrolls the page
+   * and the list never moves.
+   */
+  private applyTouchAction(owned: boolean): void {
+    const style = (this.#canvas as { style?: { touchAction?: string } }).style;
+    if (style === undefined) return;
+    style.touchAction = owned ? "none" : "";
   }
 
   private handleNonPassiveRegions(regions: readonly NonPassiveRegion[]): void {
@@ -1225,8 +1243,20 @@ function nextSequence(value: number): number {
   return next === 0 ? 1 : next;
 }
 
+/**
+ * Validates a logical canvas dimension, which is legitimately fractional.
+ *
+ * The logical size is the backing store divided by the device pixel ratio, and
+ * a phone's ratio is routinely fractional -- 2.75 or 3.5 -- so that quotient
+ * almost never lands on an integer. Requiring one rejected every such device
+ * with a message that said the value was not positive when it was. Rounding
+ * instead would be worse: the viewport Core lays out against would disagree
+ * with the backing store by a sub-pixel and the replay scale would drift.
+ */
 function positiveDimension(value: number, label: string): number {
-  if (!Number.isInteger(value) || value <= 0) throw new RangeError(`${label} must be positive`);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RangeError(`${label} must be a positive finite number`);
+  }
   return value;
 }
 

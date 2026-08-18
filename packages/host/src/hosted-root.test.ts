@@ -121,6 +121,54 @@ describe("createHostedCanvasRoot", () => {
     expect(core.inputs).toHaveLength(1);
   });
 
+  it("hands touch gestures to Core instead of letting the browser pan the page", async () => {
+    // A non-passive listener and preventDefault are not enough on a touch
+    // screen: the browser decides at pointerdown whether the compositor pans,
+    // and consults only touch-action for it. Without this a drag scrolled the
+    // page and the list never moved.
+    installCanvasGlobal();
+    const core = fakeCore();
+    core.non_passive_regions = () =>
+      Uint32Array.of(1, 1, 2, floatBits(0), floatBits(0), floatBits(160), floatBits(80));
+    const canvas = new FakeCanvas();
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+    root.render(undefined);
+    expect(canvas.style.touchAction).toBe("none");
+    await root.close();
+    // Released with the listeners: a canvas the engine no longer drives must
+    // not keep the page's own gestures suppressed.
+    expect(canvas.style.touchAction).toBe("");
+  });
+
+  it("accepts a fractional device pixel ratio", async () => {
+    // A phone reports ratios like 2.75, so the logical size -- the backing
+    // store divided by that ratio -- almost never lands on an integer.
+    // Requiring one rejected every such device at startup.
+    installCanvasGlobal();
+    const globals = globalThis as { devicePixelRatio?: number };
+    const previous = globals.devicePixelRatio;
+    globals.devicePixelRatio = 2.75;
+    try {
+      const canvas = new FakeCanvas();
+      canvas.width = Math.round(393 * 2.75);
+      canvas.height = Math.round(852 * 2.75);
+      const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+        capabilities: allCapabilities(),
+        coreFactory: () => Promise.resolve(fakeCore()),
+        transport: { pageWorkerEnabled: false },
+      });
+      root.render(undefined);
+      await root.close();
+    } finally {
+      if (previous === undefined) delete globals.devicePixelRatio;
+      else globals.devicePixelRatio = previous;
+    }
+  });
+
   it("prevents wheel defaults synchronously only inside Core-published regions", async () => {
     installCanvasGlobal();
     const core = fakeCore();
@@ -519,6 +567,7 @@ class FakeCanvas {
   public ownerDocument = { defaultView: { EditContext: FakeEditContext } };
   public replacement: unknown;
   public transferCount = 0;
+  public style: { touchAction?: string } = {};
 
   public cloneNode(): FakeCanvas {
     const clone = new FakeCanvas();
@@ -557,6 +606,7 @@ class FakeCanvas {
       resetTransform() {},
       restore() {},
       save() {},
+      scale() {},
       translate() {},
     };
   }
