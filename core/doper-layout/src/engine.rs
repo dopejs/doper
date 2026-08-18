@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use doper_abi::{NodeKind, Prop};
 use doper_scene::{BitSet, DirtyDomain, NodeId, Scene};
 
@@ -51,6 +53,13 @@ pub struct LayoutSnapshot {
     ids: Vec<NodeId>,
     offsets: Vec<Point>,
     sizes: Vec<Size>,
+    /// Whether each entry was a virtual list item or lived inside one.
+    ///
+    /// An item is usually a wrapper around an application subtree, so a window
+    /// shift adds and removes whole subtrees, not single nodes. Removed nodes
+    /// are gone from the Scene, so their former role can only be recovered from
+    /// the previous snapshot.
+    virtual_items: Vec<bool>,
 }
 
 impl LayoutSnapshot {
@@ -218,8 +227,31 @@ impl LayoutEngine {
             });
         }
 
-        let can_increment = topology_unchanged && self.last_constraints == Some(constraints);
-        let (full, visited, boundary_count) = if can_increment {
+        let constraints_unchanged = self.last_constraints == Some(constraints);
+        // Moving a scroll window adds and removes items every frame, and the
+        // topology gate sent every one of those frames down the full-layout
+        // path, so scrolling cost a pass over the whole Scene. Items take their
+        // offset from the height index rather than from their siblings, so the
+        // nodes that stayed keep their geometry and only the new ones are laid
+        // out.
+        let window_shift =
+            !topology_unchanged && constraints_unchanged && self.only_virtual_items_changed(scene);
+        let can_increment = topology_unchanged && constraints_unchanged;
+        let (full, visited, boundary_count) = if window_shift {
+            let added = self.remap_for_window_shift(scene);
+            let mut visited = 0;
+            self.boundary_roots.clear();
+            for node in added {
+                // Descendants of a new item are laid out with it, so only the
+                // item itself is a boundary.
+                if scene.virtual_item_index(node).is_none() {
+                    continue;
+                }
+                visited += self.layout_new_virtual_item(scene, node, measurer, virtual_layout)?;
+                self.boundary_roots.push(node);
+            }
+            (false, visited, self.boundary_roots.len())
+        } else if can_increment {
             self.prepare_incremental();
             self.collect_boundaries(scene)?;
             let roots = &self.boundary_roots;
@@ -299,12 +331,157 @@ impl LayoutEngine {
         self.back.offsets.resize(scene.len(), Point::ZERO);
         self.back.sizes.clear();
         self.back.sizes.resize(scene.len(), Size::ZERO);
+        self.record_virtual_items(scene);
+    }
+
+    /// Records which nodes sit inside a virtual item, for next frame's classification.
+    ///
+    /// Scene order is topological, so a single forward pass can inherit the flag
+    /// from each node's parent.
+    fn record_virtual_items(&mut self, scene: &Scene) {
+        self.back.virtual_items.clear();
+        self.back.virtual_items.reserve(scene.len());
+        for node in scene.ids().iter().copied() {
+            let inherited = scene
+                .parent(node)
+                .and_then(|parent| scene.resolve(parent))
+                .and_then(|index| self.back.virtual_items.get(index).copied())
+                .unwrap_or(false);
+            self.back
+                .virtual_items
+                .push(inherited || scene.virtual_item_index(node).is_some());
+        }
+    }
+
+    /// Rebuilds `back` against the new id list, keeping every surviving node's
+    /// geometry, and returns the nodes that are new and therefore need layout.
+    fn remap_for_window_shift(&mut self, scene: &Scene) -> Vec<NodeId> {
+        let mut previous = HashMap::with_capacity(self.front.ids.len());
+        for (index, node) in self.front.ids.iter().copied().enumerate() {
+            previous.insert(node, index);
+        }
+        self.back.ids.clear();
+        self.back.ids.extend_from_slice(scene.ids());
+        self.back.offsets.clear();
+        self.back.sizes.clear();
+        let mut added = Vec::new();
+        for node in scene.ids().iter().copied() {
+            match previous.get(&node) {
+                Some(&index) => {
+                    self.back.offsets.push(self.front.offsets[index]);
+                    self.back.sizes.push(self.front.sizes[index]);
+                }
+                None => {
+                    self.back.offsets.push(Point::ZERO);
+                    self.back.sizes.push(Size::ZERO);
+                    added.push(node);
+                }
+            }
+        }
+        self.record_virtual_items(scene);
+        added
+    }
+
+    /// Whether a node sits inside a virtual item, computed against the Scene.
+    fn within_virtual_item(&self, scene: &Scene, index: usize) -> bool {
+        let mut current = scene.ids().get(index).copied();
+        while let Some(node) = current {
+            if scene.virtual_item_index(node).is_some() {
+                return true;
+            }
+            current = scene.parent(node);
+        }
+        false
+    }
+
+    /// Whether the only structural change is virtual items appearing or
+    /// disappearing, which is what moving a scroll window does.
+    ///
+    /// Those items take their offset from the height index rather than from
+    /// their siblings, so the nodes that stayed cannot have moved.
+    fn only_virtual_items_changed(&self, scene: &Scene) -> bool {
+        let current: HashSet<NodeId> = scene.ids().iter().copied().collect();
+        let previous: HashSet<NodeId> = self.front.ids.iter().copied().collect();
+        if current == previous || self.front.ids.len() != self.front.virtual_items.len() {
+            return false;
+        }
+        let added_are_items = scene
+            .ids()
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| !previous.contains(node))
+            .all(|(index, node)| {
+                scene.virtual_item_index(*node).is_some() || self.within_virtual_item(scene, index)
+            });
+        let removed_are_items = self
+            .front
+            .ids
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| !current.contains(node))
+            .all(|(index, _)| self.front.virtual_items[index]);
+        added_are_items && removed_are_items
     }
 
     fn prepare_incremental(&mut self) {
         self.back.ids.clone_from(&self.front.ids);
         self.back.offsets.clone_from(&self.front.offsets);
         self.back.sizes.clone_from(&self.front.sizes);
+        self.back
+            .virtual_items
+            .clone_from(&self.front.virtual_items);
+    }
+
+    /// Lays out one newly materialized virtual item and returns the nodes visited.
+    ///
+    /// The constraints must be the ones the parent hands its children -- padding
+    /// removed, and unbounded for a scroll container -- so they are taken from
+    /// the parent's own frame rather than from its size. `compute_subtree` only
+    /// assigns an offset when a parent frame is on the stack, so the item's own
+    /// offset is written here, exactly as the full pass would place it.
+    fn layout_new_virtual_item(
+        &mut self,
+        scene: &Scene,
+        node: NodeId,
+        measurer: &mut impl IntrinsicMeasurer,
+        virtual_layout: &impl VirtualLayoutProvider,
+    ) -> Result<usize, LayoutError> {
+        let parent = scene
+            .parent(node)
+            .ok_or(LayoutError::SceneInvariant("virtual item has no parent"))?;
+        let (_, parent_size) = self
+            .front
+            .geometry(parent)
+            .ok_or(LayoutError::SceneInvariant(
+                "virtual item parent has no prior geometry",
+            ))?;
+        let parent_frame = make_frame(
+            scene,
+            parent,
+            BoxConstraints::tight(parent_size)?,
+            virtual_layout,
+        )?;
+        compute_subtree(
+            scene,
+            node,
+            parent_frame.child_constraints,
+            measurer,
+            virtual_layout,
+            &mut self.back,
+            &mut self.stack,
+        )?;
+        let index = scene.resolve(node).ok_or(LayoutError::SceneInvariant(
+            "layout encountered a stale node",
+        ))?;
+        let item_index = scene
+            .virtual_item_index(node)
+            .ok_or(LayoutError::SceneInvariant(
+                "new node is not a virtual item",
+            ))?;
+        let offset = virtual_item_offset(scene, parent, item_index, virtual_layout)?;
+        self.back.offsets[index] =
+            Point::new(parent_frame.padding.left, parent_frame.padding.top + offset);
+        subtree_len(scene, node)
     }
 
     fn collect_boundaries(&mut self, scene: &Scene) -> Result<(), LayoutError> {

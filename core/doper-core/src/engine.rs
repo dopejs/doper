@@ -3524,10 +3524,13 @@ mod tests {
     }
 
     /// Materializes a half-open window of virtual items as direct children.
-    fn virtual_window(frame_seq: u32, start: u32, end: u32) -> Vec<u8> {
+    ///
+    /// Node slots are allocated contiguously from `base` because the Scene
+    /// rejects gaps, so the node id and the logical item index are independent.
+    fn virtual_window(frame_seq: u32, start: u32, end: u32, base: u32) -> Vec<u8> {
         let mut mutations = Vec::new();
         for index in start..end {
-            let node = id(2 + index);
+            let node = id(base + index - start);
             mutations.push(Mutation::CreateNode {
                 node_id: node,
                 kind: NodeKind::Container,
@@ -3553,7 +3556,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "known limitation: a window shift still costs a full-Scene layout pass"]
     fn shifting_a_virtual_window_costs_the_change_not_the_whole_scene() {
         // Scrolling moves the window by an item or two per frame. If that costs
         // a layout pass over the entire Scene, the cost of scrolling grows with
@@ -3561,7 +3563,7 @@ mod tests {
         // scrolling could not both be had.
         let mut engine = CoreEngine::new(100.0, 100.0).expect("Core");
         engine.commit(&virtual_list_tree()).expect("list");
-        engine.commit(&virtual_window(2, 0, 40)).expect("window");
+        engine.commit(&virtual_window(2, 0, 40, 2)).expect("window");
 
         // Drop one item off the front and add one at the back: two nodes change
         // out of a 41-node Scene.
@@ -3594,14 +3596,43 @@ mod tests {
         let output = engine.commit(&shift).expect("shift");
         let visited = output.diagnostics.layout_visited_nodes;
         let scene_nodes = output.diagnostics.scene_nodes;
-        // Currently 42 of 42: the layout engine only reuses geometry while the
-        // topology is unchanged, and a window shift changes it by definition, so
-        // scrolling costs a pass over the whole Scene. See the virtual scrolling
-        // section of docs/design.md for why the first attempt at fixing this was
-        // withdrawn.
         assert!(
             visited * 2 < scene_nodes,
             "a two-node window shift visited {visited} of {scene_nodes} nodes"
+        );
+
+        // Reusing geometry is only worth anything if it is the same geometry.
+        // Lay the identical Scene out from scratch and require an exact match,
+        // because a wrong offset here would be quietly repaired by the
+        // measurement-correction pass and show up only as a visited count.
+        let mut reference = CoreEngine::new(100.0, 100.0).expect("Core");
+        reference.commit(&virtual_list_tree()).expect("list");
+        reference
+            .commit(&virtual_window(2, 1, 41, 2))
+            .expect("window");
+
+        // The two Scenes hold the same items under different node ids, so
+        // compare them by logical item index.
+        let geometry_by_item = |engine: &CoreEngine| {
+            let scene = engine.scene();
+            let snapshot = engine.layout.snapshot();
+            let mut found = Vec::new();
+            for node in scene.ids().iter().copied() {
+                if let Some(item) = scene.virtual_item_index(node)
+                    && let Some(geometry) = snapshot.geometry(node)
+                {
+                    found.push((item, geometry));
+                }
+            }
+            found.sort_by_key(|(item, _)| *item);
+            found
+        };
+        let incremental = geometry_by_item(&engine);
+        let full = geometry_by_item(&reference);
+        assert_eq!(incremental.len(), 40, "the shifted window holds 40 items");
+        assert_eq!(
+            incremental, full,
+            "incremental window shift must match a full layout exactly"
         );
     }
 
@@ -3761,7 +3792,11 @@ mod tests {
             ))
             .expect("materialized frame");
 
-        assert_eq!(output.diagnostics.layout_visited_nodes, 9);
+        // Two passes: three newly materialized items, then a corrective pass over
+        // the list subtree because their measured heights differ from the
+        // estimate. Neither one re-lays-out the whole Scene, which is why this
+        // is 7 rather than the 5 + 4 it used to be.
+        assert_eq!(output.diagnostics.layout_visited_nodes, 7);
 
         assert_eq!(
             engine
