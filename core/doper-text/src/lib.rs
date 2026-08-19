@@ -14,7 +14,7 @@ pub use error::TextError;
 pub use font::{FontFace, MAX_FONT_BYTES};
 pub use layout::{
     CaretStop, Grapheme, MAX_TEXT_BYTES, PositionedGlyph, ShapeCluster, TextLayout, TextLine,
-    TextOptions,
+    TextOptions, soft_break_offsets,
 };
 
 #[cfg(test)]

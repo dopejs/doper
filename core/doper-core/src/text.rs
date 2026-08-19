@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use doper_abi::{
     AbiError, EditorDecorationKind, GlyphBitmapResource, GlyphPlacementResource,
@@ -10,7 +13,9 @@ use doper_abi::{
 use doper_layout::{BoxConstraints, IntrinsicMeasurer, Size};
 use doper_paint::{EditorDecoration, ShapedGlyphRun, TextPaintResolver, TextStyleResource};
 use doper_scene::{NodeId, Scene, TextRun};
-use doper_text::{CaretStop, FontFace, GlyphAtlas, TextEngine, TextLayout, TextOptions};
+use doper_text::{
+    CaretStop, FontFace, GlyphAtlas, TextEngine, TextLayout, TextOptions, soft_break_offsets,
+};
 
 use crate::editing::ActiveEditorVisual;
 
@@ -58,6 +63,18 @@ struct ForcedFallbackRun {
     content_hash: u64,
 }
 
+/// One fallback run's wrapping, produced by measurement and reused by paint.
+///
+/// Measurement is the only place that knows both the value and the width it has
+/// to fit, so it records the result rather than making paint and hit testing
+/// each re-derive it -- and each risk deriving it differently.
+struct WrappedRun {
+    /// Byte offsets where a soft break starts a new visual line.
+    breaks: Vec<usize>,
+    /// The value with those breaks materialized, for the whole-run draw.
+    display: Arc<str>,
+}
+
 /// Transactional text layout, raster, and derived-resource owner.
 pub(crate) struct CoreTextSystem {
     engine: TextEngine,
@@ -68,6 +85,10 @@ pub(crate) struct CoreTextSystem {
     edit_overrides: HashMap<NodeId, Arc<str>>,
     editor_decorations: HashMap<NodeId, Vec<EditorDecoration>>,
     editor_scroll: HashMap<NodeId, [f32; 2]>,
+    /// Soft break offsets and the wrapped string each fallback run last measured.
+    wrapped_fallback: HashMap<NodeId, WrappedRun>,
+    /// Editable nodes that scroll horizontally instead of wrapping.
+    non_wrapping: HashSet<NodeId>,
     active: HashMap<NodeId, PreparedRun>,
     candidate: Option<HashMap<NodeId, PreparedRun>>,
     staged: Vec<GlyphResourceInstruction>,
@@ -88,6 +109,8 @@ impl Default for CoreTextSystem {
             edit_overrides: HashMap::new(),
             editor_decorations: HashMap::new(),
             editor_scroll: HashMap::new(),
+            wrapped_fallback: HashMap::new(),
+            non_wrapping: HashSet::new(),
             active: HashMap::new(),
             candidate: None,
             staged: Vec::new(),
@@ -111,11 +134,15 @@ impl CoreTextSystem {
             .filter(|resource| resource.kind == ResourceKind::TextStyle)
             .and_then(|resource| TextStyleResource::decode(text_run.style_id, resource).ok())?;
         let value = self.text_value(scene, node)?;
-        Some(self.fallback_caret_stops(text_run, &value, &style))
+        Some(self.fallback_caret_stops(node, text_run, &value, &style))
     }
 
     pub(crate) fn set_edit_overrides(&mut self, overrides: HashMap<NodeId, Arc<str>>) {
         self.edit_overrides = overrides;
+    }
+
+    pub(crate) fn set_non_wrapping(&mut self, nodes: HashSet<NodeId>) {
+        self.non_wrapping = nodes;
     }
 
     pub(crate) fn update_editor_decorations(
@@ -147,7 +174,7 @@ impl CoreTextSystem {
             let Some(value) = self.text_value(scene, visual.node) else {
                 return;
             };
-            let carets = self.fallback_caret_stops(text_run, &value, &style);
+            let carets = self.fallback_caret_stops(visual.node, text_run, &value, &style);
             decorations_from_carets(&carets, visual, caret_visible)
         };
         self.editor_decorations.insert(visual.node, decorations);
@@ -528,7 +555,19 @@ impl TextPaintResolver for CoreTextSystem {
     }
 
     fn inline_fallback(&self, node: NodeId) -> Option<&str> {
-        self.edit_overrides.get(&node).map(AsRef::as_ref)
+        // The wrapped form when measurement produced one: the backend draws a
+        // whole-run fallback line per `\n`, so materializing the soft breaks is
+        // what makes it wrap without a second draw command.
+        self.edit_overrides.get(&node)?;
+        Some(
+            self.wrapped_fallback
+                .get(&node)
+                .map_or_else(
+                    || self.edit_overrides.get(&node).map(Arc::as_ref),
+                    |wrapped| Some(wrapped.display.as_ref()),
+                )
+                .unwrap_or(""),
+        )
     }
 
     fn editor_decorations(&self, node: NodeId) -> &[EditorDecoration] {
@@ -633,20 +672,59 @@ fn closest_caret(carets: &[CaretStop], offset: u32) -> Option<CaretStop> {
         .min_by_key(|caret| (i64::from(caret.utf16_offset) - i64::from(offset)).unsigned_abs())
 }
 
+/// Estimated advance as a fraction of the font size, for unmeasured code points.
+///
+/// Roughly right for Latin and badly wrong for full-width scripts, which is why
+/// every editable run is measured; this only covers the frames between typing a
+/// code point and the Host reporting its advance.
+const ESTIMATED_ADVANCE_RATIO: f32 = 0.6;
+
+fn advance_for(advances: Option<&HashMap<char, f32>>, estimate: f32, character: char) -> f32 {
+    advances
+        .and_then(|measured| measured.get(&character).copied())
+        .unwrap_or(estimate)
+}
+
+/// Rebuilds a value with its soft breaks turned into real newlines.
+///
+/// The whole-run fallback draw splits on `\n` and offsets by the line height, so
+/// this is what makes a wrapped run paint as several lines without a second
+/// display command. Offsets into this string do not match the value's, which is
+/// why it is only ever handed to paint.
+fn materialize_breaks(text: &str, breaks: &[usize]) -> Arc<str> {
+    if breaks.is_empty() {
+        return Arc::from(text);
+    }
+    let mut output = String::with_capacity(text.len() + breaks.len());
+    let mut previous = 0;
+    for offset in breaks {
+        output.push_str(&text[previous..*offset]);
+        output.push('\n');
+        previous = *offset;
+    }
+    output.push_str(&text[previous..]);
+    Arc::from(output)
+}
+
 /// Builds fallback caret stops from measured per-code-point advances.
 ///
-/// A code point missing from `advances` falls back to `font_size * 0.6`, which
-/// is roughly right for Latin and badly wrong for full-width scripts. These
-/// stops both paint the caret and resolve pointer hit testing to a text offset,
-/// so an unmeasured run mis-selects words as well as painting the caret off the
-/// glyph. The Host measures every run a Scene node makes editable.
+/// A code point missing from `advances` falls back to an estimate, which is
+/// roughly right for Latin and badly wrong for full-width scripts. These stops
+/// both paint the caret and resolve pointer hit testing to a text offset, so an
+/// unmeasured run mis-selects words as well as painting the caret off the glyph.
+/// The Host measures every run a Scene node makes editable.
+///
+/// `breaks` are the soft breaks measurement chose. Unlike a `\n` they consume no
+/// character, so the offset either side of one is the same text position on two
+/// different visual lines.
 fn caret_stops(
     text: &str,
+    breaks: &[usize],
     advances: Option<&HashMap<char, f32>>,
     font_size: f32,
     line_height: f32,
 ) -> Vec<CaretStop> {
-    let estimate = font_size * 0.6;
+    let estimate = font_size * ESTIMATED_ADVANCE_RATIO;
     let mut carets = Vec::with_capacity(text.chars().count().saturating_add(1));
     let mut utf16 = 0_u32;
     let mut line = 0_usize;
@@ -660,14 +738,16 @@ fn caret_stops(
         height: line_height,
     });
     for (byte_offset, character) in text.char_indices() {
+        if breaks.contains(&byte_offset) {
+            line = line.saturating_add(1);
+            x = 0.0;
+        }
         utf16 = utf16.saturating_add(u32::try_from(character.len_utf16()).unwrap_or(2));
         if character == '\n' {
             line = line.saturating_add(1);
             x = 0.0;
         } else {
-            x += advances
-                .and_then(|measured| measured.get(&character).copied())
-                .unwrap_or(estimate);
+            x += advance_for(advances, estimate, character);
         }
         carets.push(CaretStop {
             byte_offset: byte_offset.saturating_add(character.len_utf8()),
@@ -686,12 +766,25 @@ impl CoreTextSystem {
     /// measured advances when it has published them for this pair.
     fn fallback_caret_stops(
         &self,
+        node: NodeId,
         run: TextRun,
         value: &str,
         style: &TextStyleResource,
     ) -> Vec<CaretStop> {
         let table = self.advance_table(run);
-        caret_stops(value, table.as_ref(), style.font_size, style.line_height)
+        // The breaks measurement recorded, not a fresh computation: paint, hit
+        // testing and the caret have to agree on where the lines are.
+        let breaks = self
+            .wrapped_fallback
+            .get(&node)
+            .map_or(&[][..], |wrapped| wrapped.breaks.as_slice());
+        caret_stops(
+            value,
+            breaks,
+            table.as_ref(),
+            style.font_size,
+            style.line_height,
+        )
     }
 
     /// The code points the Host measured for this pair, keyed for lookup.
@@ -770,13 +863,36 @@ impl CoreTextSystem {
         // font_size * 0.6 here would shrink a full-width run to 60% of its real
         // width for as long as it is being edited, which reads as the text
         // jumping the moment the field is typed into.
-        approximate_fallback_measure(
+        let table = self.advance_table(run);
+        let estimate = style.font_size * ESTIMATED_ADVANCE_RATIO;
+        // A single-line field scrolls its value instead; wrapping one would turn
+        // a long value into a paragraph inside a one-line box.
+        let wrap_width = if self.non_wrapping.contains(&node) {
+            f32::INFINITY
+        } else {
+            constraints.max_width
+        };
+        let breaks = soft_break_offsets(
             &text,
-            self.advance_table(run).as_ref(),
+            |character| advance_for(table.as_ref(), estimate, character),
+            wrap_width,
+        );
+        let size = wrapped_fallback_measure(
+            &text,
+            &breaks,
+            table.as_ref(),
             constraints,
             style.font_size,
             style.line_height,
-        )
+        );
+        self.wrapped_fallback.insert(
+            node,
+            WrappedRun {
+                display: materialize_breaks(&text, &breaks),
+                breaks,
+            },
+        );
+        size
     }
 
     fn text_value(&self, scene: &Scene, node: NodeId) -> Option<Arc<str>> {
@@ -816,28 +932,34 @@ fn decode_font(scene: &Scene, font_id: u32) -> Option<(u32, Arc<[u8]>)> {
     ))
 }
 
-fn approximate_fallback_measure(
-    string: &str,
+/// Measures a fallback run against the soft breaks it will be painted with.
+fn wrapped_fallback_measure(
+    text: &str,
+    breaks: &[usize],
     advances: Option<&HashMap<char, f32>>,
     constraints: BoxConstraints,
     font_size: f32,
     line_height: f32,
 ) -> Size {
-    let estimate = font_size * 0.6;
-    let mut line_count = 0_usize;
+    let estimate = font_size * ESTIMATED_ADVANCE_RATIO;
+    let mut line_count = 1_usize;
     let mut longest_line = 0.0_f32;
-    for line in string.split('\n') {
-        line_count += 1;
-        let width = line
-            .chars()
-            .map(|character| {
-                advances
-                    .and_then(|measured| measured.get(&character).copied())
-                    .unwrap_or(estimate)
-            })
-            .sum::<f32>();
-        longest_line = longest_line.max(width);
+    let mut width = 0.0_f32;
+    for (offset, character) in text.char_indices() {
+        if breaks.contains(&offset) {
+            longest_line = longest_line.max(width);
+            line_count += 1;
+            width = 0.0;
+        }
+        if character == '\n' {
+            longest_line = longest_line.max(width);
+            line_count += 1;
+            width = 0.0;
+            continue;
+        }
+        width += advance_for(advances, estimate, character);
     }
+    longest_line = longest_line.max(width);
     let height = usize_to_f32(line_count) * line_height;
     constraints.constrain(Size::new(longest_line, height))
 }

@@ -244,6 +244,18 @@ impl EditingController {
             .collect()
     }
 
+    /// Editable nodes that must never soft wrap, because they are single line.
+    ///
+    /// A single-line field scrolls its value horizontally instead; wrapping one
+    /// would turn a long value into a paragraph inside a one-line box.
+    pub(crate) fn non_wrapping_nodes(&self) -> std::collections::HashSet<NodeId> {
+        self.sessions
+            .iter()
+            .filter(|(_, active)| active.flags & EDITABLE_MULTILINE == 0)
+            .map(|(&node, _)| node)
+            .collect()
+    }
+
     pub(crate) fn active_visual(&self) -> Option<ActiveEditorVisual> {
         let node = self.active_node?;
         let session = &self.sessions.get(&node)?.session;

@@ -537,6 +537,8 @@ impl CoreEngine {
         }
         self.text
             .set_edit_overrides(self.editing.display_overrides());
+        self.text
+            .set_non_wrapping(self.editing.non_wrapping_nodes());
         if !editing_changed.is_empty() {
             self.layout.mark_text_measurements_changed(&editing_changed);
         }
@@ -1185,6 +1187,8 @@ impl CoreEngine {
         self.last_input_sequence = Some(batch.frame_seq);
         self.text
             .set_edit_overrides(self.editing.display_overrides());
+        self.text
+            .set_non_wrapping(self.editing.non_wrapping_nodes());
         self.metrics.accepted_input_batches = self.metrics.accepted_input_batches.saturating_add(1);
         if edit_outcome.changed_nodes.is_empty() {
             if !scroll_outcome.changed {
@@ -3046,13 +3050,41 @@ mod tests {
     }
 
     #[test]
+    fn a_multiline_editor_wraps_and_a_single_line_one_does_not() {
+        // The fallback path had no line breaking at all, so a value wider than
+        // the box painted straight across whatever sat beside and below it.
+        let drawn = |flags: u32| -> String {
+            let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+            let output = engine
+                .commit(&editable_tree_with_width(flags, "alpha beta gamma", 60.0))
+                .expect("frame");
+            DisplayList::decode(&output.display_list)
+                .expect("DisplayList")
+                .instructions
+                .iter()
+                .find_map(|instruction| match &instruction.command {
+                    DisplayCommand::DrawTextInlineFallback { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .expect("inline fallback draw")
+        };
+
+        // 16px estimates to 9.6px per code point, so six fit in 60px. The break
+        // lands on a word opportunity rather than mid-word.
+        assert_eq!(drawn(1), "alpha \nbeta \ngamma");
+        // Single line: the value stays one line and the field scrolls instead.
+        assert_eq!(drawn(0), "alpha beta gamma");
+    }
+
+    #[test]
     fn an_editor_scrolls_its_own_value_to_keep_the_caret_inside() {
         // The node clips to its box and the fallback path does not wrap, so a
         // value wider than the field would put the caret outside the clip and
         // make typing invisible.
         let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
         engine
-            .commit(&editable_tree_with_width(1, "abcdefghij", 40.0))
+            // Flags zero: single line, so it scrolls rather than wrapping.
+            .commit(&editable_tree_with_width(0, "abcdefghij", 40.0))
             .expect("frame");
         engine
             .input(&input(

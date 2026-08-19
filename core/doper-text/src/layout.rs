@@ -631,3 +631,114 @@ mod tests {
         );
     }
 }
+
+/// Byte offsets at which a run of text has to start a new visual line.
+///
+/// The whole-run system-font fallback has no shaper, so it cannot use
+/// [`wrap_paragraph`]; it does have the browser's per-code-point advances. This
+/// applies the same UAX #14 break opportunities to those advances, so a run
+/// wraps at the same places whether or not an explicit font was supplied.
+///
+/// Only soft breaks are returned. A `\n` in the source is a hard break the
+/// caller already handles, and it is never reported here. When a single word
+/// cannot fit at all the run breaks on a grapheme boundary rather than
+/// overflowing, matching `overflow-wrap: anywhere`.
+///
+/// A non-finite or non-positive `max_width` disables wrapping.
+pub fn soft_break_offsets(
+    text: &str,
+    advance_of: impl Fn(char) -> f32,
+    max_width: f32,
+) -> Vec<usize> {
+    let mut breaks = Vec::new();
+    if !max_width.is_finite() || max_width <= 0.0 || text.is_empty() {
+        return breaks;
+    }
+    let allowed = linebreaks(text)
+        .filter_map(|(offset, opportunity)| {
+            matches!(opportunity, BreakOpportunity::Allowed).then_some(offset)
+        })
+        .collect::<BTreeSet<_>>();
+    let mut line_start = 0_usize;
+    let mut width = 0.0_f32;
+    let mut last_allowed: Option<usize> = None;
+    for (offset, character) in text.char_indices() {
+        if character == '\n' {
+            line_start = offset + character.len_utf8();
+            width = 0.0;
+            last_allowed = None;
+            continue;
+        }
+        let advance = advance_of(character);
+        if width + advance > max_width && offset > line_start {
+            // Prefer the last opportunity on this line; with none, break right
+            // here so a single long word is split instead of overflowing.
+            let split = last_allowed
+                .filter(|candidate| *candidate > line_start && *candidate <= offset)
+                .unwrap_or(offset);
+            breaks.push(split);
+            line_start = split;
+            width = text[split..offset].chars().map(&advance_of).sum::<f32>();
+            last_allowed = None;
+        }
+        width += advance;
+        let end = offset + character.len_utf8();
+        if allowed.contains(&end) {
+            last_allowed = Some(end);
+        }
+    }
+    breaks
+}
+
+#[cfg(test)]
+mod soft_break_tests {
+    use super::soft_break_offsets;
+
+    /// Ten units per code point keeps the arithmetic readable in the assertions.
+    fn uniform(_character: char) -> f32 {
+        10.0
+    }
+
+    #[test]
+    fn breaks_latin_at_word_opportunities() {
+        // "alpha beta" is 10 code points; at 60 units only "alpha " fits, and
+        // the break belongs after the space, not mid-word.
+        assert_eq!(soft_break_offsets("alpha beta", uniform, 60.0), vec![6]);
+    }
+
+    #[test]
+    fn splits_a_word_that_cannot_fit_on_its_own_line() {
+        // No opportunity inside it, so overflowing is the only alternative.
+        assert_eq!(soft_break_offsets("abcdefgh", uniform, 30.0), vec![3, 6]);
+    }
+
+    #[test]
+    fn treats_a_hard_break_as_a_fresh_line_and_never_reports_it() {
+        assert_eq!(soft_break_offsets("abc\nabc", uniform, 40.0), Vec::new());
+        assert_eq!(
+            soft_break_offsets("abcde\nabcde", uniform, 30.0),
+            vec![3, 9]
+        );
+    }
+
+    #[test]
+    fn wrapping_is_disabled_by_a_non_positive_or_infinite_width() {
+        for width in [f32::INFINITY, 0.0, -1.0, f32::NAN] {
+            assert_eq!(soft_break_offsets("abcdefgh", uniform, width), Vec::new());
+        }
+    }
+
+    #[test]
+    fn breaks_between_han_code_points_which_have_no_spaces() {
+        // Every boundary is an opportunity, so this is a pure width fit: two
+        // code points per line at 25 units, three bytes each.
+        assert_eq!(
+            soft_break_offsets("\u{4e2d}\u{6587}\u{5907}\u{6ce8}", uniform, 25.0),
+            vec![6]
+        );
+        assert_eq!(
+            soft_break_offsets("\u{4e2d}\u{6587}\u{5907}\u{6ce8}", uniform, 15.0),
+            vec![3, 6, 9]
+        );
+    }
+}
