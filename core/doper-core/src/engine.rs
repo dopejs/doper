@@ -2955,6 +2955,63 @@ mod tests {
     }
 
     #[test]
+    fn editing_does_not_resize_a_measured_text_box() {
+        // The browser-measured width applies to the Scene string. Falling back to
+        // font_size * 0.6 for the whole session shrank a full-width run to 60% of
+        // its width the moment it was focused, and snapped it back on blur.
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit_with_system_text_metrics(
+                &editable_tree_with_text(1, "\u{4e2d}\u{6587}"),
+                Some(&system_metrics(SystemTextMetricCommand::Upsert(
+                    SystemTextMetric {
+                        string_id: 3,
+                        style_id: 2,
+                        max_line_width: 32.0,
+                        line_count: 1,
+                        advances: vec![('\u{4e2d}', 16.0), ('\u{5019}', 16.0), ('\u{6587}', 16.0)],
+                    },
+                ))),
+            )
+            .expect("frame");
+        let text = NodeId::from_raw(id(1)).expect("text id");
+        let width = |engine: &CoreEngine| {
+            engine
+                .layout
+                .snapshot()
+                .geometry(text)
+                .map(|(_, size)| size.width)
+                .expect("geometry")
+        };
+        assert!((width(&engine) - 32.0).abs() < 0.01, "{}", width(&engine));
+
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+        // Focus alone must not resize: the session value still equals the string.
+        assert!((width(&engine) - 32.0).abs() < 0.01, "{}", width(&engine));
+
+        engine
+            .input(&input(
+                2,
+                vec![InputCommand::Insert {
+                    node_id: id(1),
+                    base_revision: 0,
+                    text: "\u{5019}".to_owned(),
+                }],
+            ))
+            .expect("insert");
+        engine.take_edit_transactions().expect("drain insert");
+        // One more measured full-width glyph, so exactly one advance wider. The
+        // estimate would have given 3 * 16 * 0.6 = 28.8, narrower than before.
+        assert!((width(&engine) - 48.0).abs() < 0.01, "{}", width(&engine));
+    }
+
+    #[test]
     fn ime_preedit_uses_measured_advances_for_the_candidate_window() {
         // The preedit run lives only in the editing session: it is in no Scene
         // string, so the Host measures it into the same code-point table. Without

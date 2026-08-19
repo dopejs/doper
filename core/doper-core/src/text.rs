@@ -736,8 +736,17 @@ impl CoreTextSystem {
         else {
             return Size::ZERO;
         };
-        if !self.edit_overrides.contains_key(&node)
-            && let Some(metric) = self.system_metrics.get(&(run.string_id, run.style_id))
+        let metric = self.system_metrics.get(&(run.string_id, run.style_id));
+        // The browser's own line measurement is the most faithful answer, but it
+        // describes the Scene string. An active editing session shows a value
+        // that runs ahead of it, so it only applies while the two still agree —
+        // which includes the whole time a focused field has not been typed into,
+        // and is what keeps focus and blur from resizing the box.
+        if let Some(metric) = metric
+            && self
+                .edit_overrides
+                .get(&node)
+                .is_none_or(|value| scene_string(scene, run.string_id) == Some(value.as_ref()))
         {
             self.metrics.system_metric_hits = self.metrics.system_metric_hits.saturating_add(1);
             return constraints.constrain(Size::new(
@@ -749,7 +758,17 @@ impl CoreTextSystem {
         let Some(text) = self.text_value(scene, node) else {
             return Size::ZERO;
         };
-        approximate_fallback_measure(&text, constraints, style.font_size, style.line_height)
+        // Summed from the same measured advances the caret uses. Falling back to
+        // font_size * 0.6 here would shrink a full-width run to 60% of its real
+        // width for as long as it is being edited, which reads as the text
+        // jumping the moment the field is typed into.
+        approximate_fallback_measure(
+            &text,
+            self.advance_table(run).as_ref(),
+            constraints,
+            style.font_size,
+            style.line_height,
+        )
     }
 
     fn text_value(&self, scene: &Scene, node: NodeId) -> Option<Arc<str>> {
@@ -791,19 +810,36 @@ fn decode_font(scene: &Scene, font_id: u32) -> Option<(u32, Arc<[u8]>)> {
 
 fn approximate_fallback_measure(
     string: &str,
+    advances: Option<&HashMap<char, f32>>,
     constraints: BoxConstraints,
     font_size: f32,
     line_height: f32,
 ) -> Size {
+    let estimate = font_size * 0.6;
     let mut line_count = 0_usize;
-    let mut longest_line = 0_usize;
+    let mut longest_line = 0.0_f32;
     for line in string.split('\n') {
         line_count += 1;
-        longest_line = longest_line.max(line.chars().count());
+        let width = line
+            .chars()
+            .map(|character| {
+                advances
+                    .and_then(|measured| measured.get(&character).copied())
+                    .unwrap_or(estimate)
+            })
+            .sum::<f32>();
+        longest_line = longest_line.max(width);
     }
-    let width = usize_to_f32(longest_line) * font_size * 0.6;
     let height = usize_to_f32(line_count) * line_height;
-    constraints.constrain(Size::new(width, height))
+    constraints.constrain(Size::new(longest_line, height))
+}
+
+/// The immutable UTF-8 string a text run names, when it resolves.
+fn scene_string(scene: &Scene, string_id: u32) -> Option<&str> {
+    let resource = scene
+        .resource(string_id)
+        .filter(|resource| resource.kind == ResourceKind::Utf8String)?;
+    std::str::from_utf8(&resource.bytes).ok()
 }
 
 fn hash_bytes(bytes: &[u8]) -> u64 {
