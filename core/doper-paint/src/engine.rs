@@ -89,6 +89,13 @@ pub trait TextPaintResolver {
     fn inline_fallback(&self, node: NodeId) -> Option<&str>;
     /// Returns transient selection, composition, and caret overlays for one active editor.
     fn editor_decorations(&self, node: NodeId) -> &[EditorDecoration];
+    /// Returns how far an editor has scrolled its own value inside its box.
+    ///
+    /// An editable clips to its box, so a caret past the edge would be invisible
+    /// without this. The offset moves the value and its overlays together.
+    fn editor_scroll(&self, _node: NodeId) -> [f32; 2] {
+        [0.0, 0.0]
+    }
 }
 
 /// One Core-authored skeleton rectangle in a scroll container's content space.
@@ -479,6 +486,17 @@ fn build_node(
             &mut instructions,
             DisplayCommand::ClipRect([0.0, 0.0, size.width, size.height]),
         );
+    }
+    if scene.kind(node) == Some(NodeKind::EditableText) {
+        let [offset_x, offset_y] = text.editor_scroll(node);
+        // Inside the clip, so the value and its overlays move together and a
+        // caret that ran past the edge comes back into view.
+        if offset_x.abs() > f32::EPSILON || offset_y.abs() > f32::EPSILON {
+            push(
+                &mut instructions,
+                DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, -offset_x, -offset_y]),
+            );
+        }
     }
     if let Some(paint_id) = scene.ref_prop(node, Prop::BackgroundColor) {
         let resource = typed_resource(scene, paint_id, ResourceKind::Paint)?;

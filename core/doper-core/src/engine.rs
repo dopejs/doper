@@ -750,12 +750,17 @@ impl CoreEngine {
             .editor_caret_stops(&self.scene, node)
             .filter(|carets| !carets.is_empty())
             .ok_or(CoreError::InvalidEditableTarget { node })?;
-        let local = geometry
+        let mut local = geometry
             .to_local(HitPoint {
                 x: position[0],
                 y: position[1],
             })
             .ok_or(CoreError::InvalidEditableTarget { node })?;
+        // The value is painted shifted by minus the editor's own scroll, so a
+        // canvas point maps back into content space by adding it.
+        let [scroll_x, scroll_y] = self.editing.scroll_offset(node);
+        local.x += scroll_x;
+        local.y += scroll_y;
         let offset = nearest_caret_offset(&carets, local);
         let (anchor, focus) = if flags & 0x02 != 0 {
             doper_edit::word_range_utf16(session.text(), offset).map_err(CoreError::Edit)?
@@ -780,6 +785,57 @@ impl CoreEngine {
         })
     }
 
+    /// Keeps the active caret inside the editor's own box.
+    ///
+    /// An editable clips to its box and the fallback text path does not wrap, so
+    /// a value wider than the field would put the caret outside the clip and
+    /// make typing invisible. This is the field's own scroll, applied inside the
+    /// clip; `caret_reveal_target` is the separate job of bringing the whole
+    /// field into an ancestor viewport.
+    ///
+    /// Runs against the layout the frame is about to paint, so the offset never
+    /// describes a box the caret has already left.
+    fn reveal_caret_in_editor(&mut self) -> bool {
+        let Some(visual) = self.editing.active_visual() else {
+            return false;
+        };
+        let node = visual.node;
+        let Some((_, size)) = self.layout.snapshot().geometry(node) else {
+            return false;
+        };
+        let Some(carets) = self
+            .text
+            .editor_caret_stops(&self.scene, node)
+            .filter(|carets| !carets.is_empty())
+        else {
+            return false;
+        };
+        let Some(caret) = closest_editor_caret(&carets, visual.selection[1]) else {
+            return false;
+        };
+        let [mut offset_x, mut offset_y] = visual.scroll_offset;
+        // The caret is one and a half logical pixels wide and is drawn from its
+        // stop, so the right edge has to fit as well as the left.
+        let caret_right = caret.x + CARET_WIDTH;
+        if caret_right - offset_x > size.width {
+            offset_x = caret_right - size.width;
+        }
+        if caret.x - offset_x < 0.0 {
+            offset_x = caret.x;
+        }
+        let caret_bottom = caret.y + caret.height;
+        if caret_bottom - offset_y > size.height {
+            offset_y = caret_bottom - size.height;
+        }
+        if caret.y - offset_y < 0.0 {
+            offset_y = caret.y;
+        }
+        // Never scroll past the start: an empty or short value must sit flush.
+        offset_x = offset_x.max(0.0);
+        offset_y = offset_y.max(0.0);
+        self.editing.set_scroll_offset(node, [offset_x, offset_y])
+    }
+
     /// Computes the minimal ancestor scroll jump revealing the active caret.
     ///
     /// Uses the last committed frame's world geometry; the subsequent relayout
@@ -793,7 +849,12 @@ impl CoreEngine {
             .editor_caret_stops(&self.scene, node)
             .filter(|carets| !carets.is_empty())?;
         let focus = visual.selection[1];
-        let caret = editor_range_rect(&carets, [focus, focus], geometry)?;
+        let caret = editor_range_rect(
+            &carets,
+            [focus, focus],
+            geometry,
+            self.editing.scroll_offset(node),
+        )?;
         let mut ancestor = self.scene.parent(node);
         while let Some(candidate) = ancestor {
             if self.scene.kind(candidate) == Some(NodeKind::Scroll) {
@@ -1546,17 +1607,19 @@ impl CoreEngine {
             visual.selection[0].max(visual.selection[1]),
         ];
         let control = geometry.aabb;
-        let selection_rect = editor_range_rect(&carets, selection, geometry).unwrap_or(WorldRect {
-            left: control.left,
-            top: control.top,
-            right: control.left,
-            bottom: control.top,
-        });
+        let scroll = self.editing.scroll_offset(visual.node);
+        let selection_rect =
+            editor_range_rect(&carets, selection, geometry, scroll).unwrap_or(WorldRect {
+                left: control.left,
+                top: control.top,
+                right: control.left,
+                bottom: control.top,
+            });
         let requested = self
             .requested_character_range
             .filter(|(node, _)| *node == visual.node)
             .map_or([0, 0], |(_, range)| range);
-        let characters = editor_character_rects(&carets, requested, geometry);
+        let characters = editor_character_rects(&carets, requested, geometry, scroll);
         let capacity = EDITING_GEOMETRY_HEADER_WORDS
             .saturating_add(EDITING_GEOMETRY_RECT_WORDS.saturating_mul(2))
             .saturating_add(
@@ -1599,6 +1662,9 @@ impl CoreEngine {
         if let Err(error) = self.hit.update(&self.scene, self.layout.snapshot()) {
             return self.poison(CoreError::Hit(error));
         }
+        // Scrolling the value inside its own box moves every glyph in the node,
+        // so the subtree cache cannot be trusted for that frame.
+        let force_full_paint = force_full_paint | self.reveal_caret_in_editor();
         self.text.update_editor_decorations(
             &self.scene,
             self.editing.active_visual(),
@@ -1816,17 +1882,21 @@ fn append_geometry_rect(words: &mut Vec<u32>, rect: WorldRect) {
     ]);
 }
 
+/// Caret bar width in logical pixels, shared by paint, geometry and reveal.
+const CARET_WIDTH: f32 = 1.5;
+
 fn editor_range_rect(
     carets: &[doper_text::CaretStop],
     range: [u32; 2],
     geometry: WorldGeometry,
+    scroll: [f32; 2],
 ) -> Option<WorldRect> {
     let first = closest_editor_caret(carets, range[0])?;
     let last = closest_editor_caret(carets, range[1])?;
     if range[0] == range[1] {
         return Some(transform_local_rect(
             geometry,
-            [first.x, first.y, 1.5, first.height],
+            scrolled([first.x, first.y, CARET_WIDTH, first.height], scroll),
         ));
     }
     let mut result = None;
@@ -1858,7 +1928,7 @@ fn editor_range_rect(
             (edge_b - edge_a).abs().max(1.5),
             sample.height,
         ];
-        let world = transform_local_rect(geometry, local);
+        let world = transform_local_rect(geometry, scrolled(local, scroll));
         result = Some(result.map_or(world, |current: WorldRect| WorldRect {
             left: current.left.min(world.left),
             top: current.top.min(world.top),
@@ -1873,6 +1943,7 @@ fn editor_character_rects(
     carets: &[doper_text::CaretStop],
     requested: [u32; 2],
     geometry: WorldGeometry,
+    scroll: [f32; 2],
 ) -> Vec<([u32; 2], WorldRect)> {
     if requested[0] >= requested[1] {
         return Vec::new();
@@ -1892,9 +1963,12 @@ fn editor_character_rects(
                 pair[0].height.max(pair[1].height),
             ]
         } else {
-            [pair[0].x, pair[0].y, 1.5, pair[0].height]
+            [pair[0].x, pair[0].y, CARET_WIDTH, pair[0].height]
         };
-        result.push(([start, end], transform_local_rect(geometry, local)));
+        result.push((
+            [start, end],
+            transform_local_rect(geometry, scrolled(local, scroll)),
+        ));
     }
     result
 }
@@ -1907,6 +1981,11 @@ fn closest_editor_caret(
         .iter()
         .copied()
         .min_by_key(|caret| (i64::from(caret.utf16_offset) - i64::from(offset)).unsigned_abs())
+}
+
+/// Moves a content-space rectangle into the editor's painted position.
+fn scrolled(rect: [f32; 4], scroll: [f32; 2]) -> [f32; 4] {
+    [rect[0] - scroll[0], rect[1] - scroll[1], rect[2], rect[3]]
 }
 
 fn transform_local_rect(geometry: WorldGeometry, rect: [f32; 4]) -> WorldRect {
@@ -2222,6 +2301,18 @@ mod tests {
                 max_graphemes: 100,
             },
         ]
+    }
+
+    /// The same tree with an explicit box narrower than the value it holds.
+    fn editable_tree_with_width(flags: u32, text: &str, width: f32) -> Vec<u8> {
+        let mut batch = doper_abi::MutationBatch::decode(&editable_tree_with_text(flags, text))
+            .expect("decode");
+        batch.instructions.push(instruction(Mutation::SetF32 {
+            node_id: id(1),
+            prop: Prop::Width,
+            value: width,
+        }));
+        batch.encode().expect("encode")
     }
 
     fn editable_tree_with_text(flags: u32, text: &str) -> Vec<u8> {
@@ -2955,6 +3046,66 @@ mod tests {
     }
 
     #[test]
+    fn an_editor_scrolls_its_own_value_to_keep_the_caret_inside() {
+        // The node clips to its box and the fallback path does not wrap, so a
+        // value wider than the field would put the caret outside the clip and
+        // make typing invisible.
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit(&editable_tree_with_width(1, "abcdefghij", 40.0))
+            .expect("frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+
+        let caret_left = |engine: &CoreEngine| {
+            let words = engine.editing_geometry();
+            f32::from_bits(
+                words[doper_abi::EDITING_GEOMETRY_HEADER_WORDS
+                    + doper_abi::EDITING_GEOMETRY_RECT_WORDS],
+            )
+        };
+        let control_left = |engine: &CoreEngine| {
+            f32::from_bits(engine.editing_geometry()[doper_abi::EDITING_GEOMETRY_HEADER_WORDS])
+        };
+
+        // Focus leaves the caret at the end. Ten characters estimate to 96px in
+        // a 40px box, so unscrolled it would sit far outside the clip; it has to
+        // rest one caret bar inside the right edge instead.
+        let inset = control_left(&engine) + 40.0 - caret_left(&engine);
+        assert!(
+            (inset - super::CARET_WIDTH).abs() < 0.01,
+            "caret should rest one bar inside the right edge, inset {inset}"
+        );
+
+        engine
+            .input(&input(
+                2,
+                vec![InputCommand::MoveCaret {
+                    node_id: id(1),
+                    direction: doper_abi::CaretDirection::LineStart,
+                    granularity: doper_abi::CaretGranularity::Grapheme,
+                    extend: false,
+                }],
+            ))
+            .expect("move to start");
+        engine.take_edit_transactions().expect("drain move");
+
+        // Back at the start the field must scroll all the way back, not keep an
+        // offset that leaves the first characters hidden.
+        assert!(
+            (caret_left(&engine) - control_left(&engine)).abs() < 0.01,
+            "caret {} control {}",
+            caret_left(&engine),
+            control_left(&engine)
+        );
+    }
+
+    #[test]
     fn editing_does_not_resize_a_measured_text_box() {
         // The browser-measured width applies to the Scene string. Falling back to
         // font_size * 0.6 for the whole session shrank a full-width run to 60% of
@@ -3092,8 +3243,13 @@ mod tests {
         let left = f32::from_bits(words[rect]);
         let width = f32::from_bits(words[rect + 2]);
         // Two measured glyphs precede it, and the preedit glyph is measured too;
-        // the estimate would put it at 19.2 and make it 9.6 wide.
-        assert!((left - 32.0).abs() < 0.01, "candidate window left {left}");
+        // the estimate would put it at 19.2 and make it 9.6 wide. The field is
+        // exactly as wide as its three glyphs, so it scrolled by the caret bar
+        // to keep that bar inside the clip -- hence 32 minus CARET_WIDTH.
+        assert!(
+            (left - (32.0 - super::CARET_WIDTH)).abs() < 0.01,
+            "candidate window left {left}"
+        );
         assert!(
             (width - 16.0).abs() < 0.01,
             "candidate window width {width}"

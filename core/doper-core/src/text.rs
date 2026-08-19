@@ -67,6 +67,7 @@ pub(crate) struct CoreTextSystem {
     forced_fallback: HashMap<NodeId, ForcedFallbackRun>,
     edit_overrides: HashMap<NodeId, Arc<str>>,
     editor_decorations: HashMap<NodeId, Vec<EditorDecoration>>,
+    editor_scroll: HashMap<NodeId, [f32; 2]>,
     active: HashMap<NodeId, PreparedRun>,
     candidate: Option<HashMap<NodeId, PreparedRun>>,
     staged: Vec<GlyphResourceInstruction>,
@@ -86,6 +87,7 @@ impl Default for CoreTextSystem {
             forced_fallback: HashMap::new(),
             edit_overrides: HashMap::new(),
             editor_decorations: HashMap::new(),
+            editor_scroll: HashMap::new(),
             active: HashMap::new(),
             candidate: None,
             staged: Vec::new(),
@@ -123,9 +125,11 @@ impl CoreTextSystem {
         caret_visible: bool,
     ) {
         self.editor_decorations.clear();
+        self.editor_scroll.clear();
         let Some(visual) = visual else {
             return;
         };
+        self.editor_scroll.insert(visual.node, visual.scroll_offset);
         let source = self.candidate.as_ref().unwrap_or(&self.active);
         let decorations = if let Some(run) = source.get(&visual.node) {
             decorations_from_carets(&run.layout.carets, visual, caret_visible)
@@ -531,6 +535,10 @@ impl TextPaintResolver for CoreTextSystem {
         self.editor_decorations
             .get(&node)
             .map_or(&[], Vec::as_slice)
+    }
+
+    fn editor_scroll(&self, node: NodeId) -> [f32; 2] {
+        self.editor_scroll.get(&node).copied().unwrap_or([0.0, 0.0])
     }
 }
 

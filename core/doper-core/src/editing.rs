@@ -26,11 +26,13 @@ pub(crate) struct EditableConfiguration {
     pub(crate) max_graphemes: u32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ActiveEditorVisual {
     pub(crate) node: NodeId,
     pub(crate) selection: [u32; 2],
     pub(crate) composition: Option<[u32; 2]>,
+    /// How far this editor has scrolled its own value inside its box.
+    pub(crate) scroll_offset: [f32; 2],
 }
 
 #[derive(Clone)]
@@ -38,6 +40,8 @@ struct ActiveEdit {
     session: EditSession,
     flags: u32,
     max_graphemes: u32,
+    /// Local scroll of the value inside the box, kept so the caret stays visible.
+    scroll_offset: [f32; 2],
 }
 
 #[derive(Clone, Default)]
@@ -157,6 +161,7 @@ impl EditingController {
                         session,
                         flags: configuration.flags,
                         max_graphemes: configuration.max_graphemes,
+                        scroll_offset: [0.0, 0.0],
                     },
                 );
                 changed.push(node);
@@ -249,7 +254,31 @@ impl EditingController {
             composition: session
                 .composition_range()
                 .map(|range| [range.start, range.end]),
+            scroll_offset: self
+                .sessions
+                .get(&node)
+                .map_or([0.0, 0.0], |active| active.scroll_offset),
         })
+    }
+
+    pub(crate) fn scroll_offset(&self, node: NodeId) -> [f32; 2] {
+        self.sessions
+            .get(&node)
+            .map_or([0.0, 0.0], |active| active.scroll_offset)
+    }
+
+    /// Records how far an editor scrolled its own value; see `Engine::reveal_caret_in_editor`.
+    pub(crate) fn set_scroll_offset(&mut self, node: NodeId, offset: [f32; 2]) -> bool {
+        let Some(active) = self.sessions.get_mut(&node) else {
+            return false;
+        };
+        // Bit equality, not a tolerance: this decides whether the frame has to
+        // repaint, and a sub-pixel move still moves every glyph in the node.
+        if active.scroll_offset.map(f32::to_bits) == offset.map(f32::to_bits) {
+            return false;
+        }
+        active.scroll_offset = offset;
+        true
     }
 
     pub(crate) fn has_pending_transactions(&self) -> bool {
