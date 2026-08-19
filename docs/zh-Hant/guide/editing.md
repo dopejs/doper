@@ -12,7 +12,7 @@ IME composition、候選視窗定位、剪貼簿、復原重做、唯讀與密�
 ## 使用 widget
 
 ```ts
-import { TextField, TextArea } from "@dopejs/doper";
+import { TextField, TextArea } from "@dopejs/pingo";
 
 TextField({
   value: order.note,
@@ -44,7 +44,7 @@ createElement("editableText", {
 或使用本地 controller：
 
 ```ts
-import { useTextEditingController } from "@dopejs/doper";
+import { useTextEditingController } from "@dopejs/pingo";
 
 const editor = useTextEditingController({ value: cell.value });
 createElement("editableText", { controller: editor });

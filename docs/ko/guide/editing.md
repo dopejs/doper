@@ -13,7 +13,7 @@ doper는 편집을 Core의 일급 기능으로 다룹니다. 캐럿, 선택 영�
 ## 위젯 사용하기
 
 ```ts
-import { TextField, TextArea } from "@dopejs/doper";
+import { TextField, TextArea } from "@dopejs/pingo";
 
 TextField({
   value: order.note,
@@ -45,7 +45,7 @@ createElement("editableText", {
 로컬 컨트롤러를 쓸 수도 있습니다.
 
 ```ts
-import { useTextEditingController } from "@dopejs/doper";
+import { useTextEditingController } from "@dopejs/pingo";
 
 const editor = useTextEditingController({ value: cell.value });
 createElement("editableText", { controller: editor });

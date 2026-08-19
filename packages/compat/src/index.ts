@@ -3,7 +3,7 @@ import {
   type DoperNode,
   type HostedCanvasRoot,
   type HostedCanvasRootOptions,
-} from "@dopejs/doper";
+} from "@dopejs/pingo";
 
 /** Why an active page left the doper rendering path. */
 export type CompatFallbackReason =

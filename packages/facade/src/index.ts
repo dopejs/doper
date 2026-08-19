@@ -14,7 +14,7 @@ export {
   type RefObject,
   type Signal,
   type Unsubscribe,
-} from "@dopejs/doper-runtime";
+} from "@dopejs/pingo-runtime";
 export {
   Fragment,
   DoperFont,
@@ -50,34 +50,34 @@ export {
   type TextProps,
   type VirtualListProps,
   type Woff2Decoder,
-} from "@dopejs/doper-jsx";
-export { type DoperRoot } from "@dopejs/doper-reconciler";
+} from "@dopejs/pingo-jsx";
+export { type DoperRoot } from "@dopejs/pingo-reconciler";
 export type {
   EditTransaction,
   EventTransaction,
   EditingGeometry,
   EditingSelection,
   NativeTextInputMode,
-} from "@dopejs/doper-editing";
-export { TextEditingController, type TextEditingControllerOptions } from "@dopejs/doper-editing";
+} from "@dopejs/pingo-editing";
+export { TextEditingController, type TextEditingControllerOptions } from "@dopejs/pingo-editing";
 export {
   TextArea,
   TextField,
   type TextAreaProps,
   type TextFieldProps,
-} from "@dopejs/doper-widgets";
+} from "@dopejs/pingo-widgets";
 export {
   getByRole,
   queryAllByRole,
   SemanticTreeMirror,
   type SemanticMirrorNode,
   type SemanticTreeMirrorOptions,
-} from "@dopejs/doper-a11y";
+} from "@dopejs/pingo-a11y";
 export {
   verifyWasmIntegrity,
   WasmIntegrityError,
   type WasmIntegrityManifest,
-} from "@dopejs/doper-host";
+} from "@dopejs/pingo-host";
 export { ENGINE_ABI_VERSION, ENGINE_VERSION, engineIdentity } from "./version";
 export { useTextEditingController } from "./editing";
 export {
@@ -104,4 +104,4 @@ export {
   type RenderClockMetrics,
   type WasmCoreInput,
   type VirtualRefillRange,
-} from "@dopejs/doper-host";
+} from "@dopejs/pingo-host";

@@ -1,7 +1,7 @@
 {
-  "name": "@dopejs/doper-jsx",
+  "name": "@dopejs/pingo-jsx",
   "version": "0.1.0",
-  "description": "doper internal: JSX runtime and host element types (use @dopejs/doper)",
+  "description": "doper internal: JSX runtime and host element types (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -35,7 +35,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@dopejs/doper-editing": "workspace:*",
+    "@dopejs/pingo-editing": "workspace:*",
     "woff2-encoder": "2.0.0"
   }
 }

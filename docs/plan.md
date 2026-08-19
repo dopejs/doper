@@ -48,7 +48,7 @@
 
 ### 2.3 开发体验
 
-- 业务只依赖 `@dopejs/doper`，继续使用 TSX、function component、hooks 和
+- 业务只依赖 `@dopejs/pingo`，继续使用 TSX、function component、hooks 和
   signals。
 - 公开 API 有明确契约、文档和兼容策略。
 - 能通过语义树进行 E2E 测试，并能录制、导出和重放线上输入。
@@ -440,7 +440,7 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 
 状态：**已完成（2026-08-17）**。
 
-- `@dopejs/doper-widgets` 已交付 `TextField`/`TextArea`：嵌套 container 边框、
+- `@dopejs/pingo-widgets` 已交付 `TextField`/`TextArea`：嵌套 container 边框、
   错误态（错误色边框 + alert caption）、readOnly/password/inputMode/
   controller 透传与 textbox 语义，只组合 `editableText` 原语；已从 facade
   主入口导出并更新公开 API 快照。placeholder 需要 overlay/绝对定位布局能力，
@@ -462,7 +462,7 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
   会话文本；密码编辑器的值在 Core 侧即拒绝导出（引擎测试断言）。schema 单源
   `semanticsBatch` 生成双端常量；Host `parseSemantics` 为 fail-closed 信任
   边界（版本、保留位、边界、UTF-8、尾部字节 + 敌意字节 fuzz）。
-- `@dopejs/doper-a11y`：`SemanticTreeMirror` 把语义快照增量映射为 canvas 旁
+- `@dopejs/pingo-a11y`：`SemanticTreeMirror` 把语义快照增量映射为 canvas 旁
   绝对定位 DOM 影子树（role/aria-label/textContent/tabindex），并提供
   `getByRole`/`queryAllByRole` 语义 E2E 选择器；已从 facade 导出。
 - 焦点模型：focusable/focused 随快照导出；镜像元素进入 tab 顺序，聚焦转发到
@@ -506,7 +506,7 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 
 状态：**已完成（2026-08-17）**。
 
-- `@dopejs/doper-compat` 边界包：按页面粒度的挂载/卸载适配器与回退开关，
+- `@dopejs/pingo-compat` 边界包：按页面粒度的挂载/卸载适配器与回退开关，
   业务经它接入 doper 并可一键切回存量渲染路径；依赖方向 compat → facade
   单向，删除 shim 不改 Core（自动依赖方向检查）。
 - 迁移指南 `docs/migration.md`：接入步骤、能力矩阵、已知限制与回退操作。

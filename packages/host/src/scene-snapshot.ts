@@ -6,7 +6,7 @@ import {
   type NodeKind,
   type Prop,
   type ResourceKind,
-} from "@dopejs/doper-reconciler";
+} from "@dopejs/pingo-reconciler";
 
 interface SnapshotResource {
   readonly bytes: Uint8Array;

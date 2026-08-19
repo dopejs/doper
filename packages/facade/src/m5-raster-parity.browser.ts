@@ -1,4 +1,4 @@
-import { createElement, createHostedCanvasRoot, type FrameReport } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot, type FrameReport } from "@dopejs/pingo";
 import { afterEach, describe, expect, it } from "vitest";
 
 /**

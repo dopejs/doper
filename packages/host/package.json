@@ -1,7 +1,7 @@
 {
-  "name": "@dopejs/doper-host",
+  "name": "@dopejs/pingo-host",
   "version": "0.1.0",
-  "description": "doper internal: canvas host, worker transports, and product WASM core (use @dopejs/doper)",
+  "description": "doper internal: canvas host, worker transports, and product WASM core (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -24,10 +24,10 @@
     }
   },
   "dependencies": {
-    "@dopejs/doper-backend-canvas2d": "workspace:*",
-    "@dopejs/doper-a11y": "workspace:*",
-    "@dopejs/doper-editing": "workspace:*",
-    "@dopejs/doper-reconciler": "workspace:*"
+    "@dopejs/pingo-backend-canvas2d": "workspace:*",
+    "@dopejs/pingo-a11y": "workspace:*",
+    "@dopejs/pingo-editing": "workspace:*",
+    "@dopejs/pingo-reconciler": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

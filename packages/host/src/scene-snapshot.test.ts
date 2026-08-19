@@ -6,7 +6,7 @@ import {
   decodeMutationBatch,
   encodeMutationBatch,
   type Mutation,
-} from "@dopejs/doper-reconciler";
+} from "@dopejs/pingo-reconciler";
 import { describe, expect, it } from "vitest";
 
 import { MutationSceneSnapshot } from "./scene-snapshot";

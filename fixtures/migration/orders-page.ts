@@ -1,8 +1,8 @@
 // Representative migrated page: renders through the compat boundary with a
 // page-granular legacy fallback. This fixture is the input for the automated
 // migration scanner and the shadow/rollback drills.
-import { createElement, TextField, type DoperNode } from "@dopejs/doper";
-import { mountCompatPage, type LegacyRenderer } from "@dopejs/doper-compat";
+import { createElement, TextField, type DoperNode } from "@dopejs/pingo";
+import { mountCompatPage, type LegacyRenderer } from "@dopejs/pingo-compat";
 
 export function renderOrdersPage(): DoperNode {
   return createElement("container", {

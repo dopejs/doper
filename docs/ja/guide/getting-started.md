@@ -3,17 +3,17 @@
 ## インストール
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
-アプリケーションが依存するのは `@dopejs/doper` ひとつだけです。`@dopejs/doper-host` や
-`@dopejs/doper-jsx` などは内部実装パッケージで公開契約ではありません。
+アプリケーションが依存するのは `@dopejs/pingo` ひとつだけです。`@dopejs/pingo-host` や
+`@dopejs/pingo-jsx` などは内部実装パッケージで公開契約ではありません。
 [移行スキャナ](/migration)がそれらの直接 import を拒否します。
 
 ## 最初のキャンバスをマウントする
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#app")!;
 canvas.width = 800;
@@ -49,7 +49,7 @@ root.render(
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@dopejs/doper"
+    "jsxImportSource": "@dopejs/pingo"
   }
 }
 ```
@@ -86,7 +86,7 @@ root.render(<OrderRow index={1} />);
 ## 状態と副作用
 
 ```ts
-import { signal, useEffect, useSignal, useState } from "@dopejs/doper";
+import { signal, useEffect, useSignal, useState } from "@dopejs/pingo";
 
 function Counter() {
   const [count, setCount] = useState(0);

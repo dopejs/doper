@@ -1,4 +1,4 @@
-import { createElement, type Color } from "@dopejs/doper";
+import { createElement, type Color } from "@dopejs/pingo";
 import type { Meta, StoryObj } from "@storybook/html-vite";
 
 import { mountStory } from "./mount";

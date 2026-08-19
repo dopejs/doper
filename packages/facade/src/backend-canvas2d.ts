@@ -1,1 +1,1 @@
-export * from "@dopejs/doper-backend-canvas2d";
+export * from "@dopejs/pingo-backend-canvas2d";

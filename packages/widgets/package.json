@@ -1,7 +1,7 @@
 {
-  "name": "@dopejs/doper-widgets",
+  "name": "@dopejs/pingo-widgets",
   "version": "0.1.0",
-  "description": "doper internal: TextField/TextArea widgets over the editable primitive (use @dopejs/doper)",
+  "description": "doper internal: TextField/TextArea widgets over the editable primitive (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -27,7 +27,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@dopejs/doper-editing": "workspace:*",
-    "@dopejs/doper-jsx": "workspace:*"
+    "@dopejs/pingo-editing": "workspace:*",
+    "@dopejs/pingo-jsx": "workspace:*"
   }
 }

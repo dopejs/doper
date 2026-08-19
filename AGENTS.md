@@ -63,7 +63,7 @@ Keep responsibilities aligned with the module boundaries in `docs/design.md`:
   animation, ABI, and orchestration remain separate crates.
 - `packages/`: TypeScript packages. Runtime, JSX, reconciler, host, backend,
   widgets, accessibility, and devtools remain independently testable.
-- `@dopejs/doper`: facade package only. It re-exports public APIs and contains
+- `@dopejs/pingo`: facade package only. It re-exports public APIs and contains
   no implementation logic.
 - Shared schemas: the single source for opcodes, props, invalidation metadata,
   and binary layouts. Generate Rust and TypeScript representations from them;
@@ -120,11 +120,11 @@ an explicit update to `docs/design.md` with migration and rollback impact.
 
 ## Public API and compatibility
 
-Treat the exports of `@dopejs/doper` as the public contract. Keep internal
+Treat the exports of `@dopejs/pingo` as the public contract. Keep internal
 packages private to applications and preserve tree shaking:
 
-- Provide `@dopejs/doper/jsx-runtime` and
-  `@dopejs/doper/jsx-dev-runtime` subpath exports.
+- Provide `@dopejs/pingo/jsx-runtime` and
+  `@dopejs/pingo/jsx-dev-runtime` subpath exports.
 - Keep devtools and optional backends out of the main entry point.
 - Track the facade with API extraction once that tooling exists.
 - Preserve existing API behavior unless a breaking change is explicitly

@@ -4,7 +4,7 @@ import {
   createWasmCore,
   loadFont,
   type FrameReport,
-} from "@dopejs/doper";
+} from "@dopejs/pingo";
 import { afterEach, describe, expect, it } from "vitest";
 
 describe("browser product vertical slice", () => {

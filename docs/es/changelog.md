@@ -33,7 +33,7 @@ Primera versión publicable. Todos los hitos de ingeniería P0–M5 están compl
   fases captura/objetivo/burbuja, con el protocolo de `preventDefault` síncrono sobre zonas no pasivas.
 - Accesibilidad: exportación del árbol semántico, proyección al árbol DOM en la sombra, selectores E2E
   semánticos `getByRole` y reenvío del foco de teclado.
-- Migración y puesta en producción: `@dopejs/doper-compat` con despliegue y vuelta atrás por página,
+- Migración y puesta en producción: `@dopejs/pingo-compat` con despliegue y vuelta atrás por página,
   escáner de migración, verificación de integridad SHA-256 del paquete y del WASM, diagnóstico y
   manual de operación.
 - Prototipo WebGPU aislado y comparación sin discrepancias contra el oráculo headless (ADR-0006:

@@ -1,7 +1,7 @@
 # doper npm 发布流程
 
-> 状态：初版（2026-08-17）。发布集共 10 个包：公开入口 `@dopejs/doper`、
-> 迁移边界 `@dopejs/doper-compat`，以及它们的依赖闭包（runtime/jsx/
+> 状态：初版（2026-08-17）。发布集共 10 个包：公开入口 `@dopejs/pingo`、
+> 迁移边界 `@dopejs/pingo-compat`，以及它们的依赖闭包（runtime/jsx/
 > editing/reconciler/host/backend-canvas2d/widgets/a11y）。内部包的
 > description 均标注 "internal"，公开契约只有 facade 与 compat 的导出面
 > （迁移扫描器阻止业务 import 内部包）。
@@ -14,7 +14,7 @@
   不兼容时递增，并伴随 golden fixture 显式更新；npm 版本按 semver 管理
   公开 API（`benchmarks/api/*.d.ts` 快照即公开面审阅记录）。
 - 0.x 阶段 minor 允许 breaking，需在 CHANGELOG 与 API 快照 diff 中明示。
-- 内部包（`@dopejs/doper-*`，compat 除外）不承诺任何稳定性；pnpm 发布时
+- 内部包（`@dopejs/pingo-*`，compat 除外）不承诺任何稳定性；pnpm 发布时
   facade 对它们的依赖被固定为精确版本，同版本原子发布避免内部漂移。
 
 ## 2. GitHub 发版（推荐路径）

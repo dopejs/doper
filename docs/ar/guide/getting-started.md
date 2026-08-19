@@ -3,16 +3,16 @@
 ## التثبيت
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
-يعتمد تطبيقك على حزمة واحدة فقط هي `@dopejs/doper`. أمّا `@dopejs/doper-host` و`@dopejs/doper-jsx`
+يعتمد تطبيقك على حزمة واحدة فقط هي `@dopejs/pingo`. أمّا `@dopejs/pingo-host` و`@dopejs/pingo-jsx`
 وغيرهما فهي حزم تنفيذ داخلية خارج العقد العلني، و[ماسح الترحيل](/migration) يرفض استيرادها مباشرة.
 
 ## تركيب أوّل canvas
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#app")!;
 canvas.width = 800;
@@ -48,7 +48,7 @@ root.render(
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@dopejs/doper"
+    "jsxImportSource": "@dopejs/pingo"
   }
 }
 ```
@@ -85,7 +85,7 @@ root.render(<OrderRow index={1} />);
 ## الحالة والتأثيرات الجانبية
 
 ```ts
-import { signal, useEffect, useSignal, useState } from "@dopejs/doper";
+import { signal, useEffect, useSignal, useState } from "@dopejs/pingo";
 
 function Counter() {
   const [count, setCount] = useState(0);

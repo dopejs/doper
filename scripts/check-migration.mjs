@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Import specifiers business code may use; everything else is engine-internal. */
-const ALLOWED_PACKAGES = new Set(["@dopejs/doper", "@dopejs/doper-compat"]);
+const ALLOWED_PACKAGES = new Set(["@dopejs/pingo", "@dopejs/pingo-compat"]);
 
 /**
  * Scans migrated business source for patterns the public contract forbids:
@@ -38,7 +38,7 @@ export function scanSource(file, source) {
     const specifier = importMatch?.[1] ?? importMatch?.[2];
     if (specifier !== undefined) {
       const packageName = specifier.split("/").slice(0, 2).join("/");
-      const isFacadeSubpath = specifier.startsWith("@dopejs/doper/");
+      const isFacadeSubpath = specifier.startsWith("@dopejs/pingo/");
       if (!ALLOWED_PACKAGES.has(packageName) || (!isFacadeSubpath && specifier !== packageName)) {
         record(
           "internal-package-import",
@@ -81,7 +81,7 @@ export async function checkShimDependencyDirection() {
     await readFile(path.join(repositoryRoot, "packages/compat/package.json"), "utf8"),
   );
   for (const dependency of Object.keys(compat.dependencies ?? {})) {
-    if (dependency !== "@dopejs/doper") {
+    if (dependency !== "@dopejs/pingo") {
       problems.push(`packages/compat depends on ${dependency}; only the facade is allowed`);
     }
   }
@@ -91,7 +91,7 @@ export async function checkShimDependencyDirection() {
     const manifestPath = path.join(repositoryRoot, "packages", entry.name, "package.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     const dependencies = { ...manifest.dependencies, ...manifest.devDependencies };
-    if (Object.keys(dependencies).includes("@dopejs/doper-compat")) {
+    if (Object.keys(dependencies).includes("@dopejs/pingo-compat")) {
       problems.push(`packages/${entry.name} depends on the compat shim; the shim must stay a leaf`);
     }
   }

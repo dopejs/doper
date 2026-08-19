@@ -1,4 +1,4 @@
-import type { DoperNode, HostedCanvasRoot, HostedCanvasRootOptions } from "@dopejs/doper";
+import type { DoperNode, HostedCanvasRoot, HostedCanvasRootOptions } from "@dopejs/pingo";
 
 import type { PlaygroundMessages } from "./messages";
 

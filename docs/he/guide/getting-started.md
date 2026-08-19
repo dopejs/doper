@@ -3,17 +3,17 @@
 ## התקנה
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
-היישום תלוי בחבילה אחת בלבד: `@dopejs/doper`. החבילות `@dopejs/doper-host`, `@dopejs/doper-jsx`
+היישום תלוי בחבילה אחת בלבד: `@dopejs/pingo`. החבילות `@dopejs/pingo-host`, `@dopejs/pingo-jsx`
 והאחרות הן חבילות מימוש פנימיות שאינן חלק מהחוזה הציבורי, ו[סורק ההגירה](/migration) דוחה ייבוא ישיר
 שלהן.
 
 ## הרכבת ה-canvas הראשון
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#app")!;
 canvas.width = 800;
@@ -49,7 +49,7 @@ root.render(
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@dopejs/doper"
+    "jsxImportSource": "@dopejs/pingo"
   }
 }
 ```
@@ -86,7 +86,7 @@ root.render(<OrderRow index={1} />);
 ## מצב ותופעות לוואי
 
 ```ts
-import { signal, useEffect, useSignal, useState } from "@dopejs/doper";
+import { signal, useEffect, useSignal, useState } from "@dopejs/pingo";
 
 function Counter() {
   const [count, setCount] = useState(0);

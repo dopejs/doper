@@ -1,4 +1,4 @@
-import { TextField, type EditableInputMode } from "@dopejs/doper";
+import { TextField, type EditableInputMode } from "@dopejs/pingo";
 import type { Meta, StoryObj } from "@storybook/html-vite";
 
 import { mountStory } from "./mount";

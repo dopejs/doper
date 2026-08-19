@@ -32,7 +32,7 @@ ABI 版本獨立管理。
   三階段事件、non-passive 區域同步 `preventDefault` 協定。
 - 無障礙：語意樹匯出、DOM 影子樹鏡像、`getByRole` 語意 E2E 選擇器、
   鍵盤聚焦轉送。
-- 遷移與生產化：`@dopejs/doper-compat` 依頁面灰度/回退、遷移掃描器、
+- 遷移與生產化：`@dopejs/pingo-compat` 依頁面灰度/回退、遷移掃描器、
   發佈套件與 WASM SHA-256 完整性驗證、診斷與運行手冊。
 - WebGPU 隔離原型與 headless oracle 零失配差分（ADR-0006：
   Continue Experiment，預設關閉）。

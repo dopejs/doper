@@ -14,7 +14,7 @@ Zwischenablage, Rückgängig/Wiederherstellen, Nur-Lesen und Passwort implementi
 ## Widgets verwenden
 
 ```ts
-import { TextField, TextArea } from "@dopejs/doper";
+import { TextField, TextArea } from "@dopejs/pingo";
 
 TextField({
   value: order.note,
@@ -46,7 +46,7 @@ createElement("editableText", {
 Oder mit einem lokalen Controller:
 
 ```ts
-import { useTextEditingController } from "@dopejs/doper";
+import { useTextEditingController } from "@dopejs/pingo";
 
 const editor = useTextEditingController({ value: cell.value });
 createElement("editableText", { controller: editor });

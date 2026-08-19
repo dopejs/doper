@@ -4,7 +4,7 @@
 
 canvas 내용은 본질적으로 스크린 리더에 보이지 않습니다. doper는 접근성을 출시 후에 덧씌우는
 레이어로 다루지 않습니다. Core가 시맨틱 트리(role / label / value / bounds / focusable)를 유지하고,
-`@dopejs/doper-a11y`가 이를 canvas 옆의 절대 위치 DOM 섀도 트리로 증분 반영합니다.
+`@dopejs/pingo-a11y`가 이를 canvas 옆의 절대 위치 DOM 섀도 트리로 증분 반영합니다.
 
 섀도 요소는 시각적으로 투명하지만 접근성 트리와 tab 순서에는 존재합니다. 포커스하면 엔진의 편집
 세션으로 전달되므로 키보드 사용자가 canvas 안의 입력란을 실제로 조작할 수 있습니다.
@@ -26,7 +26,7 @@ canvas 내용은 본질적으로 스크린 리더에 보이지 않습니다. dop
 시맨틱 트리가 실제 DOM으로 반영되므로 E2E는 픽셀 비교 대신 역할과 이름으로 요소를 선택할 수 있습니다.
 
 ```ts
-import { getByRole, queryAllByRole } from "@dopejs/doper";
+import { getByRole, queryAllByRole } from "@dopejs/pingo";
 
 const email = getByRole(document.body, "textbox", { name: "수신인" });
 email.focus(); // 엔진 편집 세션으로 전달됩니다

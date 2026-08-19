@@ -1,4 +1,4 @@
-import { createElement } from "@dopejs/doper";
+import { createElement } from "@dopejs/pingo";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { mountCompatPage, type CompatFallbackReason, type LegacyRenderer } from "./index";

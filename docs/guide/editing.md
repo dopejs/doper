@@ -12,7 +12,7 @@ IME composition、候选窗定位、剪贴板、撤销重做、只读与密码�
 ## 使用 widget
 
 ```ts
-import { TextField, TextArea } from "@dopejs/doper";
+import { TextField, TextArea } from "@dopejs/pingo";
 
 TextField({
   value: order.note,
@@ -44,7 +44,7 @@ createElement("editableText", {
 或使用本地 controller：
 
 ```ts
-import { useTextEditingController } from "@dopejs/doper";
+import { useTextEditingController } from "@dopejs/pingo";
 
 const editor = useTextEditingController({ value: cell.value });
 createElement("editableText", { controller: editor });

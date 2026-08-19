@@ -1,7 +1,7 @@
 {
-  "name": "@dopejs/doper-editing",
+  "name": "@dopejs/pingo-editing",
   "version": "0.1.0",
-  "description": "doper internal: editing transactions and native input bridge (use @dopejs/doper)",
+  "description": "doper internal: editing transactions and native input bridge (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {
     "type": "git",

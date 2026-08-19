@@ -1,5 +1,5 @@
 {
-  "name": "doper-workspace",
+  "name": "pingo-workspace",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -87,7 +87,7 @@
     "wasm:budget:run": "node scripts/measure-wasm-budget.mjs"
   },
   "devDependencies": {
-    "@dopejs/doper": "workspace:*",
+    "@dopejs/pingo": "workspace:*",
     "@eslint/js": "10.0.1",
     "@vitest/browser-playwright": "4.1.10",
     "@vitest/coverage-v8": "4.1.10",

@@ -4,7 +4,7 @@ import {
   TextField,
   type DoperNode,
   type FrameReport,
-} from "@dopejs/doper";
+} from "@dopejs/pingo";
 import { afterEach, describe, expect, it } from "vitest";
 
 /** Representative migration page: heading, editable search, virtual list. */

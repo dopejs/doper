@@ -8,7 +8,7 @@ import type {
 } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
-import type { EditTransaction, EventTransaction } from "@dopejs/doper-editing";
+import type { EditTransaction, EventTransaction } from "@dopejs/pingo-editing";
 import {
   WORKER_PROTOCOL_VERSION,
   isRenderWorkerOutboundEnvelope,

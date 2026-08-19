@@ -4,7 +4,7 @@
 
 Canvas-Inhalte sind für Screenreader von Natur aus unsichtbar. doper behandelt Barrierefreiheit nicht als
 Schicht, die nach der Veröffentlichung übergestülpt wird: Der Core pflegt einen Semantikbaum
-(role / label / value / bounds / focusable), und `@dopejs/doper-a11y` bildet ihn inkrementell auf einen
+(role / label / value / bounds / focusable), und `@dopejs/pingo-a11y` bildet ihn inkrementell auf einen
 absolut positionierten DOM-Schattenbaum neben dem canvas ab.
 
 Die Schattenelemente sind optisch transparent, existieren aber im Barrierefreiheitsbaum und in der
@@ -29,7 +29,7 @@ Weil der Semantikbaum in echtes DOM gespiegelt wird, können E2E-Tests über Rol
 statt Pixel zu vergleichen:
 
 ```ts
-import { getByRole, queryAllByRole } from "@dopejs/doper";
+import { getByRole, queryAllByRole } from "@dopejs/pingo";
 
 const email = getByRole(document.body, "textbox", { name: "Empfänger" });
 email.focus(); // wird an die Bearbeitungssitzung der Engine weitergeleitet

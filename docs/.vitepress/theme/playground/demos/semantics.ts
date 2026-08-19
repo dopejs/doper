@@ -1,4 +1,4 @@
-import { createElement, getByRole, queryAllByRole, TextField } from "@dopejs/doper";
+import { createElement, getByRole, queryAllByRole, TextField } from "@dopejs/pingo";
 
 import type { Demo, DemoContext } from "../demo";
 

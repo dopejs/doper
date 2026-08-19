@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { Canvas2DResourceRegistry, ResourceKind } from "@dopejs/doper-backend-canvas2d";
+import { Canvas2DResourceRegistry, ResourceKind } from "@dopejs/pingo-backend-canvas2d";
 
 /**
  * The per-code-point table sums isolated widths, and a real font applies

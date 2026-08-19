@@ -1,5 +1,5 @@
 {
-  "name": "@dopejs/doper-compat",
+  "name": "@dopejs/pingo-compat",
   "version": "0.1.0",
   "description": "doper migration boundary: page-granular mount with legacy fallback",
   "license": "MIT",
@@ -27,6 +27,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@dopejs/doper": "workspace:*"
+    "@dopejs/pingo": "workspace:*"
   }
 }

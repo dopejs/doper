@@ -20,10 +20,10 @@ try {
 
 async function checkAbiRoundtrip() {
   for (const packageName of [
-    "@dopejs/doper-reconciler",
-    "@dopejs/doper-editing",
-    "@dopejs/doper-backend-canvas2d",
-    "@dopejs/doper-host",
+    "@dopejs/pingo-reconciler",
+    "@dopejs/pingo-editing",
+    "@dopejs/pingo-backend-canvas2d",
+    "@dopejs/pingo-host",
   ]) {
     execFileSync("pnpm", ["--filter", packageName, "build"], {
       cwd: root,

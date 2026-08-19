@@ -13,7 +13,7 @@
 ## שימוש ברכיבים המוכנים
 
 ```ts
-import { TextField, TextArea } from "@dopejs/doper";
+import { TextField, TextArea } from "@dopejs/pingo";
 
 TextField({
   value: order.note,
@@ -45,7 +45,7 @@ createElement("editableText", {
 או באמצעות בקר מקומי:
 
 ```ts
-import { useTextEditingController } from "@dopejs/doper";
+import { useTextEditingController } from "@dopejs/pingo";
 
 const editor = useTextEditingController({ value: cell.value });
 createElement("editableText", { controller: editor });

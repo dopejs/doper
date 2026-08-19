@@ -113,18 +113,18 @@ WebGPU 后端则由 Rust 内的 `wgpu` 直接消费 DisplayList，不经过 JS�
 
 | package                          | 职责                                                         |
 | -------------------------------- | ------------------------------------------------------------ |
-| `@dopejs/doper`                  | **门面包**。业务唯一直接依赖项，re-export 下列各包的公开 API |
-| `@dopejs/doper-runtime`          | signals、hooks、function component、生命周期                 |
-| `@dopejs/doper-jsx`              | JSX runtime、编译期优化（静态提升、props 常量折叠）          |
-| `@dopejs/doper-reconciler`       | 组件树 → Mutation Stream 编码                                |
-| `@dopejs/doper-host`             | Worker 生命周期、SAB 通道、能力探测与降级                    |
-| `@dopejs/doper-editing`          | EditContext/IME/剪贴板桥接、editing controller 与编辑事件    |
-| `@dopejs/doper-backend-canvas2d` | DisplayList 回放器                                           |
-| `@dopejs/doper-widgets`          | 内置组件（Flex/Stack/Text/Image/VirtualList/Table…）         |
-| `@dopejs/doper-a11y`             | 语义树 → DOM 影子树                                          |
-| `@dopejs/doper-devtools`         | 帧瀑布、cache 命中率、tile 可视化、scene 检查器              |
+| `@dopejs/pingo`                  | **门面包**。业务唯一直接依赖项，re-export 下列各包的公开 API |
+| `@dopejs/pingo-runtime`          | signals、hooks、function component、生命周期                 |
+| `@dopejs/pingo-jsx`              | JSX runtime、编译期优化（静态提升、props 常量折叠）          |
+| `@dopejs/pingo-reconciler`       | 组件树 → Mutation Stream 编码                                |
+| `@dopejs/pingo-host`             | Worker 生命周期、SAB 通道、能力探测与降级                    |
+| `@dopejs/pingo-editing`          | EditContext/IME/剪贴板桥接、editing controller 与编辑事件    |
+| `@dopejs/pingo-backend-canvas2d` | DisplayList 回放器                                           |
+| `@dopejs/pingo-widgets`          | 内置组件（Flex/Stack/Text/Image/VirtualList/Table…）         |
+| `@dopejs/pingo-a11y`             | 语义树 → DOM 影子树                                          |
+| `@dopejs/pingo-devtools`         | 帧瀑布、cache 命中率、tile 可视化、scene 检查器              |
 
-#### 门面包 `@dopejs/doper`
+#### 门面包 `@dopejs/pingo`
 
 业务侧只依赖这一个包，内部子包对业务不可见，便于后续重构而不破坏调用方。
 
@@ -133,13 +133,13 @@ WebGPU 后端则由 Rust 内的 `wgpu` 直接消费 DisplayList，不经过 JS�
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@dopejs/doper",
+    "jsxImportSource": "@dopejs/pingo",
   },
 }
 ```
 
 ```tsx
-import { createRoot } from "@dopejs/doper";
+import { createRoot } from "@dopejs/pingo";
 
 root.render(
   <virtualList
@@ -152,9 +152,9 @@ root.render(
 
 约束：
 
-- 门面包必须提供 `@dopejs/doper/jsx-runtime` 与 `@dopejs/doper/jsx-dev-runtime` 两个子路径导出，转发到 `@dopejs/doper-jsx`，否则 `jsxImportSource` 无法工作。
+- 门面包必须提供 `@dopejs/pingo/jsx-runtime` 与 `@dopejs/pingo/jsx-dev-runtime` 两个子路径导出，转发到 `@dopejs/pingo-jsx`，否则 `jsxImportSource` 无法工作。
 - **只做 re-export，不含任何实现逻辑**，避免成为绕不开的耦合点。
-- 后端与 devtools 通过子路径按需引入（`@dopejs/doper/devtools`、`@dopejs/doper/backend-webgpu`），不进主入口，保证 tree-shaking 后不带入生产包。
+- 后端与 devtools 通过子路径按需引入（`@dopejs/pingo/devtools`、`@dopejs/pingo/backend-webgpu`），不进主入口，保证 tree-shaking 后不带入生产包。
 - 门面包的导出面即公开 API 契约，纳入 api-extractor 卡点；子包之间的相互依赖不受此约束。
 
 ---
@@ -444,7 +444,7 @@ policy；关闭 Worker 后直接使用 M1 主线程路径。
 1. SAB 不可用 → `postMessage` 传 mutation（多一次拷贝，延迟略增，仍在 Worker 内合成）。
 2. Worker/OffscreenCanvas 不可用 → 全部退回主线程单线程模式，功能不缺失，性能按 doper 自身的主线程基线独立记录。
 
-降级在 `@dopejs/doper-host` 的能力探测中自动完成，业务无感知。
+降级在 `@dopejs/pingo-host` 的能力探测中自动完成，业务无感知。
 
 ---
 
@@ -1641,7 +1641,7 @@ outline glyph，不把 COLR/CBDT/SVG、系统字体或浏览器合成字体伪�
 
 1. **EditContext**：绑定 canvas，接收文本、selection、composition 与字符边界
    查询，向输入法提供 control/selection/character bounds。
-2. **引擎托管输入代理**：EditContext 不可用时，由 `@dopejs/doper-editing`
+2. **引擎托管输入代理**：EditContext 不可用时，由 `@dopejs/pingo-editing`
    维护一个全局、不可见的 `textarea`/`input` 代理，统一处理
    `beforeinput`、composition、软键盘和剪贴板。
 
@@ -1767,7 +1767,7 @@ function Cell({ row, col }: CellProps) {
 
 理由：signal 更新精确定位到单个组件，不需要从根 diff，也不要求业务标注静态/动态节点；百万 cell 场景下仍可保持更新范围可控。
 
-### 编译期优化（`@dopejs/doper-jsx`）
+### 编译期优化（`@dopejs/pingo-jsx`）
 
 - 静态子树提升：结构不变的子树只发一次 `CreateNode`，之后完全跳过。
 - props 常量折叠：编译期能确定的值直接编入初始 mutation。
@@ -1785,7 +1785,7 @@ function Cell({ row, col }: CellProps) {
 从第一天进架构，不后补。
 
 - Core 维护语义树（role / label / value / bounds / focusable）。
-- `@dopejs/doper-a11y` 把语义树映射为 canvas 旁的绝对定位 DOM 影子树，供屏幕阅读器与自动化工具消费。
+- `@dopejs/pingo-a11y` 把语义树映射为 canvas 旁的绝对定位 DOM 影子树，供屏幕阅读器与自动化工具消费。
 - E2E 因此可以按语义选择元素，像素录制回放只作为补充证据。
 - 保留像素回归测试作为渲染正确性的补充手段（`@napi-rs/canvas` 或 headless 真实浏览器）。
 

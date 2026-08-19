@@ -1,4 +1,4 @@
-import { decodeMutationBatch, encodeMutationBatch } from "@dopejs/doper-reconciler";
+import { decodeMutationBatch, encodeMutationBatch } from "@dopejs/pingo-reconciler";
 
 import type { SabMutationRing, SabMutationRingMetrics } from "./sab-ring";
 import { MutationTransportBackpressureError } from "./transport-errors";

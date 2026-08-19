@@ -2,15 +2,15 @@ import {
   RasterTileCache,
   type Canvas2DContext,
   type ReplayStats,
-} from "@dopejs/doper-backend-canvas2d";
+} from "@dopejs/pingo-backend-canvas2d";
 import {
   ABI_VERSION,
   NodeKind,
   ResourceKind,
   encodeMutationBatch,
   type Mutation,
-} from "@dopejs/doper-reconciler";
-import { encodeInputBatch } from "@dopejs/doper-editing";
+} from "@dopejs/pingo-reconciler";
+import { encodeInputBatch } from "@dopejs/pingo-editing";
 import { describe, expect, it, vi } from "vitest";
 
 import { CanvasFrameSink, parseSemantics, type CoreClient, type FrameReport } from "./main-thread";

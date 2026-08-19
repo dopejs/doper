@@ -1,7 +1,7 @@
 {
-  "name": "@dopejs/doper-reconciler",
+  "name": "@dopejs/pingo-reconciler",
   "version": "0.1.0",
-  "description": "doper internal: component tree reconciler and mutation stream encoder (use @dopejs/doper)",
+  "description": "doper internal: component tree reconciler and mutation stream encoder (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -23,9 +23,9 @@
     }
   },
   "dependencies": {
-    "@dopejs/doper-editing": "workspace:*",
-    "@dopejs/doper-jsx": "workspace:*",
-    "@dopejs/doper-runtime": "workspace:*"
+    "@dopejs/pingo-editing": "workspace:*",
+    "@dopejs/pingo-jsx": "workspace:*",
+    "@dopejs/pingo-runtime": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

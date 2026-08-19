@@ -3,17 +3,17 @@
 ## Installation
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
-Ihre Anwendung hängt nur von einem Paket ab: `@dopejs/doper`. `@dopejs/doper-host`,
-`@dopejs/doper-jsx` und die übrigen sind interne Implementierungspakete und nicht Teil des
+Ihre Anwendung hängt nur von einem Paket ab: `@dopejs/pingo`. `@dopejs/pingo-host`,
+`@dopejs/pingo-jsx` und die übrigen sind interne Implementierungspakete und nicht Teil des
 öffentlichen Vertrags — der [Migrationsscanner](/migration) lehnt ihren direkten Import ab.
 
 ## Das erste Canvas einhängen
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#app")!;
 canvas.width = 800;
@@ -49,7 +49,7 @@ Konfigurieren Sie `tsconfig.json`:
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@dopejs/doper"
+    "jsxImportSource": "@dopejs/pingo"
   }
 }
 ```
@@ -87,7 +87,7 @@ führen keinen neuen Eingabepfad ein.
 ## Zustand und Effekte
 
 ```ts
-import { signal, useEffect, useSignal, useState } from "@dopejs/doper";
+import { signal, useEffect, useSignal, useState } from "@dopejs/pingo";
 
 function Counter() {
   const [count, setCount] = useState(0);

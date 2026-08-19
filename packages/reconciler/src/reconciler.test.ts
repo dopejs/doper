@@ -4,8 +4,8 @@ import {
   type DoperEvent,
   type DoperNode,
   type NodeHandle,
-} from "@dopejs/doper-jsx";
-import { signal, useEffect } from "@dopejs/doper-runtime";
+} from "@dopejs/pingo-jsx";
+import { signal, useEffect } from "@dopejs/pingo-runtime";
 import { describe, expect, it, vi } from "vitest";
 
 import { NodeKind, Prop, ResourceKind } from "./generated";

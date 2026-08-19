@@ -14,7 +14,7 @@ doper は編集を Core の一級機能として扱います。キャレット�
 ## ウィジェットを使う
 
 ```ts
-import { TextField, TextArea } from "@dopejs/doper";
+import { TextField, TextArea } from "@dopejs/pingo";
 
 TextField({
   value: order.note,
@@ -46,7 +46,7 @@ createElement("editableText", {
 ローカルのコントローラを使うこともできます。
 
 ```ts
-import { useTextEditingController } from "@dopejs/doper";
+import { useTextEditingController } from "@dopejs/pingo";
 
 const editor = useTextEditingController({ value: cell.value });
 createElement("editableText", { controller: editor });

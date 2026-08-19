@@ -4,7 +4,7 @@
 
 محتوى الـ canvas غير مرئيّ لقارئات الشاشة بطبيعته. ولا يتعامل doper مع إمكانية الوصول بوصفها طبقة تُضاف
 بعد الإطلاق: تحتفظ النواة بشجرة دلالية (role / label / value / bounds / focusable)، وتحوّلها
-‏`@dopejs/doper-a11y` تزايديًا إلى شجرة DOM ظلّية مطلقة الموضع بجوار الـ canvas.
+‏`@dopejs/pingo-a11y` تزايديًا إلى شجرة DOM ظلّية مطلقة الموضع بجوار الـ canvas.
 
 العناصر الظلّية شفّافة بصريًا لكنّها موجودة في شجرة إمكانية الوصول وفي ترتيب التنقّل بمفتاح Tab، ويُحوَّل
 التركيز عليها إلى جلسة التحرير في المحرّك، فيتمكّن مستخدم لوحة المفاتيح من تشغيل حقول الإدخال داخل الـ
@@ -27,7 +27,7 @@ canvas فعليًا.
 البكسلات:
 
 ```ts
-import { getByRole, queryAllByRole } from "@dopejs/doper";
+import { getByRole, queryAllByRole } from "@dopejs/pingo";
 
 const email = getByRole(document.body, "textbox", { name: "المستلِم" });
 email.focus(); // يُحوَّل إلى جلسة التحرير في المحرّك

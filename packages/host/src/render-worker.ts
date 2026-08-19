@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
-import { decodeMutationBatch } from "@dopejs/doper-reconciler";
-import { decodeInputBatch } from "@dopejs/doper-editing";
+import { decodeMutationBatch } from "@dopejs/pingo-reconciler";
+import { decodeInputBatch } from "@dopejs/pingo-editing";
 
 import { MINIMUM_READABLE_ABI_VERSION } from "./generated";
 import { CanvasFrameSink, createDefaultRasterCache, type CoreClient } from "./main-thread";

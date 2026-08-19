@@ -5,7 +5,7 @@ import { useData } from "vitepress";
 import type { Demo, DemoContext } from "./demo";
 import { playgroundMessages } from "./messages";
 
-type EngineModule = typeof import("@dopejs/doper");
+type EngineModule = typeof import("@dopejs/pingo");
 type HostedRoot = Awaited<ReturnType<EngineModule["createHostedCanvasRoot"]>>;
 
 const { lang } = useData();
@@ -221,7 +221,7 @@ onMounted(() => {
       // Loaded lazily so the static site build never evaluates browser-only
       // engine code during server-side rendering.
       const [engineModule, demoModule] = await Promise.all([
-        import("@dopejs/doper"),
+        import("@dopejs/pingo"),
         import("./demos"),
       ]);
       engine = engineModule;

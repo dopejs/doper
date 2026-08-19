@@ -649,7 +649,7 @@ export function localeConfig(
       },
       socialLinks: [
         { icon: "github", link: "https://github.com/dopejs/pingo" },
-        { icon: "npm", link: "https://www.npmjs.com/package/@dopejs/doper" },
+        { icon: "npm", link: "https://www.npmjs.com/package/@dopejs/pingo" },
       ],
       outline: { level: [2, 3], label: ui.outline },
       docFooter: { prev: ui.previousPage, next: ui.nextPage },

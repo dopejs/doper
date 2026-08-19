@@ -5,7 +5,7 @@ import {
   queryAllByRole,
   TextField,
   type FrameReport,
-} from "@dopejs/doper";
+} from "@dopejs/pingo";
 import { afterEach, describe, expect, it } from "vitest";
 
 describe("M4 semantic tree and accessibility mirror", () => {

@@ -4,8 +4,8 @@ import {
   type DoperNode,
   type EditableInputMode,
   type EditableTextProps,
-} from "@dopejs/doper-jsx";
-import type { EditTransaction, TextEditingController } from "@dopejs/doper-editing";
+} from "@dopejs/pingo-jsx";
+import type { EditTransaction, TextEditingController } from "@dopejs/pingo-editing";
 
 /** Shared decorated-field configuration for TextField and TextArea. */
 export interface TextFieldProps {

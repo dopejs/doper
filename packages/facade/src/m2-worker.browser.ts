@@ -8,7 +8,7 @@ import {
   type ScrollProps,
   type VirtualListProps,
   type VirtualRefillRange,
-} from "@dopejs/doper";
+} from "@dopejs/pingo";
 import { afterEach, describe, expect, it } from "vitest";
 
 describe("M2 production transport matrix", () => {

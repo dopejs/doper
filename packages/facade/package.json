@@ -1,5 +1,5 @@
 {
-  "name": "@dopejs/doper",
+  "name": "@dopejs/pingo",
   "version": "0.1.0",
   "description": "doper canvas rendering engine: public facade with TSX, hooks, native scrolling, and canvas-native editing",
   "license": "MIT",
@@ -35,14 +35,14 @@
     }
   },
   "dependencies": {
-    "@dopejs/doper-a11y": "workspace:*",
-    "@dopejs/doper-backend-canvas2d": "workspace:*",
-    "@dopejs/doper-editing": "workspace:*",
-    "@dopejs/doper-host": "workspace:*",
-    "@dopejs/doper-jsx": "workspace:*",
-    "@dopejs/doper-reconciler": "workspace:*",
-    "@dopejs/doper-runtime": "workspace:*",
-    "@dopejs/doper-widgets": "workspace:*"
+    "@dopejs/pingo-a11y": "workspace:*",
+    "@dopejs/pingo-backend-canvas2d": "workspace:*",
+    "@dopejs/pingo-editing": "workspace:*",
+    "@dopejs/pingo-host": "workspace:*",
+    "@dopejs/pingo-jsx": "workspace:*",
+    "@dopejs/pingo-reconciler": "workspace:*",
+    "@dopejs/pingo-runtime": "workspace:*",
+    "@dopejs/pingo-widgets": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

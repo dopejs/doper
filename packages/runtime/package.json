@@ -1,7 +1,7 @@
 {
-  "name": "@dopejs/doper-runtime",
+  "name": "@dopejs/pingo-runtime",
   "version": "0.1.0",
-  "description": "doper internal: signals and hooks runtime (use @dopejs/doper)",
+  "description": "doper internal: signals and hooks runtime (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -1,5 +1,5 @@
-import { encodeInputBatch } from "@dopejs/doper-editing";
-import { NULL_NODE_ID, NodeKind, encodeMutationBatch } from "@dopejs/doper-reconciler";
+import { encodeInputBatch } from "@dopejs/pingo-editing";
+import { NULL_NODE_ID, NodeKind, encodeMutationBatch } from "@dopejs/pingo-reconciler";
 import { describe, expect, it, vi } from "vitest";
 
 import {

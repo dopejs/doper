@@ -19,9 +19,9 @@ import {
   type NodeHandle,
   type Ref,
   type VirtualListProps,
-} from "@dopejs/doper-jsx";
-import { ComponentScope } from "@dopejs/doper-runtime/internal";
-import type { EditTransaction, EventTransaction, InputEventKind } from "@dopejs/doper-editing";
+} from "@dopejs/pingo-jsx";
+import { ComponentScope } from "@dopejs/pingo-runtime/internal";
+import type { EditTransaction, EventTransaction, InputEventKind } from "@dopejs/pingo-editing";
 
 import { MAX_VIRTUAL_ITEMS, NodeKind, Prop, ResourceKind } from "./generated";
 import { encodeMutationBatch, NULL_NODE_ID, type Mutation } from "./mutation-stream";

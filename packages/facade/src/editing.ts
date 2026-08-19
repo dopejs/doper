@@ -1,5 +1,5 @@
-import { TextEditingController, type TextEditingControllerOptions } from "@dopejs/doper-editing";
-import { useMemo } from "@dopejs/doper-runtime";
+import { TextEditingController, type TextEditingControllerOptions } from "@dopejs/pingo-editing";
+import { useMemo } from "@dopejs/pingo-runtime";
 
 /** Returns one stable controller and synchronizes its external value every render. */
 export function useTextEditingController(

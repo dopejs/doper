@@ -1,5 +1,5 @@
-import { decodeInputBatch } from "@dopejs/doper-editing";
-import { decodeMutationBatch } from "@dopejs/doper-reconciler";
+import { decodeInputBatch } from "@dopejs/pingo-editing";
+import { decodeMutationBatch } from "@dopejs/pingo-reconciler";
 
 import { decodeSystemTextMetricBatch } from "./system-text-metrics";
 

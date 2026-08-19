@@ -4,7 +4,7 @@
 
 canvas の内容は本質的にスクリーンリーダーから見えません。doper はアクセシビリティをリリース後に
 被せるレイヤーとして扱いません。Core がセマンティクスツリー（role / label / value / bounds /
-focusable）を保持し、`@dopejs/doper-a11y` がそれを canvas の隣の絶対配置された DOM シャドウツリーへ
+focusable）を保持し、`@dopejs/pingo-a11y` がそれを canvas の隣の絶対配置された DOM シャドウツリーへ
 差分的に反映します。
 
 シャドウ要素は視覚的には透明ですが、アクセシビリティツリーと tab 順には存在します。フォーカスすると
@@ -28,7 +28,7 @@ focusable）を保持し、`@dopejs/doper-a11y` がそれを canvas の隣の絶
 要素を選択できます。
 
 ```ts
-import { getByRole, queryAllByRole } from "@dopejs/doper";
+import { getByRole, queryAllByRole } from "@dopejs/pingo";
 
 const email = getByRole(document.body, "textbox", { name: "宛先" });
 email.focus(); // エンジンの編集セッションへ転送されます

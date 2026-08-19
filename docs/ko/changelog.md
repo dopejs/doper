@@ -32,7 +32,7 @@ npm semver와 바이너리 ABI 버전은 독립적으로 관리합니다.
   비 passive 영역 동기 `preventDefault` 프로토콜.
 - 접근성: 시맨틱 트리 내보내기, DOM 섀도 트리 반영, `getByRole` 시맨틱 E2E 셀렉터,
   키보드 포커스 전달.
-- 마이그레이션과 production화: `@dopejs/doper-compat`의 페이지 단위 점진 적용/롤백,
+- 마이그레이션과 production화: `@dopejs/pingo-compat`의 페이지 단위 점진 적용/롤백,
   마이그레이션 스캐너, 릴리스 패키지와 WASM SHA-256 무결성 검증, 진단과 운영 매뉴얼.
 - 격리된 WebGPU 프로토타입과 헤드리스 오라클의 불일치 없는 차분(ADR-0006:
   Continue Experiment, 기본 비활성).

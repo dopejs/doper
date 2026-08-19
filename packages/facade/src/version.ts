@@ -1,4 +1,4 @@
-import { ABI_VERSION } from "@dopejs/doper-host";
+import { ABI_VERSION } from "@dopejs/pingo-host";
 
 /** Engine release version for incident reports and rollout dashboards. */
 export const ENGINE_VERSION = "0.1.0";

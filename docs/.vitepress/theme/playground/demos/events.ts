@@ -1,4 +1,4 @@
-import { createElement, type DoperEvent, type DoperNode } from "@dopejs/doper";
+import { createElement, type DoperEvent, type DoperNode } from "@dopejs/pingo";
 
 import type { Demo, DemoContext } from "../demo";
 

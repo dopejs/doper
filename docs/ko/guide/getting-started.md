@@ -3,17 +3,17 @@
 ## 설치
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
-애플리케이션은 `@dopejs/doper` 하나만 의존합니다. `@dopejs/doper-host`, `@dopejs/doper-jsx` 같은
+애플리케이션은 `@dopejs/pingo` 하나만 의존합니다. `@dopejs/pingo-host`, `@dopejs/pingo-jsx` 같은
 패키지는 내부 구현이며 공개 계약이 아닙니다. [마이그레이션 스캐너](/migration)가 이들을 직접
 import 하는 것을 거부합니다.
 
 ## 첫 캔버스 마운트하기
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#app")!;
 canvas.width = 800;
@@ -49,7 +49,7 @@ Canvas2D 중에서 전송 경로를 고릅니다. 폴백을 위한 분기를 직
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@dopejs/doper"
+    "jsxImportSource": "@dopejs/pingo"
   }
 }
 ```
@@ -86,7 +86,7 @@ root.render(<OrderRow index={1} />);
 ## 상태와 부수 효과
 
 ```ts
-import { signal, useEffect, useSignal, useState } from "@dopejs/doper";
+import { signal, useEffect, useSignal, useState } from "@dopejs/pingo";
 
 function Counter() {
   const [count, setCount] = useState(0);

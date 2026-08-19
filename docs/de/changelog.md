@@ -33,7 +33,7 @@ Erste veröffentlichungsfähige Version. Alle Engineering-Meilensteine P0–M5 s
   Capture/Ziel/Bubble samt Protokoll für synchrones `preventDefault` in nicht passiven Regionen.
 - Barrierefreiheit: Export des Semantikbaums, Spiegelung in den DOM-Schattenbaum, semantische
   E2E-Selektoren über `getByRole` und Weiterleitung des Tastaturfokus.
-- Migration und Produktivbetrieb: `@dopejs/doper-compat` für seitenweises Ausrollen und Zurücknehmen,
+- Migration und Produktivbetrieb: `@dopejs/pingo-compat` für seitenweises Ausrollen und Zurücknehmen,
   Migrationsscanner, SHA-256-Integritätsprüfung von Paket und WASM, Diagnose und Betriebshandbuch.
 - Isolierter WebGPU-Prototyp mit abweichungsfreiem Vergleich gegen das Headless-Orakel (ADR-0006:
   Continue Experiment, standardmäßig deaktiviert).

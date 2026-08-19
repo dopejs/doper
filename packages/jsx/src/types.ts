@@ -1,6 +1,6 @@
 import type { DoperFont } from "./font";
 import type { DoperImage } from "./image";
-import type { EditTransaction, TextEditingController } from "@dopejs/doper-editing";
+import type { EditTransaction, TextEditingController } from "@dopejs/pingo-editing";
 
 /** Stable list identity used by localized reconciliation. */
 export type Key = string | number;

@@ -1,4 +1,4 @@
-import { TextArea } from "@dopejs/doper";
+import { TextArea } from "@dopejs/pingo";
 import type { Meta, StoryObj } from "@storybook/html-vite";
 
 import { mountStory } from "./mount";

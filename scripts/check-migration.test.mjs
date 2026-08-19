@@ -9,9 +9,9 @@ import {
 describe("migration scanner", () => {
   it("flags internal imports, embedded inputs, and forceUpdate escapes", () => {
     const source = [
-      'import { createHostedCanvasRoot } from "@dopejs/doper-host";',
-      'import { createElement } from "@dopejs/doper";',
-      'import { jsx } from "@dopejs/doper/jsx-runtime";',
+      'import { createHostedCanvasRoot } from "@dopejs/pingo-host";',
+      'import { createElement } from "@dopejs/pingo";',
+      'import { jsx } from "@dopejs/pingo/jsx-runtime";',
       'const input = createElement("input", { value });',
       "widget.forceUpdate();",
     ].join("\n");

@@ -1,4 +1,4 @@
-import type { Color, DoperFont, DoperImage } from "@dopejs/doper-jsx";
+import type { Color, DoperFont, DoperImage } from "@dopejs/pingo-jsx";
 
 import {
   AFFINE_A_OFFSET,

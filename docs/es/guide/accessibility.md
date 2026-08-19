@@ -4,7 +4,7 @@
 
 El contenido de un canvas es, por naturaleza, invisible para un lector de pantalla. doper no trata la
 accesibilidad como una capa que se añade después de publicar: el Core mantiene un árbol semántico
-(role / label / value / bounds / focusable) y `@dopejs/doper-a11y` lo proyecta de forma incremental
+(role / label / value / bounds / focusable) y `@dopejs/pingo-a11y` lo proyecta de forma incremental
 como un árbol DOM en la sombra, posicionado en absoluto junto al canvas.
 
 Los elementos en la sombra son visualmente transparentes pero existen en el árbol de accesibilidad y
@@ -29,7 +29,7 @@ Como el árbol semántico se refleja en DOM real, los tests E2E pueden seleccion
 lugar de comparar píxeles:
 
 ```ts
-import { getByRole, queryAllByRole } from "@dopejs/doper";
+import { getByRole, queryAllByRole } from "@dopejs/pingo";
 
 const email = getByRole(document.body, "textbox", { name: "Destinatario" });
 email.focus(); // se reenvía a la sesión de edición del motor

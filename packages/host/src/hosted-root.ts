@@ -5,8 +5,8 @@ import {
   type DoperRoot,
   type MutationSink,
   type RootOptions,
-} from "@dopejs/doper-reconciler";
-import { SemanticTreeMirror } from "@dopejs/doper-a11y";
+} from "@dopejs/pingo-reconciler";
+import { SemanticTreeMirror } from "@dopejs/pingo-a11y";
 import {
   decodeInputBatch,
   encodeInputBatch,
@@ -16,7 +16,7 @@ import {
   type EditingGeometry,
   type EventTransaction,
   type InputCommand,
-} from "@dopejs/doper-editing";
+} from "@dopejs/pingo-editing";
 
 import { MAX_INPUT_BYTES, MAX_MUTATION_BYTES } from "./generated";
 import {
@@ -122,6 +122,14 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly workerFactory?: () => Worker;
 }
 
+/**
+ * How long a double click waits for its editor to become active.
+ *
+ * Long enough for a Worker round trip on a loaded main thread, short enough
+ * that a gesture the user has moved on from is dropped instead of applied.
+ */
+const PENDING_WORD_SELECTION_MS = 600;
+
 /** Public root whose transport can fail over without replacing Shell component state. */
 export interface HostedCanvasRoot extends DoperRoot {
   readonly canvas: HTMLCanvasElement;
@@ -183,6 +191,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #lastTransportMetrics: HostMutationTransportMetrics | undefined;
   #nonPassiveRegions: readonly NonPassiveRegion[] = [];
   #editingGeometry: EditingGeometryFrame | undefined;
+  /** A double click held until its editor becomes active; see the handler. */
+  #pendingWordSelection: { x: number; y: number; deadline: number } | undefined;
   #textDragPointer: number | undefined;
   #semanticMirror: SemanticTreeMirror | undefined;
   #mainFrameTimestamp: number | undefined;
@@ -492,6 +502,9 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   }
 
   private readonly handleCanvasPointerEvent = (event: PointerEvent): void => {
+    // A new press supersedes a held gesture. The browser reports the double
+    // click after both presses, so this never discards the one just recorded.
+    if (event.type === "pointerdown") this.#pendingWordSelection = undefined;
     switch (event.type) {
       case "pointerdown":
       case "pointerup":
@@ -802,22 +815,39 @@ class HostedCanvasRootController implements HostedCanvasRoot {
 
   private readonly handleCanvasDoubleClick = (event: Event): void => {
     const mouse = event as MouseEvent;
-    const activeNodeId = this.#inputBridge.activeNodeId;
-    const geometry = this.#editingGeometry;
-    if (activeNodeId === undefined || geometry === undefined || geometry.nodeId !== activeNodeId) {
-      return;
-    }
     const rect = this.#canvas.getBoundingClientRect();
     if (!(rect.width > 0) || !(rect.height > 0)) return;
     const x = ((mouse.clientX - rect.left) * this.logicalWidth()) / rect.width;
     const y = ((mouse.clientY - rect.top) * this.logicalHeight()) / rect.height;
+    if (this.selectWordAt(x, y)) return;
+    // The press that focuses an editor round-trips through Core, and with a
+    // Worker transport that has not landed by the time the browser reports the
+    // double click. Dropping it made the first double click on an unfocused
+    // field place a caret and select nothing, which reads as word selection
+    // being broken. Held until the editor reports its geometry.
+    this.#pendingWordSelection = { x, y, deadline: this.now() + PENDING_WORD_SELECTION_MS };
+  };
+
+  /**
+   * Selects the word under a canvas point when an editor already owns it.
+   *
+   * Returns whether the selection was dispatched, so the caller can decide to
+   * hold the gesture until an editor becomes active.
+   */
+  private selectWordAt(x: number, y: number): boolean {
+    const activeNodeId = this.#inputBridge.activeNodeId;
+    const geometry = this.#editingGeometry;
+    if (activeNodeId === undefined || geometry === undefined || geometry.nodeId !== activeNodeId) {
+      return false;
+    }
+    const bounds = geometry.controlBounds;
     if (
-      x < geometry.controlBounds.left ||
-      x >= geometry.controlBounds.left + geometry.controlBounds.width ||
-      y < geometry.controlBounds.top ||
-      y >= geometry.controlBounds.top + geometry.controlBounds.height
+      x < bounds.left ||
+      x >= bounds.left + bounds.width ||
+      y < bounds.top ||
+      y >= bounds.top + bounds.height
     ) {
-      return;
+      return false;
     }
     try {
       // The segmentation travels with the click: Core resolves the offset from
@@ -839,7 +869,29 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     } catch (cause) {
       this.#options.onHostError?.(toError(cause, "word selection failed"));
     }
-  };
+    return true;
+  }
+
+  /** Applies a double click that arrived before its editor was active. */
+  private flushPendingWordSelection(): void {
+    const pending = this.#pendingWordSelection;
+    if (pending === undefined) return;
+    // Expired gestures are dropped rather than applied late: selecting a word
+    // long after the press would move a selection the user has since made.
+    if (this.now() > pending.deadline) {
+      this.#pendingWordSelection = undefined;
+      return;
+    }
+    // Cleared before dispatching, not after: the command produces a frame, the
+    // frame reports geometry, and that re-enters here. Leaving it set resent the
+    // selection on every re-entry until the deadline expired.
+    this.#pendingWordSelection = undefined;
+    if (!this.selectWordAt(pending.x, pending.y)) this.#pendingWordSelection = pending;
+  }
+
+  private now(): number {
+    return typeof performance === "object" ? performance.now() : Date.now();
+  }
 
   private attachCanvasEventListeners(): void {
     this.observeCanvasSize();
@@ -1289,6 +1341,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   /** Feeds Core-computed editor geometry to the IME bridge automatically. */
   private handleEditingGeometry(frame: EditingGeometryFrame): void {
     this.#editingGeometry = frame;
+    this.flushPendingWordSelection();
     if (this.#inputBridge.activeNodeId !== frame.nodeId) return;
     const toDomRect = (rect: EditingGeometryRect): DOMRect =>
       new DOMRect(rect.left, rect.top, rect.width, rect.height);

@@ -9,7 +9,7 @@ import type {
 } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
-import type { EditTransaction, EventTransaction } from "@dopejs/doper-editing";
+import type { EditTransaction, EventTransaction } from "@dopejs/pingo-editing";
 
 export const WORKER_PROTOCOL_VERSION = 8 as const;
 

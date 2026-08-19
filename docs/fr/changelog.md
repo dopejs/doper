@@ -33,7 +33,7 @@ Première version publiable. Tous les jalons d'ingénierie P0–M5 sont terminé
   capture/cible/bouillonnement, avec le protocole de `preventDefault` synchrone sur les zones non passives.
 - Accessibilité : export de l'arbre sémantique, projection vers l'arbre DOM fantôme, sélecteurs E2E
   sémantiques `getByRole` et transmission du focus clavier.
-- Migration et industrialisation : `@dopejs/doper-compat` pour le déploiement et le retour arrière page par
+- Migration et industrialisation : `@dopejs/pingo-compat` pour le déploiement et le retour arrière page par
   page, scanner de migration, vérification d'intégrité SHA-256 du paquet et du WASM, diagnostic et manuel
   d'exploitation.
 - Prototype WebGPU isolé et comparaison sans écart face à l'oracle headless (ADR-0006 :

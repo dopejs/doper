@@ -4,7 +4,7 @@
 
 Содержимое canvas по своей природе невидимо для программ чтения с экрана. doper не относится к
 доступности как к слою, который накидывают после релиза: ядро ведёт дерево семантики
-(role / label / value / bounds / focusable), а `@dopejs/doper-a11y` инкрементально отображает его в
+(role / label / value / bounds / focusable), а `@dopejs/pingo-a11y` инкрементально отображает его в
 абсолютно позиционированное теневое DOM-дерево рядом с canvas.
 
 Теневые элементы визуально прозрачны, но присутствуют в дереве доступности и в порядке обхода по Tab;
@@ -29,7 +29,7 @@
 не сравнивать пиксели:
 
 ```ts
-import { getByRole, queryAllByRole } from "@dopejs/doper";
+import { getByRole, queryAllByRole } from "@dopejs/pingo";
 
 const email = getByRole(document.body, "textbox", { name: "Получатель" });
 email.focus(); // перенаправляется в сессию редактирования движка

@@ -7,7 +7,7 @@ import {
   type RasterFrameResult,
   type RasterTileCacheMetrics,
   type ReplayStats,
-} from "@dopejs/doper-backend-canvas2d";
+} from "@dopejs/pingo-backend-canvas2d";
 import {
   createRoot,
   decodeMutationBatch,
@@ -16,14 +16,14 @@ import {
   type MutationSink,
   type ResourceKind,
   type RootOptions,
-} from "@dopejs/doper-reconciler";
+} from "@dopejs/pingo-reconciler";
 import {
   decodeEditTransactionBatch,
   decodeEventTransactionBatch,
   decodeInputBatch,
   type EditTransaction,
   type EventTransaction,
-} from "@dopejs/doper-editing";
+} from "@dopejs/pingo-editing";
 
 import { encodeSystemTextMetricBatch } from "./system-text-metrics";
 

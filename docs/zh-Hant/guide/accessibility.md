@@ -4,7 +4,7 @@
 
 canvas 內容天生對螢幕閱讀器不可見。doper 不把無障礙當作發佈後再補的覆蓋層：
 Core 維護語意樹（role / label / value / bounds / focusable），
-`@dopejs/doper-a11y` 把它增量映射為 canvas 旁的絕對定位 DOM 影子樹。
+`@dopejs/pingo-a11y` 把它增量映射為 canvas 旁的絕對定位 DOM 影子樹。
 
 影子元素視覺透明但存在於無障礙樹與 tab 順序中；聚焦它會轉送到引擎的編輯工作階段，
 所以鍵盤使用者能真正操作 canvas 內的輸入框。
@@ -25,7 +25,7 @@ Core 維護語意樹（role / label / value / bounds / focusable），
 因為語意樹被鏡像成真實 DOM，E2E 可以依角色與名稱選取元素，而不是比對像素：
 
 ```ts
-import { getByRole, queryAllByRole } from "@dopejs/doper";
+import { getByRole, queryAllByRole } from "@dopejs/pingo";
 
 const email = getByRole(document.body, "textbox", { name: "收件人" });
 email.focus(); // 轉送到引擎編輯工作階段

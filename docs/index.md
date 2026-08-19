@@ -5,6 +5,10 @@ hero:
   name: Pingo
   text: canvas 渲染引擎
   tagline: Rust/WASM 核心 + TypeScript 外壳 + 可插拔后端。为高性能交互、原生虚拟滚动与 canvas 内文本编辑而设计。
+  image:
+    light: /pingo-mark.svg
+    dark: /pingo-mark-dark.svg
+    alt: Pingo
   actions:
     - theme: brand
       text: 快速开始
@@ -34,13 +38,13 @@ features:
 ## 30 秒上手
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
-> 品牌名已切换为 Pingo。公开 npm 包将在兼容迁移完成后切换到 `@dopejs/pingo`；当前安装命令仍保持为 `@dopejs/doper`。
+> 品牌名已切换为 Pingo。公开 npm 包将在兼容迁移完成后切换到 `@dopejs/pingo`；当前安装命令仍保持为 `@dopejs/pingo`。
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const root = await createHostedCanvasRoot(document.querySelector("canvas")!);
 

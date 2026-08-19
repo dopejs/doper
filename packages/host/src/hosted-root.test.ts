@@ -1,9 +1,9 @@
-import { ABI_VERSION, decodeMutationBatch } from "@dopejs/doper-reconciler";
+import { ABI_VERSION, decodeMutationBatch } from "@dopejs/pingo-reconciler";
 import {
   decodeInputBatch,
   encodeInputBatch,
   EVENT_FLAG_PRECISE_WHEEL,
-} from "@dopejs/doper-editing";
+} from "@dopejs/pingo-editing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedCanvasRoot } from "./hosted-root";
@@ -475,6 +475,53 @@ describe("createHostedCanvasRoot", () => {
     await root.close();
   });
 
+  it("holds a double click until its editor reports geometry", async () => {
+    // The press that focuses an editor round-trips through Core, and with a
+    // Worker transport that has not landed when the browser reports the double
+    // click. Dropping the gesture made the first double click on an untouched
+    // field select nothing at all.
+    installCanvasGlobal();
+    const canvas = new FakeCanvas();
+    const core = fakeCore();
+    const node = 0x0010_0001;
+    const geometry: Uint32Array | undefined = undefined;
+    core.editing_geometry = () => geometry;
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+    root.render(editableElement());
+    const nodeId = decodeMutationBatch(core.commits.at(-1) ?? new Uint8Array()).mutations.find(
+      (mutation) => mutation.type === "configureEditable",
+    )?.nodeId;
+    expect(nodeId).toBeDefined();
+
+    const wordCommands = (): number =>
+      core.inputs.filter((bytes) =>
+        decodeInputBatch(bytes).commands.some(
+          (command) => command.type === "placeCaret" && command.word,
+        ),
+      ).length;
+
+    // Inside the canvas, before any editor is active.
+    canvas.emit("dblclick", { clientX: 30, clientY: 25, detail: 2 });
+    expect(wordCommands(), "nothing to address the gesture to yet").toBe(0);
+
+    geometry = editingGeometry(nodeId ?? node);
+    root.focusEditable(nodeId ?? node);
+    // Focus activates the bridge after the frame that carried this geometry, so
+    // the gesture flushes on the next one -- in production the caret placement
+    // that follows the press.
+    root.render(editableElement(81));
+    expect(wordCommands(), "the held gesture is applied once geometry arrives").toBe(1);
+
+    // A later geometry frame must not replay it.
+    root.render(editableElement(82));
+    expect(wordCommands()).toBe(1);
+    await root.close();
+  });
+
   it("falls back before canvas transfer when Worker preparation fails", async () => {
     installCanvasGlobal();
     const canvas = new FakeCanvas();
@@ -583,9 +630,26 @@ describe("createHostedCanvasRoot", () => {
 });
 
 class FakeEditContext extends EventTarget {
+  public text = "";
+  public selectionStart = 0;
+  public selectionEnd = 0;
+
   public constructor(_options: object) {
     super();
   }
+
+  public updateText(start: number, end: number, value: string): void {
+    this.text = this.text.slice(0, start) + value + this.text.slice(end);
+  }
+
+  public updateSelection(start: number, end: number): void {
+    this.selectionStart = start;
+    this.selectionEnd = end;
+  }
+
+  public updateControlBounds(): void {}
+  public updateSelectionBounds(): void {}
+  public updateCharacterBounds(): void {}
 }
 
 class FakeCanvas {
@@ -597,6 +661,17 @@ class FakeCanvas {
   public replacement: unknown;
   public transferCount = 0;
   public style: { touchAction?: string } = {};
+  public focused = false;
+
+  public focus(): void {
+    this.focused = true;
+  }
+
+  public blur(): void {
+    this.focused = false;
+  }
+
+  public setAttribute(): void {}
 
   public cloneNode(): FakeCanvas {
     const clone = new FakeCanvas();
@@ -654,6 +729,33 @@ interface FakeCore extends CoreClient {
   readonly commits: Uint8Array[];
   readonly inputs: Uint8Array[];
   freed: boolean;
+}
+
+/**
+ * An editable element without importing the JSX package.
+ *
+ * The host does not depend on it, and the descriptor is a plain object keyed by
+ * a globally registered symbol, so this stays a test detail rather than a new
+ * edge in the package graph.
+ */
+function editableElement(width = 80): unknown {
+  return {
+    $$typeof: Symbol.for("dopejs.doper.element"),
+    type: "editableText",
+    key: null,
+    props: { height: 40, revision: 1n, value: "ab cd", width },
+  };
+}
+
+/** A one-character editor covering the whole fake canvas. */
+function editingGeometry(nodeId: number): Uint32Array {
+  const bits = (value: number): number => {
+    const scratch = new DataView(new ArrayBuffer(4));
+    scratch.setFloat32(0, value, true);
+    return scratch.getUint32(0, true);
+  };
+  const rect = [bits(0), bits(0), bits(160), bits(80)];
+  return Uint32Array.from([1, nodeId, 0, 0, 0, ...rect, ...rect]);
 }
 
 function fakeCore(): FakeCore {

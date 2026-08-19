@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { decodeMutationBatch, encodeMutationBatch, Prop } from "@dopejs/doper-reconciler";
+import { decodeMutationBatch, encodeMutationBatch, Prop } from "@dopejs/pingo-reconciler";
 
 import { SabMutationRing } from "./sab-ring";
 import { SabMutationReceiver, SabMutationTransport } from "./sab-transport";

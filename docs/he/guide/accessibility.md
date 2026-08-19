@@ -3,7 +3,7 @@
 ## בארכיטקטורה מהיום הראשון
 
 תוכן של canvas אינו נראה לקוראי מסך מעצם טבעו. doper אינו מתייחס לנגישות כשכבה שמולבשת אחרי ההשקה:
-הליבה מתחזקת עץ סמנטי (role / label / value / bounds / focusable), ו-`@dopejs/doper-a11y` ממפה אותו
+הליבה מתחזקת עץ סמנטי (role / label / value / bounds / focusable), ו-`@dopejs/pingo-a11y` ממפה אותו
 באופן מצטבר לעץ DOM צללי ממוקם אבסולוטית לצד ה-canvas.
 
 רכיבי הצל שקופים חזותית אך קיימים בעץ הנגישות ובסדר המעבר ב-Tab; מיקוד בהם מועבר להפעלת העריכה של המנוע,
@@ -25,7 +25,7 @@
 מכיוון שהעץ הסמנטי משתקף ל-DOM אמיתי, בדיקות E2E יכולות לבחור לפי תפקיד ושם במקום להשוות פיקסלים:
 
 ```ts
-import { getByRole, queryAllByRole } from "@dopejs/doper";
+import { getByRole, queryAllByRole } from "@dopejs/pingo";
 
 const email = getByRole(document.body, "textbox", { name: "נמען" });
 email.focus(); // מועבר להפעלת העריכה של המנוע

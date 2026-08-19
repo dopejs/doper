@@ -42,7 +42,7 @@ instruction_count:u32]`。
 
 这是 doper 的首个正式 ABI，没有需要迁移的既有发布版本。未来任何不兼容布局变化都
 必须提升 ABI 版本、生成新 golden，并在 Host 握手中保留可诊断的降级行为。目录名不
-属于 ABI；TypeScript 包目录保持简洁，npm 包名仍使用 `@dopejs/doper-*` 命名空间。
+属于 ABI；TypeScript 包目录保持简洁，npm 包名仍使用 `@dopejs/pingo-*` 命名空间。
 
 ## Verification
 

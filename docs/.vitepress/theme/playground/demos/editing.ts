@@ -1,4 +1,4 @@
-import { createElement, TextArea, TextField, type EditTransaction } from "@dopejs/doper";
+import { createElement, TextArea, TextField, type EditTransaction } from "@dopejs/pingo";
 
 import type { Demo, DemoContext } from "../demo";
 

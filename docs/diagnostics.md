@@ -4,10 +4,10 @@
 
 ## 1. 身份信息
 
-每条上报应附带 `engineIdentity()`（来自 `@dopejs/doper`）：
+每条上报应附带 `engineIdentity()`（来自 `@dopejs/pingo`）：
 
 ```ts
-import { engineIdentity } from "@dopejs/doper";
+import { engineIdentity } from "@dopejs/pingo";
 report({ ...engineIdentity(), pageId, mode: root.mode });
 ```
 
@@ -33,7 +33,7 @@ report({ ...engineIdentity(), pageId, mode: root.mode });
 校验 manifest 与字节一致。自托管部署在实例化前调用：
 
 ```ts
-import { verifyWasmIntegrity } from "@dopejs/doper";
+import { verifyWasmIntegrity } from "@dopejs/pingo";
 await verifyWasmIntegrity(await response.arrayBuffer(), manifest);
 ```
 

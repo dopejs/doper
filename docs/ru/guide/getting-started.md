@@ -3,17 +3,17 @@
 ## Установка
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
-Приложение зависит ровно от одного пакета — `@dopejs/doper`. `@dopejs/doper-host`,
-`@dopejs/doper-jsx` и остальные являются внутренними пакетами реализации и не входят в публичный
+Приложение зависит ровно от одного пакета — `@dopejs/pingo`. `@dopejs/pingo-host`,
+`@dopejs/pingo-jsx` и остальные являются внутренними пакетами реализации и не входят в публичный
 контракт: [сканер миграции](/migration) отклоняет их прямой импорт.
 
 ## Первый холст
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#app")!;
 canvas.width = 800;
@@ -49,7 +49,7 @@ postMessage и Canvas2D в главном потоке — писать ветв
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@dopejs/doper"
+    "jsxImportSource": "@dopejs/pingo"
   }
 }
 ```
@@ -87,7 +87,7 @@ root.render(<OrderRow index={1} />);
 ## Состояние и эффекты
 
 ```ts
-import { signal, useEffect, useSignal, useState } from "@dopejs/doper";
+import { signal, useEffect, useSignal, useState } from "@dopejs/pingo";
 
 function Counter() {
   const [count, setCount] = useState(0);

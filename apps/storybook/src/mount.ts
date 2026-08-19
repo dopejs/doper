@@ -1,4 +1,4 @@
-import { createHostedCanvasRoot, type DoperNode, type HostedCanvasRoot } from "@dopejs/doper";
+import { createHostedCanvasRoot, type DoperNode, type HostedCanvasRoot } from "@dopejs/pingo";
 
 /**
  * Mounts one doper scene on its own canvas for a story.

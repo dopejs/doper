@@ -4,7 +4,7 @@ import {
   type EditTransaction,
   type FrameReport,
   type NodeHandle,
-} from "@dopejs/doper";
+} from "@dopejs/pingo";
 import { afterEach, describe, expect, it } from "vitest";
 
 interface BrowserEditContext extends EventTarget {

@@ -5,11 +5,11 @@
 
 ## 1. 迁移模型
 
-迁移以**页面**为最小粒度，通过 `@dopejs/doper-compat` 的
+迁移以**页面**为最小粒度，通过 `@dopejs/pingo-compat` 的
 `mountCompatPage` 建立边界：
 
 ```ts
-import { mountCompatPage } from "@dopejs/doper-compat";
+import { mountCompatPage } from "@dopejs/pingo-compat";
 
 const page = await mountCompatPage({
   pageId: "orders",
@@ -24,7 +24,7 @@ const page = await mountCompatPage({
 - `enabled: false` 时页面完全由存量渲染器接管，doper 不初始化。
 - `page.enable()` / `page.fallback(detail)` 支持运行时切换；
   初始化失败与连续运行时错误（默认 3 次）自动回退到存量路径。
-- shim 只依赖 `@dopejs/doper` 公开 facade；删除 shim 不需要修改引擎。
+- shim 只依赖 `@dopejs/pingo` 公开 facade；删除 shim 不需要修改引擎。
 
 ## 2. 业务代码约束
 
@@ -33,7 +33,7 @@ const page = await mountCompatPage({
 
 | 规则                      | 说明                                                                                                                            |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `internal-package-import` | 只能 import `@dopejs/doper`（含 `/jsx-runtime` 等子路径）与 `@dopejs/doper-compat`；`@dopejs/doper-host` 等内部包不属于公开契约 |
+| `internal-package-import` | 只能 import `@dopejs/pingo`（含 `/jsx-runtime` 等子路径）与 `@dopejs/pingo-compat`；`@dopejs/pingo-host` 等内部包不属于公开契约 |
 | `embed-dom-input`         | 禁止 per-widget HTML `input`/`textarea`；caret、selection、IME、剪贴板由引擎输入桥统一托管                                      |
 | `force-update`            | 不存在 `forceUpdate` 逃生口；失效由 prop 语义驱动                                                                               |
 

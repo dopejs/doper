@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { cssFont } from "@dopejs/doper-backend-canvas2d";
+import { cssFont } from "@dopejs/pingo-backend-canvas2d";
 
 /**
  * A unit test can only pin the string. What actually broke was how the browser

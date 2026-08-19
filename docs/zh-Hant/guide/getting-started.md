@@ -3,16 +3,16 @@
 ## 安裝
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
-業務只相依 `@dopejs/doper` 這一個套件。`@dopejs/doper-host`、`@dopejs/doper-jsx` 等是內部實作套件，
+業務只相依 `@dopejs/pingo` 這一個套件。`@dopejs/pingo-host`、`@dopejs/pingo-jsx` 等是內部實作套件，
 不屬於公開契約——[遷移掃描器](/migration)會拒絕直接 import 它們。
 
 ## 掛載第一個畫布
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#app")!;
 canvas.width = 800;
@@ -47,7 +47,7 @@ Canvas2D 之間選擇傳輸路徑，你不需要為降級寫分支。`root.mode`
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@dopejs/doper"
+    "jsxImportSource": "@dopejs/pingo"
   }
 }
 ```
@@ -84,7 +84,7 @@ root.render(<OrderRow index={1} />);
 ## 狀態與副作用
 
 ```ts
-import { signal, useEffect, useSignal, useState } from "@dopejs/doper";
+import { signal, useEffect, useSignal, useState } from "@dopejs/pingo";
 
 function Counter() {
   const [count, setCount] = useState(0);

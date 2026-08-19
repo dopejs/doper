@@ -14,7 +14,7 @@ de candidatos, portapapeles, deshacer/rehacer, sólo lectura y contraseña los i
 ## Usar los widgets
 
 ```ts
-import { TextField, TextArea } from "@dopejs/doper";
+import { TextField, TextArea } from "@dopejs/pingo";
 
 TextField({
   value: order.note,
@@ -46,7 +46,7 @@ createElement("editableText", {
 O con un controlador local:
 
 ```ts
-import { useTextEditingController } from "@dopejs/doper";
+import { useTextEditingController } from "@dopejs/pingo";
 
 const editor = useTextEditingController({ value: cell.value });
 createElement("editableText", { controller: editor });
