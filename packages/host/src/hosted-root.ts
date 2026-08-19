@@ -654,6 +654,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       previousTimestamp === undefined || timestamp <= previousTimestamp
         ? 1000 / 60
         : Math.min(1000, timestamp - previousTimestamp);
+    this.blurEditableOutsideActiveEditor(kind, x, y);
     this.synthesizeTextSelection(kind, x, y, pointerId, event.shiftKey);
     const eventId = this.#eventSequence;
     this.#eventSequence = nextSequence(eventId);
@@ -678,6 +679,64 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       this.#options.onHostError?.(toError(cause, `${kind} dispatch failed`));
     }
   }
+
+  /**
+   * Ends the session when a press lands anywhere but the active editor.
+   *
+   * Core reports only a hit target, so a press on empty canvas produces no
+   * event transaction at all and cannot drive this. The active editor's control
+   * bounds already come back with the editing geometry, so the decision is made
+   * here and synchronously, the way a native input loses focus.
+   */
+  private blurEditableOutsideActiveEditor(
+    kind: "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel",
+    x: number,
+    y: number,
+  ): void {
+    if (kind !== "pointerdown") return;
+    const activeNodeId = this.#inputBridge.activeNodeId;
+    if (activeNodeId === undefined) return;
+    const geometry = this.#editingGeometry;
+    // Bounds unknown: blurring on a guess would end a session the press was
+    // actually inside of, which is worse than leaving it focused for a frame.
+    if (geometry === undefined || geometry.nodeId !== activeNodeId) return;
+    const bounds = geometry.controlBounds;
+    if (
+      x >= bounds.left &&
+      x < bounds.left + bounds.width &&
+      y >= bounds.top &&
+      y < bounds.top + bounds.height
+    ) {
+      return;
+    }
+    try {
+      this.blurEditable();
+    } catch (cause) {
+      this.#options.onHostError?.(toError(cause, "editable blur failed"));
+    }
+  }
+
+  /**
+   * Ends the session when a press lands outside the canvas entirely.
+   *
+   * The engine never sees those events, so without this the session outlives
+   * every interaction with the rest of the page. The accessibility mirror and
+   * the input proxy are the engine's own surfaces and do not count as outside.
+   */
+  private readonly handleDocumentPointerDown = (event: Event): void => {
+    if (this.#closing || this.#unmounted) return;
+    if (this.#inputBridge.activeNodeId === undefined) return;
+    const target = event.target;
+    if (!(target instanceof Node)) return;
+    if (this.#canvas === target || this.#canvas.contains(target)) return;
+    if (this.#inputBridge.ownsNode(target)) return;
+    if (this.#semanticMirror?.container.contains(target) === true) return;
+    try {
+      this.blurEditable();
+    } catch (cause) {
+      this.#options.onHostError?.(toError(cause, "editable blur failed"));
+    }
+  };
 
   /** Turns raw pointer input over the active editor into caret placement. */
   private synthesizeTextSelection(
@@ -775,6 +834,13 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#canvas.addEventListener("click", this.handleCanvasClick, { passive: true });
     this.#canvas.addEventListener("dblclick", this.handleCanvasDoubleClick, { passive: true });
     this.#canvas.addEventListener("wheel", this.handleCanvasWheel, { passive: wheelPassive });
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      // Capture, so a handler that stops propagation cannot strand the session.
+      document.addEventListener("pointerdown", this.handleDocumentPointerDown, {
+        capture: true,
+        passive: true,
+      });
+    }
     this.#eventListenersAttached = true;
   }
 
@@ -791,6 +857,11 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#pendingRefills.clear();
     if (!this.#eventListenersAttached) return;
     if (typeof this.#canvas.removeEventListener !== "function") return;
+    if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+      document.removeEventListener("pointerdown", this.handleDocumentPointerDown, {
+        capture: true,
+      });
+    }
     this.#canvas.removeEventListener("pointerdown", this.handleCanvasPointerEvent);
     this.#canvas.removeEventListener("pointerup", this.handleCanvasPointerEvent);
     this.#canvas.removeEventListener("pointermove", this.handleCanvasPointerEvent);

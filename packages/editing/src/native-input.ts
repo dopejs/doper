@@ -132,6 +132,18 @@ export class NativeTextInputBridge {
     return this.#target?.nodeId;
   }
 
+  /**
+   * Whether a DOM node belongs to the surface this bridge owns.
+   *
+   * The host ends a session when a press lands outside the editor, and the
+   * proxy lives in `document.body` rather than inside the canvas, so a press on
+   * it would otherwise read as a press somewhere else on the page.
+   */
+  public ownsNode(node: Node | null): boolean {
+    if (node === null || this.#proxy === undefined) return false;
+    return this.#proxy === node || this.#proxy.contains(node);
+  }
+
   public activate(target: EditingTargetState): void {
     this.assertUsable();
     validateTarget(target);
