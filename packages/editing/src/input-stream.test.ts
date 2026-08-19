@@ -237,4 +237,42 @@ describe("Input Stream", () => {
       }
     }
   });
+
+  it("round-trips dictionary word boundaries and refuses a malformed set", () => {
+    // Variable length, so the framing has to survive an empty set as well as a
+    // populated one.
+    for (const boundaries of [[], [0], [0, 2, 5, 9]]) {
+      const batch = {
+        frameSeq: 3,
+        commands: [
+          {
+            type: "setWordBoundaries" as const,
+            nodeId: 0x0010_0001,
+            baseRevision: 0x0000_0007_0000_0009n,
+            boundaries,
+          },
+        ],
+      };
+      const bytes = encodeInputBatch(batch);
+      expect(decodeInputBatch(bytes)).toEqual(batch);
+      expect(encodeInputBatch(decodeInputBatch(bytes))).toEqual(bytes);
+    }
+
+    // Unsorted or duplicated would give one segmentation two byte sequences.
+    for (const boundaries of [[2, 1], [1, 1], [-1], [1.5]]) {
+      expect(() =>
+        encodeInputBatch({
+          frameSeq: 1,
+          commands: [
+            {
+              type: "setWordBoundaries",
+              nodeId: 0x0010_0001,
+              baseRevision: 0n,
+              boundaries,
+            },
+          ],
+        }),
+      ).toThrow(InputStreamError);
+    }
+  });
 });

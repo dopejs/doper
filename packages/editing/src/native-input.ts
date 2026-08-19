@@ -139,6 +139,30 @@ export class NativeTextInputBridge {
    * proxy lives in `document.body` rather than inside the canvas, so a press on
    * it would otherwise read as a press somewhere else on the page.
    */
+  /**
+   * Dictionary word boundaries for the value this bridge currently mirrors.
+   *
+   * UAX #29 has no dictionary, so Core alone makes every Han ideograph its own
+   * word and a double click selects one character. `Intl.Segmenter` does have
+   * one, and ICU picks it by script rather than by locale, so the host locale
+   * is the right one to ask with. Returns `undefined` when the platform has no
+   * segmenter or nothing is being edited, and Core keeps its own segmentation.
+   */
+  public wordBoundaries():
+    { readonly baseRevision: bigint; readonly offsets: number[] } | undefined {
+    if (this.#target === undefined || typeof Intl.Segmenter !== "function") return undefined;
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+    const offsets: number[] = [];
+    let utf16 = 0;
+    for (const segment of segmenter.segment(this.#value)) {
+      offsets.push(utf16);
+      utf16 += segment.segment.length;
+    }
+    // Offsets index the value this bridge mirrors, so they are only valid for
+    // the revision it has applied; Core drops them when that has moved on.
+    return { baseRevision: this.#appliedRevision, offsets };
+  }
+
   public ownsNode(node: Node | null): boolean {
     if (node === null || this.#proxy === undefined) return false;
     return this.#proxy === node || this.#proxy.contains(node);

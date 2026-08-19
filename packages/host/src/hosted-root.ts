@@ -820,7 +820,20 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       return;
     }
     try {
+      // The segmentation travels with the click: Core resolves the offset from
+      // the caret stops, and this only decides where the word around it ends.
+      const words = this.#inputBridge.wordBoundaries();
       this.sendInputCommands([
+        ...(words === undefined
+          ? []
+          : [
+              {
+                type: "setWordBoundaries" as const,
+                nodeId: activeNodeId,
+                baseRevision: words.baseRevision,
+                boundaries: words.offsets,
+              },
+            ]),
         { type: "placeCaret", nodeId: activeNodeId, x, y, extend: false, word: true },
       ]);
     } catch (cause) {

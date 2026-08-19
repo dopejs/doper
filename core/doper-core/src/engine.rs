@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -737,6 +737,7 @@ impl CoreEngine {
         node_id: u32,
         position: [f32; 2],
         flags: u32,
+        boundaries: &HashMap<NodeId, Vec<u32>>,
     ) -> Result<InputCommand, CoreError> {
         let node = NodeId::from_raw(node_id)?;
         let session = self
@@ -765,7 +766,17 @@ impl CoreEngine {
         local.y += scroll_y;
         let offset = nearest_caret_offset(&carets, local);
         let (anchor, focus) = if flags & 0x02 != 0 {
-            doper_edit::word_range_utf16(session.text(), offset).map_err(CoreError::Edit)?
+            // UAX #29 has no dictionary, so it makes every Han ideograph its own
+            // word and a double click selects one character. Use the Host's
+            // segmentation when it describes this exact revision.
+            match boundaries.get(&node).and_then(|offsets| {
+                word_range_from_boundaries(offsets, offset, session.text_index().utf16_len())
+            }) {
+                Some(range) => range,
+                None => {
+                    doper_edit::word_range_utf16(session.text(), offset).map_err(CoreError::Edit)?
+                }
+            }
         } else if flags & 0x01 != 0 {
             (session.selection().anchor.offset, offset)
         } else {
@@ -893,12 +904,15 @@ impl CoreEngine {
         batch: &InputBatch,
         desired_x: &mut Option<(NodeId, f32)>,
     ) -> Result<Vec<InputCommand>, CoreError> {
+        // Collected up front and used only within this batch. The Host sends
+        // them with the operation that needs them, so there is no stored table
+        // to go stale between batches.
+        let boundaries = self.collect_word_boundaries(batch);
         let mut edit_commands = Vec::new();
-        for instruction in batch
-            .instructions
-            .iter()
-            .filter(|instruction| !is_scroll_command(&instruction.command))
-        {
+        for instruction in batch.instructions.iter().filter(|instruction| {
+            !is_scroll_command(&instruction.command)
+                && !matches!(instruction.command, InputCommand::SetWordBoundaries { .. })
+        }) {
             let resolved = match instruction.command {
                 InputCommand::PlaceCaret {
                     node_id,
@@ -906,7 +920,7 @@ impl CoreEngine {
                     flags,
                 } => {
                     *desired_x = None;
-                    self.resolve_place_caret(node_id, position, flags)?
+                    self.resolve_place_caret(node_id, position, flags, &boundaries)?
                 }
                 InputCommand::MoveCaret {
                     node_id,
@@ -924,6 +938,36 @@ impl CoreEngine {
             edit_commands.push(resolved);
         }
         Ok(edit_commands)
+    }
+
+    /// Reads the batch's dictionary word boundaries, dropping any that are stale.
+    ///
+    /// The Host segments its own copy of the value, which can be a revision
+    /// behind the session. Applying those would select against text the user has
+    /// already changed, so a mismatch falls back to UAX #29 instead.
+    fn collect_word_boundaries(&self, batch: &InputBatch) -> HashMap<NodeId, Vec<u32>> {
+        let mut collected = HashMap::new();
+        for instruction in &batch.instructions {
+            let InputCommand::SetWordBoundaries {
+                node_id,
+                base_revision,
+                ref boundaries,
+            } = instruction.command
+            else {
+                continue;
+            };
+            let Ok(node) = NodeId::from_raw(node_id) else {
+                continue;
+            };
+            if self
+                .editing
+                .session(node)
+                .is_some_and(|session| session.revision() == base_revision)
+            {
+                collected.insert(node, boundaries.clone());
+            }
+        }
+        collected
     }
 
     /// Resolves a keyboard caret movement into an authoritative selection.
@@ -1884,6 +1928,28 @@ fn append_geometry_rect(words: &mut Vec<u32>, rect: WorldRect) {
         (rect.right - rect.left).max(0.0).to_bits(),
         (rect.bottom - rect.top).max(0.0).to_bits(),
     ]);
+}
+
+/// Resolves an offset against ascending word-start offsets.
+///
+/// `boundaries` are word starts, so the word containing `offset` runs from the
+/// last start at or before it to the next start, or to the end of the value.
+fn word_range_from_boundaries(boundaries: &[u32], offset: u32, length: u32) -> Option<(u32, u32)> {
+    if boundaries.is_empty() {
+        return None;
+    }
+    let start = boundaries
+        .iter()
+        .rev()
+        .find(|candidate| **candidate <= offset)
+        .copied()
+        .unwrap_or(0);
+    let end = boundaries
+        .iter()
+        .find(|candidate| **candidate > start)
+        .copied()
+        .unwrap_or(length);
+    (start < end).then_some((start, end))
 }
 
 /// Caret bar width in logical pixels, shared by paint, geometry and reveal.
@@ -3047,6 +3113,92 @@ mod tests {
         assert_eq!(offset_at(Some(system_metrics(measured))), 3);
         // Without advances the estimate runs out of string and clamps past it.
         assert_eq!(offset_at(None), 4);
+    }
+
+    #[test]
+    fn a_double_click_uses_host_segmentation_for_scripts_without_spaces() {
+        // UAX #29 has no dictionary: it makes every Han ideograph its own word,
+        // so a double click selected one character. The browser's Intl.Segmenter
+        // does have one, and its result arrives with the click.
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit(&editable_tree_with_text(
+                1,
+                "\u{4eca}\u{5929}\u{5929}\u{6c14}",
+            ))
+            .expect("frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+
+        let selection_after = |engine: &mut CoreEngine| -> [u32; 2] {
+            let bytes = engine.take_edit_transactions().expect("edit bytes");
+            doper_abi::EditTransactionBatch::decode(&bytes)
+                .expect("decode")
+                .records
+                .last()
+                .expect("record")
+                .selection
+        };
+        // Unmeasured advances estimate to 9.6px, so stops sit at 0, 9.6, 19.2,
+        // 28.8 and 38.4; this lands on offset 2, the second dictionary word.
+        let position = [21.0, 0.0];
+        let double_click = InputCommand::PlaceCaret {
+            node_id: id(1),
+            position,
+            flags: 2,
+        };
+
+        engine
+            .input(&input(2, vec![double_click.clone()]))
+            .expect("word without boundaries");
+        // Without segmentation this is one ideograph.
+        assert_eq!(selection_after(&mut engine), [2, 3]);
+
+        let revision_of = |engine: &CoreEngine| {
+            engine
+                .editing
+                .session(NodeId::from_raw(id(1)).expect("node"))
+                .expect("session")
+                .revision()
+        };
+        let revision = revision_of(&engine);
+        engine
+            .input(&input(
+                3,
+                vec![
+                    InputCommand::SetWordBoundaries {
+                        node_id: id(1),
+                        base_revision: revision,
+                        boundaries: vec![0, 2],
+                    },
+                    double_click.clone(),
+                ],
+            ))
+            .expect("word with boundaries");
+        assert_eq!(selection_after(&mut engine), [2, 4]);
+
+        // A stale revision must not select against text the user already changed.
+        engine
+            .input(&input(
+                4,
+                vec![
+                    InputCommand::SetWordBoundaries {
+                        node_id: id(1),
+                        // Any revision but the session's own is stale; each
+                        // accepted selection advances it, so read it fresh.
+                        base_revision: revision_of(&engine).wrapping_add(7),
+                        boundaries: vec![0, 2],
+                    },
+                    double_click,
+                ],
+            ))
+            .expect("word with stale boundaries");
+        assert_eq!(selection_after(&mut engine), [2, 3]);
     }
 
     #[test]

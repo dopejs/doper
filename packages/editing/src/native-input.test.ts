@@ -160,6 +160,19 @@ function transaction(overrides: Partial<EditTransaction> = {}): EditTransaction 
 }
 
 describe("NativeTextInputBridge (unit)", () => {
+  it("segments its mirrored value with the platform dictionary", () => {
+    // UAX #29 has no dictionary, so Core alone makes every Han ideograph its own
+    // word; this is where the browser's segmentation enters.
+    const { bridge } = harness({ editContext: true });
+    bridge.activate(target({ value: "\u4eca\u5929\u5929\u6c14", revision: 7n }));
+    const words = bridge.wordBoundaries();
+    expect(words?.baseRevision).toBe(7n);
+    expect(words?.offsets).toEqual([0, 2]);
+
+    bridge.deactivate();
+    expect(bridge.wordBoundaries()).toBeUndefined();
+  });
+
   it("detaches the EditContext when the session ends", () => {
     // An EditContext left on a focused element keeps the OS text service
     // engaged, so the soft keyboard and the IME stay on a field the user has

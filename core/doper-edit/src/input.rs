@@ -165,6 +165,7 @@ pub fn edit_command_from_input(
         | InputCommand::PlaceCaret { .. }
         | InputCommand::MoveCaret { .. }
         | InputCommand::RequestCharacterBounds { .. }
+        | InputCommand::SetWordBoundaries { .. }
         | InputCommand::ScrollBegin { .. }
         | InputCommand::ScrollDelta { .. }
         | InputCommand::ScrollEnd { .. }

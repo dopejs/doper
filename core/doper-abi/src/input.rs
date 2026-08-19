@@ -4,7 +4,7 @@ use crate::codec::{
 };
 use crate::{
     AbiError, INPUT_MAGIC, InputOpcode, MAX_INPUT_BYTES, MAX_INPUT_INSTRUCTIONS,
-    MAX_RESOURCE_BYTES, StreamKind,
+    MAX_RESOURCE_BYTES, MAX_WORD_BOUNDARIES, StreamKind,
 };
 
 /// Visual edge preference carried at the browser UTF-16 boundary.
@@ -286,6 +286,21 @@ pub enum InputCommand {
         granularity: CaretGranularity,
         /// Extends the selection anchor instead of collapsing.
         extend: bool,
+    },
+    /// Supplies dictionary word boundaries for the current editing value.
+    ///
+    /// UAX #29 has no dictionary, so it makes every Han ideograph its own word
+    /// and a double click selects one character. The browser's `Intl.Segmenter`
+    /// does have one; this carries its result in so Core can keep owning the
+    /// selection. `base_revision` is the session revision the boundaries were
+    /// computed against, and a stale one is ignored rather than applied.
+    SetWordBoundaries {
+        /// Generation-bearing editable node.
+        node_id: u32,
+        /// Session revision the boundaries describe.
+        base_revision: u64,
+        /// UTF-16 offsets at which a word starts, ascending and unique.
+        boundaries: Vec<u32>,
     },
     /// Starts direct manipulation of a Core-owned scroll node.
     ScrollBegin {
@@ -636,6 +651,37 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
                 extend,
             }
         }
+        InputOpcode::SetWordBoundaries => {
+            let node_id = reader.read_u32()?;
+            let low = u64::from(reader.read_u32()?);
+            let high = u64::from(reader.read_u32()?);
+            let declared = reader.read_u32()?;
+            if declared > MAX_WORD_BOUNDARIES {
+                return Err(AbiError::InvalidValue(
+                    "word boundary count is outside the supported limit",
+                ));
+            }
+            let count = usize::try_from(declared).map_err(|_| AbiError::ArithmeticOverflow)?;
+            // Reserve against the bytes that remain, never the declared count.
+            let mut boundaries = Vec::with_capacity(count.min(reader.remaining() / 4));
+            let mut previous: Option<u32> = None;
+            for _ in 0..count {
+                let offset = reader.read_u32()?;
+                // Ascending and unique keeps one segmentation one byte sequence.
+                if previous.is_some_and(|last| offset <= last) {
+                    return Err(AbiError::InvalidValue(
+                        "word boundaries must ascend without duplicates",
+                    ));
+                }
+                previous = Some(offset);
+                boundaries.push(offset);
+            }
+            InputCommand::SetWordBoundaries {
+                node_id,
+                base_revision: low | (high << 32),
+                boundaries,
+            }
+        }
         InputOpcode::ScrollBegin => InputCommand::ScrollBegin {
             node_id: reader.read_u32()?,
         },
@@ -781,6 +827,31 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             writer.u8(u8::from(*extend));
             writer.u8(0);
         }
+        InputCommand::SetWordBoundaries {
+            node_id,
+            base_revision,
+            boundaries,
+        } => {
+            let count =
+                u32::try_from(boundaries.len()).map_err(|_| AbiError::ArithmeticOverflow)?;
+            if count > MAX_WORD_BOUNDARIES {
+                return Err(AbiError::InvalidValue(
+                    "word boundary count is outside the supported limit",
+                ));
+            }
+            if boundaries.windows(2).any(|pair| pair[0] >= pair[1]) {
+                return Err(AbiError::InvalidValue(
+                    "word boundaries must ascend without duplicates",
+                ));
+            }
+            writer.u32(*node_id);
+            writer.u32(u32::try_from(*base_revision & 0xffff_ffff).unwrap_or(u32::MAX));
+            writer.u32(u32::try_from(*base_revision >> 32).unwrap_or(u32::MAX));
+            writer.u32(count);
+            for offset in boundaries {
+                writer.u32(*offset);
+            }
+        }
         InputCommand::PlaceCaret {
             node_id,
             position,
@@ -892,6 +963,7 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::RequestCharacterBounds { .. } => InputOpcode::RequestCharacterBounds,
         InputCommand::PlaceCaret { .. } => InputOpcode::PlaceCaret,
         InputCommand::MoveCaret { .. } => InputOpcode::MoveCaret,
+        InputCommand::SetWordBoundaries { .. } => InputOpcode::SetWordBoundaries,
         InputCommand::ScrollBegin { .. } => InputOpcode::ScrollBegin,
         InputCommand::ScrollDelta { .. } => InputOpcode::ScrollDelta,
         InputCommand::ScrollEnd { .. } => InputOpcode::ScrollEnd,
@@ -1040,6 +1112,11 @@ mod tests {
                     end: 4,
                     text: "替换".to_owned(),
                 }),
+                instruction(InputCommand::SetWordBoundaries {
+                    node_id: 1,
+                    base_revision: revision,
+                    boundaries: vec![0, 2, 4],
+                }),
                 instruction(InputCommand::Insert {
                     node_id: 1,
                     base_revision: revision + 1,
@@ -1155,6 +1232,90 @@ mod tests {
                 }),
             ],
         }
+    }
+
+    #[test]
+    fn word_boundaries_round_trip_and_reject_a_malformed_set() {
+        // Variable length, so the framing has to survive an empty set as well as
+        // a populated one.
+        for boundaries in [vec![], vec![0], vec![0, 2, 5, 9]] {
+            let batch = InputBatch {
+                frame_seq: 3,
+                instructions: vec![instruction(InputCommand::SetWordBoundaries {
+                    node_id: 0x0010_0001,
+                    base_revision: 0x0000_0007_0000_0009,
+                    boundaries,
+                })],
+            };
+            let bytes = batch.encode().expect("encode");
+            assert_eq!(InputBatch::decode(&bytes), Ok(batch));
+        }
+
+        // Unsorted or duplicated would give one segmentation two byte sequences.
+        for boundaries in [vec![2, 1], vec![1, 1]] {
+            let batch = InputBatch {
+                frame_seq: 1,
+                instructions: vec![instruction(InputCommand::SetWordBoundaries {
+                    node_id: 1,
+                    base_revision: 0,
+                    boundaries,
+                })],
+            };
+            assert_eq!(
+                batch.encode(),
+                Err(AbiError::InvalidValue(
+                    "word boundaries must ascend without duplicates"
+                ))
+            );
+        }
+
+        let encoded = InputBatch {
+            frame_seq: 1,
+            instructions: vec![instruction(InputCommand::SetWordBoundaries {
+                node_id: 1,
+                base_revision: 0,
+                boundaries: vec![0, 2],
+            })],
+        }
+        .encode()
+        .expect("encode");
+        // The count sits after the stream header, the instruction header, the
+        // node id and both revision halves.
+        let count_offset = 16 + 4 + 4 + 8;
+        assert_eq!(
+            u32::from_le_bytes(
+                encoded[count_offset..count_offset + 4]
+                    .try_into()
+                    .expect("count")
+            ),
+            2
+        );
+        let mut over_limit = encoded.clone();
+        over_limit[count_offset..count_offset + 4]
+            .copy_from_slice(&(MAX_WORD_BOUNDARIES + 1).to_le_bytes());
+        assert_eq!(
+            InputBatch::decode(&over_limit),
+            Err(AbiError::InvalidValue(
+                "word boundary count is outside the supported limit"
+            ))
+        );
+
+        // Under the limit but past the payload: this must fail on the read, not
+        // on a reservation sized by the attacker's number.
+        let mut beyond_payload = encoded.clone();
+        beyond_payload[count_offset..count_offset + 4]
+            .copy_from_slice(&1_000_000_u32.to_le_bytes());
+        assert!(InputBatch::decode(&beyond_payload).is_err());
+
+        let mut descending = encoded;
+        descending[count_offset + 4..count_offset + 8].copy_from_slice(&9_u32.to_le_bytes());
+        descending[count_offset + 8..count_offset + 12].copy_from_slice(&1_u32.to_le_bytes());
+        assert_eq!(
+            InputBatch::decode(&descending),
+            Err(AbiError::InvalidValue(
+                "word boundaries must ascend without duplicates"
+            ))
+        );
     }
 
     #[test]

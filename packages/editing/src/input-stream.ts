@@ -10,6 +10,7 @@ import {
   InputOpcode,
   MAX_INPUT_BYTES,
   MAX_INPUT_INSTRUCTIONS,
+  MAX_WORD_BOUNDARIES,
   MAX_RESOURCE_BYTES,
   PROTOCOL_ALIGNMENT,
   STREAM_HEADER_BYTES,
@@ -100,6 +101,21 @@ export type InputCommand =
       readonly y: number;
       readonly extend: boolean;
       readonly word: boolean;
+    }
+  | {
+      /**
+       * Dictionary word boundaries for the value a following word operation
+       * will act on.
+       *
+       * UAX #29 has no dictionary, so Core alone makes every Han ideograph its
+       * own word and a double click selects one character. `baseRevision` is the
+       * session revision these describe; Core ignores a stale one rather than
+       * selecting against text the user has already changed.
+       */
+      readonly type: "setWordBoundaries";
+      readonly nodeId: number;
+      readonly baseRevision: bigint;
+      readonly boundaries: readonly number[];
     }
   | {
       readonly type: "moveCaret";
@@ -264,6 +280,23 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
       writer.f32(command.y);
       writer.u32((command.extend ? 1 : 0) | (command.word ? 2 : 0));
       return;
+    case "setWordBoundaries": {
+      assertU32(command.nodeId, "editable nodeId");
+      if (command.boundaries.length > MAX_WORD_BOUNDARIES) fail("too many word boundaries");
+      let previous = -1;
+      for (const offset of command.boundaries) {
+        assertU32(offset, "word boundary offset");
+        // Ascending and unique keeps one segmentation one byte sequence.
+        if (offset <= previous) fail("word boundaries must ascend without duplicates");
+        previous = offset;
+      }
+      writer.u32(command.nodeId);
+      writer.u32(Number(command.baseRevision & 0xffff_ffffn));
+      writer.u32(Number((command.baseRevision >> 32n) & 0xffff_ffffn));
+      writer.u32(command.boundaries.length);
+      for (const offset of command.boundaries) writer.u32(offset);
+      return;
+    }
     case "moveCaret":
       assertU32(command.nodeId, "editable nodeId");
       writer.u32(command.nodeId);
@@ -414,6 +447,29 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
         word: (flags & 2) !== 0,
       };
     }
+    case InputOpcode.SetWordBoundaries: {
+      const nodeId = reader.u32();
+      const low = BigInt(reader.u32());
+      const high = BigInt(reader.u32());
+      const declared = reader.u32();
+      if (declared > MAX_WORD_BOUNDARIES) fail("too many word boundaries");
+      // Bound against the bytes that remain before allocating.
+      if (declared > Math.floor(reader.remaining / 4)) fail("truncated input batch");
+      const boundaries: number[] = [];
+      let previous = -1;
+      for (let index = 0; index < declared; index += 1) {
+        const offset = reader.u32();
+        if (offset <= previous) fail("word boundaries must ascend without duplicates");
+        previous = offset;
+        boundaries.push(offset);
+      }
+      return {
+        type: "setWordBoundaries",
+        nodeId,
+        baseRevision: low | (high << 32n),
+        boundaries: Object.freeze(boundaries),
+      };
+    }
     case InputOpcode.ScrollBegin:
       return { type: "scrollBegin", nodeId: reader.u32() };
     case InputOpcode.ScrollDelta: {
@@ -492,6 +548,8 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.PlaceCaret;
     case "moveCaret":
       return InputOpcode.MoveCaret;
+    case "setWordBoundaries":
+      return InputOpcode.SetWordBoundaries;
     case "scrollBegin":
       return InputOpcode.ScrollBegin;
     case "scrollDelta":

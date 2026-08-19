@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 6,
+  "abiVersion": 7,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -75,6 +75,7 @@
     "glyphBitmapPixels": 16777216,
     "systemTextLines": 1048576,
     "systemTextAdvances": 1048576,
+    "wordBoundaries": 262144,
     "recordingRecords": 1048576,
     "virtualItems": 4000000
   },
@@ -552,6 +553,18 @@
           "name": "PlaceCaret",
           "opcode": 15,
           "fields": ["u32", "f32", "f32", "u32"]
+        },
+        {
+          "name": "SetWordBoundaries",
+          "opcode": 17,
+          "fields": [
+            { "name": "nodeId", "type": "u32" },
+            { "name": "baseRevisionLow", "type": "u32" },
+            { "name": "baseRevisionHigh", "type": "u32" },
+            { "name": "boundaryCount", "type": "u32" },
+            { "name": "boundaries", "type": "bytes" },
+            "align4"
+          ]
         },
         {
           "name": "MoveCaret",
