@@ -1,6 +1,6 @@
 # 공개 API
 
-`@dopejs/doper`의 익스포트가 공개 계약입니다. 내부 패키지(`@dopejs/doper-host` 등)는 안정성을
+`@dopejs/pingo`의 익스포트가 공개 계약입니다. 내부 패키지(`@dopejs/pingo-host` 등)는 안정성을
 약속하지 않으며, [마이그레이션 스캐너](/migration)가 애플리케이션의 직접 의존을 막습니다.
 
 ::: tip 스냅샷이 곧 계약
@@ -44,7 +44,7 @@ Fragment
 `EditableTextProps`, `EditableInputMode`, `Color`, `EdgeInsets`, `NodeHandle`, `Ref`,
 `DoperNode`, `FunctionComponent`.
 
-JSX 런타임은 `@dopejs/doper/jsx-runtime`과 `@dopejs/doper/jsx-dev-runtime`으로 제공합니다.
+JSX 런타임은 `@dopejs/pingo/jsx-runtime`과 `@dopejs/pingo/jsx-dev-runtime`으로 제공합니다.
 
 ## 반응성과 훅
 
@@ -106,5 +106,5 @@ verifyWasmIntegrity(bytes, manifest): Promise<void>
 
 ## 마이그레이션 경계
 
-`@dopejs/doper-compat`은 독립적인 경계 패키지로, 페이지 단위 점진 적용과 롤백을 위한
+`@dopejs/pingo-compat`은 독립적인 경계 패키지로, 페이지 단위 점진 적용과 롤백을 위한
 `mountCompatPage`를 제공합니다. 자세한 내용은 [마이그레이션 가이드](/migration)에 있습니다.

@@ -1,7 +1,7 @@
 # Публичный API
 
-То, что экспортирует `@dopejs/doper`, и есть публичный контракт. Внутренние пакеты
-(`@dopejs/doper-host` и прочие) не обещают стабильности, а [сканер миграции](/migration) не даёт
+То, что экспортирует `@dopejs/pingo`, и есть публичный контракт. Внутренние пакеты
+(`@dopejs/pingo-host` и прочие) не обещают стабильности, а [сканер миграции](/migration) не даёт
 приложению зависеть от них напрямую.
 
 ::: tip Снимок и есть контракт
@@ -45,7 +45,7 @@ Fragment
 `EditableTextProps`, `EditableInputMode`, `Color`, `EdgeInsets`, `NodeHandle`, `Ref`,
 `DoperNode`, `FunctionComponent`.
 
-Среда выполнения JSX доступна через `@dopejs/doper/jsx-runtime` и `@dopejs/doper/jsx-dev-runtime`.
+Среда выполнения JSX доступна через `@dopejs/pingo/jsx-runtime` и `@dopejs/pingo/jsx-dev-runtime`.
 
 ## Реактивность и хуки
 
@@ -107,5 +107,5 @@ verifyWasmIntegrity(bytes, manifest): Promise<void>
 
 ## Граница миграции
 
-`@dopejs/doper-compat` — отдельный граничный пакет, предоставляющий `mountCompatPage` для постраничного
+`@dopejs/pingo-compat` — отдельный граничный пакет, предоставляющий `mountCompatPage` для постраничного
 раскатывания и возврата. Подробности в [руководстве по миграции](/migration).

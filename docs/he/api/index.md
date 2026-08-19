@@ -1,6 +1,6 @@
 # API ציבורי
 
-מה ש-`@dopejs/doper` מייצא הוא החוזה הציבורי. חבילות פנימיות (`@dopejs/doper-host` ואחרות) אינן מבטיחות
+מה ש-`@dopejs/pingo` מייצא הוא החוזה הציבורי. חבילות פנימיות (`@dopejs/pingo-host` ואחרות) אינן מבטיחות
 יציבות, ו[סורק ההגירה](/migration) מונע מיישום להיות תלוי בהן ישירות.
 
 ::: tip התצלום הוא החוזה
@@ -44,7 +44,7 @@ Fragment
 `EditableTextProps`, `EditableInputMode`, `Color`, `EdgeInsets`, `NodeHandle`, `Ref`,
 `DoperNode`, `FunctionComponent`.
 
-סביבת הריצה של JSX זמינה דרך `@dopejs/doper/jsx-runtime` ו-`@dopejs/doper/jsx-dev-runtime`.
+סביבת הריצה של JSX זמינה דרך `@dopejs/pingo/jsx-runtime` ו-`@dopejs/pingo/jsx-dev-runtime`.
 
 ## ריאקטיביות והוקים
 
@@ -106,5 +106,5 @@ verifyWasmIntegrity(bytes, manifest): Promise<void>
 
 ## גבול ההגירה
 
-‏`@dopejs/doper-compat` היא חבילת גבול עצמאית המספקת את `mountCompatPage` להשקה לפי עמוד ולחזרה. פרטים
+‏`@dopejs/pingo-compat` היא חבילת גבול עצמאית המספקת את `mountCompatPage` להשקה לפי עמוד ולחזרה. פרטים
 ב[מדריך ההגירה](/migration).

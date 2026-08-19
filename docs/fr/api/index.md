@@ -1,6 +1,6 @@
 # API publique
 
-Ce qu'exporte `@dopejs/doper` constitue le contrat public. Les paquets internes (`@dopejs/doper-host`
+Ce qu'exporte `@dopejs/pingo` constitue le contrat public. Les paquets internes (`@dopejs/pingo-host`
 et consorts) ne promettent aucune stabilité, et le [scanner de migration](/migration) empêche une
 application d'en dépendre directement.
 
@@ -46,7 +46,7 @@ Types : `CommonProps`, `ContainerProps`, `TextProps`, `ScrollProps`, `VirtualLis
 `EditableTextProps`, `EditableInputMode`, `Color`, `EdgeInsets`, `NodeHandle`, `Ref`,
 `DoperNode`, `FunctionComponent`.
 
-Le runtime JSX est fourni via `@dopejs/doper/jsx-runtime` et `@dopejs/doper/jsx-dev-runtime`.
+Le runtime JSX est fourni via `@dopejs/pingo/jsx-runtime` et `@dopejs/pingo/jsx-dev-runtime`.
 
 ## Réactivité et hooks
 
@@ -108,5 +108,5 @@ manifeste de la compilation. Voir le [diagnostic](/diagnostics).
 
 ## Frontière de migration
 
-`@dopejs/doper-compat` est un paquet frontière indépendant qui fournit `mountCompatPage` pour le
+`@dopejs/pingo-compat` est un paquet frontière indépendant qui fournit `mountCompatPage` pour le
 déploiement page par page et le retour arrière. Détails dans le [guide de migration](/migration).

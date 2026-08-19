@@ -1,6 +1,6 @@
 # 公开 API
 
-`@dopejs/doper` 的导出即公开契约。内部包（`@dopejs/doper-host` 等）不承诺稳定性，
+`@dopejs/pingo` 的导出即公开契约。内部包（`@dopejs/pingo-host` 等）不承诺稳定性，
 [迁移扫描器](/migration)会阻止业务直接依赖它们。
 
 ::: tip 快照即契约
@@ -44,7 +44,7 @@ Fragment
 `EditableTextProps`、`EditableInputMode`、`Color`、`EdgeInsets`、`NodeHandle`、`Ref`、
 `DoperNode`、`FunctionComponent`。
 
-JSX 运行时通过 `@dopejs/doper/jsx-runtime` 与 `@dopejs/doper/jsx-dev-runtime` 提供。
+JSX 运行时通过 `@dopejs/pingo/jsx-runtime` 与 `@dopejs/pingo/jsx-dev-runtime` 提供。
 
 ## 响应式与 hooks
 
@@ -105,5 +105,5 @@ verifyWasmIntegrity(bytes, manifest): Promise<void>
 
 ## 迁移边界
 
-`@dopejs/doper-compat` 是独立的边界包，提供 `mountCompatPage` 做按页面灰度与回退。
+`@dopejs/pingo-compat` 是独立的边界包，提供 `mountCompatPage` 做按页面灰度与回退。
 详见[迁移指南](/migration)。

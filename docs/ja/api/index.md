@@ -1,6 +1,6 @@
 # 公開 API
 
-`@dopejs/doper` のエクスポートが公開契約です。内部パッケージ（`@dopejs/doper-host` など）は
+`@dopejs/pingo` のエクスポートが公開契約です。内部パッケージ（`@dopejs/pingo-host` など）は
 安定性を約束しません。[移行スキャナ](/migration)がアプリケーションからの直接依存を止めます。
 
 ::: tip スナップショットが契約
@@ -44,7 +44,7 @@ Fragment
 `EditableTextProps`、`EditableInputMode`、`Color`、`EdgeInsets`、`NodeHandle`、`Ref`、
 `DoperNode`、`FunctionComponent`。
 
-JSX ランタイムは `@dopejs/doper/jsx-runtime` と `@dopejs/doper/jsx-dev-runtime` で提供します。
+JSX ランタイムは `@dopejs/pingo/jsx-runtime` と `@dopejs/pingo/jsx-dev-runtime` で提供します。
 
 ## リアクティビティとフック
 
@@ -106,5 +106,5 @@ verifyWasmIntegrity(bytes, manifest): Promise<void>
 
 ## 移行の境界
 
-`@dopejs/doper-compat` は独立した境界パッケージで、ページ単位の段階適用とロールバックのための
+`@dopejs/pingo-compat` は独立した境界パッケージで、ページ単位の段階適用とロールバックのための
 `mountCompatPage` を提供します。詳しくは[移行ガイド](/migration)を参照してください。

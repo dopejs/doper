@@ -1,6 +1,6 @@
 # واجهة البرمجة العامة
 
-ما تُصدّره `@dopejs/doper` هو العقد العلني. أمّا الحزم الداخلية (`@dopejs/doper-host` وغيرها) فلا تَعِد
+ما تُصدّره `@dopejs/pingo` هو العقد العلني. أمّا الحزم الداخلية (`@dopejs/pingo-host` وغيرها) فلا تَعِد
 بالاستقرار، و[ماسح الترحيل](/migration) يمنع التطبيقات من الاعتماد عليها مباشرة.
 
 ::: tip اللقطة هي العقد
@@ -44,7 +44,7 @@ Fragment
 و`EditableTextProps` و`EditableInputMode` و`Color` و`EdgeInsets` و`NodeHandle` و`Ref`
 و`DoperNode` و`FunctionComponent`.
 
-وتُتاح بيئة تشغيل JSX عبر `@dopejs/doper/jsx-runtime` و`@dopejs/doper/jsx-dev-runtime`.
+وتُتاح بيئة تشغيل JSX عبر `@dopejs/pingo/jsx-runtime` و`@dopejs/pingo/jsx-dev-runtime`.
 
 ## التفاعلية والخطّافات
 
@@ -106,5 +106,5 @@ verifyWasmIntegrity(bytes, manifest): Promise<void>
 
 ## حدّ الترحيل
 
-‏`@dopejs/doper-compat` حزمة حدّية مستقلّة توفّر `mountCompatPage` للإطلاق صفحةً صفحة وللعودة. التفاصيل
+‏`@dopejs/pingo-compat` حزمة حدّية مستقلّة توفّر `mountCompatPage` للإطلاق صفحةً صفحة وللعودة. التفاصيل
 في [دليل الترحيل](/migration).
