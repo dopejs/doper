@@ -746,6 +746,83 @@ describe("CanvasFrameSink", () => {
     expect(commit.mock.calls[2]?.[1]).toBeUndefined();
   });
 
+  it("measures the password mask, which is Core's and in no Scene string", () => {
+    const commit = vi.fn((_mutations: Uint8Array, _metrics?: Uint8Array) => emptyDisplayList());
+    const sink = new CanvasFrameSink(fakeContext([], []), { commit });
+    const textNode = 0x0010_0001;
+    sink.commit(
+      mutationFrame([
+        { type: "createNode", nodeId: textNode, kind: NodeKind.Text, parent: 0, beforeSibling: 0 },
+        { type: "defineResource", resourceId: 1, kind: ResourceKind.Paint, bytes: solidPaint() },
+        {
+          type: "defineResource",
+          resourceId: 2,
+          kind: ResourceKind.Utf8String,
+          bytes: new TextEncoder().encode("ab"),
+        },
+        {
+          type: "defineResource",
+          resourceId: 3,
+          kind: ResourceKind.TextStyle,
+          bytes: textStyle(1, 16, 20, 400, "Inter"),
+        },
+        { type: "setTextRun", nodeId: textNode, stringId: 2, styleId: 3 },
+        {
+          type: "configureEditable",
+          nodeId: textNode,
+          revision: 1n,
+          // Bit two is the password flag; Core then paints U+2022 per grapheme.
+          flags: 1 | 4,
+          maxGraphemes: 0,
+        },
+      ]),
+    );
+    expect(decodeSystemTextMetricBatch(commit.mock.calls[0]?.[1] ?? new Uint8Array())).toEqual([
+      {
+        type: "upsert",
+        metric: {
+          stringId: 2,
+          styleId: 3,
+          maxLineWidth: 20,
+          lineCount: 1,
+          advances: [
+            [97, 10],
+            [98, 10],
+            [0x2022, 10],
+          ],
+        },
+      },
+    ]);
+
+    // Dropping the password flag drops the mask from the table again.
+    sink.commit(
+      mutationFrame([
+        {
+          type: "configureEditable",
+          nodeId: textNode,
+          revision: 2n,
+          flags: 1,
+          maxGraphemes: 0,
+        },
+      ]),
+    );
+    expect(decodeSystemTextMetricBatch(commit.mock.calls[1]?.[1] ?? new Uint8Array())).toEqual([
+      {
+        type: "upsert",
+        metric: {
+          stringId: 2,
+          styleId: 3,
+          maxLineWidth: 20,
+          lineCount: 1,
+          advances: [
+            [97, 10],
+            [98, 10],
+          ],
+        },
+      },
+    ]);
+  });
+
   it("measures IME preedit code points that are in no Scene string", () => {
     const setSystemTextMetrics = vi.fn((_metrics: Uint8Array) => undefined);
     const sink = new CanvasFrameSink(fakeContext([], []), {
