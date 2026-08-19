@@ -247,7 +247,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
               textStyles,
               action.id,
               Object.freeze({
-                font: `${String(decoded.weight)} ${String(decoded.fontSize)}px ${JSON.stringify(decoded.family)}`,
+                font: cssFont(decoded.weight, decoded.fontSize, decoded.family),
                 fillStyle,
                 lineHeight: decoded.lineHeight,
                 textBaseline: "alphabetic" as const,
@@ -257,7 +257,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
             textMeasurementStyles.set(
               action.id,
               Object.freeze({
-                font: `${String(decoded.weight)} ${String(decoded.fontSize)}px ${JSON.stringify(decoded.family)}`,
+                font: cssFont(decoded.weight, decoded.fontSize, decoded.family),
                 lineHeight: decoded.lineHeight,
               }),
             );
@@ -392,7 +392,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
             styles,
             action.id,
             Object.freeze({
-              font: `${String(decoded.weight)} ${String(decoded.fontSize)}px ${JSON.stringify(decoded.family)}`,
+              font: cssFont(decoded.weight, decoded.fontSize, decoded.family),
               lineHeight: decoded.lineHeight,
             }),
             "text measurement style",
@@ -679,6 +679,53 @@ function measureAdvances(
   for (const codePoint of extra ?? []) measure(codePoint);
   // Ascending so the encoded table is canonical whatever order they arrived in.
   return [...advances.entries()].sort(([left], [right]) => left - right);
+}
+
+/** CSS generic family keywords, which must never be quoted. */
+const GENERIC_FONT_FAMILIES = new Set([
+  "cursive",
+  "emoji",
+  "fangsong",
+  "fantasy",
+  "math",
+  "monospace",
+  "sans-serif",
+  "serif",
+  "system-ui",
+  "ui-monospace",
+  "ui-rounded",
+  "ui-sans-serif",
+  "ui-serif",
+]);
+
+/** A family name that needs no quoting: CSS identifiers joined by spaces. */
+const UNQUOTED_FAMILY =
+  /^-?[A-Za-z_\u0080-\uffff][\w\-\u0080-\uffff]*(?: [A-Za-z_\u0080-\uffff][\w\-\u0080-\uffff]*)*$/u;
+
+/**
+ * Builds a Canvas2D `font` shorthand from a text style.
+ *
+ * The family is a CSS font-family list, so it is emitted per entry. Quoting a
+ * generic keyword turns it into a family name no font has, and the browser then
+ * silently renders the default face: `400 13px "sans-serif"` measures exactly
+ * like `serif`, not like `sans-serif`. Quoting the whole list would likewise
+ * make `Inter, sans-serif` one nonexistent name.
+ */
+export function cssFont(weight: number, fontSize: number, family: string): string {
+  const families = family
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map((entry) => {
+      if (GENERIC_FONT_FAMILIES.has(entry.toLowerCase())) return entry.toLowerCase();
+      // Already quoted by the caller, or safe to leave bare.
+      if (/^["'].*["']$/u.test(entry) || UNQUOTED_FAMILY.test(entry)) return entry;
+      return JSON.stringify(entry);
+    });
+  // An empty list would leave the previous font in place, which is worse than a
+  // visible default, so fall back to the generic every browser has.
+  const list = families.length === 0 ? "sans-serif" : families.join(", ");
+  return `${String(weight)} ${String(fontSize)}px ${list}`;
 }
 
 function measureHardLines(

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { RESOURCE_ENCODING_VERSION, ResourceKind } from "./generated";
-import { Canvas2DResourceRegistry } from "./resources";
+import { Canvas2DResourceRegistry, cssFont } from "./resources";
 
 describe("Canvas2DResourceRegistry", () => {
   it("decodes schema-versioned paint, text, and text-style resources", () => {
@@ -17,7 +17,7 @@ describe("Canvas2DResourceRegistry", () => {
     expect(resources.getPaint(1)).toBe("#12345680");
     expect(resources.getText(2)).toBe("hello");
     expect(resources.getTextStyle(3)).toEqual({
-      font: '400 16px "Inter"',
+      font: "400 16px Inter",
       fillStyle: "#12345680",
       lineHeight: 20,
       textBaseline: "alphabetic",
@@ -61,7 +61,7 @@ describe("Canvas2DResourceRegistry", () => {
       resources.measureSystemTextPairs(context, actions, [{ stringId: 2, styleId: 3 }]),
     ).toEqual([{ stringId: 2, styleId: 3, maxLineWidth: 28, lineCount: 2, advances: [] }]);
     // Two calls, one per hard line: an ordinary pair must not pay for advances.
-    expect(fonts).toEqual(['400 16px "Inter"', '400 16px "Inter"']);
+    expect(fonts).toEqual(["400 16px Inter", "400 16px Inter"]);
 
     fonts.length = 0;
     expect(
@@ -202,3 +202,33 @@ function sfntFont(): Uint8Array {
   bytes.set([0x4f, 0x54, 0x54, 0x4f, 0, 0, 0, 0], 12);
   return bytes;
 }
+
+describe("cssFont", () => {
+  it("never quotes a generic family keyword", () => {
+    // A quoted generic is a family name no font has, so the browser silently
+    // renders the default face: measured in Chromium, '400 13px "sans-serif"'
+    // gives the same advances as `serif`, not as `sans-serif`.
+    expect(cssFont(400, 13, "sans-serif")).toBe("400 13px sans-serif");
+    expect(cssFont(700, 16, "Serif")).toBe("700 16px serif");
+    expect(cssFont(400, 13, "system-ui")).toBe("400 13px system-ui");
+  });
+
+  it("emits a family list per entry", () => {
+    // Quoting the whole list would make it one nonexistent family name.
+    expect(cssFont(400, 13, "Inter, Helvetica Neue, sans-serif")).toBe(
+      "400 13px Inter, Helvetica Neue, sans-serif",
+    );
+  });
+
+  it("quotes only names that need it, and keeps existing quotes", () => {
+    expect(cssFont(400, 13, "2Fast")).toBe('400 13px "2Fast"');
+    expect(cssFont(400, 13, "Noto Sans SC")).toBe("400 13px Noto Sans SC");
+    expect(cssFont(400, 13, '"My Font"')).toBe('400 13px "My Font"');
+  });
+
+  it("falls back to a generic rather than leaving the font unset", () => {
+    // An invalid shorthand is a no-op on a Canvas2D context, so the previous
+    // draw's font would silently apply to this one.
+    expect(cssFont(400, 13, " , ")).toBe("400 13px sans-serif");
+  });
+});

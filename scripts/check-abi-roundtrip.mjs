@@ -167,7 +167,9 @@ async function checkAbiRoundtrip() {
     decodeHex(resourceGolden.textStyle),
   );
   assertEqual(resources.getPaint(1), "#12345680", "portable solid paint fixture");
-  assertEqual(resources.getTextStyle(2)?.font, '400 16px "Inter"', "portable text-style fixture");
+  // Unquoted: a bare CSS identifier needs no quotes, and quoting a generic
+  // keyword would name a family no font has.
+  assertEqual(resources.getTextStyle(2)?.font, "400 16px Inter", "portable text-style fixture");
 
   const display = backend.decodeDisplayList(decodeHex(displayGolden));
   if (display.commands.length !== 4 || display.commands[0]?.type !== "save") {

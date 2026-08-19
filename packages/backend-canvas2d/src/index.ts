@@ -6,6 +6,8 @@ export {
 } from "./display-list";
 export {
   Canvas2DResourceRegistry,
+  cssFont,
+  type CodePointAdvance,
   type CanvasEncodedResourceAction,
   type CanvasFontResource,
   type CanvasSystemTextMetric,
