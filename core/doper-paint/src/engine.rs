@@ -467,7 +467,14 @@ fn build_node(
         }
         push(&mut instructions, DisplayCommand::Alpha(opacity));
     }
-    if scene.kind(node) == Some(NodeKind::Scroll) {
+    // A scroll viewport clips its children; an editable clips its own value,
+    // which the fallback path does not wrap and so can be arbitrarily wider than
+    // the box it was measured into. Without this a long line paints across
+    // whatever sits beside and below the field.
+    if matches!(
+        scene.kind(node),
+        Some(NodeKind::Scroll | NodeKind::EditableText)
+    ) {
         push(
             &mut instructions,
             DisplayCommand::ClipRect([0.0, 0.0, size.width, size.height]),
@@ -815,6 +822,40 @@ mod tests {
             .paint(&scene, full_layout.snapshot(), &full_changed.changed, true)
             .expect("full paint");
         assert_eq!(incremental.picture.bytes(), full.picture.bytes());
+    }
+
+    #[test]
+    fn clips_an_editable_to_its_own_box() {
+        // The fallback text path does not wrap, so a value can be far wider than
+        // the box it was measured into. Unclipped it paints over whatever sits
+        // beside and below the field.
+        let root = id(0);
+        let editable = id(1);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(editable, NodeKind::EditableText, Some(root)),
+                set_f32(editable, Prop::Width, 120.0),
+                set_f32(editable, Prop::Height, 24.0),
+            ],
+        );
+        let (layout, changed) = layout(&scene);
+        let picture = PaintEngine::new()
+            .paint(&scene, layout.snapshot(), &changed, false)
+            .expect("paint")
+            .picture;
+        let decoded = DisplayList::decode(picture.bytes()).expect("display list");
+        assert!(
+            decoded.instructions.iter().any(|instruction| matches!(
+                instruction.command,
+                DisplayCommand::ClipRect(rect) if rect == [0.0, 0.0, 120.0, 24.0]
+            )),
+            "{:?}",
+            decoded.instructions
+        );
     }
 
     #[test]
