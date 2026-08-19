@@ -114,13 +114,17 @@ export class NativeTextInputBridge {
       this.listen(this.#editContext, "compositionend", this.handleCompositionEnd);
       this.listen(this.#editContext, "characterboundsupdate", this.handleCharacterBoundsUpdate);
       this.listen(canvas, "keydown", this.handleKeyDown);
-      // EditContext only replaces text input. Clipboard events still fire on
-      // the editing host, and the built-in undo stack is disabled outright, so
-      // both stay the application's responsibility; without these the shortcuts
-      // silently do nothing.
-      this.listen(canvas, "copy", this.handleCopy);
-      this.listen(canvas, "cut", this.handleCut);
-      this.listen(canvas, "paste", this.handlePaste);
+      // EditContext only replaces text input: the built-in undo stack is
+      // disabled outright and the clipboard stays the application's job. The
+      // listeners sit on the document, not the canvas — events targeted at the
+      // host bubble up here anyway, and a browser that routes them at the
+      // document because it does not treat the host as editable is still
+      // caught. The handlers no-op while no editor is active.
+      const clipboardHost: EventTarget =
+        typeof ownerDocument.addEventListener === "function" ? ownerDocument : canvas;
+      this.listen(clipboardHost, "copy", this.handleCopy);
+      this.listen(clipboardHost, "cut", this.handleCut);
+      this.listen(clipboardHost, "paste", this.handlePaste);
     } else {
       this.mode = "textarea-proxy";
       this.#proxy = createProxy(ownerDocument);

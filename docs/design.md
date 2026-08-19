@@ -1302,6 +1302,33 @@ replace、Cmd+Z/Shift+Cmd+Z/Ctrl+Y 产出 undo/redo，且裸键和 alt 组合不
 复跑即失败。真实按键经浏览器把剪贴板事件路由到 EditContext host 的行为属于平台资格
 认证——headless 下无法发真实 Cmd+C。
 
+### 空撤销毒化 Core，恢复路径把密码画成明文（2026-08-19）
+
+上一条接好快捷键后，真机上按 Cmd+Z 直接红屏：
+`render Worker failed: … Core frame rejected: Edit(NothingToUndo)`，且恢复后**密码框显示明文**。
+一次按键暴露了三层问题，逐层修复：
+
+**1. 空历史撤销被当成协议违规。** `EditingController` 里 `session.apply(command)?` 把
+`NothingToUndo`/`NothingToRedo` 原样上抛，输入帧被拒、Core 被毒化、worker 致命。但空撤销
+是普通按键，原生输入框的行为是什么都不做。现在这两个错误在命令循环里跳过该命令继续，
+其余错误仍然拒帧。
+
+**2. 恢复快照丢了 `configureEditable`。** worker 死亡后 `MutationSceneSnapshot.encode()`
+重建新 Core，但它的 apply/encode 都没有 `configureEditable` 分支——新 Core 没有编辑会话，
+密码遮罩是会话的显示覆盖，于是恢复帧把 Scene 字符串**明文**画了出来。这是真实的暴露：
+demo 的 Shell 持久值就是明文，全靠 Core 的绘制期遮罩。快照现在保留并重放每个节点最后
+一次可编辑配置。
+
+**3. 剪贴板监听从 canvas 移到 document。** 反馈"本地仍然无法粘贴"。规范说剪贴板事件打在
+EditContext host 上，但打在 host 上的事件本来就冒泡到 document；若浏览器实现不把 host
+视为可编辑目标而把事件发给 document，挂 canvas 就一个也收不到。挂 document 两种路由都
+覆盖，处理器在无活动编辑器时本来就是空操作，textarea-proxy 模式不变（代理事件自带焦点）。
+无 `addEventListener` 的宿主文档（无头测试桩）回退挂 canvas。
+
+**验证**：engine 测试断言空 Undo/Redo 后帧成功且会话仍可插入，把跳过改回上抛即失败；
+snapshot 测试断言恢复批中含带原 flags 的 `configureEditable`；native-input 单测改为在
+document 上派发剪贴板事件。真实 Cmd+V 的浏览器路由仍属平台资格认证。
+
 ### 富单元格暴露的能力缺口
 
 新 demo 每行约 18 个节点（此前 3 个），1280×800 视口下 20 行物化 = 357 个 Scene 节点。

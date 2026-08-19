@@ -87,6 +87,7 @@ interface Harness {
   readonly canvas: FakeSurface;
   readonly commands: InputCommand[];
   readonly context: FakeEditContext | undefined;
+  readonly document: EventTarget;
   readonly errors: Error[];
   readonly proxy: FakeSurface | undefined;
   readonly submits: number[];
@@ -100,7 +101,7 @@ function harness(options: { editContext?: boolean } = {}): Harness {
   const boundsRequests: Array<readonly [number, number, number]> = [];
   const created: FakeSurface[] = [];
   const canvas = new FakeSurface();
-  const fakeDocument = {
+  const fakeDocument = Object.assign(new EventTarget(), {
     body: { append: () => undefined },
     createElement: () => {
       const element = new FakeSurface();
@@ -108,7 +109,7 @@ function harness(options: { editContext?: boolean } = {}): Harness {
       return element;
     },
     defaultView: undefined,
-  };
+  });
   Reflect.set(canvas, "ownerDocument", fakeDocument);
   const bridge = new NativeTextInputBridge(canvas as unknown as HTMLCanvasElement, {
     dispatch: (command) => commands.push(command),
@@ -126,6 +127,7 @@ function harness(options: { editContext?: boolean } = {}): Harness {
     canvas,
     commands,
     context,
+    document: fakeDocument,
     errors,
     proxy: options.editContext === true ? undefined : created[0],
     submits,
@@ -190,7 +192,7 @@ describe("NativeTextInputBridge (unit)", () => {
     // EditContext only replaces text input: clipboard events fire on the host
     // canvas, and the browser undo stack is disabled entirely, so both must be
     // wired there or the shortcuts silently do nothing.
-    const { bridge, canvas, commands } = harness({ editContext: true });
+    const { bridge, canvas, commands, document } = harness({ editContext: true });
     bridge.activate(target({ selection: { anchor: 0, focus: 2 } }));
     const clipboard = new Map<string, string>();
     const clipboardEvent = (type: string): Event =>
@@ -200,12 +202,14 @@ describe("NativeTextInputBridge (unit)", () => {
           setData: (format: string, value: string) => clipboard.set(format, value),
         },
       });
-    canvas.dispatchEvent(clipboardEvent("copy"));
+    // Dispatched on the document: host-targeted events bubble here, and this is
+    // also where a browser that does not treat the host as editable routes them.
+    document.dispatchEvent(clipboardEvent("copy"));
     expect(clipboard.get("text/plain")).toBe("ab");
     clipboard.set("text/plain", "pasted");
-    canvas.dispatchEvent(clipboardEvent("paste"));
+    document.dispatchEvent(clipboardEvent("paste"));
     expect(commands.at(-1)).toMatchObject({ type: "insert", text: "pasted" });
-    canvas.dispatchEvent(clipboardEvent("cut"));
+    document.dispatchEvent(clipboardEvent("cut"));
     expect(commands.at(-1)).toMatchObject({ type: "replace", start: 0, end: 2, text: "" });
 
     const press = (key: string, init: Record<string, unknown> = {}): void => {

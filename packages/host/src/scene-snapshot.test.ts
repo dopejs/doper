@@ -139,6 +139,27 @@ describe("MutationSceneSnapshot", () => {
     expect(snapshot).toMatchObject({ frameSeq: 2, nodeCount: 2 });
   });
 
+  it("preserves the editable configuration during recovery", () => {
+    // Recovery rebuilds a fresh Core from this snapshot. Without the editable
+    // configuration the new Core has no editing session, and a password field
+    // repaints its Scene string in plaintext.
+    const snapshot = new MutationSceneSnapshot();
+    snapshot.apply(
+      batch(1, [
+        create(1, NodeKind.Root, NULL_NODE_ID),
+        create(2, NodeKind.EditableText, 1),
+        { type: "configureEditable", nodeId: 2, revision: 7n, flags: 1 | 4, maxGraphemes: 128 },
+      ]),
+    );
+    expect(decodeMutationBatch(snapshot.encode()).mutations).toContainEqual({
+      type: "configureEditable",
+      nodeId: 2,
+      revision: 7n,
+      flags: 1 | 4,
+      maxGraphemes: 128,
+    });
+  });
+
   it("preserves virtual-list configuration and materialized item identity during recovery", () => {
     const snapshot = new MutationSceneSnapshot();
     snapshot.apply(

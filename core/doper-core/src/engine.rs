@@ -3849,6 +3849,57 @@ mod tests {
     }
 
     #[test]
+    fn undo_with_empty_history_is_a_no_op_not_a_poisoned_frame() {
+        // Cmd+Z with nothing to undo is an ordinary key press. Rejecting the
+        // input frame poisoned the Core, killed the render worker, and the
+        // recovery that followed repainted a password field in plaintext.
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&editable_text_tree(1)).expect("frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+
+        for (seq, command) in [
+            (
+                2,
+                InputCommand::Undo {
+                    node_id: id(1),
+                    base_revision: 0,
+                },
+            ),
+            (
+                3,
+                InputCommand::Redo {
+                    node_id: id(1),
+                    base_revision: 0,
+                },
+            ),
+        ] {
+            engine
+                .input(&input(seq, vec![command]))
+                .expect("empty history must be a no-op");
+        }
+
+        // The session is still alive and usable afterwards.
+        engine
+            .input(&input(
+                4,
+                vec![InputCommand::Insert {
+                    node_id: id(1),
+                    base_revision: 0,
+                    text: "x".to_owned(),
+                }],
+            ))
+            .expect("insert after no-op undo");
+        let bytes = engine.take_edit_transactions().expect("edit bytes");
+        assert!(!bytes.is_empty(), "insert still produces a transaction");
+    }
+
+    #[test]
     fn editable_batches_are_atomic_and_password_display_never_contains_plaintext() {
         let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
         engine

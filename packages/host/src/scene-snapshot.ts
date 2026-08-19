@@ -16,6 +16,12 @@ interface SnapshotResource {
 
 interface SnapshotNode {
   readonly children: number[];
+  /**
+   * Last editable configuration, kept so recovery re-creates the editing
+   * session. Dropping it re-created the Core without the password flag, and
+   * the recovered frame painted the field's value in plaintext.
+   */
+  editable: { revision: bigint; flags: number; maxGraphemes: number } | undefined;
   readonly f32: Map<Prop, number>;
   flags: number;
   readonly kind: NodeKind;
@@ -165,6 +171,9 @@ export class MutationSceneSnapshot {
       if (node.virtualItemIndex !== undefined) {
         mutations.push({ nodeId, itemIndex: node.virtualItemIndex, type: "setVirtualItem" });
       }
+      if (node.editable !== undefined) {
+        mutations.push({ nodeId, type: "configureEditable", ...node.editable });
+      }
     }
     return encodeMutationBatch({ frameSeq, mutations });
   }
@@ -282,6 +291,13 @@ export class MutationSceneSnapshot {
         return;
       case "setVirtualItem":
         touchNode(mutation.nodeId).virtualItemIndex = mutation.itemIndex;
+        return;
+      case "configureEditable":
+        touchNode(mutation.nodeId).editable = {
+          revision: mutation.revision,
+          flags: mutation.flags,
+          maxGraphemes: mutation.maxGraphemes,
+        };
     }
   }
 
@@ -325,6 +341,7 @@ export class MutationSceneSnapshot {
 function emptyNode(kind: NodeKind, parent: number): SnapshotNode {
   return {
     children: [],
+    editable: undefined,
     f32: new Map(),
     flags: 0,
     kind,
@@ -341,6 +358,7 @@ function emptyNode(kind: NodeKind, parent: number): SnapshotNode {
 function cloneNode(node: SnapshotNode): SnapshotNode {
   return {
     children: [...node.children],
+    editable: node.editable === undefined ? undefined : { ...node.editable },
     f32: new Map(node.f32),
     flags: node.flags,
     kind: node.kind,
