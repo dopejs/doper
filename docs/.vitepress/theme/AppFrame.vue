@@ -66,7 +66,7 @@ onBeforeUnmount(() => {
     <iframe
       ref="frame"
       :src="initialSource"
-      title="pingo embedded application"
+      title="Pingo embedded application"
       @load="onFrameLoad"
     />
   </div>

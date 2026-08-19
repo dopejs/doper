@@ -52,6 +52,7 @@ pub use mutation::{Mutation, MutationBatch, MutationInstruction};
 pub use recording::{ReplayRecord, ReplayRecording};
 pub use system_text_metrics::{
     SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand, SystemTextMetricInstruction,
+    TextContraction,
 };
 
 /// Semantic invalidation domains associated with a property.

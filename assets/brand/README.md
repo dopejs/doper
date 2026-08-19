@@ -1,4 +1,4 @@
-# pingo brand assets
+# Pingo brand assets
 
 `pingo` comes from Latin `pingō`: to draw, paint, or depict.
 

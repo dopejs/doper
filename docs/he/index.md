@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: pingo
+  name: Pingo
   text: מנוע רינדור canvas
   tagline: ליבת Rust/WASM + מעטפת TypeScript + עורף רינדור מתחלף. תוכנן לאינטראקציה בביצועים גבוהים, גלילה וירטואלית נייטיב ועריכת טקסט בתוך ה-canvas.
   actions:

@@ -3079,7 +3079,14 @@ mod tests {
                         line_count: 1,
                         advances: vec![('A', 10.0), ('B', 10.0), ('X', 10.0), ('\u{3001}', 16.0)],
                         positional_advances: vec![10.0, 16.0, 10.0, 16.0, 10.0],
-                        contractions: vec![('\u{3001}', '\u{3001}', -8.0)],
+                        contractions: vec![doper_abi::TextContraction {
+                            first: '\u{3001}',
+                            second: '\u{3001}',
+                            delta: -8.0,
+                            // Every tested platform trims the first mark, so the
+                            // stop between the pair belongs 8px earlier.
+                            first_delta: -8.0,
+                        }],
                     },
                 ))),
             )
@@ -3112,8 +3119,11 @@ mod tests {
             .text
             .editor_caret_stops(&engine.scene, node)
             .expect("caret stops");
-        // "A、、B": the second mark advances 16 - 8 = 8, so the stop after it is
-        // at 10 + 16 + 8 = 34. Without the contraction it lands at 42.
+        // "A、、B": the font trims the first mark, so it advances 16 - 8 = 8 and
+        // the second keeps its full 16. The stop between the marks therefore
+        // belongs at 10 + 8 = 18, not at 10 + 16 = 26, and the stop after them
+        // at 34. Attributing the trim to the second mark puts the between-stop
+        // on top of it, which is why the caret could not be placed there.
         let x = |offset: u32| {
             stops
                 .iter()
@@ -3121,7 +3131,7 @@ mod tests {
                 .map(|stop| stop.x)
                 .expect("stop")
         };
-        assert!((x(2) - 26.0).abs() < 0.01, "before the pair: {}", x(2));
+        assert!((x(2) - 18.0).abs() < 0.01, "between the pair: {}", x(2));
         assert!((x(3) - 34.0).abs() < 0.01, "after the pair: {}", x(3));
         assert!((x(4) - 44.0).abs() < 0.01, "end: {}", x(4));
     }

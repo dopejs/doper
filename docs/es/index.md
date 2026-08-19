@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: pingo
+  name: Pingo
   text: motor de renderizado canvas
   tagline: Núcleo Rust/WASM + capa TypeScript + backend intercambiable. Diseñado para interacción de alto rendimiento, scroll virtual nativo y edición de texto dentro del canvas.
   actions:

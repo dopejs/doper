@@ -19,8 +19,16 @@ import {
 /** One measured code point and its advance in logical CSS pixels. */
 export type CodePointAdvance = readonly [codePoint: number, advance: number];
 
-/** Width a font removes when the second code point directly follows the first. */
-export type CodePointContraction = readonly [first: number, second: number, delta: number];
+/**
+ * A pair a font sets closer together, and how much of that the first code point
+ * gives up. `delta - firstDelta` is what the second gives up.
+ */
+export type CodePointContraction = readonly [
+  first: number,
+  second: number,
+  delta: number,
+  firstDelta: number,
+];
 
 /** Browser-measured dimensions for one immutable fallback string/style pair. */
 export interface SystemTextMetric {
@@ -91,7 +99,7 @@ export function encodeSystemTextMetricBatch(deltas: readonly SystemTextMetricDel
         total,
         checkedAdd(
           instructionBytes(opcode),
-          checkedAdd(advances * 8, checkedAdd(positional * 4, contractions * 12)),
+          checkedAdd(advances * 8, checkedAdd(positional * 4, contractions * 16)),
         ),
       );
     }, 0);
@@ -127,10 +135,11 @@ export function encodeSystemTextMetricBatch(deltas: readonly SystemTextMetricDel
       writer.u32(delta.metric.positionalAdvances.length);
       for (const advance of delta.metric.positionalAdvances) writer.f32(advance);
       writer.u32(delta.metric.contractions.length);
-      for (const [first, second, contraction] of delta.metric.contractions) {
+      for (const [first, second, contraction, firstDelta] of delta.metric.contractions) {
         writer.u32(first);
         writer.u32(second);
         writer.f32(contraction);
+        writer.f32(firstDelta);
       }
     } else {
       writer.instruction(SystemTextMetricOpcode.ReleaseSystemTextMetric);
@@ -206,13 +215,18 @@ export function decodeSystemTextMetricBatch(input: Uint8Array): SystemTextMetric
       if (contractionCount > MAX_SYSTEM_TEXT_ADVANCES) {
         fail("text metric contraction count is outside the supported limit");
       }
-      if (contractionCount > Math.floor(reader.remaining / 12)) {
+      if (contractionCount > Math.floor(reader.remaining / 16)) {
         fail("truncated text metric batch");
       }
       const contractions: CodePointContraction[] = [];
       for (let index = 0; index < contractionCount; index += 1) {
         contractions.push(
-          Object.freeze([reader.codePoint(), reader.codePoint(), reader.f32()] as const),
+          Object.freeze([
+            reader.codePoint(),
+            reader.codePoint(),
+            reader.f32(),
+            reader.f32(),
+          ] as const),
         );
       }
       const metric = {
@@ -273,9 +287,11 @@ function validateMetric(metric: SystemTextMetric): void {
     fail("text metric contraction count is outside the supported limit");
   }
   let previousPair: readonly [number, number] = [-1, -1];
-  for (const [first, second, contraction] of metric.contractions) {
-    if (!Number.isFinite(contraction) || !Number.isFinite(Math.fround(contraction))) {
-      fail("text metric contraction must be finite and representable as f32");
+  for (const [first, second, contraction, firstDelta] of metric.contractions) {
+    for (const value of [contraction, firstDelta]) {
+      if (!Number.isFinite(value) || !Number.isFinite(Math.fround(value))) {
+        fail("text metric contraction must be finite and representable as f32");
+      }
     }
     validateCodePoint(first);
     validateCodePoint(second);

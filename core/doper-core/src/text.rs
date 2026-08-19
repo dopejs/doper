@@ -806,28 +806,45 @@ impl CoreTextSystem {
                 metric
                     .contractions
                     .iter()
-                    .map(|(first, second, delta)| ((*first, *second), *delta))
+                    .map(|entry| {
+                        (
+                            (entry.first, entry.second),
+                            (entry.delta, entry.first_delta),
+                        )
+                    })
                     .collect::<HashMap<_, _>>()
             });
-        let mut previous: Option<char> = None;
-        value
-            .chars()
-            .map(|character| {
+        let characters = value.chars().collect::<Vec<_>>();
+        (0..characters.len())
+            .map(|index| {
+                let character = characters[index];
                 if character == '\n' {
-                    previous = None;
                     return 0.0;
                 }
                 let mut advance = advance_for(table.as_ref(), estimate, character);
-                // The pair's total is first + second + delta, and prefix
-                // differences put the whole adjustment on the second glyph.
-                if let Some(first) = previous
-                    && let Some(delta) = contractions
+                let pair = |first: char, second: char| {
+                    contractions
                         .as_ref()
-                        .and_then(|table| table.get(&(first, character)))
+                        .and_then(|table| table.get(&(first, second)).copied())
+                };
+                // A font trims one half of a contracting pair, and which half
+                // decides where the caret between them belongs. Attributing the
+                // whole adjustment to the following glyph -- what a prefix
+                // difference does -- leaves that stop on top of it, and the
+                // caret cannot be placed between the two marks at all.
+                if let Some(next) = characters.get(index + 1).copied()
+                    && next != '\n'
+                    && let Some((_, first_delta)) = pair(character, next)
                 {
-                    advance += *delta;
+                    advance += first_delta;
                 }
-                previous = Some(character);
+                if index > 0
+                    && let previous = characters[index - 1]
+                    && previous != '\n'
+                    && let Some((delta, first_delta)) = pair(previous, character)
+                {
+                    advance += delta - first_delta;
+                }
                 advance.max(0.0)
             })
             .collect()

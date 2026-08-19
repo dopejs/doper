@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: pingo
+  name: Pingo
   text: canvas 渲染引擎
   tagline: Rust/WASM 核心 + TypeScript 外壳 + 可插拔后端。为高性能交互、原生虚拟滚动与 canvas 内文本编辑而设计。
   actions:
@@ -37,7 +37,7 @@ features:
 pnpm add @dopejs/doper
 ```
 
-> 品牌名已切换为 pingo。公开 npm 包将在兼容迁移完成后切换到 `@dopejs/pingo`；当前安装命令仍保持为 `@dopejs/doper`。
+> 品牌名已切换为 Pingo。公开 npm 包将在兼容迁移完成后切换到 `@dopejs/pingo`；当前安装命令仍保持为 `@dopejs/doper`。
 
 ```ts
 import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
@@ -59,7 +59,7 @@ root.render(
 
 ## 它不做什么
 
-pingo 是渲染引擎，不是浏览器。**不做** SSR/HTML 首屏、通用 CSS 兼容（盒模型、层叠、选择器）、
+Pingo 是渲染引擎，不是浏览器。**不做** SSR/HTML 首屏、通用 CSS 兼容（盒模型、层叠、选择器）、
 小程序或原生适配层，也不做业务级富文本语义（协同、公式、Markdown 命令）。
 
 引擎**确实拥有** caret、选区、IME、剪贴板、撤销重做与可编辑文本原语——这些不会被推回业务层用

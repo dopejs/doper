@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: pingo
+  name: Pingo
   text: canvas 렌더링 엔진
   tagline: Rust/WASM 코어 + TypeScript 셸 + 교체 가능한 백엔드. 고성능 상호작용, 네이티브 가상 스크롤, canvas 내 텍스트 편집을 위해 설계되었습니다.
   actions:

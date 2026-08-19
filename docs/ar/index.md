@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: pingo
+  name: Pingo
   text: محرّك عرض canvas
   tagline: نواة Rust/WASM + غلاف TypeScript + خلفية عرض قابلة للاستبدال. مصمَّم للتفاعل عالي الأداء والتمرير الافتراضي الأصلي وتحرير النص داخل canvas.
   actions:

@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: pingo
+  name: Pingo
   text: движок рендеринга canvas
   tagline: Ядро на Rust/WASM + оболочка на TypeScript + сменный бэкенд. Спроектирован для высокопроизводительного взаимодействия, нативной виртуальной прокрутки и редактирования текста внутри canvas.
   actions:

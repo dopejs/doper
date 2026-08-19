@@ -122,7 +122,7 @@ async function checkAbiRoundtrip() {
           [0x4e2d, 12],
         ],
         positionalAdvances: [6.5, 0, 11.5],
-        contractions: [[0x3001, 0x3001, -8]],
+        contractions: [[0x3001, 0x3001, -8, -8]],
       },
     },
     { type: "release", stringId: 8, styleId: 10 },

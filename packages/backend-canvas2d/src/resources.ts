@@ -67,8 +67,16 @@ interface TextMeasurementStyle {
 /** One measured code point and its advance in logical CSS pixels. */
 export type CodePointAdvance = readonly [codePoint: number, advance: number];
 
-/** Width a font removes when the second code point directly follows the first. */
-export type CodePointContraction = readonly [first: number, second: number, delta: number];
+/**
+ * A pair a font sets closer together, and how much of that the first code point
+ * gives up. `delta - firstDelta` is what the second gives up.
+ */
+export type CodePointContraction = readonly [
+  first: number,
+  second: number,
+  delta: number,
+  firstDelta: number,
+];
 
 /** Immutable string/style resource pair requiring browser system-font metrics. */
 export interface CanvasSystemTextPair {
@@ -444,8 +452,10 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
         const measured = measureHardLines(context, text);
         const wantAdvances = pair.measureAdvances === true;
         const advances = wantAdvances ? measureAdvances(context, text, pair.extraCodePoints) : [];
-        const positionalAdvances = wantAdvances ? measurePositionalAdvances(context, text) : [];
         const contractions = wantAdvances ? measureContractions(context, advances) : [];
+        const positionalAdvances = wantAdvances
+          ? measurePositionalAdvances(context, text, contractions)
+          : [];
         metrics.push(
           Object.freeze({
             ...pair,
@@ -776,7 +786,11 @@ const MAXIMUM_POSITIONAL_ADVANCES = 4096;
  * these equals the width of the rendered line. A newline contributes zero and
  * resets the prefix.
  */
-function measurePositionalAdvances(context: Canvas2DContext, text: string): number[] {
+function measurePositionalAdvances(
+  context: Canvas2DContext,
+  text: string,
+  contractions: readonly CodePointContraction[],
+): number[] {
   const codePoints = [...text].length;
   if (codePoints === 0 || codePoints > MAXIMUM_POSITIONAL_ADVANCES) return [];
   const advances: number[] = [];
@@ -795,6 +809,35 @@ function measurePositionalAdvances(context: Canvas2DContext, text: string): numb
       advances.push(Math.max(0, width - previous));
       previous = width;
     }
+  }
+  return reattributeContractions([...text], advances, contractions);
+}
+
+/**
+ * Moves each contraction onto the code point the font actually trimmed.
+ *
+ * A prefix ends at a boundary, so its last code point has no follower and is
+ * measured at full width; the whole contraction lands on the next difference.
+ * That makes the sum right and the boundary between the pair wrong, which is
+ * exactly the stop a caret needs.
+ */
+function reattributeContractions(
+  codePoints: readonly string[],
+  advances: number[],
+  contractions: readonly CodePointContraction[],
+): number[] {
+  if (contractions.length === 0) return advances;
+  const table = new Map(
+    contractions.map(([first, second, , firstDelta]) => [`${first}:${second}`, firstDelta]),
+  );
+  for (let index = 0; index + 1 < codePoints.length; index += 1) {
+    const first = codePoints[index]?.codePointAt(0);
+    const second = codePoints[index + 1]?.codePointAt(0);
+    if (first === undefined || second === undefined) continue;
+    const firstDelta = table.get(`${first}:${second}`);
+    if (firstDelta === undefined) continue;
+    advances[index] = Math.max(0, (advances[index] ?? 0) + firstDelta);
+    advances[index + 1] = Math.max(0, (advances[index + 1] ?? 0) - firstDelta);
   }
   return advances;
 }
@@ -826,10 +869,23 @@ function measureContractions(
   const contractions: CodePointContraction[] = [];
   for (const first of candidates) {
     for (const second of candidates) {
-      const pair = String.fromCodePoint(first) + String.fromCodePoint(second);
+      const firstGlyph = String.fromCodePoint(first);
+      const secondGlyph = String.fromCodePoint(second);
+      const pair = firstGlyph + secondGlyph;
       const delta =
         context.measureText(pair).width - ((width.get(first) ?? 0) + (width.get(second) ?? 0));
-      if (Math.abs(delta) > CONTRACTION_EPSILON) contractions.push([first, second, delta]);
+      if (Math.abs(delta) <= CONTRACTION_EPSILON) continue;
+      // Which half the font trims decides where the caret between them goes, so
+      // it is measured rather than assumed. The ink of the second glyph sits at
+      // its own offset, and the pair's right ink edge minus the second's own
+      // gives that offset without reading pixels back.
+      const secondOffset =
+        context.measureText(pair).actualBoundingBoxRight -
+        context.measureText(secondGlyph).actualBoundingBoxRight;
+      const firstDelta = Number.isFinite(secondOffset)
+        ? secondOffset - (width.get(first) ?? 0)
+        : delta;
+      contractions.push([first, second, delta, clampContraction(firstDelta, delta)]);
     }
   }
   // Ascending so one table has one encoding, matching the advance table.
@@ -840,6 +896,20 @@ function measureContractions(
 
 /** Sub-pixel noise that is not a real contraction. */
 const CONTRACTION_EPSILON = 0.01;
+
+/**
+ * Keeps a measured attribution inside the pair's own budget.
+ *
+ * `actualBoundingBoxRight` is ink, not advance, so a glyph whose ink does not
+ * reach its advance can push the derived offset outside the range the pair
+ * actually removed. Clamping keeps both halves of the split non-positive.
+ */
+function clampContraction(firstDelta: number, delta: number): number {
+  if (!Number.isFinite(firstDelta)) return delta;
+  const low = Math.min(0, delta);
+  const high = Math.max(0, delta);
+  return Math.min(high, Math.max(low, firstDelta));
+}
 
 function measureHardLines(
   context: Canvas2DContext,

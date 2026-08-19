@@ -42,8 +42,8 @@ pub struct SystemTextMetric {
     /// string they were measured from and apply only while the editing value
     /// still equals it.
     pub positional_advances: Vec<f32>,
-    /// Width a font removes when the second code point directly follows the
-    /// first, as `(first, second, delta)` with a non-zero negative delta.
+    /// Widths a font removes when the second code point directly follows the
+    /// first.
     ///
     /// CJK fonts contract adjacent full-width punctuation, and the per-code-point
     /// table cannot express it. Positional advances can, but only while the
@@ -51,7 +51,25 @@ pub struct SystemTextMetric {
     /// application is not required to write the value back, so that can be never.
     /// This table is a property of the font, not of one string, so it keeps the
     /// caret correct for any value built from these code points.
-    pub contractions: Vec<(char, char, f32)>,
+    pub contractions: Vec<TextContraction>,
+}
+
+/// One pair a font sets closer together than the sum of their advances.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextContraction {
+    /// Leading code point of the pair.
+    pub first: char,
+    /// Code point that must directly follow it.
+    pub second: char,
+    /// Total width removed from the pair, normally negative.
+    pub delta: f32,
+    /// Portion taken from the first code point's own advance.
+    ///
+    /// Measured rather than assumed: which half of a pair a font trims decides
+    /// where the caret between them belongs. Every tested platform trims the
+    /// first, so a model that assumed the second put the caret on top of the
+    /// following glyph. `delta - first_delta` is what the second loses.
+    pub first_delta: f32,
 }
 
 /// One transactional system-text metric cache delta.
@@ -273,10 +291,11 @@ impl SystemTextMetricBatch {
                     let contraction_count = u32::try_from(metric.contractions.len())
                         .map_err(|_| AbiError::ArithmeticOverflow)?;
                     writer.u32(contraction_count);
-                    for (first, second, delta) in &metric.contractions {
-                        writer.u32(*first as u32);
-                        writer.u32(*second as u32);
-                        writer.f32(*delta)?;
+                    for contraction in &metric.contractions {
+                        writer.u32(contraction.first as u32);
+                        writer.u32(contraction.second as u32);
+                        writer.f32(contraction.delta)?;
+                        writer.f32(contraction.first_delta)?;
                     }
                 }
                 SystemTextMetricCommand::Release {
@@ -351,19 +370,20 @@ fn read_positional_advances(reader: &mut Reader<'_>, declared: u32) -> Result<Ve
 fn read_contractions(
     reader: &mut Reader<'_>,
     declared: u32,
-) -> Result<Vec<(char, char, f32)>, AbiError> {
+) -> Result<Vec<TextContraction>, AbiError> {
     if declared > MAX_SYSTEM_TEXT_ADVANCES {
         return Err(AbiError::InvalidValue(
             "system text contraction count is outside the supported limit",
         ));
     }
     let count = usize::try_from(declared).map_err(|_| AbiError::ArithmeticOverflow)?;
-    let mut contractions = Vec::with_capacity(count.min(reader.remaining() / 12));
+    let mut contractions = Vec::with_capacity(count.min(reader.remaining() / 16));
     let mut previous: Option<(u32, u32)> = None;
     for _ in 0..count {
         let first = reader.read_u32()?;
         let second = reader.read_u32()?;
         let delta = reader.read_f32()?;
+        let first_delta = reader.read_f32()?;
         // Ascending and unique keeps one table one byte sequence.
         if previous.is_some_and(|last| (first, second) <= last) {
             return Err(AbiError::InvalidValue(
@@ -376,12 +396,17 @@ fn read_contractions(
                 "system text contraction code point is not a Unicode scalar value",
             ));
         };
-        if !delta.is_finite() {
+        if !delta.is_finite() || !first_delta.is_finite() {
             return Err(AbiError::InvalidValue(
                 "system text contraction must be finite",
             ));
         }
-        contractions.push((first, second, delta));
+        contractions.push(TextContraction {
+            first,
+            second,
+            delta,
+            first_delta,
+        });
     }
     Ok(contractions)
 }
@@ -391,22 +416,25 @@ fn validate_metric(
     line_count: u32,
     advances: &[(char, f32)],
     positional_advances: &[f32],
-    contractions: &[(char, char, f32)],
+    contractions: &[TextContraction],
 ) -> Result<(), AbiError> {
     if contractions.len() > MAX_SYSTEM_TEXT_ADVANCES as usize {
         return Err(AbiError::InvalidValue(
             "system text contraction count is outside the supported limit",
         ));
     }
-    if contractions
-        .windows(2)
-        .any(|pair| (pair[0].0 as u32, pair[0].1 as u32) >= (pair[1].0 as u32, pair[1].1 as u32))
-    {
+    if contractions.windows(2).any(|pair| {
+        (pair[0].first as u32, pair[0].second as u32)
+            >= (pair[1].first as u32, pair[1].second as u32)
+    }) {
         return Err(AbiError::InvalidValue(
             "system text contractions must ascend without duplicates",
         ));
     }
-    if contractions.iter().any(|(_, _, delta)| !delta.is_finite()) {
+    if contractions
+        .iter()
+        .any(|entry| !entry.delta.is_finite() || !entry.first_delta.is_finite())
+    {
         return Err(AbiError::InvalidValue(
             "system text contraction must be finite",
         ));
@@ -508,7 +536,12 @@ mod tests {
                         line_count: 2,
                         advances: vec![('\n', 0.0), ('a', 6.5), ('\u{4e2d}', 12.0)],
                         positional_advances: vec![6.5, 0.0, 11.5],
-                        contractions: vec![('\u{3001}', '\u{3001}', -8.0)],
+                        contractions: vec![TextContraction {
+                            first: '\u{3001}',
+                            second: '\u{3001}',
+                            delta: -8.0,
+                            first_delta: -8.0,
+                        }],
                     }),
                 },
                 SystemTextMetricInstruction {
@@ -618,7 +651,12 @@ mod tests {
                 line_count: 1,
                 advances: Vec::new(),
                 positional_advances: Vec::new(),
-                contractions: vec![('a', 'b', f32::NAN)],
+                contractions: vec![TextContraction {
+                    first: 'a',
+                    second: 'b',
+                    delta: f32::NAN,
+                    first_delta: 0.0,
+                }],
             },
             SystemTextMetric {
                 string_id: 1,
@@ -627,7 +665,20 @@ mod tests {
                 line_count: 1,
                 advances: Vec::new(),
                 positional_advances: Vec::new(),
-                contractions: vec![('b', 'a', -1.0), ('a', 'b', -1.0)],
+                contractions: vec![
+                    TextContraction {
+                        first: 'b',
+                        second: 'a',
+                        delta: -1.0,
+                        first_delta: -1.0,
+                    },
+                    TextContraction {
+                        first: 'a',
+                        second: 'b',
+                        delta: -1.0,
+                        first_delta: -1.0,
+                    },
+                ],
             },
         ] {
             let batch = SystemTextMetricBatch {

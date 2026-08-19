@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: pingo
+  name: Pingo
   text: canvas-Rendering-Engine
   tagline: Rust/WASM-Kern + TypeScript-Schale + austauschbares Backend. Entwickelt für hochperformante Interaktion, natives virtuelles Scrollen und Texteingabe direkt im canvas.
   actions:

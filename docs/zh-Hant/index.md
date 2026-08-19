@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: pingo
+  name: Pingo
   text: canvas 繪製引擎
   tagline: Rust/WASM 核心 + TypeScript 外殼 + 可插拔後端。為高效能互動、原生虛擬捲動與 canvas 內文字編輯而設計。
   actions:

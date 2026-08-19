@@ -68,8 +68,61 @@ it("positional advances sum to the true rendered line width", () => {
     );
     expect(entry, "a contracting pair must reach Core").toBeDefined();
     expect(entry?.[2]).toBeCloseTo(together - isolated, 2);
+
+    // Which half the font trims decides where the caret between the pair goes,
+    // so the attribution is checked against ink, independently of the advance
+    // arithmetic that produced it.
+    const single = context.measureText("\u3001").width;
+    expect(entry?.[3]).toBeCloseTo(inkOffsetOfSecond(context) - single, 1);
   }
 });
+
+/**
+ * Where the second glyph of a contracting pair actually starts, from pixels.
+ *
+ * Independent ground truth: reading it off the same `measureText` model the
+ * production path uses would make the assertion circular.
+ */
+function inkOffsetOfSecond(reference: CanvasRenderingContext2D): number {
+  const canvas = document.createElement("canvas");
+  canvas.width = 120;
+  canvas.height = 30;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (context === null) throw new Error("2d context unavailable");
+  const blobs = (text: string): Array<readonly [number, number]> => {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.font = reference.font;
+    context.fillStyle = "#000";
+    context.textBaseline = "alphabetic";
+    context.fillText(text, 0, 22);
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+    const found: Array<readonly [number, number]> = [];
+    let start = -1;
+    for (let x = 0; x <= canvas.width; x += 1) {
+      const inked =
+        x < canvas.width &&
+        Array.from(
+          { length: canvas.height },
+          (_, y) => data[(y * canvas.width + x) * 4 + 3] ?? 0,
+        ).some((alpha) => alpha > 40);
+      if (inked) {
+        if (start < 0) start = x;
+      } else if (start >= 0) {
+        found.push([start, x - 1]);
+        start = -1;
+      }
+    }
+    return found;
+  };
+  const one = blobs("\u3001");
+  const two = blobs("\u3001\u3001");
+  const firstInk = one[0];
+  const secondInk = two[1];
+  if (firstInk === undefined || secondInk === undefined) {
+    throw new Error("the mark did not render as two separate blobs");
+  }
+  return secondInk[0] - firstInk[0];
+}
 
 function textStyle(fontSize: number): Uint8Array {
   const family = new TextEncoder().encode("sans-serif");

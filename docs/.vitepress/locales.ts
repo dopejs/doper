@@ -662,7 +662,7 @@ export function localeConfig(
       lastUpdatedText: ui.lastUpdated,
       footer: {
         message: ui.footerMessage,
-        copyright: "© 2026 pingo contributors",
+        copyright: "© 2026 Pingo contributors",
       },
     },
   };
