@@ -156,6 +156,7 @@ export class NativeTextInputBridge {
     this.#pendingCharacterBounds = undefined;
     this.syncSurface();
     this.applyInputMode(target.inputMode ?? "text");
+    this.attachEditContext(true);
     this.#canvas.focus({ preventScroll: true });
     this.#proxy?.focus({ preventScroll: true });
   }
@@ -164,7 +165,19 @@ export class NativeTextInputBridge {
     this.#target = undefined;
     this.#composing = false;
     this.applyInputMode("none");
+    // Detached, not just logically ended. An EditContext left on a focused
+    // element keeps the OS text service engaged: the soft keyboard stays up and
+    // the IME stays armed on a field the user has clicked away from. Pressing
+    // outside the canvas hides that, because the browser moves focus off the
+    // canvas itself; pressing elsewhere inside it does not, which is what made
+    // the two look like different features.
+    this.attachEditContext(false);
     this.#proxy?.blur();
+  }
+
+  private attachEditContext(attached: boolean): void {
+    if (this.#editContext === undefined) return;
+    Reflect.set(this.#canvas, "editContext", attached ? this.#editContext : null);
   }
 
   /** Forwards the soft-keyboard hint to whichever surface owns OS input. */

@@ -160,6 +160,19 @@ function transaction(overrides: Partial<EditTransaction> = {}): EditTransaction 
 }
 
 describe("NativeTextInputBridge (unit)", () => {
+  it("detaches the EditContext when the session ends", () => {
+    // An EditContext left on a focused element keeps the OS text service
+    // engaged, so the soft keyboard and the IME stay on a field the user has
+    // clicked away from. Ending the session logically is not enough.
+    const { bridge, canvas } = harness({ editContext: true });
+    bridge.activate(target());
+    expect(Reflect.get(canvas, "editContext")).not.toBeNull();
+    bridge.deactivate();
+    expect(Reflect.get(canvas, "editContext")).toBeNull();
+    bridge.activate(target());
+    expect(Reflect.get(canvas, "editContext")).not.toBeNull();
+  });
+
   it("maps EditContext keydown navigation onto Core caret movement", () => {
     const { bridge, canvas, commands } = harness({ editContext: true });
     bridge.activate(target());

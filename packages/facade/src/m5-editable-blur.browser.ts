@@ -83,4 +83,51 @@ describe("editable blur on a press outside the editor", () => {
     expect(document.activeElement).toBe(proxy);
     expect(errors.map((error) => error.message)).toEqual([]);
   });
+
+  it("leaves the OS text service in the same state whichever side the press lands", async () => {
+    // With EditContext the canvas keeps DOM focus either way, so the only thing
+    // that tells the OS a text input is gone is the attachment itself. Pressing
+    // outside the canvas used to hide the difference, because the browser moves
+    // focus off the canvas on its own.
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    const canvas = document.createElement("canvas");
+    canvas.style.width = "300px";
+    canvas.style.height = "200px";
+    canvas.width = 300;
+    canvas.height = 200;
+    document.body.append(canvas);
+
+    const root = await createHostedCanvasRoot(canvas, { transport: { preference: "main-thread" } });
+    roots.push(root);
+    root.render(
+      createElement("container", {
+        width: 300,
+        height: 200,
+        backgroundColor: "#ffffffff",
+        children: [
+          createElement("editableText", { height: 40, revision: 1n, value: "ab", width: 280 }),
+          createElement("container", { width: 280, height: 120 }),
+        ],
+      }),
+    );
+    await settle();
+    const attached = (): boolean => Reflect.get(canvas, "editContext") !== null;
+    const press = (target: EventTarget, clientX: number, clientY: number): void => {
+      target.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, clientX, clientY, pointerId: 1 }),
+      );
+    };
+    const rect = (): DOMRect => canvas.getBoundingClientRect();
+
+    for (const away of ["inside", "outside"] as const) {
+      press(canvas, rect().left + 40, rect().top + 20);
+      await settle();
+      expect(attached(), `${away}: focused`).toBe(true);
+      if (away === "inside") press(canvas, rect().left + 140, rect().top + 150);
+      else press(outside, 0, 0);
+      await settle();
+      expect(attached(), `${away}: blurred`).toBe(false);
+    }
+  });
 });
