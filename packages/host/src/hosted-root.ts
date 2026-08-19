@@ -101,6 +101,22 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly onSemantics?: (nodes: readonly SemanticNode[]) => void;
   /** Disables the DOM accessibility mirror; enabled whenever the canvas is mounted. */
   readonly accessibility?: boolean;
+  /**
+   * Opts into the raster tile cache. Off by default.
+   *
+   * Whether a frame goes through the tile cache is a caching decision, and it
+   * has to be invisible. It is not: a tile is an ad-hoc `OffscreenCanvas`, and
+   * the browser does not rasterize text on one the way it does on the canvas it
+   * is compositing. Measured on the editing playground, the same caption
+   * alternated between 775px and 781px of ink from frame to frame, changing
+   * weight and spacing with it, because consecutive frames took different sides
+   * of this branch.
+   *
+   * It also has no measured benefit left. A tile is keyed by the picture that
+   * produced it, so nothing is reusable across two different pictures, and a
+   * picture that has not changed is no longer redrawn at all. Re-enabling this
+   * needs a tile path proven pixel-identical to the direct one.
+   */
   readonly rasterCache?: boolean;
   readonly transport?: HostTransportPolicy;
   readonly workerFactory?: () => Worker;
@@ -451,7 +467,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       devicePixelRatio: devicePixelRatioOf(this.#canvas),
       height: positiveDimension(this.logicalHeight(), "canvas height"),
       mode: selectedMode,
-      rasterCache: this.#options.rasterCache !== false,
+      rasterCache: this.#options.rasterCache === true,
       ...(inputRingBuffer === undefined ? {} : { inputRingBuffer }),
       ...(ringBuffer === undefined ? {} : { ringBuffer }),
       width: positiveDimension(this.logicalWidth(), "canvas width"),
@@ -883,9 +899,9 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     const core = await (this.#options.coreFactory ?? createWasmCore)(width, height);
     this.#core = core;
     const rasterCache =
-      this.#options.rasterCache === false
-        ? undefined
-        : createDefaultRasterCache(context, this.#options.onHostError);
+      this.#options.rasterCache === true
+        ? createDefaultRasterCache(context, this.#options.onHostError)
+        : undefined;
     const sink = new CanvasFrameSink(
       context,
       core,
