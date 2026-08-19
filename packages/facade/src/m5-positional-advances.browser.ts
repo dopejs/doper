@@ -52,13 +52,10 @@ it("positional advances sum to the true rendered line width", () => {
     cursor += lineCodePoints + 1;
   }
 
-  // The isolated table cannot represent the contraction; if this ever starts
-  // passing the font stopped contracting and the positional path is optional.
-  const isolatedSum = [..."、、"].reduce(
-    (total, character) => total + context.measureText(character).width,
-    0,
-  );
-  expect(context.measureText("、、").width).toBeLessThan(isolatedSum - 1);
+  // Whether the font contracts consecutive full-width punctuation is a
+  // platform property (macOS PingFang does, the CI Linux fonts do not), so it
+  // cannot be a hard assertion. What must hold everywhere is the invariant
+  // above: the positional sum equals the rendered width, contracted or not.
 });
 
 function textStyle(fontSize: number): Uint8Array {

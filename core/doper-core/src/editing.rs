@@ -5,8 +5,8 @@ use doper_abi::{
     MAX_RESOURCE_BYTES, NodeKind, ResourceKind, WireAffinity, WireRange,
 };
 use doper_edit::{
-    Affinity, EditConfig, EditIntent, EditSession, EditTransaction, ExternalValue, Selection,
-    TransactionKind, edit_command_from_input,
+    Affinity, EditCommand, EditConfig, EditError, EditIntent, EditSession, EditTransaction,
+    ExternalValue, Selection, TransactionKind, edit_command_from_input,
 };
 use doper_scene::{NodeId, Scene};
 
@@ -219,7 +219,32 @@ impl EditingController {
             {
                 return Err(CoreError::EditableReadOnly { node });
             }
-            let transaction = active.session.apply(command)?;
+            let transaction = match active.session.apply(command.clone()) {
+                Ok(transaction) => transaction,
+                // A command sent while an engine-side selection change was in
+                // flight arrives against a base revision that has already moved
+                // on. That is an ordinary race under an asynchronous transport,
+                // not a protocol violation: rejecting the frame poisoned the
+                // whole render loop over one dropped key press.
+                //
+                // Undo and redo are not positional -- they are defined against
+                // the current history whatever revision carried them -- so they
+                // are retried at the session's own revision; a native editor
+                // never swallows an undo. A positional edit computed against
+                // text that has since changed cannot be safely re-aimed, so it
+                // is dropped and the acknowledgement realigns the input surface.
+                Err(EditError::StaleRevision { .. }) => {
+                    if matches!(command.intent, EditIntent::Undo | EditIntent::Redo) {
+                        active.session.apply(EditCommand {
+                            base_revision: active.session.revision(),
+                            intent: command.intent,
+                        })?
+                    } else {
+                        active.session.acknowledge_stale()?
+                    }
+                }
+                Err(error) => return Err(error.into()),
+            };
             // Selection/composition-only transitions still change editor overlays.
             outcome.changed_nodes.push(node);
             self.pending.push((node, transaction));

@@ -39,6 +39,11 @@ pub struct EditSession {
     selection: Selection,
     composition: Option<Composition>,
     revision: u64,
+    /// Revision of the last transaction that changed the text, as opposed to
+    /// the selection or composition state. Word segmentation depends only on
+    /// the text, so this is what decides whether Host-computed boundaries are
+    /// still valid; gating them on `revision` made every caret click stale.
+    text_revision: u64,
     config: EditConfig,
     undo: VecDeque<HistoryEntry>,
     redo: VecDeque<HistoryEntry>,
@@ -63,6 +68,7 @@ impl EditSession {
             selection,
             composition: None,
             revision,
+            text_revision: revision,
             config,
             undo: VecDeque::new(),
             redo: VecDeque::new(),
@@ -75,6 +81,32 @@ impl EditSession {
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Returns the revision of the last transaction that changed the text.
+    #[must_use]
+    pub const fn text_revision(&self) -> u64 {
+        self.text_revision
+    }
+
+    /// Consumes one revision to acknowledge a command applied against a stale
+    /// base, changing nothing else.
+    ///
+    /// The input surface bumps its optimistic revision when it sends a command;
+    /// a command raced past by an engine-side selection change arrives stale,
+    /// and dropping it without a transaction would desynchronize every command
+    /// that follows. The acknowledgement realigns the surface instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EditError::RevisionOverflow`] when the revision space is
+    /// exhausted.
+    pub fn acknowledge_stale(&mut self) -> Result<EditTransaction, EditError> {
+        let next_revision = self
+            .revision
+            .checked_add(1)
+            .ok_or(EditError::RevisionOverflow)?;
+        Ok(self.finish_no_op(next_revision, TransactionKind::Edit))
     }
 
     /// Returns the conversion table for the active revision.
@@ -321,6 +353,9 @@ impl EditSession {
 
         let base_revision = self.revision;
         self.revision = next_revision;
+        if delta.is_some() {
+            self.text_revision = next_revision;
+        }
         Ok(EditTransaction {
             base_revision,
             revision: next_revision,
@@ -374,6 +409,7 @@ impl EditSession {
         self.selection = selection;
         self.composition = None;
         self.revision = external.revision;
+        self.text_revision = external.revision;
         self.undo.clear();
         self.redo.clear();
         self.undo_bytes = 0;

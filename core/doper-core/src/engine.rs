@@ -959,11 +959,13 @@ impl CoreEngine {
             let Ok(node) = NodeId::from_raw(node_id) else {
                 continue;
             };
-            if self
-                .editing
-                .session(node)
-                .is_some_and(|session| session.revision() == base_revision)
-            {
+            // Segmentation depends only on the text, so it stays valid across
+            // selection and composition revisions: gating on the full revision
+            // made every boundary batch racing an unacknowledged caret click
+            // stale, and the fallback then selected a single ideograph.
+            if self.editing.session(node).is_some_and(|session| {
+                base_revision >= session.text_revision() && base_revision <= session.revision()
+            }) {
                 collected.insert(node, boundaries.clone());
             }
         }
@@ -3196,6 +3198,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn a_double_click_uses_host_segmentation_for_scripts_without_spaces() {
         // UAX #29 has no dictionary: it makes every Han ideograph its own word,
         // so a double click selected one character. The browser's Intl.Segmenter
@@ -3262,23 +3265,75 @@ mod tests {
             .expect("word with boundaries");
         assert_eq!(selection_after(&mut engine), [2, 4]);
 
-        // A stale revision must not select against text the user already changed.
+        // Boundaries computed before a caret click are still fresh: only the
+        // text invalidates them. Gating on the full revision made every batch
+        // racing an unacknowledged selection stale, and the fallback then
+        // selected a single ideograph.
+        let text_base = revision_of(&engine);
         engine
             .input(&input(
                 4,
+                vec![InputCommand::SetSelection {
+                    node_id: id(1),
+                    base_revision: text_base,
+                    selection: doper_abi::InputSelection {
+                        anchor: doper_abi::InputPosition {
+                            offset: 0,
+                            affinity: doper_abi::InputAffinity::Downstream,
+                        },
+                        focus: doper_abi::InputPosition {
+                            offset: 0,
+                            affinity: doper_abi::InputAffinity::Downstream,
+                        },
+                    },
+                }],
+            ))
+            .expect("selection bump");
+        engine.take_edit_transactions().expect("drain selection");
+        engine
+            .input(&input(
+                5,
                 vec![
                     InputCommand::SetWordBoundaries {
                         node_id: id(1),
-                        // Any revision but the session's own is stale; each
-                        // accepted selection advances it, so read it fresh.
-                        base_revision: revision_of(&engine).wrapping_add(7),
+                        base_revision: text_base,
                         boundaries: vec![0, 2],
                     },
-                    double_click,
+                    double_click.clone(),
                 ],
             ))
-            .expect("word with stale boundaries");
-        assert_eq!(selection_after(&mut engine), [2, 3]);
+            .expect("word with boundaries racing a selection");
+        assert_eq!(selection_after(&mut engine), [2, 4]);
+
+        // A base from before the last text change, or from a future the
+        // session has not reached, must not select against the wrong text.
+        engine
+            .input(&input(
+                6,
+                vec![InputCommand::Insert {
+                    node_id: id(1),
+                    base_revision: revision_of(&engine),
+                    text: "x".to_owned(),
+                }],
+            ))
+            .expect("text change");
+        engine.take_edit_transactions().expect("drain insert");
+        for (seq, base) in [(7, text_base), (8, revision_of(&engine).wrapping_add(7))] {
+            engine
+                .input(&input(
+                    seq,
+                    vec![
+                        InputCommand::SetWordBoundaries {
+                            node_id: id(1),
+                            base_revision: base,
+                            boundaries: vec![0, 2],
+                        },
+                        double_click.clone(),
+                    ],
+                ))
+                .expect("word with stale boundaries");
+            assert_eq!(selection_after(&mut engine), [2, 3]);
+        }
     }
 
     #[test]
@@ -3931,6 +3986,72 @@ mod tests {
     }
 
     #[test]
+    fn a_raced_undo_still_restores_the_deleted_text() {
+        // The recorded failure: double-click selects a word (each click's caret
+        // placement consumes a revision through an asynchronous transport),
+        // Backspace deletes it, and Ctrl+Z arrives carrying a base revision the
+        // selection churn has already passed. Undo is defined against the
+        // history, not a text position, so a stale base must not swallow it --
+        // and it must never reject the frame.
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit(&editable_tree_with_text(1, "ab cd"))
+            .expect("frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+
+        engine
+            .input(&input(
+                2,
+                vec![InputCommand::Replace {
+                    node_id: id(1),
+                    base_revision: 0,
+                    start: 0,
+                    end: 2,
+                    text: String::new(),
+                }],
+            ))
+            .expect("delete");
+        engine.take_edit_transactions().expect("drain delete");
+
+        // An engine-side caret placement the input surface has not yet been
+        // acknowledged for; it consumes revision 2.
+        engine
+            .input(&input(
+                3,
+                vec![InputCommand::PlaceCaret {
+                    node_id: id(1),
+                    position: [0.0, 0.0],
+                    flags: 0,
+                }],
+            ))
+            .expect("place caret");
+        engine.take_edit_transactions().expect("drain caret");
+
+        // The surface still believes the revision is 1.
+        engine
+            .input(&input(
+                4,
+                vec![InputCommand::Undo {
+                    node_id: id(1),
+                    base_revision: 1,
+                }],
+            ))
+            .expect("raced undo");
+        let node = NodeId::from_raw(id(1)).expect("node");
+        assert_eq!(
+            engine.editing.session(node).expect("session").text(),
+            "ab cd",
+            "the raced undo must still restore the deletion"
+        );
+    }
+
+    #[test]
     fn undo_with_empty_history_is_a_no_op_not_a_poisoned_frame() {
         // Cmd+Z with nothing to undo is an ordinary key press. Rejecting the
         // input frame poisoned the Core, killed the render worker, and the
@@ -4012,26 +4133,49 @@ mod tests {
                 },
             ],
         );
-        assert!(matches!(engine.input(&rejected), Err(CoreError::Edit(_))));
+        // The first insert applies; the second arrives against a base the
+        // first already consumed. Under an asynchronous transport that is an
+        // ordinary race, so the command is dropped and acknowledged rather
+        // than rejecting the frame -- a rejected frame poisons the render loop.
+        let output = engine.input(&rejected).expect("raced frame");
+        assert!(output.is_some(), "the applied insert still paints");
         let node = NodeId::from_raw(id(1)).expect("editable node");
-        assert_eq!(engine.editing.session(node).expect("session").text(), "a");
+        assert_eq!(
+            engine.editing.session(node).expect("session").text(),
+            "asecret",
+            "the stale insert must not apply"
+        );
+        let bytes = engine.take_edit_transactions().expect("acks");
+        let batch = doper_abi::EditTransactionBatch::decode(&bytes).expect("decode");
+        // One transaction for the applied insert, one no-op acknowledgement
+        // realigning the input surface past the dropped command.
+        assert_eq!(batch.records.len(), 2);
+        assert_eq!(batch.records[1].base_revision, 1);
+        assert_eq!(batch.records[1].revision, 2);
+        assert!(batch.records[1].delta.is_none());
 
         let output = engine
             .input(&input(
                 2,
                 vec![InputCommand::Insert {
                     node_id: id(1),
-                    base_revision: 0,
+                    base_revision: 2,
                     text: "secret".to_owned(),
                 }],
             ))
             .expect("password input")
             .expect("changed frame");
+        assert_eq!(
+            engine.editing.session(node).expect("session").text(),
+            "asecretsecret",
+            "a current-base insert must apply"
+        );
         let display = DisplayList::decode(&output.display_list).expect("DisplayList");
+        let mask = "\u{2022}".repeat("asecretsecret".chars().count());
         assert!(display.instructions.iter().any(|instruction| matches!(
             &instruction.command,
             DisplayCommand::DrawTextInlineFallback { text, .. }
-                if text == "•••••••" && !text.contains("secret")
+                if *text == mask && !text.contains("secret")
         )));
     }
 
