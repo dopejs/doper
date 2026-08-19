@@ -3986,6 +3986,80 @@ mod tests {
     }
 
     #[test]
+    fn undo_repaints_after_the_value_returns_to_the_measured_string() {
+        // The recorded failure: Backspace repainted, Ctrl+Z did not, and the
+        // caret kept moving through text the screen no longer matched. Undo
+        // restores the exact Scene string, which re-qualified the node for the
+        // browser-metric measurement branch -- and that branch returned without
+        // refreshing the wrapped display string paint serves, so the deleted
+        // text stayed on screen. The production shape needs the metric present;
+        // without one the miss branch always refreshed it, which is why the
+        // earlier probe saw both frames repaint.
+        let text = "ab";
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit_with_system_text_metrics(
+                &editable_tree_with_text(1, text),
+                Some(&system_metrics(SystemTextMetricCommand::Upsert(
+                    SystemTextMetric {
+                        string_id: 3,
+                        style_id: 2,
+                        max_line_width: 20.0,
+                        line_count: 1,
+                        advances: vec![('a', 10.0), ('b', 10.0)],
+                        positional_advances: vec![10.0, 10.0],
+                    },
+                ))),
+            )
+            .expect("frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+
+        let inline_text = |output: &crate::FrameOutput| -> String {
+            DisplayList::decode(&output.display_list)
+                .expect("decode")
+                .instructions
+                .iter()
+                .filter_map(|instruction| match &instruction.command {
+                    DisplayCommand::DrawTextInlineFallback { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("|")
+        };
+
+        let deleted = engine
+            .input(&input(
+                2,
+                vec![InputCommand::DeleteBackward {
+                    node_id: id(1),
+                    base_revision: 0,
+                }],
+            ))
+            .expect("delete")
+            .expect("delete frame");
+        engine.take_edit_transactions().expect("drain delete");
+        assert_eq!(inline_text(&deleted), "a");
+
+        let restored = engine
+            .input(&input(
+                3,
+                vec![InputCommand::Undo {
+                    node_id: id(1),
+                    base_revision: 1,
+                }],
+            ))
+            .expect("undo")
+            .expect("undo frame");
+        assert_eq!(inline_text(&restored), "ab", "the undo frame must repaint");
+    }
+
+    #[test]
     fn a_raced_undo_still_restores_the_deleted_text() {
         // The recorded failure: double-click selects a word (each click's caret
         // placement consumes a revision through an asynchronous transport),

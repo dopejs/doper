@@ -856,19 +856,10 @@ impl CoreTextSystem {
         // that runs ahead of it, so it only applies while the two still agree —
         // which includes the whole time a focused field has not been typed into,
         // and is what keeps focus and blur from resizing the box.
-        if let Some(metric) = metric
-            && self
-                .edit_overrides
-                .get(&node)
-                .is_none_or(|value| scene_string(scene, run.string_id) == Some(value.as_ref()))
-        {
-            self.metrics.system_metric_hits = self.metrics.system_metric_hits.saturating_add(1);
-            return constraints.constrain(Size::new(
-                metric.max_line_width,
-                system_text_height(metric.line_count, style.line_height),
-            ));
-        }
-        self.metrics.system_metric_misses = self.metrics.system_metric_misses.saturating_add(1);
+        let metric_fresh = self
+            .edit_overrides
+            .get(&node)
+            .is_none_or(|value| scene_string(scene, run.string_id) == Some(value.as_ref()));
         let Some(text) = self.text_value(scene, node) else {
             return Size::ZERO;
         };
@@ -889,16 +880,31 @@ impl CoreTextSystem {
             |index| advances.get(index).copied().unwrap_or(0.0),
             wrap_width,
         );
-        let size =
-            wrapped_fallback_measure(&text, &breaks, &advances, constraints, style.line_height);
+        // The wrapped display is refreshed on EVERY measurement path before any
+        // early return: paint serves it in place of the live value, so leaving
+        // it behind shows the previous text. Undoing back to the exact Scene
+        // string used to take the metric branch below without updating it, and
+        // the undone edit stayed on screen while the caret moved through the
+        // restored value.
         self.wrapped_fallback.insert(
             node,
             WrappedRun {
                 display: materialize_breaks(&text, &breaks),
-                breaks,
+                breaks: breaks.clone(),
             },
         );
-        size
+        if let Some(metric) = metric
+            && metric_fresh
+            && breaks.is_empty()
+        {
+            self.metrics.system_metric_hits = self.metrics.system_metric_hits.saturating_add(1);
+            return constraints.constrain(Size::new(
+                metric.max_line_width,
+                system_text_height(metric.line_count, style.line_height),
+            ));
+        }
+        self.metrics.system_metric_misses = self.metrics.system_metric_misses.saturating_add(1);
+        wrapped_fallback_measure(&text, &breaks, &advances, constraints, style.line_height)
     }
 
     fn text_value(&self, scene: &Scene, node: NodeId) -> Option<Arc<str>> {
