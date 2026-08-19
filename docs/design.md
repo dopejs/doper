@@ -1482,6 +1482,28 @@ actualBoundingBoxRight(b)` 得到第二个字形的实际起点，减去第一�
 刻意不复用生产路径的 measureText 算术；playground 端到端断言两个停靠点 82.50/96.50 对齐
 像素真值 82.33/96.33。6 个 golden 随 abiVersion 9→10 重基。
 
+### 首次双击不选词，与包名改为 `@dopejs/pingo-*`（2026-08-20）
+
+**双击竞态**：`dblclick` 是同步 DOM 事件，而聚焦要等事件事务从 Core 异步往返。未聚焦的
+输入框第一次双击时，处理器跑在聚焦建立之前，`activeNodeId` 还是 undefined，手势被直接
+丢弃——表现为"第一次双击只放了个光标，什么都没选中"。主线程传输下聚焦是同步的，所以只在
+Worker 传输下出现。
+
+修法：无法立即服务的双击**挂起**（坐标 + 600ms 期限），在编辑器上报几何时补发。新的按下
+会作废挂起的手势；浏览器在两次按下之后才报 dblclick，所以不会误删刚记录的那个。
+
+单测在这里抓到一个我自己引入的缺陷：补发时先派发再清除，而派发会同步产生新帧、新帧上报
+几何、又重入补发——600ms 内重发了 764 次。清除必须先于派发，失败再放回。
+
+**包名**：品牌更名，`@dopejs/doper` → `@dopejs/pingo`，`@dopejs/doper-*` → `@dopejs/pingo-*`，
+工作区名 `doper-workspace` → `pingo-workspace`。子路径导出（`/jsx-runtime`、`/jsx-dev-runtime`、
+`/backend-canvas2d`）与 `jsxImportSource` 随之更新，API 快照重新生成。
+
+**本次未改**（等确认再动）：Rust crate 名 `doper-*`、WASM 产物 `doper_core_bg.wasm`、仓库
+目录名、JSX 元素符号 `Symbol.for("dopejs.doper.element")`、以及公开类型名里的 `Doper`
+前缀（`DoperNode`、`DoperEvent`、`DoperRoot` 等）。后者是**破坏性 API 变更**，需要单独决定
+是否改名以及是否保留别名。
+
 ### 富单元格暴露的能力缺口
 
 新 demo 每行约 18 个节点（此前 3 个），1280×800 视口下 20 行物化 = 357 个 Scene 节点。

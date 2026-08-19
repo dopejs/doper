@@ -484,8 +484,9 @@ describe("createHostedCanvasRoot", () => {
     const canvas = new FakeCanvas();
     const core = fakeCore();
     const node = 0x0010_0001;
-    const geometry: Uint32Array | undefined = undefined;
-    core.editing_geometry = () => geometry;
+    // The null node id is Core's "no editor" frame, which the host discards.
+    const geometry = { current: editingGeometry(0) };
+    core.editing_geometry = () => geometry.current;
     const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
       capabilities: allCapabilities(),
       coreFactory: () => Promise.resolve(core),
@@ -508,7 +509,7 @@ describe("createHostedCanvasRoot", () => {
     canvas.emit("dblclick", { clientX: 30, clientY: 25, detail: 2 });
     expect(wordCommands(), "nothing to address the gesture to yet").toBe(0);
 
-    geometry = editingGeometry(nodeId ?? node);
+    geometry.current = editingGeometry(nodeId ?? node);
     root.focusEditable(nodeId ?? node);
     // Focus activates the bridge after the frame that carried this geometry, so
     // the gesture flushes on the next one -- in production the caret placement
@@ -731,21 +732,19 @@ interface FakeCore extends CoreClient {
   freed: boolean;
 }
 
-/**
- * An editable element without importing the JSX package.
- *
- * The host does not depend on it, and the descriptor is a plain object keyed by
- * a globally registered symbol, so this stays a test detail rather than a new
- * edge in the package graph.
- */
-function editableElement(width = 80): unknown {
+/** An editable element without importing the JSX package. */
+function editableElement(width = 80): RenderNode {
+  // The descriptor is a plain object keyed by a globally registered symbol, so
+  // this stays a test detail rather than a new edge in the package graph.
   return {
     $$typeof: Symbol.for("dopejs.doper.element"),
     type: "editableText",
     key: null,
     props: { height: 40, revision: 1n, value: "ab cd", width },
-  };
+  } as unknown as RenderNode;
 }
+
+type RenderNode = Parameters<Awaited<ReturnType<typeof createHostedCanvasRoot>>["render"]>[0];
 
 /** A one-character editor covering the whole fake canvas. */
 function editingGeometry(nodeId: number): Uint32Array {
