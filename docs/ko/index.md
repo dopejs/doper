@@ -5,6 +5,10 @@ hero:
   name: Pingo
   text: canvas 렌더링 엔진
   tagline: Rust/WASM 코어 + TypeScript 셸 + 교체 가능한 백엔드. 고성능 상호작용, 네이티브 가상 스크롤, canvas 내 텍스트 편집을 위해 설계되었습니다.
+  image:
+    light: /pingo-mark.svg
+    dark: /pingo-mark-dark.svg
+    alt: Pingo
   actions:
     - theme: brand
       text: 시작하기
@@ -34,11 +38,11 @@ features:
 ## 30초 만에 시작하기
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const root = await createHostedCanvasRoot(document.querySelector("canvas")!);
 

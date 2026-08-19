@@ -5,6 +5,10 @@ hero:
   name: Pingo
   text: מנוע רינדור canvas
   tagline: ליבת Rust/WASM + מעטפת TypeScript + עורף רינדור מתחלף. תוכנן לאינטראקציה בביצועים גבוהים, גלילה וירטואלית נייטיב ועריכת טקסט בתוך ה-canvas.
+  image:
+    light: /pingo-mark.svg
+    dark: /pingo-mark-dark.svg
+    alt: Pingo
   actions:
     - theme: brand
       text: התחלה מהירה
@@ -34,11 +38,11 @@ features:
 ## מתחילים ב-30 שניות
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const root = await createHostedCanvasRoot(document.querySelector("canvas")!);
 

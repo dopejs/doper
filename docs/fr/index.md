@@ -5,6 +5,10 @@ hero:
   name: Pingo
   text: moteur de rendu canvas
   tagline: Cœur Rust/WASM + couche TypeScript + backend interchangeable. Conçu pour l'interaction haute performance, le défilement virtuel natif et l'édition de texte dans le canvas.
+  image:
+    light: /pingo-mark.svg
+    dark: /pingo-mark-dark.svg
+    alt: Pingo
   actions:
     - theme: brand
       text: Démarrage
@@ -34,11 +38,11 @@ features:
 ## Démarrer en 30 secondes
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const root = await createHostedCanvasRoot(document.querySelector("canvas")!);
 

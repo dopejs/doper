@@ -5,6 +5,10 @@ hero:
   name: Pingo
   text: движок рендеринга canvas
   tagline: Ядро на Rust/WASM + оболочка на TypeScript + сменный бэкенд. Спроектирован для высокопроизводительного взаимодействия, нативной виртуальной прокрутки и редактирования текста внутри canvas.
+  image:
+    light: /pingo-mark.svg
+    dark: /pingo-mark-dark.svg
+    alt: Pingo
   actions:
     - theme: brand
       text: Быстрый старт
@@ -34,11 +38,11 @@ features:
 ## Начать за 30 секунд
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const root = await createHostedCanvasRoot(document.querySelector("canvas")!);
 

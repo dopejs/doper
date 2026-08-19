@@ -20,7 +20,10 @@ export default defineConfig({
   // Storybook is a separate static build copied in beside the docs output, so
   // it resolves at runtime but is not a VitePress route.
   ignoreDeadLinks: [/^\/storybook\/$/u],
-  head: [["meta", { name: "theme-color", content: "#5aa9ff" }]],
+  head: [
+    ["meta", { name: "theme-color", content: "#2E5BFF" }],
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/pingo-favicon.svg" }],
+  ],
   // The playground links to itself in ten locales plus every guide page, and
   // prefetching all of them saturates the connection before the engine chunk
   // and the render worker are even requested. Measured on the deployed site,
@@ -29,6 +32,7 @@ export default defineConfig({
   router: { prefetchLinks: false },
   locales,
   themeConfig: {
+    logo: { light: "/pingo-mark.svg", dark: "/pingo-mark-dark.svg", alt: "Pingo" },
     search: { provider: "local", options: { locales: searchLocales } },
   },
 });

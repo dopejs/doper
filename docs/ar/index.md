@@ -5,6 +5,10 @@ hero:
   name: Pingo
   text: محرّك عرض canvas
   tagline: نواة Rust/WASM + غلاف TypeScript + خلفية عرض قابلة للاستبدال. مصمَّم للتفاعل عالي الأداء والتمرير الافتراضي الأصلي وتحرير النص داخل canvas.
+  image:
+    light: /pingo-mark.svg
+    dark: /pingo-mark-dark.svg
+    alt: Pingo
   actions:
     - theme: brand
       text: البداية السريعة
@@ -34,11 +38,11 @@ features:
 ## البدء خلال ثلاثين ثانية
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const root = await createHostedCanvasRoot(document.querySelector("canvas")!);
 

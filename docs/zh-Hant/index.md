@@ -5,6 +5,10 @@ hero:
   name: Pingo
   text: canvas 繪製引擎
   tagline: Rust/WASM 核心 + TypeScript 外殼 + 可插拔後端。為高效能互動、原生虛擬捲動與 canvas 內文字編輯而設計。
+  image:
+    light: /pingo-mark.svg
+    dark: /pingo-mark-dark.svg
+    alt: Pingo
   actions:
     - theme: brand
       text: 快速開始
@@ -34,11 +38,11 @@ features:
 ## 30 秒上手
 
 ```sh
-pnpm add @dopejs/doper
+pnpm add @dopejs/pingo
 ```
 
 ```ts
-import { createElement, createHostedCanvasRoot } from "@dopejs/doper";
+import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
 const root = await createHostedCanvasRoot(document.querySelector("canvas")!);
 
