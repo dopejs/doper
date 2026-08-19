@@ -134,7 +134,7 @@ impl CoreTextSystem {
             .filter(|resource| resource.kind == ResourceKind::TextStyle)
             .and_then(|resource| TextStyleResource::decode(text_run.style_id, resource).ok())?;
         let value = self.text_value(scene, node)?;
-        Some(self.fallback_caret_stops(node, text_run, &value, &style))
+        Some(self.fallback_caret_stops(scene, node, text_run, &value, &style))
     }
 
     pub(crate) fn set_edit_overrides(&mut self, overrides: HashMap<NodeId, Arc<str>>) {
@@ -174,7 +174,7 @@ impl CoreTextSystem {
             let Some(value) = self.text_value(scene, visual.node) else {
                 return;
             };
-            let carets = self.fallback_caret_stops(visual.node, text_run, &value, &style);
+            let carets = self.fallback_caret_stops(scene, visual.node, text_run, &value, &style);
             decorations_from_carets(&carets, visual, caret_visible)
         };
         self.editor_decorations.insert(visual.node, decorations);
@@ -717,14 +717,7 @@ fn materialize_breaks(text: &str, breaks: &[usize]) -> Arc<str> {
 /// `breaks` are the soft breaks measurement chose. Unlike a `\n` they consume no
 /// character, so the offset either side of one is the same text position on two
 /// different visual lines.
-fn caret_stops(
-    text: &str,
-    breaks: &[usize],
-    advances: Option<&HashMap<char, f32>>,
-    font_size: f32,
-    line_height: f32,
-) -> Vec<CaretStop> {
-    let estimate = font_size * ESTIMATED_ADVANCE_RATIO;
+fn caret_stops(text: &str, breaks: &[usize], advances: &[f32], line_height: f32) -> Vec<CaretStop> {
     let mut carets = Vec::with_capacity(text.chars().count().saturating_add(1));
     let mut utf16 = 0_u32;
     let mut line = 0_usize;
@@ -737,7 +730,7 @@ fn caret_stops(
         y: 0.0,
         height: line_height,
     });
-    for (byte_offset, character) in text.char_indices() {
+    for (index, (byte_offset, character)) in text.char_indices().enumerate() {
         if breaks.contains(&byte_offset) {
             line = line.saturating_add(1);
             x = 0.0;
@@ -747,7 +740,7 @@ fn caret_stops(
             line = line.saturating_add(1);
             x = 0.0;
         } else {
-            x += advance_for(advances, estimate, character);
+            x += advances.get(index).copied().unwrap_or(0.0);
         }
         carets.push(CaretStop {
             byte_offset: byte_offset.saturating_add(character.len_utf8()),
@@ -766,25 +759,53 @@ impl CoreTextSystem {
     /// measured advances when it has published them for this pair.
     fn fallback_caret_stops(
         &self,
+        scene: &Scene,
         node: NodeId,
         run: TextRun,
         value: &str,
         style: &TextStyleResource,
     ) -> Vec<CaretStop> {
-        let table = self.advance_table(run);
+        let advances = self.value_advances(scene, run, value, style.font_size);
         // The breaks measurement recorded, not a fresh computation: paint, hit
         // testing and the caret have to agree on where the lines are.
         let breaks = self
             .wrapped_fallback
             .get(&node)
             .map_or(&[][..], |wrapped| wrapped.breaks.as_slice());
-        caret_stops(
-            value,
-            breaks,
-            table.as_ref(),
-            style.font_size,
-            style.line_height,
-        )
+        caret_stops(value, breaks, &advances, style.line_height)
+    }
+
+    /// One advance per code point of `value`, in order.
+    ///
+    /// Uses the positional measurement when the editing value still equals the
+    /// string it was measured from: those advances come from prefix differences
+    /// and carry contextual width, which the per-code-point table cannot — CJK
+    /// fonts contract consecutive full-width punctuation, so summing isolated
+    /// widths drifts the caret one notch per adjacent pair. A diverged value
+    /// falls back to the table, and an unmeasured code point to the estimate.
+    fn value_advances(&self, scene: &Scene, run: TextRun, value: &str, font_size: f32) -> Vec<f32> {
+        let metric = self.system_metrics.get(&(run.string_id, run.style_id));
+        if let Some(metric) = metric
+            && !metric.positional_advances.is_empty()
+            && metric.positional_advances.len() == value.chars().count()
+            && scene_string(scene, run.string_id) == Some(value)
+        {
+            return metric.positional_advances.clone();
+        }
+        let estimate = font_size * ESTIMATED_ADVANCE_RATIO;
+        let table = metric
+            .filter(|metric| !metric.advances.is_empty())
+            .map(|metric| metric.advances.iter().copied().collect::<HashMap<_, _>>());
+        value
+            .chars()
+            .map(|character| {
+                if character == '\n' {
+                    0.0
+                } else {
+                    advance_for(table.as_ref(), estimate, character)
+                }
+            })
+            .collect()
     }
 
     /// The code points the Host measured for this pair, keyed for lookup.
@@ -796,14 +817,6 @@ impl CoreTextSystem {
     /// the Shell never sees. The Host measures the preedit text into this same
     /// table, so composition underlines and the IME candidate-window rectangles
     /// land on the glyphs instead of on a 0.6em estimate.
-    fn advance_table(&self, run: TextRun) -> Option<HashMap<char, f32>> {
-        let metric = self.system_metrics.get(&(run.string_id, run.style_id))?;
-        if metric.advances.is_empty() {
-            return None;
-        }
-        Some(metric.advances.iter().copied().collect())
-    }
-
     fn candidate_mut(&mut self) -> &mut HashMap<NodeId, PreparedRun> {
         self.candidate.get_or_insert_with(|| self.active.clone())
     }
@@ -863,8 +876,7 @@ impl CoreTextSystem {
         // font_size * 0.6 here would shrink a full-width run to 60% of its real
         // width for as long as it is being edited, which reads as the text
         // jumping the moment the field is typed into.
-        let table = self.advance_table(run);
-        let estimate = style.font_size * ESTIMATED_ADVANCE_RATIO;
+        let advances = self.value_advances(scene, run, &text, style.font_size);
         // A single-line field scrolls its value instead; wrapping one would turn
         // a long value into a paragraph inside a one-line box.
         let wrap_width = if self.non_wrapping.contains(&node) {
@@ -874,17 +886,11 @@ impl CoreTextSystem {
         };
         let breaks = soft_break_offsets(
             &text,
-            |character| advance_for(table.as_ref(), estimate, character),
+            |index| advances.get(index).copied().unwrap_or(0.0),
             wrap_width,
         );
-        let size = wrapped_fallback_measure(
-            &text,
-            &breaks,
-            table.as_ref(),
-            constraints,
-            style.font_size,
-            style.line_height,
-        );
+        let size =
+            wrapped_fallback_measure(&text, &breaks, &advances, constraints, style.line_height);
         self.wrapped_fallback.insert(
             node,
             WrappedRun {
@@ -936,16 +942,14 @@ fn decode_font(scene: &Scene, font_id: u32) -> Option<(u32, Arc<[u8]>)> {
 fn wrapped_fallback_measure(
     text: &str,
     breaks: &[usize],
-    advances: Option<&HashMap<char, f32>>,
+    advances: &[f32],
     constraints: BoxConstraints,
-    font_size: f32,
     line_height: f32,
 ) -> Size {
-    let estimate = font_size * ESTIMATED_ADVANCE_RATIO;
     let mut line_count = 1_usize;
     let mut longest_line = 0.0_f32;
     let mut width = 0.0_f32;
-    for (offset, character) in text.char_indices() {
+    for (index, (offset, character)) in text.char_indices().enumerate() {
         if breaks.contains(&offset) {
             longest_line = longest_line.max(width);
             line_count += 1;
@@ -957,7 +961,7 @@ fn wrapped_fallback_measure(
             width = 0.0;
             continue;
         }
-        width += advance_for(advances, estimate, character);
+        width += advances.get(index).copied().unwrap_or(0.0);
     }
     longest_line = longest_line.max(width);
     let height = usize_to_f32(line_count) * line_height;

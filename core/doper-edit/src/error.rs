@@ -12,8 +12,6 @@ pub enum EditError {
     CompositionAlreadyActive,
     CompositionNotActive,
     CompositionActive,
-    NothingToUndo,
-    NothingToRedo,
     NewlineNotAllowed,
     TextByteLimitExceeded { actual: usize, maximum: usize },
     GraphemeLimitExceeded { actual: usize, maximum: usize },

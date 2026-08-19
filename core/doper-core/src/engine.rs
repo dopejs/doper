@@ -3055,6 +3055,85 @@ mod tests {
     }
 
     #[test]
+    fn positional_advances_carry_contextual_punctuation_compression() {
+        // CJK fonts contract consecutive full-width punctuation: "、、" measures
+        // 24px, not 2 x 16px. The per-code-point table cannot express that, so
+        // the caret drifted one notch to the right of every adjacent pair. The
+        // positional advances are prefix differences and carry it exactly.
+        let text = "A\u{3001}\u{3001}B";
+        let offset_at = |positional: Vec<f32>| -> u32 {
+            let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+            engine
+                .commit_with_system_text_metrics(
+                    &editable_tree_with_text(1, text),
+                    Some(&system_metrics(SystemTextMetricCommand::Upsert(
+                        SystemTextMetric {
+                            string_id: 3,
+                            style_id: 2,
+                            max_line_width: 44.0,
+                            line_count: 1,
+                            advances: vec![('A', 10.0), ('B', 10.0), ('\u{3001}', 16.0)],
+                            positional_advances: positional,
+                        },
+                    ))),
+                )
+                .expect("frame");
+            engine
+                .input(&input(
+                    1,
+                    vec![InputCommand::FocusEditable { node_id: id(1) }],
+                ))
+                .expect("focus");
+            engine.take_edit_transactions().expect("drain focus");
+            // Focus puts the caret at the end and the editor scrolls to reveal
+            // it; move it home first so the click coordinate is unscrolled.
+            engine
+                .input(&input(
+                    2,
+                    vec![InputCommand::SetSelection {
+                        node_id: id(1),
+                        base_revision: 0,
+                        selection: doper_abi::InputSelection {
+                            anchor: doper_abi::InputPosition {
+                                offset: 0,
+                                affinity: doper_abi::InputAffinity::Downstream,
+                            },
+                            focus: doper_abi::InputPosition {
+                                offset: 0,
+                                affinity: doper_abi::InputAffinity::Downstream,
+                            },
+                        },
+                    }],
+                ))
+                .expect("home");
+            engine.take_edit_transactions().expect("drain home");
+            engine
+                .input(&input(
+                    3,
+                    vec![InputCommand::PlaceCaret {
+                        node_id: id(1),
+                        position: [33.0, 0.0],
+                        flags: 0,
+                    }],
+                ))
+                .expect("place caret");
+            let bytes = engine.take_edit_transactions().expect("edit bytes");
+            doper_abi::EditTransactionBatch::decode(&bytes)
+                .expect("decode")
+                .records
+                .last()
+                .expect("record")
+                .selection[0]
+        };
+
+        // Measured in context the second mark advances 8px, so the stops are
+        // 0/10/26/34/44 and x=33 lands after it. Isolated widths give
+        // 0/10/26/42/52 and the same click lands one glyph earlier.
+        assert_eq!(offset_at(vec![10.0, 16.0, 8.0, 10.0]), 3);
+        assert_eq!(offset_at(Vec::new()), 2);
+    }
+
+    #[test]
     fn measured_advances_place_the_caret_where_the_glyphs_actually_are() {
         // Four full-width code points at 16px advance 16px each; the unmeasured
         // estimate is font_size * 0.6 = 9.6px, so by the fourth stop the two
@@ -3073,6 +3152,7 @@ mod tests {
                 ('\u{6587}', 16.0),
                 ('\u{6ce8}', 16.0),
             ],
+            positional_advances: Vec::new(),
         });
 
         let offset_at = |metrics: Option<Vec<u8>>| -> u32 {
@@ -3305,6 +3385,7 @@ mod tests {
                         max_line_width: 32.0,
                         line_count: 1,
                         advances: vec![('\u{4e2d}', 16.0), ('\u{5019}', 16.0), ('\u{6587}', 16.0)],
+                        positional_advances: Vec::new(),
                     },
                 ))),
             )
@@ -3365,6 +3446,7 @@ mod tests {
                         // U+5019 occurs nowhere in the Scene string; it is only
                         // ever composed, which is the case that used to break.
                         advances: vec![('\u{4e2d}', 16.0), ('\u{5019}', 16.0), ('\u{6587}', 16.0)],
+                        positional_advances: Vec::new(),
                     },
                 ))),
             )
@@ -3863,9 +3945,13 @@ mod tests {
             .expect("focus");
         engine.take_edit_transactions().expect("drain focus");
 
-        for (seq, command) in [
+        // Each no-op still consumes the revision and acknowledges it: the input
+        // surface bumped its optimistic revision when it sent the command, and
+        // only this acknowledgement keeps the two in step.
+        for (seq, base, command) in [
             (
                 2,
+                0,
                 InputCommand::Undo {
                     node_id: id(1),
                     base_revision: 0,
@@ -3873,15 +3959,21 @@ mod tests {
             ),
             (
                 3,
+                1,
                 InputCommand::Redo {
                     node_id: id(1),
-                    base_revision: 0,
+                    base_revision: 1,
                 },
             ),
         ] {
             engine
                 .input(&input(seq, vec![command]))
                 .expect("empty history must be a no-op");
+            let bytes = engine.take_edit_transactions().expect("ack bytes");
+            let batch = doper_abi::EditTransactionBatch::decode(&bytes).expect("decode");
+            let record = batch.records.last().expect("ack record");
+            assert_eq!(record.base_revision, base);
+            assert_eq!(record.revision, base + 1);
         }
 
         // The session is still alive and usable afterwards.
@@ -3890,7 +3982,7 @@ mod tests {
                 4,
                 vec![InputCommand::Insert {
                     node_id: id(1),
-                    base_revision: 0,
+                    base_revision: 2,
                     text: "x".to_owned(),
                 }],
             ))
@@ -4031,6 +4123,7 @@ mod tests {
             max_line_width: 80.0,
             line_count: 2,
             advances: Vec::new(),
+            positional_advances: Vec::new(),
         });
         let output = engine
             .commit_with_system_text_metrics(
@@ -4067,6 +4160,7 @@ mod tests {
                     max_line_width: 120.0,
                     line_count: 3,
                     advances: Vec::new(),
+                    positional_advances: Vec::new(),
                 },
             )))
             .expect("metric refresh")

@@ -647,7 +647,7 @@ mod tests {
 /// A non-finite or non-positive `max_width` disables wrapping.
 pub fn soft_break_offsets(
     text: &str,
-    advance_of: impl Fn(char) -> f32,
+    advance_of: impl Fn(usize) -> f32,
     max_width: f32,
 ) -> Vec<usize> {
     let mut breaks = Vec::new();
@@ -661,30 +661,31 @@ pub fn soft_break_offsets(
         .collect::<BTreeSet<_>>();
     let mut line_start = 0_usize;
     let mut width = 0.0_f32;
-    let mut last_allowed: Option<usize> = None;
-    for (offset, character) in text.char_indices() {
+    // Byte offset and code-point index of the last break opportunity.
+    let mut last_allowed: Option<(usize, usize)> = None;
+    for (index, (offset, character)) in text.char_indices().enumerate() {
         if character == '\n' {
             line_start = offset + character.len_utf8();
             width = 0.0;
             last_allowed = None;
             continue;
         }
-        let advance = advance_of(character);
+        let advance = advance_of(index);
         if width + advance > max_width && offset > line_start {
             // Prefer the last opportunity on this line; with none, break right
             // here so a single long word is split instead of overflowing.
-            let split = last_allowed
-                .filter(|candidate| *candidate > line_start && *candidate <= offset)
-                .unwrap_or(offset);
+            let (split, split_index) = last_allowed
+                .filter(|(candidate, _)| *candidate > line_start && *candidate <= offset)
+                .unwrap_or((offset, index));
             breaks.push(split);
             line_start = split;
-            width = text[split..offset].chars().map(&advance_of).sum::<f32>();
+            width = (split_index..index).map(&advance_of).sum::<f32>();
             last_allowed = None;
         }
         width += advance;
         let end = offset + character.len_utf8();
         if allowed.contains(&end) {
-            last_allowed = Some(end);
+            last_allowed = Some((end, index + 1));
         }
     }
     breaks
@@ -695,7 +696,7 @@ mod soft_break_tests {
     use super::soft_break_offsets;
 
     /// Ten units per code point keeps the arithmetic readable in the assertions.
-    fn uniform(_character: char) -> f32 {
+    fn uniform(_index: usize) -> f32 {
         10.0
     }
 

@@ -224,6 +224,7 @@ mod tests {
                     max_line_width: 42.0,
                     line_count: 1,
                     advances: Vec::new(),
+                    positional_advances: Vec::new(),
                 }),
             }],
         }

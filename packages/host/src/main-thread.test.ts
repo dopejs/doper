@@ -623,7 +623,14 @@ describe("CanvasFrameSink", () => {
         // No node is editable, so Core gets dimensions without per-code-point
         // advances: measuring those for every run would put one measureText call
         // per distinct code point on the scroll hot path.
-        metric: { stringId: 2, styleId: 3, maxLineWidth: 40, lineCount: 2, advances: [] },
+        metric: {
+          stringId: 2,
+          styleId: 3,
+          maxLineWidth: 40,
+          lineCount: 2,
+          advances: [],
+          positionalAdvances: [],
+        },
       },
     ]);
 
@@ -677,7 +684,14 @@ describe("CanvasFrameSink", () => {
     expect(decodeSystemTextMetricBatch(refreshedMetrics)).toEqual([
       {
         type: "upsert",
-        metric: { stringId: 2, styleId: 3, maxLineWidth: 40, lineCount: 1, advances: [] },
+        metric: {
+          stringId: 2,
+          styleId: 3,
+          maxLineWidth: 40,
+          lineCount: 1,
+          advances: [],
+          positionalAdvances: [],
+        },
       },
     ]);
   });
@@ -708,7 +722,14 @@ describe("CanvasFrameSink", () => {
     expect(decodeSystemTextMetricBatch(commit.mock.calls[0]?.[1] ?? new Uint8Array())).toEqual([
       {
         type: "upsert",
-        metric: { stringId: 2, styleId: 3, maxLineWidth: 20, lineCount: 1, advances: [] },
+        metric: {
+          stringId: 2,
+          styleId: 3,
+          maxLineWidth: 20,
+          lineCount: 1,
+          advances: [],
+          positionalAdvances: [],
+        },
       },
     ]);
 
@@ -737,6 +758,7 @@ describe("CanvasFrameSink", () => {
             [97, 10],
             [98, 10],
           ],
+          positionalAdvances: [10, 10],
         },
       },
     ]);
@@ -790,6 +812,7 @@ describe("CanvasFrameSink", () => {
             [98, 10],
             [0x2022, 10],
           ],
+          positionalAdvances: [10, 10],
         },
       },
     ]);
@@ -818,6 +841,7 @@ describe("CanvasFrameSink", () => {
             [97, 10],
             [98, 10],
           ],
+          positionalAdvances: [10, 10],
         },
       },
     ]);
@@ -884,6 +908,7 @@ describe("CanvasFrameSink", () => {
             [98, 10],
             [0x4e2d, 10],
           ],
+          positionalAdvances: [10, 10],
         },
       },
     ]);

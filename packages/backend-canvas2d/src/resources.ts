@@ -93,6 +93,17 @@ export interface CanvasSystemTextMetric extends CanvasSystemTextPair {
    * editable runs request them.
    */
   readonly advances: readonly CodePointAdvance[];
+  /**
+   * Advance of each code point of the string in order, from prefix width
+   * differences, empty unless the pair asked for advances.
+   *
+   * Prefix measurement carries contextual width the per-code-point table
+   * cannot: CJK fonts contract consecutive full-width punctuation, so summing
+   * isolated widths drifts the caret one notch per adjacent pair. Exact only
+   * for the measured string; Core applies these while the editing value still
+   * equals it.
+   */
+  readonly positionalAdvances: readonly number[];
 }
 
 /** One portable resource lifecycle action accepted by an atomic backend transaction. */
@@ -418,9 +429,17 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
         }
         context.font = style.font;
         const measured = measureHardLines(context, text);
-        const advances =
-          pair.measureAdvances === true ? measureAdvances(context, text, pair.extraCodePoints) : [];
-        metrics.push(Object.freeze({ ...pair, ...measured, advances: Object.freeze(advances) }));
+        const wantAdvances = pair.measureAdvances === true;
+        const advances = wantAdvances ? measureAdvances(context, text, pair.extraCodePoints) : [];
+        const positionalAdvances = wantAdvances ? measurePositionalAdvances(context, text) : [];
+        metrics.push(
+          Object.freeze({
+            ...pair,
+            ...measured,
+            advances: Object.freeze(advances),
+            positionalAdvances: Object.freeze(positionalAdvances),
+          }),
+        );
       }
     } finally {
       context.restore();
@@ -726,6 +745,43 @@ export function cssFont(weight: number, fontSize: number, family: string): strin
   // visible default, so fall back to the generic every browser has.
   const list = families.length === 0 ? "sans-serif" : families.join(", ");
   return `${String(weight)} ${String(fontSize)}px ${list}`;
+}
+
+/**
+ * Longest value measured positionally; prefix measurement rescans the line, so
+ * a pathological value falls back to the table rather than freezing the frame.
+ */
+const MAXIMUM_POSITIONAL_ADVANCES = 4096;
+
+/**
+ * Measures each code point in context via prefix width differences.
+ *
+ * One `measureText` per code point, like the isolated table, but the growing
+ * prefix lets the font apply contextual contraction and kerning, so the sum of
+ * these equals the width of the rendered line. A newline contributes zero and
+ * resets the prefix.
+ */
+function measurePositionalAdvances(context: Canvas2DContext, text: string): number[] {
+  const codePoints = [...text].length;
+  if (codePoints === 0 || codePoints > MAXIMUM_POSITIONAL_ADVANCES) return [];
+  const advances: number[] = [];
+  const lines = text.split("\n");
+  for (const [lineIndex, line] of lines.entries()) {
+    if (lineIndex > 0) advances.push(0);
+    let prefix = "";
+    let previous = 0;
+    for (const character of line) {
+      prefix += character;
+      const width = context.measureText(prefix).width;
+      if (!Number.isFinite(width)) {
+        throw new Error("Canvas measureText returned an invalid width");
+      }
+      // Kerning can pull a prefix in; the wire format requires non-negative.
+      advances.push(Math.max(0, width - previous));
+      previous = width;
+    }
+  }
+  return advances;
 }
 
 function measureHardLines(

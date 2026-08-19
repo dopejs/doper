@@ -33,6 +33,15 @@ pub struct SystemTextMetric {
     /// these, and measuring every text run would put one `measureText` call per
     /// distinct code point on the scroll hot path.
     pub advances: Vec<(char, f32)>,
+    /// Advance of each code point of the string in order, measured in context
+    /// from prefix differences, or empty when the pair was not measured.
+    ///
+    /// The per-code-point table cannot express contextual width: CJK fonts
+    /// contract consecutive full-width punctuation, so summing isolated widths
+    /// drifts the caret one notch per adjacent pair. These are exact for the
+    /// string they were measured from and apply only while the editing value
+    /// still equals it.
+    pub positional_advances: Vec<f32>,
 }
 
 /// One transactional system-text metric cache delta.
@@ -153,13 +162,17 @@ impl SystemTextMetricBatch {
                     let line_count = reader.read_u32()?;
                     let advance_count = reader.read_u32()?;
                     let advances = read_advances(&mut reader, advance_count)?;
-                    validate_metric(max_line_width, line_count, &advances)?;
+                    let positional_count = reader.read_u32()?;
+                    let positional_advances =
+                        read_positional_advances(&mut reader, positional_count)?;
+                    validate_metric(max_line_width, line_count, &advances, &positional_advances)?;
                     SystemTextMetricCommand::Upsert(SystemTextMetric {
                         string_id,
                         style_id,
                         max_line_width,
                         line_count,
                         advances,
+                        positional_advances,
                     })
                 }
                 SystemTextMetricOpcode::ReleaseSystemTextMetric => {
@@ -213,7 +226,12 @@ impl SystemTextMetricBatch {
             }
             match &instruction.command {
                 SystemTextMetricCommand::Upsert(metric) => {
-                    validate_metric(metric.max_line_width, metric.line_count, &metric.advances)?;
+                    validate_metric(
+                        metric.max_line_width,
+                        metric.line_count,
+                        &metric.advances,
+                        &metric.positional_advances,
+                    )?;
                     let advance_count = u32::try_from(metric.advances.len())
                         .map_err(|_| AbiError::ArithmeticOverflow)?;
                     writer.instruction(SystemTextMetricOpcode::UpsertSystemTextMetric as u8, 0);
@@ -224,6 +242,12 @@ impl SystemTextMetricBatch {
                     writer.u32(advance_count);
                     for (code_point, advance) in &metric.advances {
                         writer.u32(*code_point as u32);
+                        writer.f32(*advance)?;
+                    }
+                    let positional_count = u32::try_from(metric.positional_advances.len())
+                        .map_err(|_| AbiError::ArithmeticOverflow)?;
+                    writer.u32(positional_count);
+                    for advance in &metric.positional_advances {
                         writer.f32(*advance)?;
                     }
                 }
@@ -274,11 +298,46 @@ fn read_advances(reader: &mut Reader<'_>, declared: u32) -> Result<Vec<(char, f3
     Ok(advances)
 }
 
+/// Reads a declared in-order advance array, bounded before it can allocate.
+fn read_positional_advances(reader: &mut Reader<'_>, declared: u32) -> Result<Vec<f32>, AbiError> {
+    if declared > MAX_SYSTEM_TEXT_ADVANCES {
+        return Err(AbiError::InvalidValue(
+            "system text positional advance count is outside the supported limit",
+        ));
+    }
+    let count = usize::try_from(declared).map_err(|_| AbiError::ArithmeticOverflow)?;
+    let mut advances = Vec::with_capacity(count.min(reader.remaining() / 4));
+    for _ in 0..count {
+        let advance = reader.read_f32()?;
+        if !advance.is_finite() || advance < 0.0 {
+            return Err(AbiError::InvalidValue(
+                "system text advance must be finite and non-negative",
+            ));
+        }
+        advances.push(advance);
+    }
+    Ok(advances)
+}
+
 fn validate_metric(
     max_line_width: f32,
     line_count: u32,
     advances: &[(char, f32)],
+    positional_advances: &[f32],
 ) -> Result<(), AbiError> {
+    if positional_advances.len() > MAX_SYSTEM_TEXT_ADVANCES as usize {
+        return Err(AbiError::InvalidValue(
+            "system text positional advance count is outside the supported limit",
+        ));
+    }
+    if positional_advances
+        .iter()
+        .any(|advance| !advance.is_finite() || *advance < 0.0)
+    {
+        return Err(AbiError::InvalidValue(
+            "system text advance must be finite and non-negative",
+        ));
+    }
     if !max_line_width.is_finite() || max_line_width < 0.0 {
         return Err(AbiError::InvalidValue(
             "system text width must be finite and non-negative",
@@ -362,6 +421,7 @@ mod tests {
                         max_line_width: 123.5,
                         line_count: 2,
                         advances: vec![('\n', 0.0), ('a', 6.5), ('\u{4e2d}', 12.0)],
+                        positional_advances: vec![6.5, 0.0, 11.5],
                     }),
                 },
                 SystemTextMetricInstruction {
@@ -407,6 +467,7 @@ mod tests {
                 max_line_width: 1.0,
                 line_count: 1,
                 advances: Vec::new(),
+                positional_advances: Vec::new(),
             },
             SystemTextMetric {
                 string_id: 1,
@@ -414,6 +475,7 @@ mod tests {
                 max_line_width: -1.0,
                 line_count: 1,
                 advances: Vec::new(),
+                positional_advances: Vec::new(),
             },
             SystemTextMetric {
                 string_id: 1,
@@ -421,6 +483,7 @@ mod tests {
                 max_line_width: 1.0,
                 line_count: 0,
                 advances: Vec::new(),
+                positional_advances: Vec::new(),
             },
             SystemTextMetric {
                 string_id: 1,
@@ -428,6 +491,7 @@ mod tests {
                 max_line_width: 1.0,
                 line_count: 1,
                 advances: vec![('a', f32::NAN)],
+                positional_advances: Vec::new(),
             },
             SystemTextMetric {
                 string_id: 1,
@@ -435,6 +499,23 @@ mod tests {
                 max_line_width: 1.0,
                 line_count: 1,
                 advances: vec![('a', -1.0)],
+                positional_advances: Vec::new(),
+            },
+            SystemTextMetric {
+                string_id: 1,
+                style_id: 1,
+                max_line_width: 1.0,
+                line_count: 1,
+                advances: Vec::new(),
+                positional_advances: vec![-1.0],
+            },
+            SystemTextMetric {
+                string_id: 1,
+                style_id: 1,
+                max_line_width: 1.0,
+                line_count: 1,
+                advances: Vec::new(),
+                positional_advances: vec![f32::NAN],
             },
         ] {
             let batch = SystemTextMetricBatch {
@@ -489,7 +570,8 @@ mod tests {
                 1,
                 &(0..=MAX_SYSTEM_TEXT_ADVANCES)
                     .map(|index| (char::from_u32(index).unwrap_or('a'), 0.0))
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                &[]
             ),
             Err(AbiError::InvalidValue(
                 "system text advance count is outside the supported limit"
@@ -500,7 +582,7 @@ mod tests {
             Err(AbiError::InstructionLengthMismatch {
                 opcode: SystemTextMetricOpcode::UpsertSystemTextMetric as u8,
                 offset: 0,
-                expected: 24,
+                expected: 28,
                 actual: 20,
             })
         );

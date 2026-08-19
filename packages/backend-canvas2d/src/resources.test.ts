@@ -59,7 +59,16 @@ describe("Canvas2DResourceRegistry", () => {
 
     expect(
       resources.measureSystemTextPairs(context, actions, [{ stringId: 2, styleId: 3 }]),
-    ).toEqual([{ stringId: 2, styleId: 3, maxLineWidth: 28, lineCount: 2, advances: [] }]);
+    ).toEqual([
+      {
+        stringId: 2,
+        styleId: 3,
+        maxLineWidth: 28,
+        lineCount: 2,
+        advances: [],
+        positionalAdvances: [],
+      },
+    ]);
     // Two calls, one per hard line: an ordinary pair must not pay for advances.
     expect(fonts).toEqual(["400 16px Inter", "400 16px Inter"]);
 
@@ -85,11 +94,14 @@ describe("Canvas2DResourceRegistry", () => {
           [0x77, 7],
           [0x78, 7],
         ],
+        // In string order from prefix differences; the newline resets the line.
+        positionalAdvances: [7, 7, 7, 7, 0, 7, 7],
       },
     ]);
-    // Two lines plus one call per distinct code point other than the newline,
-    // not per occurrence: "x" appears twice and is measured once.
-    expect(fonts).toHaveLength(7);
+    // Two lines, one call per distinct code point other than the newline ("x"
+    // appears twice and is measured once), and one prefix call per code point
+    // for the positional advances.
+    expect(fonts).toHaveLength(13);
 
     fonts.length = 0;
     expect(
@@ -106,8 +118,9 @@ describe("Canvas2DResourceRegistry", () => {
       [0x78, 7],
       [0x4e2d, 7],
     ]);
-    // The extra "w" was already measured for the string, so it costs nothing.
-    expect(fonts).toHaveLength(8);
+    // The extra "w" was already measured for the string, so it costs nothing
+    // beyond the prefix calls for the positional advances.
+    expect(fonts).toHaveLength(14);
     expect(resources.getText(2)).toBeUndefined();
     expect(resources.getTextStyle(3)).toBeUndefined();
   });

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 7,
+  "abiVersion": 8,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -761,6 +761,14 @@
             },
             {
               "name": "advances",
+              "type": "bytes"
+            },
+            {
+              "name": "positionalAdvanceCount",
+              "type": "u32"
+            },
+            {
+              "name": "positionalAdvances",
               "type": "bytes"
             },
             "align4"

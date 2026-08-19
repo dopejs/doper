@@ -38,7 +38,7 @@ for (const [file, contents] of outputs) {
 if (stale) process.exitCode = 1;
 
 function validateSchema(value) {
-  if (value.schemaVersion !== 1 || value.abiVersion !== 7) {
+  if (value.schemaVersion !== 1 || value.abiVersion !== 8) {
     throw new Error("unsupported protocol schema or ABI version");
   }
   if (value.endianness !== "little" || value.alignment !== 4) {
@@ -257,13 +257,14 @@ function validateNamedFields(fields, label) {
     names.add(field.name);
   }
   const types = fields.map((field) => (typeof field === "string" ? field : field.type));
-  const variableIndex = types.indexOf("bytes");
-  if (variableIndex >= 0) {
-    if (types.lastIndexOf("bytes") !== variableIndex || types[variableIndex + 1] !== "align4") {
-      throw new Error(`${label} variable bytes must occur once and be followed by align4`);
+  if (types.includes("bytes")) {
+    // Each variable region is described by a count field the codec validates;
+    // the schema only pins that the instruction as a whole ends realigned.
+    if (types.at(-1) !== "align4") {
+      throw new Error(`${label} variable bytes require a trailing align4`);
     }
-    if (variableIndex + 2 !== types.length) {
-      throw new Error(`${label} cannot contain fields after variable byte alignment`);
+    if (types.slice(0, -1).includes("align4")) {
+      throw new Error(`${label} align4 must be the final field`);
     }
   } else if (types.includes("align4")) {
     throw new Error(`${label} align4 requires a preceding bytes field`);

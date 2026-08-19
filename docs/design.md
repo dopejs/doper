@@ -1329,6 +1329,30 @@ EditContext host 上，但打在 host 上的事件本来就冒泡到 document；
 snapshot 测试断言恢复批中含带原 flags 的 `configureEditable`；native-input 单测改为在
 document 上派发剪贴板事件。真实 Cmd+V 的浏览器路由仍属平台资格认证。
 
+### 连续标点让 caret 漂移；空撤销事务化（abiVersion 7→8，2026-08-19）
+
+反馈两条：连续标点（"、、"）处 caret 错位；删除/撤销后光标动了但渲染不刷新。
+
+**1. 逐码点表在原理上装不下上下文宽度。** Chromium 实测 `、、` 宽 24px，而两个孤立 `、`
+各 16px——CJK 字体会收缩连续全角标点。按码点索引的推进表每对相邻标点让 caret 向右漂
+8px。修法：`UpsertSystemTextMetric` 再加一段**位置型推进**（整行前缀差分逐码点，换行为 0
+并重置前缀），它的逐项和恰等于整行实测宽。Core 侧收敛为一个 `value_advances`：编辑值仍
+等于被测字符串时用位置型（精确），分歧窗口回退码点表，未测码点回退估算——caret、软换行、
+测量三处共用同一数组，保证画、断行、命中一致。前缀测量对行长是二次的，超过 4096 码点
+跳过位置型只留表。abiVersion 7→8，6 个 golden 显式重基。
+
+**2. 空撤销从"跳过"改为"消耗 revision 的空操作事务"。** 上一条把空历史 Undo/Redo 改成
+跳过命令，但输入桥在发送时已乐观自增 `#sentRevision`，而跳过意味着 Core 不推进 revision
+也不回 ack——两边从此错位，**之后每一条编辑命令都因 revision 不匹配被拒**，帧被拒→worker
+致命→静默恢复，表现正是"光标动了、渲染没刷新"。现在 `EditSession` 对空历史 Undo/Redo
+产出一个无 delta、选区不变、revision +1 的事务，ack 使桥保持同步；`NothingToUndo/Redo`
+错误变体随之删除（无生产者）。
+
+**验证**：engine 断言同一点击在有/无位置型推进下分别解析到偏移 3 和 2（把位置型分支禁用
+复跑，断言反转）；浏览器测试断言真实 canvas 上位置型推进的逐行和等于 `measureText(整行)`，
+且 `、、` 确实窄于两倍孤立宽（若字体停止收缩该断言会提醒位置型已可选）；engine 断言空
+Undo/Redo 各回一条 base/revision 正确的 ack 且会话随后可正常插入。
+
 ### 富单元格暴露的能力缺口
 
 新 demo 每行约 18 个节点（此前 3 个），1280×800 视口下 20 行物化 = 357 个 Scene 节点。

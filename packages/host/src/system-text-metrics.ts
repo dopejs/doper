@@ -37,6 +37,16 @@ export interface SystemTextMetric {
    * measured, since each distinct code point costs a `measureText` call.
    */
   readonly advances: readonly CodePointAdvance[];
+  /**
+   * Advance of each code point of the string in order, measured in context
+   * from prefix differences, or empty when the pair was not measured.
+   *
+   * Exact for the string it was measured from — including the contextual
+   * contraction of consecutive full-width punctuation, which the table above
+   * cannot express — and applied by Core only while the editing value still
+   * equals that string.
+   */
+  readonly positionalAdvances: readonly number[];
 }
 
 /** One transactional system-font metric cache delta. */
@@ -63,7 +73,11 @@ export function encodeSystemTextMetricBatch(deltas: readonly SystemTextMetricDel
           ? SystemTextMetricOpcode.UpsertSystemTextMetric
           : SystemTextMetricOpcode.ReleaseSystemTextMetric;
       const advances = delta.type === "upsert" ? delta.metric.advances.length : 0;
-      return checkedAdd(total, checkedAdd(instructionBytes(opcode), advances * 8));
+      const positional = delta.type === "upsert" ? delta.metric.positionalAdvances.length : 0;
+      return checkedAdd(
+        total,
+        checkedAdd(instructionBytes(opcode), checkedAdd(advances * 8, positional * 4)),
+      );
     }, 0);
   if (bytes > MAX_SYSTEM_TEXT_METRICS_BYTES) fail("text metric batch exceeds maximum size");
   const output = new Uint8Array(bytes);
@@ -94,6 +108,8 @@ export function encodeSystemTextMetricBatch(deltas: readonly SystemTextMetricDel
         writer.u32(codePoint);
         writer.f32(advance);
       }
+      writer.u32(delta.metric.positionalAdvances.length);
+      for (const advance of delta.metric.positionalAdvances) writer.f32(advance);
     } else {
       writer.instruction(SystemTextMetricOpcode.ReleaseSystemTextMetric);
       writer.u32(delta.stringId);
@@ -155,12 +171,22 @@ export function decodeSystemTextMetricBatch(input: Uint8Array): SystemTextMetric
       for (let index = 0; index < advanceCount; index += 1) {
         advances.push(Object.freeze([reader.codePoint(), reader.f32()] as const));
       }
+      const positionalCount = reader.u32();
+      if (positionalCount > MAX_SYSTEM_TEXT_ADVANCES) {
+        fail("text metric advance count is outside the supported limit");
+      }
+      if (positionalCount > Math.floor(reader.remaining / 4)) fail("truncated text metric batch");
+      const positionalAdvances: number[] = [];
+      for (let index = 0; index < positionalCount; index += 1) {
+        positionalAdvances.push(reader.f32());
+      }
       const metric = {
         stringId,
         styleId,
         maxLineWidth,
         lineCount,
         advances: Object.freeze(advances),
+        positionalAdvances: Object.freeze(positionalAdvances),
       };
       validateMetric(metric);
       deltas.push({ type: "upsert", metric: Object.freeze(metric) });
@@ -198,6 +224,14 @@ function validateMetric(metric: SystemTextMetric): void {
   }
   if (metric.advances.length > MAX_SYSTEM_TEXT_ADVANCES) {
     fail("text metric advance count is outside the supported limit");
+  }
+  if (metric.positionalAdvances.length > MAX_SYSTEM_TEXT_ADVANCES) {
+    fail("text metric advance count is outside the supported limit");
+  }
+  for (const advance of metric.positionalAdvances) {
+    if (!Number.isFinite(advance) || !Number.isFinite(Math.fround(advance)) || advance < 0) {
+      fail("text metric advance must be finite, non-negative, and representable as f32");
+    }
   }
   let previous = -1;
   for (const [codePoint, advance] of metric.advances) {

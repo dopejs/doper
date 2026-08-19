@@ -282,7 +282,15 @@ impl EditSession {
                 (Some(delta), TransactionKind::Composition)
             }
             EditIntent::Undo => {
-                let entry = self.undo.back().ok_or(EditError::NothingToUndo)?;
+                // An empty history is an ordinary key press, not an error. It
+                // must still consume the revision: the input surface bumps its
+                // optimistic revision when it sends the command, and only this
+                // transaction's acknowledgement keeps the two in step. Skipping
+                // the command desynchronizes every edit that follows.
+                let Some(entry) = self.undo.back() else {
+                    // No text or selection change; only the revision advances.
+                    return Ok(self.finish_no_op(next_revision, TransactionKind::Undo));
+                };
                 let prepared =
                     self.prepare_replacement(entry.inverse.range, entry.inverse.text.clone())?;
                 let delta = prepared.forward.clone();
@@ -295,7 +303,9 @@ impl EditSession {
                 (Some(delta), TransactionKind::Undo)
             }
             EditIntent::Redo => {
-                let entry = self.redo.back().ok_or(EditError::NothingToRedo)?;
+                let Some(entry) = self.redo.back() else {
+                    return Ok(self.finish_no_op(next_revision, TransactionKind::Redo));
+                };
                 let prepared =
                     self.prepare_replacement(entry.forward.range, entry.forward.text.clone())?;
                 let delta = prepared.forward.clone();
@@ -319,6 +329,25 @@ impl EditSession {
             composition: self.composition_range(),
             kind,
         })
+    }
+
+    /// Consumes the revision without changing any state.
+    ///
+    /// Undo or redo on an empty history lands here: the input surface has
+    /// already bumped its optimistic revision for the command it sent, so the
+    /// command must produce an acknowledging transaction even though it changes
+    /// nothing — dropping it would desynchronize every edit that follows.
+    fn finish_no_op(&mut self, next_revision: u64, kind: TransactionKind) -> EditTransaction {
+        let base_revision = self.revision;
+        self.revision = next_revision;
+        EditTransaction {
+            base_revision,
+            revision: next_revision,
+            delta: None,
+            selection: self.selection,
+            composition: self.composition_range(),
+            kind,
+        }
     }
 
     /// Applies a strictly newer authoritative Shell value and clears local history.

@@ -5,8 +5,8 @@ use doper_abi::{
     MAX_RESOURCE_BYTES, NodeKind, ResourceKind, WireAffinity, WireRange,
 };
 use doper_edit::{
-    Affinity, EditConfig, EditError, EditIntent, EditSession, EditTransaction, ExternalValue,
-    Selection, TransactionKind, edit_command_from_input,
+    Affinity, EditConfig, EditIntent, EditSession, EditTransaction, ExternalValue, Selection,
+    TransactionKind, edit_command_from_input,
 };
 use doper_scene::{NodeId, Scene};
 
@@ -219,14 +219,7 @@ impl EditingController {
             {
                 return Err(CoreError::EditableReadOnly { node });
             }
-            let transaction = match active.session.apply(command) {
-                Ok(transaction) => transaction,
-                // Pressing undo with an empty history is an ordinary key press,
-                // not a protocol violation: native inputs do nothing. Rejecting
-                // the frame would poison the render loop over a no-op.
-                Err(EditError::NothingToUndo | EditError::NothingToRedo) => continue,
-                Err(error) => return Err(error.into()),
-            };
+            let transaction = active.session.apply(command)?;
             // Selection/composition-only transitions still change editor overlays.
             outcome.changed_nodes.push(node);
             self.pending.push((node, transaction));

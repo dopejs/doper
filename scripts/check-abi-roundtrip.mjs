@@ -121,6 +121,7 @@ async function checkAbiRoundtrip() {
           [97, 6.5],
           [0x4e2d, 12],
         ],
+        positionalAdvances: [6.5, 0, 11.5],
       },
     },
     { type: "release", stringId: 8, styleId: 10 },
