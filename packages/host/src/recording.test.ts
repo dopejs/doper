@@ -131,6 +131,7 @@ function systemTextMetricBytes(): Uint8Array {
         lineCount: 1,
         advances: [],
         positionalAdvances: [],
+        contractions: [],
       },
     },
   ]);

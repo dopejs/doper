@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: doper
+  name: pingo
   text: движок рендеринга canvas
   tagline: Ядро на Rust/WASM + оболочка на TypeScript + сменный бэкенд. Спроектирован для высокопроизводительного взаимодействия, нативной виртуальной прокрутки и редактирования текста внутри canvas.
   actions:
@@ -14,7 +14,7 @@ hero:
       link: /ru/playground
     - theme: alt
       text: GitHub
-      link: https://github.com/dopejs/doper
+      link: https://github.com/dopejs/pingo
 
 features:
   - title: Две тактовые оси — главный поток встал, кадры не теряются

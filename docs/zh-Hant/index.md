@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: doper
+  name: pingo
   text: canvas 繪製引擎
   tagline: Rust/WASM 核心 + TypeScript 外殼 + 可插拔後端。為高效能互動、原生虛擬捲動與 canvas 內文字編輯而設計。
   actions:
@@ -14,7 +14,7 @@ hero:
       link: /zh-Hant/playground
     - theme: alt
       text: GitHub
-      link: https://github.com/dopejs/doper
+      link: https://github.com/dopejs/pingo
 
 features:
   - title: 雙時鐘，主執行緒卡死也不掉幀

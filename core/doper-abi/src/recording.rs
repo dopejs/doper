@@ -225,6 +225,7 @@ mod tests {
                     line_count: 1,
                     advances: Vec::new(),
                     positional_advances: Vec::new(),
+                    contractions: Vec::new(),
                 }),
             }],
         }

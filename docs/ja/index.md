@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: doper
+  name: pingo
   text: canvas レンダリングエンジン
   tagline: Rust/WASM コア + TypeScript シェル + 差し替え可能なバックエンド。高性能なインタラクション、ネイティブな仮想スクロール、canvas 内テキスト編集のために設計。
   actions:
@@ -14,7 +14,7 @@ hero:
       link: /ja/playground
     - theme: alt
       text: GitHub
-      link: https://github.com/dopejs/doper
+      link: https://github.com/dopejs/pingo
 
 features:
   - title: デュアルクロック — メインスレッドが固まってもフレームは落ちない

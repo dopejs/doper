@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: doper
+  name: pingo
   text: moteur de rendu canvas
   tagline: Cœur Rust/WASM + couche TypeScript + backend interchangeable. Conçu pour l'interaction haute performance, le défilement virtuel natif et l'édition de texte dans le canvas.
   actions:
@@ -14,7 +14,7 @@ hero:
       link: /fr/playground
     - theme: alt
       text: GitHub
-      link: https://github.com/dopejs/doper
+      link: https://github.com/dopejs/pingo
 
 features:
   - title: Deux horloges — le thread principal se fige, l'image ne saute pas

@@ -22,6 +22,7 @@ const canonical: readonly SystemTextMetricDelta[] = [
         [0x4e2d, 12],
       ],
       positionalAdvances: [],
+      contractions: [],
     },
   },
   { type: "release", stringId: 8, styleId: 10 },
@@ -46,6 +47,7 @@ describe("system text metric batches", () => {
         lineCount: 1,
         advances: [],
         positionalAdvances: [],
+        contractions: [],
       },
       {
         stringId: 1,
@@ -54,6 +56,7 @@ describe("system text metric batches", () => {
         lineCount: 1,
         advances: [],
         positionalAdvances: [],
+        contractions: [],
       },
       {
         stringId: 1,
@@ -62,6 +65,7 @@ describe("system text metric batches", () => {
         lineCount: 0,
         advances: [],
         positionalAdvances: [],
+        contractions: [],
       },
       {
         stringId: 1,
@@ -70,6 +74,7 @@ describe("system text metric batches", () => {
         lineCount: 1,
         advances: [],
         positionalAdvances: [],
+        contractions: [],
       },
       {
         stringId: 1,
@@ -78,6 +83,7 @@ describe("system text metric batches", () => {
         lineCount: 1,
         advances: [],
         positionalAdvances: [],
+        contractions: [],
       },
       {
         stringId: 1,
@@ -86,6 +92,7 @@ describe("system text metric batches", () => {
         lineCount: 1,
         advances: [[97, Number.NaN]],
         positionalAdvances: [],
+        contractions: [],
       },
       {
         stringId: 1,
@@ -94,6 +101,7 @@ describe("system text metric batches", () => {
         lineCount: 1,
         advances: [[97, -1]],
         positionalAdvances: [],
+        contractions: [],
       },
       // Surrogate halves are not scalar values, and an unsorted or duplicated
       // table would give one logical table two byte sequences.
@@ -104,6 +112,7 @@ describe("system text metric batches", () => {
         lineCount: 1,
         advances: [[0xd800, 1]],
         positionalAdvances: [],
+        contractions: [],
       },
       {
         stringId: 1,
@@ -112,6 +121,7 @@ describe("system text metric batches", () => {
         lineCount: 1,
         advances: [[0x11_0000, 1]],
         positionalAdvances: [],
+        contractions: [],
       },
       {
         stringId: 1,
@@ -123,6 +133,7 @@ describe("system text metric batches", () => {
           [97, 1],
         ],
         positionalAdvances: [],
+        contractions: [],
       },
       {
         stringId: 1,
@@ -134,6 +145,7 @@ describe("system text metric batches", () => {
           [97, 1],
         ],
         positionalAdvances: [],
+        contractions: [],
       },
     ];
     for (const metric of invalid) {

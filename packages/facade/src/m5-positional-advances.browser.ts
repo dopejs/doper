@@ -56,6 +56,19 @@ it("positional advances sum to the true rendered line width", () => {
   // platform property (macOS PingFang does, the CI Linux fonts do not), so it
   // cannot be a hard assertion. What must hold everywhere is the invariant
   // above: the positional sum equals the rendered width, contracted or not.
+  //
+  // Where it does contract, the table must carry it: positional advances stop
+  // applying the moment the editing value diverges from the measured string,
+  // and an application is never required to write the value back.
+  const isolated = context.measureText("\u3001").width * 2;
+  const together = context.measureText("\u3001\u3001").width;
+  if (Math.abs(together - isolated) > 0.01) {
+    const entry = metric.contractions.find(
+      ([first, second]) => first === 0x3001 && second === 0x3001,
+    );
+    expect(entry, "a contracting pair must reach Core").toBeDefined();
+    expect(entry?.[2]).toBeCloseTo(together - isolated, 2);
+  }
 });
 
 function textStyle(fontSize: number): Uint8Array {

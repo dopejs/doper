@@ -67,6 +67,7 @@ describe("Canvas2DResourceRegistry", () => {
         lineCount: 2,
         advances: [],
         positionalAdvances: [],
+        contractions: [],
       },
     ]);
     // Two calls, one per hard line: an ordinary pair must not pay for advances.
@@ -96,12 +97,14 @@ describe("Canvas2DResourceRegistry", () => {
         ],
         // In string order from prefix differences; the newline resets the line.
         positionalAdvances: [7, 7, 7, 7, 0, 7, 7],
+        // The fake context is linear in length, so nothing contracts.
+        contractions: [],
       },
     ]);
     // Two lines, one call per distinct code point other than the newline ("x"
     // appears twice and is measured once), and one prefix call per code point
     // for the positional advances.
-    expect(fonts).toHaveLength(13);
+    expect(fonts).toHaveLength(18);
 
     fonts.length = 0;
     expect(
@@ -120,7 +123,7 @@ describe("Canvas2DResourceRegistry", () => {
     ]);
     // The extra "w" was already measured for the string, so it costs nothing
     // beyond the prefix calls for the positional advances.
-    expect(fonts).toHaveLength(14);
+    expect(fonts).toHaveLength(20);
     expect(resources.getText(2)).toBeUndefined();
     expect(resources.getTextStyle(3)).toBeUndefined();
   });

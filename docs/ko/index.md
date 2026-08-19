@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: doper
+  name: pingo
   text: canvas 렌더링 엔진
   tagline: Rust/WASM 코어 + TypeScript 셸 + 교체 가능한 백엔드. 고성능 상호작용, 네이티브 가상 스크롤, canvas 내 텍스트 편집을 위해 설계되었습니다.
   actions:
@@ -14,7 +14,7 @@ hero:
       link: /ko/playground
     - theme: alt
       text: GitHub
-      link: https://github.com/dopejs/doper
+      link: https://github.com/dopejs/pingo
 
 features:
   - title: 이중 클록 — 메인 스레드가 멈춰도 프레임은 유지

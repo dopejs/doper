@@ -3057,6 +3057,76 @@ mod tests {
     }
 
     #[test]
+    fn contraction_survives_a_value_that_diverged_from_the_measured_string() {
+        // The recorded failure. Deleting the middle of a run leaves two marks
+        // adjacent, and an application is not required to write the edited value
+        // back -- the engine's own contract is that editing needs no Shell
+        // re-render. The positional advances describe the Scene string and stop
+        // applying the moment the value diverges, so the caret drifted by the
+        // contracted width at the seam, permanently. The contraction table is a
+        // property of the font, so it still applies.
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit_with_system_text_metrics(
+                // "A、X、B": deleting X leaves the two marks adjacent, and that
+                // pair never occurs in the measured string.
+                &editable_tree_with_text(1, "A\u{3001}X\u{3001}B"),
+                Some(&system_metrics(SystemTextMetricCommand::Upsert(
+                    SystemTextMetric {
+                        string_id: 3,
+                        style_id: 2,
+                        max_line_width: 62.0,
+                        line_count: 1,
+                        advances: vec![('A', 10.0), ('B', 10.0), ('X', 10.0), ('\u{3001}', 16.0)],
+                        positional_advances: vec![10.0, 16.0, 10.0, 16.0, 10.0],
+                        contractions: vec![('\u{3001}', '\u{3001}', -8.0)],
+                    },
+                ))),
+            )
+            .expect("frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+
+        // Delete the X. The Scene string is deliberately left untouched.
+        engine
+            .input(&input(
+                2,
+                vec![InputCommand::Replace {
+                    node_id: id(1),
+                    base_revision: 0,
+                    start: 2,
+                    end: 3,
+                    text: String::new(),
+                }],
+            ))
+            .expect("delete");
+        engine.take_edit_transactions().expect("drain delete");
+
+        let node = NodeId::from_raw(id(1)).expect("node");
+        let stops = engine
+            .text
+            .editor_caret_stops(&engine.scene, node)
+            .expect("caret stops");
+        // "A、、B": the second mark advances 16 - 8 = 8, so the stop after it is
+        // at 10 + 16 + 8 = 34. Without the contraction it lands at 42.
+        let x = |offset: u32| {
+            stops
+                .iter()
+                .find(|stop| stop.utf16_offset == offset)
+                .map(|stop| stop.x)
+                .expect("stop")
+        };
+        assert!((x(2) - 26.0).abs() < 0.01, "before the pair: {}", x(2));
+        assert!((x(3) - 34.0).abs() < 0.01, "after the pair: {}", x(3));
+        assert!((x(4) - 44.0).abs() < 0.01, "end: {}", x(4));
+    }
+
+    #[test]
     fn positional_advances_carry_contextual_punctuation_compression() {
         // CJK fonts contract consecutive full-width punctuation: "、、" measures
         // 24px, not 2 x 16px. The per-code-point table cannot express that, so
@@ -3076,6 +3146,7 @@ mod tests {
                             line_count: 1,
                             advances: vec![('A', 10.0), ('B', 10.0), ('\u{3001}', 16.0)],
                             positional_advances: positional,
+                            contractions: Vec::new(),
                         },
                     ))),
                 )
@@ -3155,6 +3226,7 @@ mod tests {
                 ('\u{6ce8}', 16.0),
             ],
             positional_advances: Vec::new(),
+            contractions: Vec::new(),
         });
 
         let offset_at = |metrics: Option<Vec<u8>>| -> u32 {
@@ -3441,6 +3513,7 @@ mod tests {
                         line_count: 1,
                         advances: vec![('\u{4e2d}', 16.0), ('\u{5019}', 16.0), ('\u{6587}', 16.0)],
                         positional_advances: Vec::new(),
+                        contractions: Vec::new(),
                     },
                 ))),
             )
@@ -3502,6 +3575,7 @@ mod tests {
                         // ever composed, which is the case that used to break.
                         advances: vec![('\u{4e2d}', 16.0), ('\u{5019}', 16.0), ('\u{6587}', 16.0)],
                         positional_advances: Vec::new(),
+                        contractions: Vec::new(),
                     },
                 ))),
             )
@@ -4008,6 +4082,7 @@ mod tests {
                         line_count: 1,
                         advances: vec![('a', 10.0), ('b', 10.0)],
                         positional_advances: vec![10.0, 10.0],
+                        contractions: Vec::new(),
                     },
                 ))),
             )
@@ -4342,6 +4417,7 @@ mod tests {
             line_count: 2,
             advances: Vec::new(),
             positional_advances: Vec::new(),
+            contractions: Vec::new(),
         });
         let output = engine
             .commit_with_system_text_metrics(
@@ -4379,6 +4455,7 @@ mod tests {
                     line_count: 3,
                     advances: Vec::new(),
                     positional_advances: Vec::new(),
+                    contractions: Vec::new(),
                 },
             )))
             .expect("metric refresh")

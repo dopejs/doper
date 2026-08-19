@@ -630,6 +630,7 @@ describe("CanvasFrameSink", () => {
           lineCount: 2,
           advances: [],
           positionalAdvances: [],
+          contractions: [],
         },
       },
     ]);
@@ -691,6 +692,7 @@ describe("CanvasFrameSink", () => {
           lineCount: 1,
           advances: [],
           positionalAdvances: [],
+          contractions: [],
         },
       },
     ]);
@@ -729,6 +731,7 @@ describe("CanvasFrameSink", () => {
           lineCount: 1,
           advances: [],
           positionalAdvances: [],
+          contractions: [],
         },
       },
     ]);
@@ -759,6 +762,7 @@ describe("CanvasFrameSink", () => {
             [98, 10],
           ],
           positionalAdvances: [10, 10],
+          contractions: [],
         },
       },
     ]);
@@ -813,6 +817,7 @@ describe("CanvasFrameSink", () => {
             [0x2022, 10],
           ],
           positionalAdvances: [10, 10],
+          contractions: [],
         },
       },
     ]);
@@ -842,6 +847,7 @@ describe("CanvasFrameSink", () => {
             [98, 10],
           ],
           positionalAdvances: [10, 10],
+          contractions: [],
         },
       },
     ]);
@@ -909,6 +915,7 @@ describe("CanvasFrameSink", () => {
             [0x4e2d, 10],
           ],
           positionalAdvances: [10, 10],
+          contractions: [],
         },
       },
     ]);

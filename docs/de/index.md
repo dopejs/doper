@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: doper
+  name: pingo
   text: canvas-Rendering-Engine
   tagline: Rust/WASM-Kern + TypeScript-Schale + austauschbares Backend. Entwickelt für hochperformante Interaktion, natives virtuelles Scrollen und Texteingabe direkt im canvas.
   actions:
@@ -14,7 +14,7 @@ hero:
       link: /de/playground
     - theme: alt
       text: GitHub
-      link: https://github.com/dopejs/doper
+      link: https://github.com/dopejs/pingo
 
 features:
   - title: Zwei Uhren — der Hauptthread blockiert, das Bild bleibt flüssig

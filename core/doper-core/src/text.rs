@@ -796,14 +796,39 @@ impl CoreTextSystem {
         let table = metric
             .filter(|metric| !metric.advances.is_empty())
             .map(|metric| metric.advances.iter().copied().collect::<HashMap<_, _>>());
+        // Contraction is a property of the font, not of the measured string, so
+        // it still applies once the editing value has diverged from it. Without
+        // this the caret drifts by the removed width at every adjacent pair --
+        // permanently, for an application that never writes the value back.
+        let contractions = metric
+            .filter(|metric| !metric.contractions.is_empty())
+            .map(|metric| {
+                metric
+                    .contractions
+                    .iter()
+                    .map(|(first, second, delta)| ((*first, *second), *delta))
+                    .collect::<HashMap<_, _>>()
+            });
+        let mut previous: Option<char> = None;
         value
             .chars()
             .map(|character| {
                 if character == '\n' {
-                    0.0
-                } else {
-                    advance_for(table.as_ref(), estimate, character)
+                    previous = None;
+                    return 0.0;
                 }
+                let mut advance = advance_for(table.as_ref(), estimate, character);
+                // The pair's total is first + second + delta, and prefix
+                // differences put the whole adjustment on the second glyph.
+                if let Some(first) = previous
+                    && let Some(delta) = contractions
+                        .as_ref()
+                        .and_then(|table| table.get(&(first, character)))
+                {
+                    advance += *delta;
+                }
+                previous = Some(character);
+                advance.max(0.0)
             })
             .collect()
     }

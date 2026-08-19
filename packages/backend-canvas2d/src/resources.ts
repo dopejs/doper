@@ -67,6 +67,9 @@ interface TextMeasurementStyle {
 /** One measured code point and its advance in logical CSS pixels. */
 export type CodePointAdvance = readonly [codePoint: number, advance: number];
 
+/** Width a font removes when the second code point directly follows the first. */
+export type CodePointContraction = readonly [first: number, second: number, delta: number];
+
 /** Immutable string/style resource pair requiring browser system-font metrics. */
 export interface CanvasSystemTextPair {
   /** Whether Core needs per-code-point advances for this pair. */
@@ -104,6 +107,16 @@ export interface CanvasSystemTextMetric extends CanvasSystemTextPair {
    * equals it.
    */
   readonly positionalAdvances: readonly number[];
+  /**
+   * Pairs whose combined width is not the sum of their advances, ascending by
+   * code point, empty unless the pair asked for advances.
+   *
+   * A property of the font rather than of one string, so unlike the positional
+   * advances it keeps placing the caret after the editing value has diverged
+   * from the string these were measured against — which an application that
+   * never writes the value back never undoes.
+   */
+  readonly contractions: readonly CodePointContraction[];
 }
 
 /** One portable resource lifecycle action accepted by an atomic backend transaction. */
@@ -432,12 +445,14 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
         const wantAdvances = pair.measureAdvances === true;
         const advances = wantAdvances ? measureAdvances(context, text, pair.extraCodePoints) : [];
         const positionalAdvances = wantAdvances ? measurePositionalAdvances(context, text) : [];
+        const contractions = wantAdvances ? measureContractions(context, advances) : [];
         metrics.push(
           Object.freeze({
             ...pair,
             ...measured,
             advances: Object.freeze(advances),
             positionalAdvances: Object.freeze(positionalAdvances),
+            contractions: Object.freeze(contractions),
           }),
         );
       }
@@ -783,6 +798,48 @@ function measurePositionalAdvances(context: Canvas2DContext, text: string): numb
   }
   return advances;
 }
+
+/**
+ * Measures which code-point pairs a font sets closer together than their own
+ * advances, in two passes.
+ *
+ * The candidates come from measurement, not from a Unicode table: a code point
+ * qualifies when it contracts against itself, which is what CJK punctuation
+ * compression does. Only those are then measured against each other, so the
+ * quadratic pass runs over the handful of marks in a run rather than over every
+ * distinct code point. A font that contracts a pair where neither half
+ * contracts with itself is missed, and that pair keeps today's behaviour.
+ */
+function measureContractions(
+  context: Canvas2DContext,
+  advances: readonly CodePointAdvance[],
+): CodePointContraction[] {
+  const width = new Map(advances);
+  const candidates: number[] = [];
+  for (const [codePoint, advance] of advances) {
+    if (codePoint === 0x0a) continue;
+    const glyph = String.fromCodePoint(codePoint);
+    if (Math.abs(context.measureText(glyph + glyph).width - advance * 2) > CONTRACTION_EPSILON) {
+      candidates.push(codePoint);
+    }
+  }
+  const contractions: CodePointContraction[] = [];
+  for (const first of candidates) {
+    for (const second of candidates) {
+      const pair = String.fromCodePoint(first) + String.fromCodePoint(second);
+      const delta =
+        context.measureText(pair).width - ((width.get(first) ?? 0) + (width.get(second) ?? 0));
+      if (Math.abs(delta) > CONTRACTION_EPSILON) contractions.push([first, second, delta]);
+    }
+  }
+  // Ascending so one table has one encoding, matching the advance table.
+  return contractions.sort(([aFirst, aSecond], [bFirst, bSecond]) =>
+    aFirst - bFirst === 0 ? aSecond - bSecond : aFirst - bFirst,
+  );
+}
+
+/** Sub-pixel noise that is not a real contraction. */
+const CONTRACTION_EPSILON = 0.01;
 
 function measureHardLines(
   context: Canvas2DContext,

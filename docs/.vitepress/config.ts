@@ -11,7 +11,7 @@ const searchLocales = Object.fromEntries(
 );
 
 export default defineConfig({
-  title: "doper",
+  title: "pingo",
   lastUpdated: true,
   srcExclude: ["**/node_modules/**"],
   // Extensionless URLs need host-side rewriting; keeping .html makes the

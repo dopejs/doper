@@ -1,11 +1,15 @@
-# doper
+# pingo
 
-doper 是一套从零设计的 Web Canvas 渲染引擎，目标是提供高性能 TSX 运行时、
+pingo（原 doper）是一套从零设计的 Web Canvas 渲染引擎，目标是提供高性能 TSX 运行时、
 原生虚拟滚动、确定性的 Rust/WASM Core、版本化二进制 ABI，以及完整的文本
 渲染与 Canvas 原生编辑能力。
 
-仓库已经完成 **P0 / M0、M1、M2 与 M3**，下一阶段是 M4 的编辑、事件、命中与
-无障碍主链；目前仍不是可供业务直接使用的完整渲染引擎。技术决策以
+仓库：<https://github.com/dopejs/pingo>
+
+> 品牌已切换为 pingo；现有公开包在兼容迁移完成前仍使用 `@dopejs/doper`，因此下面的安装命令保持可直接运行。
+
+仓库已经完成 **P0–M5** 工程里程碑，当前仍不是面向所有业务场景的完整渲染引擎。
+技术决策以
 [`docs/design.md`](docs/design.md) 为准，交付顺序与出口门禁见
 [`docs/plan.md`](docs/plan.md)。
 

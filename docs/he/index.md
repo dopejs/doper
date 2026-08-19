@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: doper
+  name: pingo
   text: מנוע רינדור canvas
   tagline: ליבת Rust/WASM + מעטפת TypeScript + עורף רינדור מתחלף. תוכנן לאינטראקציה בביצועים גבוהים, גלילה וירטואלית נייטיב ועריכת טקסט בתוך ה-canvas.
   actions:
@@ -14,7 +14,7 @@ hero:
       link: /he/playground
     - theme: alt
       text: GitHub
-      link: https://github.com/dopejs/doper
+      link: https://github.com/dopejs/pingo
 
 features:
   - title: שני שעונים — התהליכון הראשי נתקע והפריימים לא נופלים

@@ -648,7 +648,7 @@ export function localeConfig(
         ],
       },
       socialLinks: [
-        { icon: "github", link: "https://github.com/dopejs/doper" },
+        { icon: "github", link: "https://github.com/dopejs/pingo" },
         { icon: "npm", link: "https://www.npmjs.com/package/@dopejs/doper" },
       ],
       outline: { level: [2, 3], label: ui.outline },
@@ -662,7 +662,7 @@ export function localeConfig(
       lastUpdatedText: ui.lastUpdated,
       footer: {
         message: ui.footerMessage,
-        copyright: "© 2026 doper contributors",
+        copyright: "© 2026 pingo contributors",
       },
     },
   };

@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: doper
+  name: pingo
   text: محرّك عرض canvas
   tagline: نواة Rust/WASM + غلاف TypeScript + خلفية عرض قابلة للاستبدال. مصمَّم للتفاعل عالي الأداء والتمرير الافتراضي الأصلي وتحرير النص داخل canvas.
   actions:
@@ -14,7 +14,7 @@ hero:
       link: /ar/playground
     - theme: alt
       text: GitHub
-      link: https://github.com/dopejs/doper
+      link: https://github.com/dopejs/pingo
 
 features:
   - title: ساعتان مستقلّتان؛ يتجمّد الخيط الرئيسي ولا تسقط الإطارات

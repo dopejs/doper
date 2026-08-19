@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: doper
+  name: pingo
   text: motor de renderizado canvas
   tagline: Núcleo Rust/WASM + capa TypeScript + backend intercambiable. Diseñado para interacción de alto rendimiento, scroll virtual nativo y edición de texto dentro del canvas.
   actions:
@@ -14,7 +14,7 @@ hero:
       link: /es/playground
     - theme: alt
       text: GitHub
-      link: https://github.com/dopejs/doper
+      link: https://github.com/dopejs/pingo
 
 features:
   - title: Dos relojes; el hilo principal se bloquea y no se pierden fotogramas

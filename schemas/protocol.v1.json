@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 8,
+  "abiVersion": 9,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -769,6 +769,14 @@
             },
             {
               "name": "positionalAdvances",
+              "type": "bytes"
+            },
+            {
+              "name": "contractionCount",
+              "type": "u32"
+            },
+            {
+              "name": "contractions",
               "type": "bytes"
             },
             "align4"
