@@ -186,6 +186,51 @@ describe("NativeTextInputBridge (unit)", () => {
     expect(Reflect.get(canvas, "editContext")).not.toBeNull();
   });
 
+  it("serves clipboard and undo shortcuts on an EditContext host", () => {
+    // EditContext only replaces text input: clipboard events fire on the host
+    // canvas, and the browser undo stack is disabled entirely, so both must be
+    // wired there or the shortcuts silently do nothing.
+    const { bridge, canvas, commands } = harness({ editContext: true });
+    bridge.activate(target({ selection: { anchor: 0, focus: 2 } }));
+    const clipboard = new Map<string, string>();
+    const clipboardEvent = (type: string): Event =>
+      Object.assign(new Event(type, { cancelable: true }), {
+        clipboardData: {
+          getData: (format: string) => clipboard.get(format) ?? "",
+          setData: (format: string, value: string) => clipboard.set(format, value),
+        },
+      });
+    canvas.dispatchEvent(clipboardEvent("copy"));
+    expect(clipboard.get("text/plain")).toBe("ab");
+    clipboard.set("text/plain", "pasted");
+    canvas.dispatchEvent(clipboardEvent("paste"));
+    expect(commands.at(-1)).toMatchObject({ type: "insert", text: "pasted" });
+    canvas.dispatchEvent(clipboardEvent("cut"));
+    expect(commands.at(-1)).toMatchObject({ type: "replace", start: 0, end: 2, text: "" });
+
+    const press = (key: string, init: Record<string, unknown> = {}): void => {
+      canvas.dispatchEvent(
+        Object.assign(
+          new Event("keydown", { cancelable: true }),
+          { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false },
+          init,
+          { key },
+        ),
+      );
+    };
+    press("z", { metaKey: true });
+    expect(commands.at(-1)).toMatchObject({ type: "undo" });
+    press("z", { metaKey: true, shiftKey: true });
+    expect(commands.at(-1)).toMatchObject({ type: "redo" });
+    press("y", { ctrlKey: true });
+    expect(commands.at(-1)).toMatchObject({ type: "redo" });
+    // Plain letters and alt-chords still belong to the platform.
+    const before = commands.length;
+    press("z");
+    press("z", { metaKey: true, altKey: true });
+    expect(commands.length).toBe(before);
+  });
+
   it("maps EditContext keydown navigation onto Core caret movement", () => {
     const { bridge, canvas, commands } = harness({ editContext: true });
     bridge.activate(target());

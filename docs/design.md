@@ -1281,6 +1281,27 @@ UAX #14 断点（`unicode_linebreak::linebreaks`），配合宿主测出的逐�
 `Intl.Segmenter` 下双击"今天天气很好"选中两个码点——把宿主发送那一步去掉复跑，选中的是
 `3..4` 一个字。
 
+### EditContext 模式下剪贴板与撤销没有接线（2026-08-19）
+
+反馈"输入框无法复制粘贴，Cmd+X/C/V、Cmd+Z 都无效"。桌面 Chromium 走的是 EditContext
+模式，而 `copy`/`cut`/`paste` 监听只挂在 textarea 代理上——EditContext 模式没有代理；
+`historyUndo`/`historyRedo` 只从代理的 `beforeinput` 来。于是默认模式下这四个快捷键全部
+无声无息地什么都不做，只有降级到 textarea-proxy 的平台才正常。
+
+**这不是浏览器的缺口，是规范就这么分工的**：EditContext 只接管文本输入（textupdate/
+composition），剪贴板事件仍然打在 editing host（canvas）上，而内建撤销栈被整个禁用——
+两者都明确是应用自己的责任。Core 侧 `Undo`/`Redo` 命令与会话历史一直都在（textarea
+路径在用），缺的只是 EditContext 侧的那几根线。
+
+**修法**：EditContext 分支把 `handleCopy`/`handleCut`/`handlePaste` 同样挂到 canvas 上；
+`handleKeyDown` 在方向键映射之前拦 `(meta|ctrl)+z`（shift 为 redo）与 `ctrl+y`。密码框
+不允许剪贴板读取、只读目标丢弃变更的既有约束由共用的处理器原样保留。
+
+**验证**：单测在 EditContext harness 上断言 copy 写入剪贴板、paste 产出 insert、cut 产出
+replace、Cmd+Z/Shift+Cmd+Z/Ctrl+Y 产出 undo/redo，且裸键和 alt 组合不产命令；去掉接线
+复跑即失败。真实按键经浏览器把剪贴板事件路由到 EditContext host 的行为属于平台资格
+认证——headless 下无法发真实 Cmd+C。
+
 ### 富单元格暴露的能力缺口
 
 新 demo 每行约 18 个节点（此前 3 个），1280×800 视口下 20 行物化 = 357 个 Scene 节点。

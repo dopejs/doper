@@ -114,6 +114,13 @@ export class NativeTextInputBridge {
       this.listen(this.#editContext, "compositionend", this.handleCompositionEnd);
       this.listen(this.#editContext, "characterboundsupdate", this.handleCharacterBoundsUpdate);
       this.listen(canvas, "keydown", this.handleKeyDown);
+      // EditContext only replaces text input. Clipboard events still fire on
+      // the editing host, and the built-in undo stack is disabled outright, so
+      // both stay the application's responsibility; without these the shortcuts
+      // silently do nothing.
+      this.listen(canvas, "copy", this.handleCopy);
+      this.listen(canvas, "cut", this.handleCut);
+      this.listen(canvas, "paste", this.handlePaste);
     } else {
       this.mode = "textarea-proxy";
       this.#proxy = createProxy(ownerDocument);
@@ -398,6 +405,17 @@ export class NativeTextInputBridge {
     const key = event as KeyboardEvent;
     const target = this.#target;
     if (target === undefined || this.#composing) return;
+    // No historyUndo/historyRedo beforeinput arrives on an EditContext host —
+    // the browser undo stack is disabled there — so the shortcut itself is the
+    // only signal. Core owns the actual history.
+    if ((key.metaKey || key.ctrlKey) && !key.altKey) {
+      const lowered = key.key.toLowerCase();
+      if (lowered === "z" || lowered === "y") {
+        if (key.cancelable) key.preventDefault();
+        this.emit({ type: lowered === "y" || key.shiftKey ? "redo" : "undo" });
+        return;
+      }
+    }
     const word = key.ctrlKey || key.altKey;
     let direction: CaretMoveDirection;
     let granularity: CaretMoveGranularity = "grapheme";
