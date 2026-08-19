@@ -16,6 +16,9 @@ import {
   MINIMUM_READABLE_ABI_VERSION,
 } from "./generated";
 
+/** One measured code point and its advance in logical CSS pixels. */
+export type CodePointAdvance = readonly [codePoint: number, advance: number];
+
 /** Browser-measured dimensions for one immutable fallback string/style pair. */
 export interface SystemTextMetric {
   readonly stringId: number;
@@ -23,15 +26,17 @@ export interface SystemTextMetric {
   readonly maxLineWidth: number;
   readonly lineCount: number;
   /**
-   * Per-code-point horizontal advance in logical CSS pixels, in string order,
-   * or empty when this pair was not measured.
+   * Advance per measured code point in logical CSS pixels, ascending by code
+   * point and without duplicates, or empty when this pair was not measured.
    *
-   * Core needs these to place a caret and to resolve a pointer to a text offset
-   * on the fallback path. Measuring is one `measureText` call per code point, so
-   * only pairs a Scene node makes editable are measured; every other run keeps
-   * an empty array and Core estimates. A newline contributes a zero advance.
+   * Core places the caret, resolves a pointer to a text offset, and lays out the
+   * IME candidate-window rectangles from these. A table rather than a positional
+   * array because the caret follows the live editing value, which during
+   * composition holds preedit text that is in no Scene string; the Host measures
+   * that text into the same table. Only pairs a Scene node makes editable are
+   * measured, since each distinct code point costs a `measureText` call.
    */
-  readonly advances: readonly number[];
+  readonly advances: readonly CodePointAdvance[];
 }
 
 /** One transactional system-font metric cache delta. */
@@ -58,7 +63,7 @@ export function encodeSystemTextMetricBatch(deltas: readonly SystemTextMetricDel
           ? SystemTextMetricOpcode.UpsertSystemTextMetric
           : SystemTextMetricOpcode.ReleaseSystemTextMetric;
       const advances = delta.type === "upsert" ? delta.metric.advances.length : 0;
-      return checkedAdd(total, checkedAdd(instructionBytes(opcode), advances * 4));
+      return checkedAdd(total, checkedAdd(instructionBytes(opcode), advances * 8));
     }, 0);
   if (bytes > MAX_SYSTEM_TEXT_METRICS_BYTES) fail("text metric batch exceeds maximum size");
   const output = new Uint8Array(bytes);
@@ -85,7 +90,10 @@ export function encodeSystemTextMetricBatch(deltas: readonly SystemTextMetricDel
       writer.f32(delta.metric.maxLineWidth);
       writer.u32(delta.metric.lineCount);
       writer.u32(delta.metric.advances.length);
-      for (const advance of delta.metric.advances) writer.f32(advance);
+      for (const [codePoint, advance] of delta.metric.advances) {
+        writer.u32(codePoint);
+        writer.f32(advance);
+      }
     } else {
       writer.instruction(SystemTextMetricOpcode.ReleaseSystemTextMetric);
       writer.u32(delta.stringId);
@@ -142,9 +150,11 @@ export function decodeSystemTextMetricBatch(input: Uint8Array): SystemTextMetric
       }
       // Bound against the bytes that remain before allocating: a declared count
       // must never size an array ahead of the payload backing it.
-      if (advanceCount > Math.floor(reader.remaining / 4)) fail("truncated text metric batch");
-      const advances: number[] = [];
-      for (let index = 0; index < advanceCount; index += 1) advances.push(reader.f32());
+      if (advanceCount > Math.floor(reader.remaining / 8)) fail("truncated text metric batch");
+      const advances: CodePointAdvance[] = [];
+      for (let index = 0; index < advanceCount; index += 1) {
+        advances.push(Object.freeze([reader.codePoint(), reader.f32()] as const));
+      }
       const metric = {
         stringId,
         styleId,
@@ -189,10 +199,29 @@ function validateMetric(metric: SystemTextMetric): void {
   if (metric.advances.length > MAX_SYSTEM_TEXT_ADVANCES) {
     fail("text metric advance count is outside the supported limit");
   }
-  for (const advance of metric.advances) {
+  let previous = -1;
+  for (const [codePoint, advance] of metric.advances) {
     if (!Number.isFinite(advance) || !Number.isFinite(Math.fround(advance)) || advance < 0) {
       fail("text metric advance must be finite, non-negative, and representable as f32");
     }
+    validateCodePoint(codePoint);
+    // Ascending and unique keeps one table one byte sequence, so a golden
+    // fixture and a cross-language round trip still pin the encoding.
+    if (codePoint <= previous) {
+      fail("text metric advances must ascend by code point without duplicates");
+    }
+    previous = codePoint;
+  }
+}
+
+function validateCodePoint(value: number): void {
+  if (
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > 0x10ffff ||
+    (value >= 0xd800 && value <= 0xdfff)
+  ) {
+    fail("text metric advance code point is not a Unicode scalar value");
   }
 }
 
@@ -284,6 +313,13 @@ class Reader {
       4,
     ).getUint32(0, true);
     this.#offset += 4;
+    return value;
+  }
+
+  /** Reads a Unicode scalar value; surrogates and out-of-range values fail. */
+  public codePoint(): number {
+    const value = this.u32();
+    validateCodePoint(value);
     return value;
   }
 

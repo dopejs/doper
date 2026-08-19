@@ -10,6 +10,7 @@ import {
   encodeMutationBatch,
   type Mutation,
 } from "@dopejs/doper-reconciler";
+import { encodeInputBatch } from "@dopejs/doper-editing";
 import { describe, expect, it, vi } from "vitest";
 
 import { CanvasFrameSink, parseSemantics, type CoreClient, type FrameReport } from "./main-thread";
@@ -727,13 +728,99 @@ describe("CanvasFrameSink", () => {
     expect(decodeSystemTextMetricBatch(commit.mock.calls[1]?.[1] ?? new Uint8Array())).toEqual([
       {
         type: "upsert",
-        metric: { stringId: 2, styleId: 3, maxLineWidth: 20, lineCount: 1, advances: [10, 10] },
+        metric: {
+          stringId: 2,
+          styleId: 3,
+          maxLineWidth: 20,
+          lineCount: 1,
+          advances: [
+            [97, 10],
+            [98, 10],
+          ],
+        },
       },
     ]);
 
     // Already measured with advances: a later frame must not remeasure it.
     sink.commit(mutationFrame([]));
     expect(commit.mock.calls[2]?.[1]).toBeUndefined();
+  });
+
+  it("measures IME preedit code points that are in no Scene string", () => {
+    const setSystemTextMetrics = vi.fn((_metrics: Uint8Array) => undefined);
+    const sink = new CanvasFrameSink(fakeContext([], []), {
+      commit: () => emptyDisplayList(),
+      input: () => emptyDisplayList(),
+      set_system_text_metrics: setSystemTextMetrics,
+    });
+    const textNode = 0x0010_0001;
+    sink.commit(
+      mutationFrame([
+        { type: "createNode", nodeId: textNode, kind: NodeKind.Text, parent: 0, beforeSibling: 0 },
+        { type: "defineResource", resourceId: 1, kind: ResourceKind.Paint, bytes: solidPaint() },
+        {
+          type: "defineResource",
+          resourceId: 2,
+          kind: ResourceKind.Utf8String,
+          bytes: new TextEncoder().encode("ab"),
+        },
+        {
+          type: "defineResource",
+          resourceId: 3,
+          kind: ResourceKind.TextStyle,
+          bytes: textStyle(1, 16, 20, 400, "Inter"),
+        },
+        { type: "setTextRun", nodeId: textNode, stringId: 2, styleId: 3 },
+        {
+          type: "configureEditable",
+          nodeId: textNode,
+          revision: 1n,
+          flags: 1,
+          maxGraphemes: 0,
+        },
+      ]),
+    );
+
+    // The preedit run never becomes a Scene string, so measuring the string
+    // alone leaves it on the estimate and misplaces the IME candidate window.
+    sink.input(
+      encodeInputBatch({
+        frameSeq: 1,
+        commands: [
+          { type: "updateComposition", nodeId: textNode, baseRevision: 1n, text: "\u4e2d" },
+        ],
+      }),
+    );
+    expect(setSystemTextMetrics).toHaveBeenCalledOnce();
+    expect(
+      decodeSystemTextMetricBatch(setSystemTextMetrics.mock.calls[0]?.[0] ?? new Uint8Array()),
+    ).toEqual([
+      {
+        type: "upsert",
+        metric: {
+          stringId: 2,
+          styleId: 3,
+          maxLineWidth: 20,
+          lineCount: 1,
+          advances: [
+            [97, 10],
+            [98, 10],
+            [0x4e2d, 10],
+          ],
+        },
+      },
+    ]);
+
+    // The same code point again introduces nothing new, so Core is not told twice.
+    sink.input(
+      encodeInputBatch({
+        frameSeq: 2,
+        commands: [
+          { type: "updateComposition", nodeId: textNode, baseRevision: 2n, text: "\u4e2d" },
+        ],
+      }),
+    );
+    expect(setSystemTextMetrics).toHaveBeenCalledOnce();
   });
 });
 

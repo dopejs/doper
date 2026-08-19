@@ -64,10 +64,15 @@ interface TextMeasurementStyle {
   readonly lineHeight: number;
 }
 
+/** One measured code point and its advance in logical CSS pixels. */
+export type CodePointAdvance = readonly [codePoint: number, advance: number];
+
 /** Immutable string/style resource pair requiring browser system-font metrics. */
 export interface CanvasSystemTextPair {
   /** Whether Core needs per-code-point advances for this pair. */
   readonly measureAdvances?: boolean;
+  /** Code points to measure beyond the string's own, such as IME preedit text. */
+  readonly extraCodePoints?: readonly number[];
   readonly stringId: number;
   readonly styleId: number;
 }
@@ -77,14 +82,17 @@ export interface CanvasSystemTextMetric extends CanvasSystemTextPair {
   readonly maxLineWidth: number;
   readonly lineCount: number;
   /**
-   * Per-code-point advance in string order, empty unless the pair asked for it.
+   * Advance per measured code point, ascending by code point, empty unless the
+   * pair asked for it.
    *
-   * Core places the fallback caret and resolves pointer hit testing with these,
-   * so a run without them mis-selects words and paints the caret off the glyph.
+   * A table rather than a positional array: Core places the caret against the
+   * live editing value, which during IME composition contains preedit text that
+   * is in no Scene string. The Host measures that text into the same table.
+   *
    * They cost one `measureText` call per distinct code point, which is why only
    * editable runs request them.
    */
-  readonly advances: readonly number[];
+  readonly advances: readonly CodePointAdvance[];
 }
 
 /** One portable resource lifecycle action accepted by an atomic backend transaction. */
@@ -410,7 +418,8 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
         }
         context.font = style.font;
         const measured = measureHardLines(context, text);
-        const advances = pair.measureAdvances === true ? measureAdvances(context, text) : [];
+        const advances =
+          pair.measureAdvances === true ? measureAdvances(context, text, pair.extraCodePoints) : [];
         metrics.push(Object.freeze({ ...pair, ...measured, advances: Object.freeze(advances) }));
       }
     } finally {
@@ -637,33 +646,39 @@ function decodeTextStyle(bytes: Uint8Array): {
 }
 
 /**
- * Measures each code point on its own, memoized by code point.
+ * Measures every distinct code point once, in ascending code-point order.
  *
- * Measuring prefixes instead would capture kerning, but Core reduces these to a
- * per-code-point table so it can keep placing the caret while the live editing
- * value runs ahead of the Scene string. Positional fidelity would be discarded,
- * and prefix measurement is quadratic in the field length.
+ * Measuring prefixes instead would capture kerning, but Core looks these up by
+ * code point so it can keep placing the caret while the live editing value runs
+ * ahead of the Scene string. Positional fidelity would be discarded anyway, and
+ * prefix measurement is quadratic in the field length.
+ *
+ * `extra` carries code points that are not in the string, currently the IME
+ * preedit run, which exists only inside Core's editing session.
  */
-function measureAdvances(context: Canvas2DContext, text: string): number[] {
-  const cache = new Map<string, number>();
-  const advances: number[] = [];
-  for (const character of text) {
+function measureAdvances(
+  context: Canvas2DContext,
+  text: string,
+  extra: readonly number[] | undefined,
+): CodePointAdvance[] {
+  const advances = new Map<number, number>();
+  const measure = (codePoint: number): void => {
+    if (advances.has(codePoint)) return;
     // The caret returns to the line start, so a newline advances nothing.
-    if (character === "\n") {
-      advances.push(0);
-      continue;
+    if (codePoint === 0x0a) {
+      advances.set(codePoint, 0);
+      return;
     }
-    let advance = cache.get(character);
-    if (advance === undefined) {
-      advance = context.measureText(character).width;
-      if (!Number.isFinite(advance) || advance < 0) {
-        throw new Error("Canvas measureText returned an invalid advance");
-      }
-      cache.set(character, advance);
+    const advance = context.measureText(String.fromCodePoint(codePoint)).width;
+    if (!Number.isFinite(advance) || advance < 0) {
+      throw new Error("Canvas measureText returned an invalid advance");
     }
-    advances.push(advance);
-  }
-  return advances;
+    advances.set(codePoint, advance);
+  };
+  for (const character of text) measure(character.codePointAt(0) ?? 0);
+  for (const codePoint of extra ?? []) measure(codePoint);
+  // Ascending so the encoded table is canonical whatever order they arrived in.
+  return [...advances.entries()].sort(([left], [right]) => left - right);
 }
 
 function measureHardLines(

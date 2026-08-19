@@ -4,13 +4,24 @@ import {
   SystemTextMetricError,
   decodeSystemTextMetricBatch,
   encodeSystemTextMetricBatch,
+  type SystemTextMetric,
   type SystemTextMetricDelta,
 } from "./system-text-metrics";
 
 const canonical: readonly SystemTextMetricDelta[] = [
   {
     type: "upsert",
-    metric: { stringId: 7, styleId: 9, maxLineWidth: 123.5, lineCount: 2, advances: [6.5, 0, 12] },
+    metric: {
+      stringId: 7,
+      styleId: 9,
+      maxLineWidth: 123.5,
+      lineCount: 2,
+      advances: [
+        [10, 0],
+        [97, 6.5],
+        [0x4e2d, 12],
+      ],
+    },
   },
   { type: "release", stringId: 8, styleId: 10 },
 ];
@@ -26,15 +37,40 @@ describe("system text metric batches", () => {
     expect(() => encodeSystemTextMetricBatch([...canonical, canonical[0]!])).toThrow(
       /more than once/u,
     );
-    for (const metric of [
+    const invalid: readonly SystemTextMetric[] = [
       { stringId: 0, styleId: 1, maxLineWidth: 1, lineCount: 1, advances: [] },
       { stringId: 1, styleId: 1, maxLineWidth: -1, lineCount: 1, advances: [] },
       { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 0, advances: [] },
       { stringId: 1, styleId: 1, maxLineWidth: Number.NaN, lineCount: 1, advances: [] },
       { stringId: 1, styleId: 1, maxLineWidth: Number.MAX_VALUE, lineCount: 1, advances: [] },
-      { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 1, advances: [Number.NaN] },
-      { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 1, advances: [-1] },
-    ]) {
+      { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 1, advances: [[97, Number.NaN]] },
+      { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 1, advances: [[97, -1]] },
+      // Surrogate halves are not scalar values, and an unsorted or duplicated
+      // table would give one logical table two byte sequences.
+      { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 1, advances: [[0xd800, 1]] },
+      { stringId: 1, styleId: 1, maxLineWidth: 1, lineCount: 1, advances: [[0x11_0000, 1]] },
+      {
+        stringId: 1,
+        styleId: 1,
+        maxLineWidth: 1,
+        lineCount: 1,
+        advances: [
+          [98, 1],
+          [97, 1],
+        ],
+      },
+      {
+        stringId: 1,
+        styleId: 1,
+        maxLineWidth: 1,
+        lineCount: 1,
+        advances: [
+          [97, 1],
+          [97, 1],
+        ],
+      },
+    ];
+    for (const metric of invalid) {
       expect(() => encodeSystemTextMetricBatch([{ type: "upsert", metric }])).toThrow(
         SystemTextMetricError,
       );

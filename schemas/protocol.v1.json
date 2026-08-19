@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 5,
+  "abiVersion": 6,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,

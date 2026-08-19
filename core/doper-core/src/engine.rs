@@ -2906,7 +2906,12 @@ mod tests {
             style_id: 2,
             max_line_width: 64.0,
             line_count: 1,
-            advances: vec![16.0, 16.0, 16.0, 16.0],
+            advances: vec![
+                ('\u{4e2d}', 16.0),
+                ('\u{5907}', 16.0),
+                ('\u{6587}', 16.0),
+                ('\u{6ce8}', 16.0),
+            ],
         });
 
         let offset_at = |metrics: Option<Vec<u8>>| -> u32 {
@@ -2947,6 +2952,95 @@ mod tests {
         assert_eq!(offset_at(Some(system_metrics(measured))), 3);
         // Without advances the estimate runs out of string and clamps past it.
         assert_eq!(offset_at(None), 4);
+    }
+
+    #[test]
+    fn ime_preedit_uses_measured_advances_for_the_candidate_window() {
+        // The preedit run lives only in the editing session: it is in no Scene
+        // string, so the Host measures it into the same code-point table. Without
+        // it the composition underline, the caret and the IME candidate-window
+        // rectangles all fall back to font_size * 0.6.
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .commit_with_system_text_metrics(
+                &editable_tree_with_text(1, "\u{4e2d}\u{6587}"),
+                Some(&system_metrics(SystemTextMetricCommand::Upsert(
+                    SystemTextMetric {
+                        string_id: 3,
+                        style_id: 2,
+                        max_line_width: 32.0,
+                        line_count: 1,
+                        // U+5019 occurs nowhere in the Scene string; it is only
+                        // ever composed, which is the case that used to break.
+                        advances: vec![('\u{4e2d}', 16.0), ('\u{5019}', 16.0), ('\u{6587}', 16.0)],
+                    },
+                ))),
+            )
+            .expect("frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::FocusEditable { node_id: id(1) }],
+            ))
+            .expect("focus");
+        engine.take_edit_transactions().expect("drain focus");
+
+        let caret = |offset: u32| doper_abi::InputPosition {
+            offset,
+            affinity: doper_abi::InputAffinity::Downstream,
+        };
+        engine
+            .input(&input(
+                2,
+                vec![
+                    InputCommand::SetSelection {
+                        node_id: id(1),
+                        base_revision: 0,
+                        selection: doper_abi::InputSelection {
+                            anchor: caret(2),
+                            focus: caret(2),
+                        },
+                    },
+                    InputCommand::BeginComposition {
+                        node_id: id(1),
+                        base_revision: 1,
+                    },
+                    InputCommand::UpdateComposition {
+                        node_id: id(1),
+                        base_revision: 2,
+                        text: "\u{5019}".to_owned(),
+                    },
+                ],
+            ))
+            .expect("compose");
+        engine.take_edit_transactions().expect("drain composition");
+
+        engine
+            .input(&input(
+                3,
+                vec![InputCommand::RequestCharacterBounds {
+                    node_id: id(1),
+                    start: 2,
+                    end: 3,
+                }],
+            ))
+            .expect("character bounds");
+
+        let words = engine.editing_geometry();
+        assert_eq!(words[0], doper_abi::EDITING_GEOMETRY_VERSION);
+        assert_eq!(words[4], 1, "one requested character");
+        let rect = doper_abi::EDITING_GEOMETRY_HEADER_WORDS
+            + doper_abi::EDITING_GEOMETRY_RECT_WORDS * 2
+            + 2;
+        let left = f32::from_bits(words[rect]);
+        let width = f32::from_bits(words[rect + 2]);
+        // Two measured glyphs precede it, and the preedit glyph is measured too;
+        // the estimate would put it at 19.2 and make it 9.6 wide.
+        assert!((left - 32.0).abs() < 0.01, "candidate window left {left}");
+        assert!(
+            (width - 16.0).abs() < 0.01,
+            "candidate window width {width}"
+        );
     }
 
     #[test]

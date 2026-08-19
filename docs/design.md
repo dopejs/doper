@@ -983,8 +983,9 @@ caret 画在 x=58——**与命中测试无关的常量偏移**，说明错的�
 双击落在错误的偏移上，`word_range_utf16` 再据此选错词。
 
 **修法**：宿主把浏览器真实测量的逐码点推进送进 Core。`systemTextMetrics` 流的
-`UpsertSystemTextMetric` 增加 `advanceCount: u32` + 变长 `advances: f32[]`，该指令从定长
-变为变长（`fixedBytes: null`，`minimumBytes: 24`），abiVersion 4→5。
+`UpsertSystemTextMetric` 增加 `advanceCount: u32` + 变长 `advances`，该指令从定长变为变长
+（`fixedBytes: null`，`minimumBytes: 24`）。表项在 abiVersion 5 是位置型的 `f32[]`，在
+abiVersion 6 改为 `(codePoint: u32, advance: f32)[]`——原因见下一条。
 
 **只测可编辑的文本**。逐码点测量是每个**不同**码点一次 `measureText`；对列表 demo 那样
 每帧几百行文本全量测量会毁掉刚优化完的滚动热路径。宿主因此在 `preflightResources` 里跟踪
@@ -1008,6 +1009,53 @@ caret 画在 x=58——**与命中测试无关的常量偏移**，说明错的�
 **残留风险**：整形路径（有真实字体资源时）不走这条 fallback，不受影响；未被测量的码点
 仍用 `font_size * 0.6`，在 Shell 往返延迟很大的场景下可见一帧抖动。回滚是把
 `advances` 字段留在线上但让宿主一律传空数组，Core 自动退回估算。
+
+### IME 预编辑从来没被测量过（abiVersion 5→6，2026-08-19）
+
+上一条落地后，反馈"编辑的 IME 状态也需要处理"。查下来是同一个洞的另一半，而且更严重。
+
+**三处症状一个根因**。合成期间的预编辑文本只存在于 Core 的编辑会话里（`edit_overrides`），
+它**永远不会成为 Scene 字符串**——Shell 只在 commit 时才拿到值。而上一条的推进表是按
+(stringId, styleId) 对着 Scene 字符串测的，所以预编辑的那几个字一个都没被测量，全部退回
+`0.6 × font_size`。受影响的不止 caret：
+
+- 组词下划线（`EditorDecorationKind::Composition`）走 `append_range_decorations(&carets, ...)`；
+- caret 走 `closest_caret(carets, ...)`；
+- **IME 候选窗位置**走 `editor_character_rects(&carets, requested, geometry)`，也就是
+  EditContext 的 `updateCharacterBounds`。
+
+三者共用同一套停靠点。16px 的全角字实测宽 16，估算给 9.6——**候选窗宽度差 40%**，会直接
+飘到字形外面。
+
+**推进表改成按码点索引，不按位置索引**。位置型表达式上更精确（能带字距调整），但它把表
+绑死在 Scene 字符串上，而 caret 要对着实时编辑值放置：按键往返期间两者差几个字符，合成
+期间两者差整个预编辑串。所以 `advances` 从 `f32[]` 改为 `(codePoint, advance)[]`，按码点
+升序且不重复（否则同一张表会有多种字节序列，golden 夹具和跨语言往返就锁不住）。Core 侧
+因此**变简单了**：不再需要回查 Scene 字符串把数组和字符 zip 起来，直接 collect 成表。
+代价是丢掉字距调整——fallback 路径本来就没有整形器，不构成回归。
+
+**宿主在合成命令到达 Core 之前测量**。`CanvasFrameSink.input` / `inputBatch` 解码输入流，
+取出 `updateComposition` / `commitComposition` 的文本，把新码点并进该资源对的
+`extraCodePoints` 再重测。三条约束：
+
+- **只在有可编辑节点时解码**（`#editableNodes.size > 0`）。滚动 demo 一个可编辑节点都没有，
+  热路径完全不受影响。
+- **只在预编辑引入了没见过的码点时**才重测并调 `set_system_text_metrics`，即最多每个新字
+  一次，而不是每次按键一次。
+- 每个资源对保留的预编辑码点有上限（4096）；溢出只是让极少数字退回估算，不会无限增长。
+
+那次度量帧的显示列表**被正常接受而不是丢弃**：增量回放是对着上一份已接受的列表做差分的，
+跳过一份会让回放器失步。紧随其后的输入帧会立刻覆盖这些像素。
+
+**验证**：`doper-core` 用 `RequestCharacterBounds` 断言合成 U+5019（该码点不在 Scene 字符串
+里）后候选窗矩形是 left=32 / width=16；把该码点从推进表里删掉后同一断言给出 width=9.6，
+即这条测试确实能鉴别。host 单测断言预编辑触发一次重测、同一码点再来不重复通知 Core；
+backend 单测断言 `extraCodePoints` 与字符串码点合并去重且按码点升序；`doper-abi` 断言代理对、
+超范围码点、乱序与重复表项都被拒绝；6 个 golden 字节夹具随 abiVersion 5→6 显式重基。
+
+**残留风险**：真机 IME 行为属于平台资格认证，仓库门禁只覆盖协议与几何。合成期间宿主会
+多产一帧（仅在出现新码点时），在极低端设备上可能可见。回滚是宿主停止传 `extraCodePoints`，
+线上退回"只测 Scene 字符串"，即上一条的行为。
 
 ### 富单元格暴露的能力缺口
 

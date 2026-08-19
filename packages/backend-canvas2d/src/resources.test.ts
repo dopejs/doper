@@ -76,12 +76,38 @@ describe("Canvas2DResourceRegistry", () => {
         measureAdvances: true,
         maxLineWidth: 28,
         lineCount: 2,
-        advances: [7, 7, 7, 7, 0, 7, 7],
+        // Ascending by code point, deduplicated, newline measured as zero.
+        advances: [
+          [0x0a, 0],
+          [0x64, 7],
+          [0x65, 7],
+          [0x69, 7],
+          [0x77, 7],
+          [0x78, 7],
+        ],
       },
     ]);
-    // Two lines plus one call per distinct code point, not per occurrence: "x"
-    // appears twice and is measured once.
+    // Two lines plus one call per distinct code point other than the newline,
+    // not per occurrence: "x" appears twice and is measured once.
     expect(fonts).toHaveLength(7);
+
+    fonts.length = 0;
+    expect(
+      resources.measureSystemTextPairs(context, actions, [
+        // IME preedit code points are in no Scene string, so they arrive here.
+        { stringId: 2, styleId: 3, measureAdvances: true, extraCodePoints: [0x4e2d, 0x77] },
+      ])[0]?.advances,
+    ).toEqual([
+      [0x0a, 0],
+      [0x64, 7],
+      [0x65, 7],
+      [0x69, 7],
+      [0x77, 7],
+      [0x78, 7],
+      [0x4e2d, 7],
+    ]);
+    // The extra "w" was already measured for the string, so it costs nothing.
+    expect(fonts).toHaveLength(8);
     expect(resources.getText(2)).toBeUndefined();
     expect(resources.getTextStyle(3)).toBeUndefined();
   });

@@ -20,6 +20,7 @@ import {
 import {
   decodeEditTransactionBatch,
   decodeEventTransactionBatch,
+  decodeInputBatch,
   type EditTransaction,
   type EventTransaction,
 } from "@dopejs/doper-editing";
@@ -272,6 +273,15 @@ type ResourceAction =
     }
   | { readonly type: "release"; readonly id: number; readonly kind: ResourceKind };
 
+/**
+ * Distinct preedit code points retained per pair.
+ *
+ * A ceiling rather than a cache policy: the set only grows with characters a
+ * person actually composed into one field, and overflow costs correctness only
+ * for code points beyond that, which fall back to the estimate.
+ */
+const MAXIMUM_COMPOSITION_CODE_POINTS = 4096;
+
 interface TextPairState extends CanvasSystemTextPair {
   readonly references: number;
 }
@@ -300,6 +310,16 @@ export class CanvasFrameSink implements MutationSink {
   readonly #editableNodes = new Set<number>();
   /** Pair keys currently measured with advances, to detect a node turning editable. */
   #advancePairs: ReadonlySet<string> = new Set();
+  /**
+   * Code points seen in IME preedit text, per string/style pair.
+   *
+   * Preedit text lives only inside Core's editing session: it is never a Scene
+   * string, so measuring the Scene string alone leaves the composing run on the
+   * 0.6em estimate and puts the composition underline, the caret and the IME
+   * candidate window in the wrong place. They accumulate because a code point
+   * already measured costs nothing to keep and re-measuring is a Core round trip.
+   */
+  readonly #compositionCodePoints = new Map<string, Set<number>>();
   readonly #onFrame: ((report: FrameReport) => void) | undefined;
   readonly #onVirtualRefills: ((requests: readonly VirtualRefillRange[]) => void) | undefined;
   readonly #rasterCache: RasterTileCache<ReplayStats> | undefined;
@@ -410,6 +430,9 @@ export class CanvasFrameSink implements MutationSink {
     replaceMap(this.#textPairState, countTextPairs(nextTextPairs));
     replaceSet(this.#editableNodes, nextEditableNodes);
     this.#advancePairs = nextAdvancePairs;
+    for (const key of [...this.#compositionCodePoints.keys()]) {
+      if (!this.#textPairState.has(key)) this.#compositionCodePoints.delete(key);
+    }
     if (actions.length > 0 || glyphResources !== undefined) {
       this.#resourceRevision = nextSequence(this.#resourceRevision);
       this.#rasterCache?.clear();
@@ -460,6 +483,7 @@ export class CanvasFrameSink implements MutationSink {
     let inputBytes = 0;
     let coreMs = 0;
     for (const bytes of batches) {
+      this.measureComposition(bytes);
       const coreStart = performance.now();
       const displayList = core.input(bytes);
       // Accumulated, not assigned: a batch applies several transactions and
@@ -495,6 +519,7 @@ export class CanvasFrameSink implements MutationSink {
   public input(bytes: Uint8Array): ReplayStats | null {
     const core = this.#core;
     if (core.input === undefined) throw new Error("Core does not implement Input Stream dispatch");
+    this.measureComposition(bytes);
     const coreStart = performance.now();
     const displayList = core.input(bytes);
     this.#coreMs = performance.now() - coreStart;
@@ -594,6 +619,69 @@ export class CanvasFrameSink implements MutationSink {
     }
   }
 
+  /**
+   * Measures IME preedit code points before Core sees the composition command.
+   *
+   * Runs only while some node is editable, so an ordinary scrolling frame never
+   * decodes its own input batch. A pair is remeasured only when the preedit
+   * introduces a code point Core has not been told about, which is at most once
+   * per new character rather than once per keystroke.
+   */
+  private measureComposition(bytes: Uint8Array): void {
+    if (this.#editableNodes.size === 0) return;
+    const pending = new Map<string, CanvasSystemTextPair>();
+    for (const command of decodeInputBatch(bytes).commands) {
+      if (command.type !== "updateComposition" && command.type !== "commitComposition") continue;
+      const text = command.text;
+      if (text === undefined || text.length === 0) continue;
+      const pair = this.#nodeTextPairs.get(command.nodeId);
+      if (pair === undefined || !this.#editableNodes.has(command.nodeId)) continue;
+      const key = textPairKey(pair);
+      let seen = this.#compositionCodePoints.get(key);
+      if (seen === undefined) {
+        seen = new Set();
+        this.#compositionCodePoints.set(key, seen);
+      }
+      for (const character of text) {
+        const codePoint = character.codePointAt(0);
+        if (codePoint === undefined || seen.has(codePoint)) continue;
+        // Bounded so a long session cannot grow the table without limit; the
+        // overflow simply keeps the estimate for rarely-typed code points.
+        if (seen.size >= MAXIMUM_COMPOSITION_CODE_POINTS) break;
+        seen.add(codePoint);
+        pending.set(key, pair);
+      }
+    }
+    if (pending.size === 0) return;
+    const update = this.#core.set_system_text_metrics?.bind(this.#core);
+    if (update === undefined) return;
+    const metrics = this.#resources.measureSystemTextPairs(
+      this.#context,
+      [],
+      [...pending].map(([key, pair]) => ({
+        stringId: pair.stringId,
+        styleId: pair.styleId,
+        measureAdvances: true,
+        extraCodePoints: [...(this.#compositionCodePoints.get(key) ?? [])],
+      })),
+    );
+    const displayList = update(
+      encodeSystemTextMetricBatch(metrics.map((metric) => ({ type: "upsert" as const, metric }))),
+    );
+    this.#advancePairs = new Set([...this.#advancePairs, ...pending.keys()]);
+    if (displayList === undefined) return;
+    this.applyDynamicGlyphResources();
+    // Accepted rather than discarded: the replayer diffs against the last
+    // accepted list, so skipping one would desynchronize incremental replay.
+    // The input frame that follows immediately overwrites these pixels.
+    this.acceptDynamicFrame(displayList, {
+      animationDeltaMs: 0,
+      cause: "animation",
+      inputBytes: 0,
+      mutationBytes: 0,
+    });
+  }
+
   /** Remeasures every active fallback pair after browser font availability changes. */
   public refreshSystemTextMetrics(): ReplayStats | null {
     const update = this.#core.set_system_text_metrics?.bind(this.#core);
@@ -602,6 +690,7 @@ export class CanvasFrameSink implements MutationSink {
       stringId,
       styleId,
       measureAdvances: this.#advancePairs.has(key),
+      extraCodePoints: [...(this.#compositionCodePoints.get(key) ?? [])],
     }));
     const metrics = this.#resources.measureSystemTextPairs(this.#context, [], pairs);
     const displayList = update(
@@ -789,6 +878,7 @@ export class CanvasFrameSink implements MutationSink {
         stringId,
         styleId,
         measureAdvances: nextAdvancePairs.has(key),
+        extraCodePoints: [...(this.#compositionCodePoints.get(key) ?? [])],
       }));
     const releases = [...this.#textPairState.entries()]
       .filter(([key]) => !nextPairState.has(key))

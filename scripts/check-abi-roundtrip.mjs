@@ -116,7 +116,11 @@ async function checkAbiRoundtrip() {
         styleId: 9,
         maxLineWidth: 123.5,
         lineCount: 2,
-        advances: [6.5, 0, 12],
+        advances: [
+          [10, 0],
+          [97, 6.5],
+          [0x4e2d, 12],
+        ],
       },
     },
     { type: "release", stringId: 8, styleId: 10 },

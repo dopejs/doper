@@ -20,15 +20,19 @@ pub struct SystemTextMetric {
     pub max_line_width: f32,
     /// Number of hard lines separated by newline characters.
     pub line_count: u32,
-    /// Per-code-point horizontal advance in logical CSS pixels, in string
-    /// order, or empty when the Host did not measure this pair.
+    /// Horizontal advance in logical CSS pixels for each measured code point,
+    /// ascending by code point, or empty when the Host did not measure the pair.
     ///
-    /// Measured only for pairs a Scene node makes editable: caret placement and
-    /// pointer hit testing need real advances, and measuring every text run
-    /// would put one `measureText` call per character on the scroll hot path.
-    /// A newline contributes a zero advance because the caret returns to the
-    /// line start.
-    pub advances: Vec<f32>,
+    /// A table rather than a positional array, because the caret is placed
+    /// against the live editing value while this pair names the Scene string,
+    /// and during IME composition the two differ by the whole preedit run. The
+    /// Host may therefore include code points that do not occur in the string.
+    ///
+    /// Measured only for pairs a Scene node makes editable: caret placement,
+    /// pointer hit testing and the IME candidate-window rectangles all read
+    /// these, and measuring every text run would put one `measureText` call per
+    /// distinct code point on the scroll hot path.
+    pub advances: Vec<(char, f32)>,
 }
 
 /// One transactional system-text metric cache delta.
@@ -218,7 +222,8 @@ impl SystemTextMetricBatch {
                     writer.f32(metric.max_line_width)?;
                     writer.u32(metric.line_count);
                     writer.u32(advance_count);
-                    for advance in &metric.advances {
+                    for (code_point, advance) in &metric.advances {
+                        writer.u32(*code_point as u32);
                         writer.f32(*advance)?;
                     }
                 }
@@ -248,7 +253,7 @@ fn pair(command: &SystemTextMetricCommand) -> (u32, u32) {
 
 /// Reads a declared advance array, bounding it before it can drive an
 /// allocation. The stream is untrusted even when this project produced it.
-fn read_advances(reader: &mut Reader<'_>, declared: u32) -> Result<Vec<f32>, AbiError> {
+fn read_advances(reader: &mut Reader<'_>, declared: u32) -> Result<Vec<(char, f32)>, AbiError> {
     if declared > MAX_SYSTEM_TEXT_ADVANCES {
         return Err(AbiError::InvalidValue(
             "system text advance count is outside the supported limit",
@@ -257,14 +262,23 @@ fn read_advances(reader: &mut Reader<'_>, declared: u32) -> Result<Vec<f32>, Abi
     let count = usize::try_from(declared).map_err(|_| AbiError::ArithmeticOverflow)?;
     // Reserve against the bytes that actually remain, never the declared count:
     // a truncated stream must fail on the read, not on a huge allocation.
-    let mut advances = Vec::with_capacity(count.min(reader.remaining() / 4));
+    let mut advances = Vec::with_capacity(count.min(reader.remaining() / 8));
     for _ in 0..count {
-        advances.push(reader.read_f32()?);
+        let raw = reader.read_u32()?;
+        let code_point = char::from_u32(raw).ok_or(AbiError::UnknownIdentifier {
+            category: "system text advance code point",
+            value: raw,
+        })?;
+        advances.push((code_point, reader.read_f32()?));
     }
     Ok(advances)
 }
 
-fn validate_metric(max_line_width: f32, line_count: u32, advances: &[f32]) -> Result<(), AbiError> {
+fn validate_metric(
+    max_line_width: f32,
+    line_count: u32,
+    advances: &[(char, f32)],
+) -> Result<(), AbiError> {
     if !max_line_width.is_finite() || max_line_width < 0.0 {
         return Err(AbiError::InvalidValue(
             "system text width must be finite and non-negative",
@@ -282,10 +296,17 @@ fn validate_metric(max_line_width: f32, line_count: u32, advances: &[f32]) -> Re
     }
     if advances
         .iter()
-        .any(|advance| !advance.is_finite() || *advance < 0.0)
+        .any(|(_, advance)| !advance.is_finite() || *advance < 0.0)
     {
         return Err(AbiError::InvalidValue(
             "system text advance must be finite and non-negative",
+        ));
+    }
+    // Ascending and unique keeps one table one byte sequence, so a golden
+    // fixture and a cross-language round trip still pin the encoding.
+    if advances.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+        return Err(AbiError::InvalidValue(
+            "system text advances must ascend by code point without duplicates",
         ));
     }
     Ok(())
@@ -340,7 +361,7 @@ mod tests {
                         style_id: 9,
                         max_line_width: 123.5,
                         line_count: 2,
-                        advances: vec![6.5, 0.0, 12.0],
+                        advances: vec![('\n', 0.0), ('a', 6.5), ('\u{4e2d}', 12.0)],
                     }),
                 },
                 SystemTextMetricInstruction {
@@ -406,14 +427,14 @@ mod tests {
                 style_id: 1,
                 max_line_width: 1.0,
                 line_count: 1,
-                advances: vec![f32::NAN],
+                advances: vec![('a', f32::NAN)],
             },
             SystemTextMetric {
                 string_id: 1,
                 style_id: 1,
                 max_line_width: 1.0,
                 line_count: 1,
-                advances: vec![-1.0],
+                advances: vec![('a', -1.0)],
             },
         ] {
             let batch = SystemTextMetricBatch {
@@ -463,7 +484,13 @@ mod tests {
 
         // Reachable only from a hand-built batch, so assert the guards directly.
         assert_eq!(
-            validate_metric(1.0, 1, &vec![0.0; MAX_SYSTEM_TEXT_ADVANCES as usize + 1]),
+            validate_metric(
+                1.0,
+                1,
+                &(0..=MAX_SYSTEM_TEXT_ADVANCES)
+                    .map(|index| (char::from_u32(index).unwrap_or('a'), 0.0))
+                    .collect::<Vec<_>>()
+            ),
             Err(AbiError::InvalidValue(
                 "system text advance count is outside the supported limit"
             ))

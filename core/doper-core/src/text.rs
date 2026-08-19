@@ -109,7 +109,7 @@ impl CoreTextSystem {
             .filter(|resource| resource.kind == ResourceKind::TextStyle)
             .and_then(|resource| TextStyleResource::decode(text_run.style_id, resource).ok())?;
         let value = self.text_value(scene, node)?;
-        Some(self.fallback_caret_stops(scene, text_run, &value, &style))
+        Some(self.fallback_caret_stops(text_run, &value, &style))
     }
 
     pub(crate) fn set_edit_overrides(&mut self, overrides: HashMap<NodeId, Arc<str>>) {
@@ -143,7 +143,7 @@ impl CoreTextSystem {
             let Some(value) = self.text_value(scene, visual.node) else {
                 return;
             };
-            let carets = self.fallback_caret_stops(scene, text_run, &value, &style);
+            let carets = self.fallback_caret_stops(text_run, &value, &style);
             decorations_from_carets(&carets, visual, caret_visible)
         };
         self.editor_decorations.insert(visual.node, decorations);
@@ -678,37 +678,29 @@ impl CoreTextSystem {
     /// measured advances when it has published them for this pair.
     fn fallback_caret_stops(
         &self,
-        scene: &Scene,
         run: TextRun,
         value: &str,
         style: &TextStyleResource,
     ) -> Vec<CaretStop> {
-        let table = self.advance_table(scene, run);
+        let table = self.advance_table(run);
         caret_stops(value, table.as_ref(), style.font_size, style.line_height)
     }
 
-    /// Maps every code point the Host measured for this pair to its advance.
+    /// The code points the Host measured for this pair, keyed for lookup.
     ///
-    /// Advances arrive positionally, against the Scene string. The caret is
-    /// placed against the live editing value, which runs ahead of that string
-    /// until the Shell round-trips the keystroke, so a positional lookup would
-    /// desynchronize on every keypress. Reducing to a per-code-point table
-    /// survives that window; a code point typed but not yet measured falls back
-    /// to the estimate for the one or two frames before it arrives.
-    fn advance_table(&self, scene: &Scene, run: TextRun) -> Option<HashMap<char, f32>> {
+    /// Keyed by code point rather than by position because the caret is placed
+    /// against the live editing value while the pair names the Scene string. The
+    /// two differ for the frames between a keystroke and the Shell round-trip,
+    /// and during IME composition they differ by the entire preedit run, which
+    /// the Shell never sees. The Host measures the preedit text into this same
+    /// table, so composition underlines and the IME candidate-window rectangles
+    /// land on the glyphs instead of on a 0.6em estimate.
+    fn advance_table(&self, run: TextRun) -> Option<HashMap<char, f32>> {
         let metric = self.system_metrics.get(&(run.string_id, run.style_id))?;
         if metric.advances.is_empty() {
             return None;
         }
-        let resource = scene
-            .resource(run.string_id)
-            .filter(|resource| resource.kind == ResourceKind::Utf8String)?;
-        let text = std::str::from_utf8(&resource.bytes).ok()?;
-        Some(
-            text.chars()
-                .zip(metric.advances.iter().copied())
-                .collect::<HashMap<char, f32>>(),
-        )
+        Some(metric.advances.iter().copied().collect())
     }
 
     fn candidate_mut(&mut self) -> &mut HashMap<NodeId, PreparedRun> {
