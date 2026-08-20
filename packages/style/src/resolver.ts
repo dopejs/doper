@@ -89,8 +89,17 @@ export function resolveStyle(options: ResolveStyleOptions): ResolveStyleResult {
     options,
     candidates,
     diagnostics,
+    false,
   );
-  addObjectDeclarations(options.legacyStyle, 2_000_000, order, options, candidates, diagnostics);
+  addObjectDeclarations(
+    options.legacyStyle,
+    2_000_000,
+    order,
+    options,
+    candidates,
+    diagnostics,
+    true,
+  );
 
   const computed: Partial<Record<StylePropertyName, ComputedStyleValue>> = {};
   for (const metadata of properties) {
@@ -163,6 +172,7 @@ function addObjectDeclarations(
   options: ResolveStyleOptions,
   candidates: Map<StylePropertyName, CascadeCandidate>,
   diagnostics: StyleDiagnostic[],
+  legacy: boolean,
 ): number {
   let order = startOrder;
   if (style === undefined) return order;
@@ -171,6 +181,15 @@ function addObjectDeclarations(
     diagnostics.push(...expanded.diagnostics);
     for (const declaration of expanded.declarations) {
       order += 1;
+      if (legacy && candidates.has(declaration.property)) {
+        const metadata = metadataForProperty(declaration.property);
+        diagnostics.push({
+          code: "legacy-direct-prop-conflict",
+          severity: "warning",
+          message: `Legacy direct prop ${metadata.jsName} overrides a CSS declaration`,
+          property: metadata.cssName,
+        });
+      }
       considerCandidate(
         declaration.property,
         declaration.value,

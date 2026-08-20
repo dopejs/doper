@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use pingo_abi::{
     AFFINE_A_OFFSET, AFFINE_RESOURCE_FIXED_BYTES, AFFINE_RESOURCE_VARIANT, AFFINE_VARIANT_OFFSET,
-    AFFINE_VERSION_OFFSET, ComputedStyleResource, IMAGE_BITMAP_HEIGHT_OFFSET,
+    AFFINE_VERSION_OFFSET, ComputedStyleResource, ComputedStyleValue, IMAGE_BITMAP_HEIGHT_OFFSET,
     IMAGE_BITMAP_PIXEL_BYTES_OFFSET, IMAGE_BITMAP_PIXELS_OFFSET,
     IMAGE_BITMAP_RESOURCE_MINIMUM_BYTES, IMAGE_BITMAP_RESOURCE_VARIANT,
     IMAGE_BITMAP_VARIANT_OFFSET, IMAGE_BITMAP_VERSION_OFFSET, IMAGE_BITMAP_WIDTH_OFFSET,
@@ -13,6 +13,7 @@ use pingo_abi::{
     SFNT_FONT_RESOURCE_MINIMUM_BYTES, SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET,
     SFNT_FONT_VERSION_OFFSET, SOLID_PAINT_RED_OFFSET, SOLID_PAINT_RESOURCE_FIXED_BYTES,
     SOLID_PAINT_RESOURCE_VARIANT, SOLID_PAINT_VARIANT_OFFSET, SOLID_PAINT_VERSION_OFFSET,
+    StyleKeyword, StyleLength, StyleProperty, StyleTransformOperation,
     TEXT_STYLE_FAMILY_BYTES_OFFSET, TEXT_STYLE_FAMILY_OFFSET, TEXT_STYLE_FONT_SIZE_OFFSET,
     TEXT_STYLE_LINE_HEIGHT_OFFSET, TEXT_STYLE_PAINT_ID_OFFSET, TEXT_STYLE_RESOURCE_MINIMUM_BYTES,
     TEXT_STYLE_RESOURCE_VARIANT, TEXT_STYLE_VARIANT_OFFSET, TEXT_STYLE_VERSION_OFFSET,
@@ -37,12 +38,14 @@ pub enum DirtyDomain {
 }
 
 /// Immutable resource interned by identifier.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Resource {
     /// Generated resource kind.
     pub kind: ResourceKind,
     /// Canonical resource bytes shared by snapshots and pictures.
     pub bytes: Arc<[u8]>,
+    /// Predecoded style payload; present only for [`ResourceKind::ComputedStyle`].
+    pub computed_style: Option<Arc<ComputedStyleResource>>,
 }
 
 /// Text and style resources attached atomically to a text node.
@@ -272,9 +275,10 @@ impl Scene {
 
     /// Applies a Core-owned physics position outside the Shell Mutation Stream.
     ///
-    /// This is restricted to an existing Scroll node and invalidates only paint
-    /// and hit-test state. Shell transactions remain the sole owner of topology
-    /// and durable properties.
+    /// This is restricted to an existing legacy Scroll node or a View whose
+    /// computed overflow makes it scrollable, and invalidates only paint and
+    /// hit-test state. Shell transactions remain the sole owner of topology and
+    /// durable properties.
     ///
     /// # Errors
     ///
@@ -311,7 +315,9 @@ impl Scene {
             }
             let index = self.resolve(node).ok_or(SceneError::StaleNode { node })?;
             let kind = self.kinds[index];
-            if kind != NodeKind::Scroll {
+            if kind != NodeKind::Scroll
+                && !(kind == NodeKind::Container && self.is_scroll_container(node))
+            {
                 return Err(SceneError::UnsupportedNodeOperation {
                     node,
                     kind,
@@ -376,6 +382,169 @@ impl Scene {
     #[must_use]
     pub fn resource(&self, resource_id: u32) -> Option<&Resource> {
         self.resources.get(&resource_id)
+    }
+
+    /// Returns the decoded immutable computed style attached to a node.
+    #[must_use]
+    pub fn computed_style(&self, node: NodeId) -> Option<&ComputedStyleResource> {
+        let resource_id = self.ref_prop(node, Prop::ComputedStyle)?;
+        self.resources.get(&resource_id)?.computed_style.as_deref()
+    }
+
+    /// Selects one canonical style value for an exact interaction-state mask.
+    #[must_use]
+    pub fn style_value(
+        &self,
+        node: NodeId,
+        property: StyleProperty,
+        state_mask: u8,
+    ) -> Option<&pingo_abi::ComputedStyleValue> {
+        self.computed_style(node)?.value(property, state_mask)
+    }
+
+    /// Returns one canonical keyword when the attached style has that value kind.
+    #[must_use]
+    pub fn style_keyword(
+        &self,
+        node: NodeId,
+        property: StyleProperty,
+        state_mask: u8,
+    ) -> Option<StyleKeyword> {
+        match self.style_value(node, property, state_mask)? {
+            ComputedStyleValue::Keyword(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns one canonical length when the attached style has that value kind.
+    #[must_use]
+    pub fn style_length(
+        &self,
+        node: NodeId,
+        property: StyleProperty,
+        state_mask: u8,
+    ) -> Option<StyleLength> {
+        match self.style_value(node, property, state_mask)? {
+            ComputedStyleValue::Length(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns one canonical RGBA color when the attached style has that value kind.
+    #[must_use]
+    pub fn style_rgba(&self, node: NodeId, property: StyleProperty, state_mask: u8) -> Option<u32> {
+        match self.style_value(node, property, state_mask)? {
+            ComputedStyleValue::Rgba8(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns one canonical scalar when the attached style has that value kind.
+    #[must_use]
+    pub fn style_f32(&self, node: NodeId, property: StyleProperty, state_mask: u8) -> Option<f32> {
+        match self.style_value(node, property, state_mask)? {
+            ComputedStyleValue::F32(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns canonical transform operations attached to a node.
+    #[must_use]
+    pub fn style_transform(
+        &self,
+        node: NodeId,
+        state_mask: u8,
+    ) -> Option<&[StyleTransformOperation]> {
+        match self.style_value(node, StyleProperty::Transform, state_mask)? {
+            ComputedStyleValue::TransformList(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    /// Returns the canonical two-axis transform/object position.
+    #[must_use]
+    pub fn style_position(
+        &self,
+        node: NodeId,
+        property: StyleProperty,
+        state_mask: u8,
+    ) -> Option<[StyleLength; 2]> {
+        match self.style_value(node, property, state_mask)? {
+            ComputedStyleValue::Position(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns whether a node's durable computed display value is `none`.
+    #[must_use]
+    pub fn display_none(&self, node: NodeId) -> bool {
+        self.style_keyword(node, StyleProperty::Display, 0) == Some(StyleKeyword::None)
+    }
+
+    /// Returns whether this node or any live ancestor has `display:none`.
+    #[must_use]
+    pub fn excluded_by_display(&self, node: NodeId) -> bool {
+        let mut cursor = Some(node);
+        while let Some(candidate) = cursor {
+            if self.display_none(candidate) {
+                return true;
+            }
+            cursor = self.parent(candidate);
+        }
+        false
+    }
+
+    /// Returns whether the node's resolved visibility participates in paint,
+    /// hit testing, and semantics. Inheritance is already materialized by the
+    /// Shell in each computed-style resource.
+    #[must_use]
+    pub fn visible(&self, node: NodeId) -> bool {
+        self.style_keyword(node, StyleProperty::Visibility, 0) != Some(StyleKeyword::Hidden)
+    }
+
+    /// Returns whether an axis establishes a programmatically scrollable mechanism.
+    #[must_use]
+    pub fn scrollable_axis(&self, node: NodeId, horizontal: bool) -> bool {
+        if self.kind(node) == Some(NodeKind::Scroll) {
+            return true;
+        }
+        let property = if horizontal {
+            StyleProperty::OverflowX
+        } else {
+            StyleProperty::OverflowY
+        };
+        matches!(
+            self.style_keyword(node, property, 0),
+            Some(StyleKeyword::Auto | StyleKeyword::Hidden | StyleKeyword::Scroll)
+        )
+    }
+
+    /// Returns whether an axis clips overflowing descendants.
+    #[must_use]
+    pub fn clips_axis(&self, node: NodeId, horizontal: bool) -> bool {
+        if self.kind(node) == Some(NodeKind::Scroll) {
+            return true;
+        }
+        let property = if horizontal {
+            StyleProperty::OverflowX
+        } else {
+            StyleProperty::OverflowY
+        };
+        matches!(
+            self.style_keyword(node, property, 0),
+            Some(
+                StyleKeyword::Auto
+                    | StyleKeyword::Clip
+                    | StyleKeyword::Hidden
+                    | StyleKeyword::Scroll
+            )
+        )
+    }
+
+    /// Returns whether this node currently owns at least one scrollable axis.
+    #[must_use]
+    pub fn is_scroll_container(&self, node: NodeId) -> bool {
+        self.scrollable_axis(node, true) || self.scrollable_axis(node, false)
     }
 
     /// Returns the dirty bitmap for one domain.
@@ -779,9 +948,16 @@ impl Scene {
 
 impl Resource {
     fn new(kind: ResourceKind, bytes: Vec<u8>) -> Self {
+        let computed_style = (kind == ResourceKind::ComputedStyle).then(|| {
+            Arc::new(
+                ComputedStyleResource::decode(&bytes)
+                    .expect("computed style was validated before resource construction"),
+            )
+        });
         Self {
             kind,
             bytes: Arc::from(bytes),
+            computed_style,
         }
     }
 }
@@ -884,8 +1060,9 @@ fn validate_node_operation(
     let kind = scene.kind(node).ok_or(SceneError::StaleNode { node })?;
     let supported = match mutation {
         Mutation::SetTextRun { .. } => matches!(kind, NodeKind::Text | NodeKind::EditableText),
-        Mutation::ScrollTo { .. } => kind == NodeKind::Scroll,
-        Mutation::ConfigureVirtualList { .. } => kind == NodeKind::Scroll,
+        Mutation::ScrollTo { .. } | Mutation::ConfigureVirtualList { .. } => {
+            matches!(kind, NodeKind::Container | NodeKind::Scroll)
+        }
         Mutation::SetVirtualItem { .. } => kind == NodeKind::Container,
         Mutation::ConfigureEditable { .. } => kind == NodeKind::EditableText,
         _ => true,
@@ -1722,14 +1899,16 @@ fn plan_apply_property(
                 operation: "SetTextRun",
             });
         }
-        Mutation::ScrollTo { .. } if kind != NodeKind::Scroll => {
+        Mutation::ScrollTo { .. } if !matches!(kind, NodeKind::Container | NodeKind::Scroll) => {
             return Err(SceneError::UnsupportedNodeOperation {
                 node,
                 kind,
                 operation: "ScrollTo",
             });
         }
-        Mutation::ConfigureVirtualList { .. } if kind != NodeKind::Scroll => {
+        Mutation::ConfigureVirtualList { .. }
+            if !matches!(kind, NodeKind::Container | NodeKind::Scroll) =>
+        {
             return Err(SceneError::UnsupportedNodeOperation {
                 node,
                 kind,
@@ -1904,7 +2083,7 @@ fn validate_virtual_plan(nodes: &BTreeMap<NodeId, PlanNode>) -> Result<(), Scene
     let mut materialized = BTreeSet::new();
     for (&node, entry) in nodes {
         if let Some(config) = entry.virtual_list {
-            if entry.kind != NodeKind::Scroll {
+            if !matches!(entry.kind, NodeKind::Container | NodeKind::Scroll) {
                 return Err(SceneError::UnsupportedNodeOperation {
                     node,
                     kind: entry.kind,
@@ -2129,6 +2308,21 @@ mod tests {
         bytes
     }
 
+    fn computed_width(width: f32) -> Vec<u8> {
+        let mut bytes = vec![0; 32];
+        bytes[0] = pingo_abi::STYLE_COMPUTED_ENCODING_VERSION;
+        bytes[1] = pingo_abi::STYLE_COMPUTED_ENCODING_VARIANT;
+        bytes[4..8].copy_from_slice(&pingo_abi::STYLE_ALL_FEATURE_BITS.to_le_bytes());
+        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&16_u32.to_le_bytes());
+        bytes[16..18].copy_from_slice(&(StyleProperty::Width as u16).to_le_bytes());
+        bytes[19] = pingo_abi::STYLE_VALUE_LENGTH;
+        bytes[20..22].copy_from_slice(&8_u16.to_le_bytes());
+        bytes[24] = pingo_abi::STYLE_LENGTH_PX;
+        bytes[28..32].copy_from_slice(&width.to_le_bytes());
+        bytes
+    }
+
     fn text_style(paint_id: u32, family: &[u8]) -> Vec<u8> {
         let padded_len = TEXT_STYLE_FAMILY_OFFSET + family.len().next_multiple_of(4);
         let mut bytes = vec![0; padded_len];
@@ -2165,6 +2359,41 @@ mod tests {
             ))
             .expect("basic scene");
         (scene, root, left, right)
+    }
+
+    #[test]
+    fn computed_styles_are_predecoded_and_queryable_without_reparsing() {
+        let root = id(0, 1);
+        let child = id(1, 1);
+        let mut scene = Scene::default();
+        scene
+            .commit(batch(
+                1,
+                vec![
+                    define(7, ResourceKind::ComputedStyle, computed_width(42.0)),
+                    create(root, NodeKind::Root, None),
+                    create(child, NodeKind::Container, Some(root)),
+                    Mutation::SetRef {
+                        node_id: child.raw(),
+                        prop: Prop::ComputedStyle,
+                        resource_id: 7,
+                    },
+                ],
+            ))
+            .expect("computed style commit");
+
+        assert_eq!(
+            scene.style_length(child, StyleProperty::Width, 0),
+            Some(StyleLength {
+                unit: pingo_abi::StyleLengthUnit::Px,
+                value: 42.0,
+            })
+        );
+        assert!(
+            scene
+                .resource(7)
+                .is_some_and(|resource| resource.computed_style.is_some())
+        );
     }
 
     fn assert_invariant(scene: &Scene, message: &'static str) {

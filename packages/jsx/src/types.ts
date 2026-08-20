@@ -1,6 +1,7 @@
 import type { PingoFont } from "./font";
 import type { PingoImage } from "./image";
 import type { EditTransaction, TextEditingController } from "@dopejs/pingo-editing";
+import type { PingoStyle } from "@dopejs/pingo-style";
 
 /** Stable list identity used by localized reconciliation. */
 export type Key = string | number;
@@ -65,6 +66,10 @@ export interface CommonProps {
   readonly key?: Key;
   readonly ref?: Ref<NodeHandle>;
   readonly children?: PingoNode;
+  /** Registered same-node class selectors, separated by ASCII whitespace. */
+  readonly className?: string;
+  /** Typed inline declarations resolved by the Shell before entering Core. */
+  readonly style?: PingoStyle;
   readonly width?: number;
   readonly height?: number;
   readonly minWidth?: number;
@@ -132,6 +137,18 @@ export interface VirtualListProps extends Omit<CommonProps, "children"> {
   readonly maximumAheadViewports?: number;
   readonly scrollX?: number;
   readonly scrollY?: number;
+}
+
+/** Explicit vertical data window attached to a View. */
+export interface VirtualViewProps {
+  readonly axis?: "y";
+  readonly itemCount: number;
+  readonly estimatedItemSize: number;
+  readonly getItemKey?: (index: number) => Key;
+  readonly renderItem: (index: number) => PingoNode;
+  readonly baseOverscanViewports?: number;
+  readonly velocityHorizonSeconds?: number;
+  readonly maximumAheadViewports?: number;
 }
 
 /** Minimal M1 text fallback properties. */

@@ -11,9 +11,19 @@ import {
   type NodeHandle,
 } from "@dopejs/pingo-jsx";
 import { signal, useEffect } from "@dopejs/pingo-runtime";
+import { createStyleSheet } from "@dopejs/pingo-style";
 import { describe, expect, it, vi } from "vitest";
 
-import { NodeKind, Prop, ResourceKind } from "./generated";
+import {
+  NodeKind,
+  Prop,
+  ResourceKind,
+  SOLID_PAINT_RED_OFFSET,
+  TEXT_STYLE_FONT_SIZE_OFFSET,
+  TEXT_STYLE_LINE_HEIGHT_OFFSET,
+  TEXT_STYLE_PAINT_ID_OFFSET,
+  TEXT_STYLE_WEIGHT_OFFSET,
+} from "./generated";
 import { decodeMutationBatch, type Mutation, type MutationBatch } from "./mutation-stream";
 import { createRoot, type MutationSink } from "./reconciler";
 
@@ -52,6 +62,104 @@ describe("reconciler", () => {
     expect(
       mutationsOfType(sink.batches[0], "configureEditable").map(({ flags }) => flags & 1),
     ).toEqual([0, 1]);
+  });
+
+  it("resolves registered class and inline styles into one computed-style resource", () => {
+    const sink = new RecordingSink();
+    const diagnostics: StyleDiagnosticRecord[] = [];
+    const styleSheet = createStyleSheet(`
+      .card { width: 120px; background-color: #123456; }
+      .card:hover { opacity: 0.5; }
+    `);
+    createRoot(sink, {
+      styleSheets: [styleSheet],
+      onStyleDiagnostics: (items, context) => diagnostics.push({ items, context }),
+    }).render(
+      createElement(View, {
+        className: "card",
+        style: { height: 80 },
+        width: 140,
+      }),
+    );
+
+    const batch = sink.batches[0];
+    const resource = resourceForProp(batch, Prop.ComputedStyle);
+    expect(resource?.kind).toBe(ResourceKind.ComputedStyle);
+    expect(
+      new DataView(resource?.bytes.buffer ?? new ArrayBuffer(0)).getUint32(8, true),
+    ).toBeGreaterThan(1);
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({
+            code: "legacy-direct-prop-conflict",
+            property: "width",
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("recomputes inherited styles for a reused child descriptor", () => {
+    const sink = new RecordingSink();
+    const child = createElement(Text, { value: "inherited" });
+    const root = createRoot(sink);
+    root.render(createElement(View, { style: { color: "#112233" }, children: child }));
+    const initialChildBinding = mutationsOfType(sink.batches[0], "setRef").filter(
+      (mutation) => mutation.prop === Prop.ComputedStyle,
+    );
+    expect(initialChildBinding).toHaveLength(2);
+
+    root.render(createElement(View, { style: { color: "#445566" }, children: child }));
+    expect(
+      mutationsOfType(sink.batches[1], "setRef").filter(
+        (mutation) => mutation.prop === Prop.ComputedStyle,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("feeds inherited computed typography into the existing text resource contract", () => {
+    const sink = new RecordingSink();
+    createRoot(sink).render(
+      createElement(View, {
+        style: {
+          color: "#123456",
+          fontFamily: "Fixture Sans",
+          fontSize: 20,
+          fontWeight: 650,
+          lineHeight: 1.5,
+        },
+        children: createElement(Text, { value: "styled" }),
+      }),
+    );
+
+    const batch = sink.batches[0];
+    const textRun = mutationsOfType(batch, "setTextRun")[0];
+    const styleResource = mutationsOfType(batch, "defineResource").find(
+      (mutation) => mutation.resourceId === textRun?.styleId,
+    );
+    expect(styleResource?.kind).toBe(ResourceKind.TextStyle);
+    const styleBytes = styleResource?.bytes ?? new Uint8Array();
+    const styleView = new DataView(styleBytes.buffer, styleBytes.byteOffset, styleBytes.byteLength);
+    expect(styleView.getFloat32(TEXT_STYLE_FONT_SIZE_OFFSET, true)).toBe(20);
+    expect(styleView.getFloat32(TEXT_STYLE_LINE_HEIGHT_OFFSET, true)).toBe(30);
+    expect(styleView.getUint16(TEXT_STYLE_WEIGHT_OFFSET, true)).toBe(650);
+    const paintId = styleView.getUint32(TEXT_STYLE_PAINT_ID_OFFSET, true);
+    const paint = mutationsOfType(batch, "defineResource").find(
+      (mutation) => mutation.resourceId === paintId,
+    );
+    expect(paint?.bytes[SOLID_PAINT_RED_OFFSET]).toBe(0x12);
+  });
+
+  it("keeps the direct-prop path byte-for-byte free of styles when rollback is enabled", () => {
+    const sink = new RecordingSink();
+    createRoot(sink, { styleResolverEnabled: false }).render(
+      createElement(View, { style: { width: 20 }, width: 40 }),
+    );
+    expect(resourceForProp(sink.batches[0], Prop.ComputedStyle)).toBeUndefined();
+    expect(mutationsOfType(sink.batches[0], "setF32")).toContainEqual(
+      expect.objectContaining({ prop: Prop.Width, value: 40 }),
+    );
   });
 
   it("mounts a deterministic host tree and removes cleared resources", () => {
@@ -357,6 +465,74 @@ describe("reconciler", () => {
     expect(sink.batches).toHaveLength(3);
   });
 
+  it("maps View.virtual onto the same vertical window contract without a Scroll node", () => {
+    const sink = new RecordingSink();
+    const renderItem = vi.fn((index: number) => createElement(Text, { value: `row ${index}` }));
+    const getItemKey = vi.fn((index: number) => `order-${index}`);
+    const root = createRoot(sink);
+    root.render(
+      createElement(View, {
+        style: { width: 240, height: 320, overflowY: "auto" },
+        virtual: {
+          axis: "y",
+          itemCount: 100,
+          estimatedItemSize: 32,
+          getItemKey,
+          renderItem,
+        },
+      }),
+    );
+
+    expect(createdKinds(sink.batches[0])).toEqual([NodeKind.Root, NodeKind.Container]);
+    expect(renderItem).not.toHaveBeenCalled();
+    const configuration = mutationsOfType(sink.batches[0], "configureVirtualList")[0];
+    expect(configuration).toEqual(
+      expect.objectContaining({ itemCount: 100, estimatedItemHeight: 32 }),
+    );
+    const nodeId = configuration?.nodeId ?? 0;
+    expect(
+      mutationsOfType(sink.batches[0], "setRef").find(
+        (mutation) => mutation.nodeId === nodeId && mutation.prop === Prop.ComputedStyle,
+      ),
+    ).toBeDefined();
+
+    root.refillVirtualRanges([{ nodeId, start: 4, end: 7 }]);
+    expect(renderItem.mock.calls.map(([index]) => index)).toEqual([4, 5, 6]);
+    expect(getItemKey.mock.calls.map(([index]) => index)).toEqual([4, 5, 6]);
+    expect(
+      mutationsOfType(sink.batches[1], "setVirtualItem").map(({ itemIndex }) => itemIndex),
+    ).toEqual([4, 5, 6]);
+  });
+
+  it("rejects conflicting View.virtual declarations before committing", () => {
+    const cases: PingoNode[] = [
+      createElement(View, {
+        style: { overflowY: "auto" },
+        children: createElement(Text, { value: "header" }),
+        virtual: { itemCount: 1, estimatedItemSize: 20, renderItem: () => null },
+      }),
+      createElement(View, {
+        style: { overflowY: "visible" },
+        virtual: { itemCount: 1, estimatedItemSize: 20, renderItem: () => null },
+      }),
+      createElement(View, {
+        style: { overflowY: "auto" },
+        virtual: {
+          axis: "x" as "y",
+          itemCount: 1,
+          estimatedItemSize: 20,
+          renderItem: () => null,
+        },
+      }),
+    ];
+
+    for (const node of cases) {
+      const sink = new RecordingSink();
+      expect(() => createRoot(sink).render(node)).toThrow();
+      expect(sink.batches).toHaveLength(0);
+    }
+  });
+
   it("coalesces virtual windows and clamps a request racing a smaller itemCount", () => {
     const sink = new RecordingSink();
     const root = createRoot(sink);
@@ -490,6 +666,11 @@ describe("reconciler", () => {
   });
 });
 
+interface StyleDiagnosticRecord {
+  readonly items: readonly { readonly code: string }[];
+  readonly context: { readonly nodeId: number; readonly hostType: string };
+}
+
 function createdKinds(batch: MutationBatch | undefined): NodeKind[] {
   return mutationsOfType(batch, "createNode").map((mutation) => mutation.kind);
 }
@@ -502,5 +683,16 @@ function mutationsOfType<Type extends Mutation["type"]>(
     batch?.mutations.filter(
       (mutation): mutation is Extract<Mutation, { readonly type: Type }> => mutation.type === type,
     ) ?? []
+  );
+}
+
+function resourceForProp(
+  batch: MutationBatch | undefined,
+  prop: Prop,
+): Extract<Mutation, { readonly type: "defineResource" }> | undefined {
+  const binding = mutationsOfType(batch, "setRef").find((mutation) => mutation.prop === prop);
+  if (binding === undefined) return;
+  return mutationsOfType(batch, "defineResource").find(
+    (mutation) => mutation.resourceId === binding.resourceId,
   );
 }

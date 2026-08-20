@@ -257,6 +257,9 @@ export enum DisplayOpcode {
   DrawTextFallback = 33,
   DrawTextInlineFallback = 36,
   FillPlaceholder = 38,
+  FillColorRect = 39,
+  FillColorRRect = 40,
+  FillColorBorder = 41,
   DrawEditorDecoration = 37,
   DrawImage = 34,
   DrawPicture = 35,
@@ -278,6 +281,9 @@ export const DISPLAY_LAYOUTS = {
     minimumBytes: 20,
   },
   [DisplayOpcode.FillPlaceholder]: { fixedBytes: 24, minimumBytes: 24 },
+  [DisplayOpcode.FillColorRect]: { fixedBytes: 24, minimumBytes: 24 },
+  [DisplayOpcode.FillColorRRect]: { fixedBytes: 40, minimumBytes: 40 },
+  [DisplayOpcode.FillColorBorder]: { fixedBytes: 68, minimumBytes: 68 },
   [DisplayOpcode.DrawEditorDecoration]: { fixedBytes: 28, minimumBytes: 28 },
   [DisplayOpcode.DrawImage]: { fixedBytes: 40, minimumBytes: 40 },
   [DisplayOpcode.DrawPicture]: { fixedBytes: 16, minimumBytes: 16 },
@@ -362,6 +368,7 @@ export const enum Invalidation {
   PaintSelf = 4,
   Hit = 8,
   Semantics = 16,
+  Scroll = 32,
 }
 
 export const PROP_METADATA = {

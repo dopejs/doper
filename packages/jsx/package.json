@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "@dopejs/pingo-editing": "workspace:*",
+    "@dopejs/pingo-style": "workspace:*",
     "woff2-encoder": "2.0.0"
   }
 }

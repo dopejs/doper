@@ -165,6 +165,9 @@ importers:
       '@dopejs/pingo-editing':
         specifier: workspace:*
         version: link:../editing
+      '@dopejs/pingo-style':
+        specifier: workspace:*
+        version: link:../style
       woff2-encoder:
         specifier: 2.0.0
         version: 2.0.0

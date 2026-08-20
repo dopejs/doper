@@ -44,4 +44,5 @@ export {
   type ScrollProps,
   type TextProps,
   type VirtualListProps,
+  type VirtualViewProps,
 } from "./types";

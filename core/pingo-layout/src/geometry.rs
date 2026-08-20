@@ -108,23 +108,6 @@ impl BoxConstraints {
             height: size.height.clamp(self.min_height, self.max_height),
         }
     }
-
-    pub(crate) fn child_constraints(self, horizontal_padding: f32) -> Self {
-        Self {
-            min_width: 0.0,
-            max_width: subtract_padding(self.max_width, horizontal_padding),
-            min_height: 0.0,
-            max_height: f32::INFINITY,
-        }
-    }
-}
-
-fn subtract_padding(value: f32, padding: f32) -> f32 {
-    if value.is_infinite() {
-        value
-    } else {
-        (value - padding).max(0.0)
-    }
 }
 
 #[cfg(test)]

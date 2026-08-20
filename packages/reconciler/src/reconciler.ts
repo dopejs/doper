@@ -19,11 +19,23 @@ import {
   type NodeHandle,
   type Ref,
   type VirtualListProps,
+  type VirtualViewProps,
 } from "@dopejs/pingo-jsx";
 import { ComponentScope } from "@dopejs/pingo-runtime/internal";
 import type { EditTransaction, EventTransaction, InputEventKind } from "@dopejs/pingo-editing";
+import {
+  resolveInteractionStyles,
+  type ComputedStyle,
+  type PingoStyle,
+  type PingoStyleNodeType,
+  type PingoStyleSheet,
+  type ResolveInteractionStylesResult,
+  type StyleDiagnostic,
+  type StylePropertyName,
+} from "@dopejs/pingo-style";
 
 import { MAX_VIRTUAL_ITEMS, NodeKind, Prop, ResourceKind } from "./generated";
+import { encodeComputedStyleResource } from "./computed-style-resource";
 import { encodeMutationBatch, NULL_NODE_ID, type Mutation } from "./mutation-stream";
 import { NodeIdAllocator } from "./node-id";
 import {
@@ -46,6 +58,17 @@ export interface RootOptions {
   readonly schedule?: (task: () => void) => void;
   readonly onFatalError?: (error: Error) => void;
   readonly onPostCommitError?: (error: Error) => void;
+  /** Immutable stylesheet registration order for this root. */
+  readonly styleSheets?: readonly PingoStyleSheet[];
+  /** Independent rollback switch for Shell style resolution. Defaults to enabled. */
+  readonly styleResolverEnabled?: boolean;
+  /** Independent rollback switch for pseudo-state variants. Defaults to enabled. */
+  readonly interactionStylesEnabled?: boolean;
+  /** Receives deterministic per-node style diagnostics before commit. */
+  readonly onStyleDiagnostics?: (
+    diagnostics: readonly StyleDiagnostic[],
+    context: { readonly nodeId: number; readonly hostType: HostType },
+  ) => void;
 }
 
 /** Public lifecycle for a localized component/host tree. */
@@ -113,11 +136,14 @@ interface HostInstance extends BaseInstance {
   scalars: Map<Prop, number>;
   vectors: Map<Prop, readonly [number, number, number, number]>;
   resources: Map<string, number>;
+  computedStyle: ComputedStyle | undefined;
+  computedStyleBytes: Uint8Array | undefined;
   onTapId: number | undefined;
   ref: Ref<NodeHandle> | undefined;
   scrollPosition: readonly [number, number] | undefined;
   virtualItemIndex: number | undefined;
   virtualItems: Map<number, PingoNode>;
+  virtualKeys: Map<number, Key>;
   /** Wrapper elements per index, reused so unchanged items skip re-diffing. */
   virtualWrappers: Map<number, PingoNode>;
   virtualList: NormalizedVirtualList | undefined;
@@ -167,6 +193,9 @@ interface NormalizedHostProps {
   readonly virtualList: NormalizedVirtualList | undefined;
   readonly editable: NormalizedEditable | undefined;
   readonly eventHandlers: Map<EventHandlerKey, PingoEventHandler>;
+  readonly computedStyle: ComputedStyle | undefined;
+  readonly computedStyleBytes: Uint8Array | undefined;
+  readonly styleDiagnostics: readonly StyleDiagnostic[];
 }
 
 type EventHandlerKey = `${InputEventKind}:${"bubble" | "capture"}`;
@@ -188,6 +217,7 @@ interface NormalizedVirtualList {
   readonly velocityHorizonSeconds: number;
   readonly maximumAheadViewports: number;
   readonly renderItem: (index: number) => PingoNode;
+  readonly getItemKey: ((index: number) => Key) | undefined;
 }
 
 interface CallbackEntry {
@@ -199,6 +229,7 @@ interface CallbackEntry {
 const COMMON_KEYS = new Set([
   "backgroundColor",
   "children",
+  "className",
   "direction",
   "gap",
   "height",
@@ -226,6 +257,7 @@ const COMMON_KEYS = new Set([
   "semanticLabel",
   "semanticRole",
   "semanticValue",
+  "style",
   "transform",
   "width",
 ]);
@@ -252,6 +284,7 @@ const EDITABLE_KEYS = new Set([
   "revision",
 ]);
 const SCROLL_KEYS = new Set([...COMMON_KEYS, "scrollX", "scrollY"]);
+const CONTAINER_KEYS = new Set([...SCROLL_KEYS, "virtual"]);
 const IMAGE_KEYS = new Set([...[...COMMON_KEYS].filter((key) => key !== "children"), "source"]);
 const VIRTUAL_LIST_KEYS = new Set([
   ...[...SCROLL_KEYS].filter((key) => key !== "children"),
@@ -264,6 +297,13 @@ const VIRTUAL_LIST_KEYS = new Set([
 ]);
 const VIRTUAL_ITEM_INDEX = Symbol("pingo.virtualItemIndex");
 
+interface StyleResolutionContext {
+  readonly enabled: boolean;
+  readonly interactionStylesEnabled: boolean;
+  readonly parentStyle: ComputedStyle | undefined;
+  readonly styleSheets: readonly PingoStyleSheet[];
+}
+
 /** Creates one deterministic component tree and Mutation Stream producer. */
 export function createRoot(sink: MutationSink, options: RootOptions = {}): CoreDrivenPingoRoot {
   return new ReconcilerRoot(sink, options);
@@ -274,6 +314,15 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
   readonly #schedule: (task: () => void) => void;
   readonly #onFatalError: ((error: Error) => void) | undefined;
   readonly #onPostCommitError: ((error: Error) => void) | undefined;
+  readonly #styleSheets: readonly PingoStyleSheet[];
+  readonly #styleResolverEnabled: boolean;
+  readonly #interactionStylesEnabled: boolean;
+  readonly #onStyleDiagnostics:
+    | ((
+        diagnostics: readonly StyleDiagnostic[],
+        context: { readonly nodeId: number; readonly hostType: HostType },
+      ) => void)
+    | undefined;
   readonly #allocator = new NodeIdAllocator();
   readonly #resources = new ResourcePool();
   readonly #callbacksByFunction = new Map<() => void, CallbackEntry>();
@@ -300,6 +349,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     this.#schedule = options.schedule ?? ((task) => queueMicrotask(task));
     this.#onFatalError = options.onFatalError;
     this.#onPostCommitError = options.onPostCommitError;
+    this.#styleSheets = Object.freeze([...(options.styleSheets ?? [])]);
+    this.#styleResolverEnabled = options.styleResolverEnabled ?? true;
+    this.#interactionStylesEnabled = options.interactionStylesEnabled ?? true;
+    this.#onStyleDiagnostics = options.onStyleDiagnostics;
   }
 
   public get failed(): boolean {
@@ -354,14 +407,14 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     const applicable = [...latest.values()]
       .filter((request) => {
         const instance = this.#hostsByNodeId.get(request.nodeId);
-        return instance?.mounted === true && instance.type === "virtualList";
+        return instance?.mounted === true && instance.virtualList !== undefined;
       })
       .sort((left, right) => left.nodeId - right.nodeId);
     if (applicable.length === 0) return;
     this.perform(() => {
       for (const request of applicable) {
         const instance = this.#hostsByNodeId.get(request.nodeId);
-        if (instance === undefined || instance.type !== "virtualList") continue;
+        if (instance === undefined || instance.virtualList === undefined) continue;
         const config = instance.virtualList;
         if (config === undefined) throw new Error("virtual list instance lost its configuration");
         // A queued Core window may race a newer application render that shrank
@@ -760,8 +813,13 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     props: Readonly<Record<string, unknown>>,
     coreParent: number,
   ): HostInstance {
-    const normalized = normalizeHostProps(type, props);
     const nodeId = this.#allocator.allocate();
+    const normalized = normalizeHostProps(type, props, {
+      enabled: this.#styleResolverEnabled,
+      interactionStylesEnabled: this.#interactionStylesEnabled,
+      parentStyle: nearestComputedStyle(owner),
+      styleSheets: this.#styleSheets,
+    });
     const instance: HostInstance = {
       kind: "host",
       type,
@@ -773,11 +831,14 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       scalars: new Map(),
       vectors: new Map(),
       resources: new Map(),
+      computedStyle: undefined,
+      computedStyleBytes: undefined,
       onTapId: undefined,
       ref: undefined,
       scrollPosition: undefined,
       virtualItemIndex: undefined,
       virtualItems: new Map(),
+      virtualKeys: new Map(),
       virtualWrappers: new Map(),
       virtualList: undefined,
       virtualRange: undefined,
@@ -795,6 +856,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       parent: coreParent,
       beforeSibling: NULL_NODE_ID,
     });
+    this.reportStyleDiagnostics(instance, normalized.styleDiagnostics);
     this.applyHostProps(instance, normalized);
     this.#hostsByNodeId.set(nodeId, instance);
     instance.props = props;
@@ -826,8 +888,14 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     }
     const props =
       typeof descriptor === "string" ? ({ value: descriptor } as const) : descriptor.props;
-    const normalized = normalizeHostProps(instance.type, props);
+    const normalized = normalizeHostProps(instance.type, props, {
+      enabled: this.#styleResolverEnabled,
+      interactionStylesEnabled: this.#interactionStylesEnabled,
+      parentStyle: nearestComputedStyle(instance.parent),
+      styleSheets: this.#styleSheets,
+    });
     const previousVirtualList = instance.virtualList;
+    this.reportStyleDiagnostics(instance, normalized.styleDiagnostics);
     this.applyHostProps(instance, normalized);
     instance.props = props;
     if (allowsHostChildren(instance.type)) {
@@ -839,15 +907,20 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       );
     }
     if (
-      instance.type === "virtualList" &&
+      instance.virtualList !== undefined &&
       instance.virtualRange !== undefined &&
       (previousVirtualList?.renderItem !== instance.virtualList?.renderItem ||
+        previousVirtualList?.getItemKey !== instance.virtualList?.getItemKey ||
         previousVirtualList?.itemCount !== instance.virtualList?.itemCount)
     ) {
       const [start, end] = instance.virtualRange;
       const itemCount = instance.virtualList?.itemCount ?? 0;
-      if (previousVirtualList?.renderItem !== instance.virtualList?.renderItem) {
+      if (
+        previousVirtualList?.renderItem !== instance.virtualList?.renderItem ||
+        previousVirtualList?.getItemKey !== instance.virtualList?.getItemKey
+      ) {
         instance.virtualItems.clear();
+        instance.virtualKeys.clear();
         instance.virtualWrappers.clear();
       }
       instance.virtualRange = undefined;
@@ -908,6 +981,16 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     instance.eventHandlers = next.eventHandlers;
     this.replaceResourceProp(instance, "text:font", Prop.Font, ResourceKind.Font, next.text?.font);
     this.replaceResourceProp(instance, "image", Prop.Image, ResourceKind.Image, next.image);
+    this.replaceResourceProp(
+      instance,
+      "computed-style",
+      Prop.ComputedStyle,
+      ResourceKind.ComputedStyle,
+      next.computedStyleBytes,
+    );
+    const inheritedStyleChanged = !equalComputedStyles(instance.computedStyle, next.computedStyle);
+    instance.computedStyle = next.computedStyle;
+    instance.computedStyleBytes = next.computedStyleBytes;
     if (next.text !== undefined) this.replaceTextRun(instance, next.text);
     if (next.editable !== undefined) {
       if (!equalEditable(instance.editable, next.editable)) {
@@ -982,6 +1065,57 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       }
       instance.virtualItemIndex = next.virtualItemIndex;
     }
+    if (inheritedStyleChanged && instance.children.length > 0) {
+      this.refreshInheritedStyles(instance);
+    }
+  }
+
+  private refreshInheritedStyles(owner: HostInstance): void {
+    const stack = [...owner.children].reverse();
+    while (stack.length > 0) {
+      const instance = stack.pop();
+      if (instance === undefined || !instance.mounted) continue;
+      if (instance.kind === "component") {
+        for (let index = instance.children.length - 1; index >= 0; index -= 1) {
+          const child = instance.children[index];
+          if (child !== undefined) stack.push(child);
+        }
+        continue;
+      }
+      const normalized = normalizeHostProps(instance.type, instance.props, {
+        enabled: this.#styleResolverEnabled,
+        interactionStylesEnabled: this.#interactionStylesEnabled,
+        parentStyle: nearestComputedStyle(instance.parent),
+        styleSheets: this.#styleSheets,
+      });
+      this.reportStyleDiagnostics(instance, normalized.styleDiagnostics);
+      const changed = !equalComputedStyles(instance.computedStyle, normalized.computedStyle);
+      this.replaceResourceProp(
+        instance,
+        "computed-style",
+        Prop.ComputedStyle,
+        ResourceKind.ComputedStyle,
+        normalized.computedStyleBytes,
+      );
+      instance.computedStyle = normalized.computedStyle;
+      instance.computedStyleBytes = normalized.computedStyleBytes;
+      if (!changed) continue;
+      for (let index = instance.children.length - 1; index >= 0; index -= 1) {
+        const child = instance.children[index];
+        if (child !== undefined) stack.push(child);
+      }
+    }
+  }
+
+  private reportStyleDiagnostics(
+    instance: Pick<HostInstance, "nodeId" | "type">,
+    diagnostics: readonly StyleDiagnostic[],
+  ): void {
+    if (diagnostics.length === 0) return;
+    this.#onStyleDiagnostics?.(diagnostics, {
+      nodeId: instance.nodeId,
+      hostType: instance.type,
+    });
   }
 
   private materializeVirtualWindow(instance: HostInstance, start: number, end: number): void {
@@ -989,7 +1123,24 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     const config = instance.virtualList;
     if (config === undefined) throw new Error("virtual list instance has no configuration");
     const children: PingoNode[] = [];
+    const windowKeys = new Set<Key>();
     for (let index = start; index < end; index += 1) {
+      const itemKey = config.getItemKey?.(index) ?? index;
+      if (
+        (typeof itemKey !== "string" && typeof itemKey !== "number") ||
+        (typeof itemKey === "number" && !Number.isFinite(itemKey))
+      ) {
+        throw new TypeError("getItemKey must return a finite number or string");
+      }
+      if (windowKeys.has(itemKey)) {
+        throw new Error(`getItemKey returned duplicate key ${String(itemKey)}`);
+      }
+      windowKeys.add(itemKey);
+      if (instance.virtualKeys.get(index) !== itemKey) {
+        instance.virtualItems.delete(index);
+        instance.virtualWrappers.delete(index);
+        instance.virtualKeys.set(index, itemKey);
+      }
       let wrapper = instance.virtualWrappers.get(index);
       if (wrapper === undefined) {
         let child = instance.virtualItems.get(index);
@@ -1004,7 +1155,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
         wrapper = createElement(
           "container",
           props as unknown as Record<string, unknown>,
-          `pingo:virtual:${String(index)}`,
+          `pingo:virtual:${typeof itemKey}:${String(itemKey)}`,
         );
         instance.virtualWrappers.set(index, wrapper);
       }
@@ -1017,7 +1168,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       children,
     );
     for (const index of instance.virtualItems.keys()) {
-      if (index < start || index >= end) instance.virtualItems.delete(index);
+      if (index < start || index >= end) {
+        instance.virtualItems.delete(index);
+        instance.virtualKeys.delete(index);
+      }
     }
     for (const index of instance.virtualWrappers.keys()) {
       if (index < start || index >= end) instance.virtualWrappers.delete(index);
@@ -1313,6 +1467,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
 function normalizeHostProps(
   type: HostType,
   props: Readonly<Record<string, unknown>>,
+  styleContext: StyleResolutionContext,
 ): NormalizedHostProps {
   assertAllowedProps(type, props);
   const common = props as CommonProps;
@@ -1404,7 +1559,12 @@ function normalizeHostProps(
   }
 
   let scrollPosition: readonly [number, number] | undefined;
-  if (type === "scroll" || type === "virtualList") {
+  if (
+    type === "scroll" ||
+    type === "virtualList" ||
+    (type === "container" &&
+      (props.virtual !== undefined || props.scrollX !== undefined || props.scrollY !== undefined))
+  ) {
     const x = optionalFinite(props.scrollX, 0, "scrollX");
     const y = optionalFinite(props.scrollY, 0, "scrollY");
     scrollPosition = [x, y];
@@ -1450,48 +1610,80 @@ function normalizeHostProps(
   }
 
   let virtualList: NormalizedVirtualList | undefined;
-  if (type === "virtualList") {
-    const virtualProps = props as unknown as VirtualListProps;
-    const itemCount = requireBoundedInteger(
-      virtualProps.itemCount,
-      0,
-      MAX_VIRTUAL_ITEMS,
-      "itemCount",
-    );
+  if (type === "virtualList" || (type === "container" && props.virtual !== undefined)) {
+    let itemCountValue: unknown;
+    let estimatedItemHeightValue: unknown;
+    let renderItemValue: unknown;
+    let getItemKey: ((index: number) => Key) | undefined;
+    let baseOverscanViewports: unknown;
+    let velocityHorizonSeconds: unknown;
+    let maximumAheadViewports: unknown;
+    if (type === "virtualList") {
+      const virtualProps = props as unknown as VirtualListProps;
+      itemCountValue = virtualProps.itemCount;
+      estimatedItemHeightValue = virtualProps.estimatedItemHeight;
+      renderItemValue = virtualProps.renderItem;
+      baseOverscanViewports = virtualProps.baseOverscanViewports;
+      velocityHorizonSeconds = virtualProps.velocityHorizonSeconds;
+      maximumAheadViewports = virtualProps.maximumAheadViewports;
+    } else {
+      if (props.children !== undefined || !isPlainRecord(props.virtual)) {
+        throw new TypeError(
+          "View virtual is a declaration object mutually exclusive with children",
+        );
+      }
+      const virtualProps = props.virtual as unknown as VirtualViewProps;
+      if (virtualProps.axis !== undefined && virtualProps.axis !== "y") {
+        throw new TypeError("M6 View virtual supports only the y axis");
+      }
+      itemCountValue = virtualProps.itemCount;
+      estimatedItemHeightValue = virtualProps.estimatedItemSize;
+      renderItemValue = virtualProps.renderItem;
+      baseOverscanViewports = virtualProps.baseOverscanViewports;
+      velocityHorizonSeconds = virtualProps.velocityHorizonSeconds;
+      maximumAheadViewports = virtualProps.maximumAheadViewports;
+      if (virtualProps.getItemKey !== undefined && typeof virtualProps.getItemKey !== "function") {
+        throw new TypeError("getItemKey must be a function");
+      }
+      getItemKey = virtualProps.getItemKey;
+    }
+    const itemCount = requireBoundedInteger(itemCountValue, 0, MAX_VIRTUAL_ITEMS, "itemCount");
     const estimatedItemHeight = requireBoundedFinite(
-      virtualProps.estimatedItemHeight,
+      estimatedItemHeightValue,
       Number.EPSILON,
       1_000_000_000,
       "estimatedItemHeight",
     );
-    if (typeof virtualProps.renderItem !== "function") {
+    if (typeof renderItemValue !== "function") {
       throw new TypeError("renderItem must be a function");
     }
+    const renderItem = renderItemValue as (index: number) => PingoNode;
     virtualList = {
       itemCount,
       estimatedItemHeight,
       baseOverscanViewports: optionalBoundedFinite(
-        virtualProps.baseOverscanViewports,
+        baseOverscanViewports,
         1,
         0,
         64,
         "baseOverscanViewports",
       ),
       velocityHorizonSeconds: optionalBoundedFinite(
-        virtualProps.velocityHorizonSeconds,
+        velocityHorizonSeconds,
         0.25,
         0,
         10,
         "velocityHorizonSeconds",
       ),
       maximumAheadViewports: optionalBoundedFinite(
-        virtualProps.maximumAheadViewports,
+        maximumAheadViewports,
         4,
         0,
         64,
         "maximumAheadViewports",
       ),
-      renderItem: virtualProps.renderItem,
+      renderItem,
+      getItemKey,
     };
   }
 
@@ -1507,6 +1699,17 @@ function normalizeHostProps(
       MAX_VIRTUAL_ITEMS - 1,
       "virtual item index",
     );
+  }
+  const styleResolution = resolveHostStyle(type, props, common, editable, styleContext);
+  if (text !== undefined && styleResolution !== undefined) {
+    text = applyComputedTextStyle(text, styleResolution.style);
+    scalars.set(Prop.FontSize, text.fontSize);
+  }
+  if (virtualList !== undefined && type === "container") {
+    const overflowY = styleResolution?.style.overflowY;
+    if (overflowY !== "auto" && overflowY !== "hidden" && overflowY !== "scroll") {
+      throw new TypeError("View virtual requires computed overflowY to be auto, hidden, or scroll");
+    }
   }
   return {
     children: allowsHostChildren(type) ? (props.children as PingoNode) : undefined,
@@ -1525,7 +1728,152 @@ function normalizeHostProps(
     virtualList,
     editable,
     eventHandlers,
+    computedStyle: styleResolution?.style,
+    computedStyleBytes:
+      styleResolution === undefined ? undefined : encodeComputedStyleResource(styleResolution),
+    styleDiagnostics: styleResolution?.diagnostics ?? [],
   };
+}
+
+function applyComputedTextStyle(
+  text: NonNullable<NormalizedHostProps["text"]>,
+  style: ComputedStyle,
+): NonNullable<NormalizedHostProps["text"]> {
+  const fontSize = computedPx(style.fontSize, text.fontSize, "fontSize");
+  const lineHeight =
+    style.lineHeight === "normal"
+      ? fontSize * 1.2
+      : typeof style.lineHeight === "number"
+        ? fontSize * style.lineHeight
+        : computedPx(style.lineHeight, text.lineHeight, "lineHeight");
+  const fontWeight =
+    typeof style.fontWeight === "number" ? optionalWeight(style.fontWeight) : text.fontWeight;
+  const fontFamily =
+    typeof style.fontFamily === "string" && style.fontFamily.trim() !== ""
+      ? style.fontFamily
+      : text.fontFamily;
+  const color = typeof style.color === "string" ? (style.color as Color) : undefined;
+  return {
+    ...text,
+    paint: color === undefined ? text.paint : encodeSolidPaint(color),
+    fontFamily,
+    fontSize,
+    lineHeight,
+    fontWeight,
+  };
+}
+
+function computedPx(value: unknown, fallback: number, property: string): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== "string" || !value.endsWith("px")) {
+    throw new TypeError(`${property} must resolve to logical pixels`);
+  }
+  return optionalPositive(Number(value.slice(0, -2)), fallback, property);
+}
+
+function resolveHostStyle(
+  type: HostType,
+  props: Readonly<Record<string, unknown>>,
+  common: CommonProps,
+  editable: NormalizedEditable | undefined,
+  context: StyleResolutionContext,
+): ResolveInteractionStylesResult | undefined {
+  if (!context.enabled) return;
+  const className = common.className;
+  if (className !== undefined && typeof className !== "string") {
+    throw new TypeError("className must be a string");
+  }
+  const inlineStyle = common.style;
+  if (inlineStyle !== undefined && !isPlainRecord(inlineStyle)) {
+    throw new TypeError("style must be a plain declaration object");
+  }
+  const hasStyleInput =
+    inlineStyle !== undefined ||
+    (className !== undefined && className.trim() !== "") ||
+    context.styleSheets.length > 0 ||
+    context.parentStyle !== undefined;
+  if (!hasStyleInput) return;
+
+  const result = resolveInteractionStyles({
+    nodeType: styleNodeType(type, editable),
+    styleSheets: context.styleSheets,
+    legacyStyle: legacyStyleForHost(type, props, common),
+    ...(className === undefined ? {} : { className }),
+    ...(inlineStyle === undefined ? {} : { inlineStyle: inlineStyle as PingoStyle }),
+    ...(context.parentStyle === undefined ? {} : { parentStyle: context.parentStyle }),
+  });
+  if (context.interactionStylesEnabled) return result;
+  return Object.freeze({
+    style: result.style,
+    diagnostics: result.diagnostics,
+    variants: Object.freeze([]),
+  });
+}
+
+function styleNodeType(
+  type: HostType,
+  editable: NormalizedEditable | undefined,
+): PingoStyleNodeType {
+  switch (type) {
+    case "container":
+    case "scroll":
+    case "virtualList":
+      return "view";
+    case "text":
+      return "text";
+    case "image":
+      return "image";
+    case "editableText":
+      return editable !== undefined && (editable.flags & 1) !== 0 ? "textArea" : "input";
+  }
+}
+
+function legacyStyleForHost(
+  type: HostType,
+  props: Readonly<Record<string, unknown>>,
+  common: CommonProps,
+): Readonly<Partial<Record<StylePropertyName, unknown>>> {
+  const legacy: Partial<Record<StylePropertyName, unknown>> = {};
+  assignDefined(legacy, "width", common.width);
+  assignDefined(legacy, "height", common.height);
+  assignDefined(legacy, "minWidth", common.minWidth);
+  assignDefined(legacy, "minHeight", common.minHeight);
+  assignDefined(legacy, "maxWidth", common.maxWidth);
+  assignDefined(legacy, "maxHeight", common.maxHeight);
+  if (common.padding !== undefined) {
+    const [top, right, bottom, left] = normalizePadding(common.padding);
+    legacy.paddingTop = top;
+    legacy.paddingRight = right;
+    legacy.paddingBottom = bottom;
+    legacy.paddingLeft = left;
+  }
+  if (common.direction !== undefined) legacy.flexDirection = common.direction;
+  assignDefined(legacy, "rowGap", common.gap);
+  assignDefined(legacy, "columnGap", common.gap);
+  assignDefined(legacy, "backgroundColor", common.backgroundColor);
+  assignDefined(legacy, "opacity", common.opacity);
+  if (type === "text" || type === "editableText") {
+    assignDefined(legacy, "color", props.color);
+    assignDefined(legacy, "fontFamily", props.fontFamily);
+    assignDefined(legacy, "fontSize", props.fontSize);
+    assignDefined(legacy, "fontWeight", props.fontWeight);
+    assignDefined(legacy, "lineHeight", props.lineHeight);
+  }
+  return legacy;
+}
+
+function assignDefined(
+  target: Partial<Record<StylePropertyName, unknown>>,
+  property: StylePropertyName,
+  value: unknown,
+): void {
+  if (value !== undefined) target[property] = value;
+}
+
+function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function hostNodeKind(type: HostType): NodeKind {
@@ -1837,7 +2185,9 @@ function assertAllowedProps(type: HostType, props: Readonly<Record<string, unkno
             ? SCROLL_KEYS
             : type === "image"
               ? IMAGE_KEYS
-              : COMMON_KEYS;
+              : type === "container"
+                ? CONTAINER_KEYS
+                : COMMON_KEYS;
   for (const key of Object.keys(props)) {
     if (!allowed.has(key)) throw new TypeError(`unknown ${type} prop ${key}`);
   }
@@ -2004,6 +2354,24 @@ function nearestCoreParent(owner: Owner, rootNodeId: number | undefined): number
   if (cursor.kind === "host") return cursor.nodeId;
   if (rootNodeId === undefined) throw new Error("component has no Core root parent");
   return rootNodeId;
+}
+
+function nearestComputedStyle(owner: Owner): ComputedStyle | undefined {
+  let cursor = owner;
+  while (cursor.kind === "component") cursor = cursor.parent;
+  return cursor.kind === "host" ? cursor.computedStyle : undefined;
+}
+
+function equalComputedStyles(
+  left: ComputedStyle | undefined,
+  right: ComputedStyle | undefined,
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  const leftKeys = Object.keys(left) as StylePropertyName[];
+  const rightKeys = Object.keys(right) as StylePropertyName[];
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((property) => Object.is(left[property], right[property]));
 }
 
 function nextU32Sequence(value: number): number {

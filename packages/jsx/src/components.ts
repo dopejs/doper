@@ -5,10 +5,16 @@ import type {
   EditableTextProps,
   ImageProps,
   TextProps,
+  VirtualViewProps,
 } from "./types";
 
 /** Public general-purpose box, currently mapped to the compatible container intrinsic. */
-export type ViewProps = ContainerProps;
+export type ViewProps = ContainerProps & {
+  /** Explicit vertical virtualization contract; never inferred from overflow. */
+  readonly virtual?: VirtualViewProps;
+  readonly scrollX?: number;
+  readonly scrollY?: number;
+};
 
 /** Public single-line editor backed by the shared Core EditableText subsystem. */
 export type InputProps = Omit<EditableTextProps, "multiline">;

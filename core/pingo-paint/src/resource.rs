@@ -329,6 +329,7 @@ mod tests {
         Resource {
             kind,
             bytes: Arc::from(bytes),
+            computed_style: None,
         }
     }
 

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use pingo_abi::{InputBatch, InputCommand, NodeKind};
+use pingo_abi::{InputBatch, InputCommand};
 use pingo_layout::{LayoutSnapshot, VirtualLayoutProvider};
 use pingo_paint::{PlaceholderRect, VirtualPaintResolver};
 use pingo_scene::{NodeId, Scene, VirtualListConfig};
@@ -428,7 +428,7 @@ impl ScrollController {
             .ids()
             .iter()
             .copied()
-            .filter(|node| scene.kind(*node) == Some(NodeKind::Scroll))
+            .filter(|node| scene.is_scroll_container(*node) && !scene.excluded_by_display(*node))
             .collect();
         let active: BTreeSet<NodeId> = scroll_nodes.iter().copied().collect();
         self.states.retain(|node, _| active.contains(node));
@@ -478,7 +478,7 @@ impl ScrollController {
         let mut staged = BTreeMap::new();
         for instruction in &batch.instructions {
             let node = input_node(&instruction.command)?;
-            if scene.kind(node) != Some(NodeKind::Scroll) {
+            if !scene.is_scroll_container(node) || scene.excluded_by_display(node) {
                 return Err(CoreError::InvalidScrollTarget { node });
             }
             if let std::collections::btree_map::Entry::Vacant(entry) = staged.entry(node) {
@@ -549,7 +549,7 @@ impl ScrollController {
         elapsed_micros: u32,
         precise: bool,
     ) -> Result<ScrollAdvance, CoreError> {
-        if scene.kind(node) != Some(NodeKind::Scroll) {
+        if !scene.is_scroll_container(node) || scene.excluded_by_display(node) {
             return Err(CoreError::InvalidScrollTarget { node });
         }
         let mut state = self
@@ -899,13 +899,17 @@ fn extents(
             inner = scene.next_sibling(next);
         }
     }
-    Ok((
-        content,
-        [
-            f64::from(viewport_size.width),
-            f64::from(viewport_size.height),
-        ],
-    ))
+    let viewport = [
+        f64::from(viewport_size.width),
+        f64::from(viewport_size.height),
+    ];
+    if !scene.scrollable_axis(node, true) {
+        content[0] = viewport[0];
+    }
+    if !scene.scrollable_axis(node, false) {
+        content[1] = viewport[1];
+    }
+    Ok((content, viewport))
 }
 
 fn is_newer_sequence(candidate: u32, previous: u32) -> bool {

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use pingo_abi::{NodeKind, Prop};
+use pingo_abi::{NodeKind, Prop, StyleKeyword, StyleLength, StyleLengthUnit, StyleProperty};
 use pingo_scene::{BitSet, DirtyDomain, NodeId, Scene};
 
 use crate::{BoxConstraints, LayoutError, Point, Size};
@@ -461,10 +461,11 @@ impl LayoutEngine {
             BoxConstraints::tight(parent_size)?,
             virtual_layout,
         )?;
+        let child_constraints = constraints_for_child(scene, &parent_frame, node)?;
         compute_subtree(
             scene,
             node,
-            parent_frame.child_constraints,
+            child_constraints,
             measurer,
             virtual_layout,
             &mut self.back,
@@ -479,8 +480,12 @@ impl LayoutEngine {
                 "new node is not a virtual item",
             ))?;
         let offset = virtual_item_offset(scene, parent, item_index, virtual_layout)?;
-        self.back.offsets[index] =
-            Point::new(parent_frame.padding.left, parent_frame.padding.top + offset);
+        let insets = parent_frame.padding.add(parent_frame.border);
+        let margin = style_margin(scene, node, percentage_basis(parent_size.width, 0.0))?;
+        self.back.offsets[index] = Point::new(
+            insets.left + margin.values.left,
+            insets.top + offset + margin.values.top,
+        );
         subtree_len(scene, node)
     }
 
@@ -546,7 +551,7 @@ fn relayout_boundary(
     Ok(candidate)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct EdgeInsets {
     top: f32,
     right: f32,
@@ -555,13 +560,6 @@ struct EdgeInsets {
 }
 
 impl EdgeInsets {
-    const ZERO: Self = Self {
-        top: 0.0,
-        right: 0.0,
-        bottom: 0.0,
-        left: 0.0,
-    };
-
     fn horizontal(self) -> f32 {
         self.left + self.right
     }
@@ -569,6 +567,29 @@ impl EdgeInsets {
     fn vertical(self) -> f32 {
         self.top + self.bottom
     }
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            top: self.top + other.top,
+            right: self.right + other.right,
+            bottom: self.bottom + other.bottom,
+            left: self.left + other.left,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct AutoEdges {
+    top: bool,
+    right: bool,
+    bottom: bool,
+    left: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Margins {
+    values: EdgeInsets,
+    auto: AutoEdges,
 }
 
 /// Value of [`Prop::Direction`] that lays children out along the main axis.
@@ -584,14 +605,22 @@ struct Frame {
     child_constraints: BoxConstraints,
     next_child: Option<NodeId>,
     padding: EdgeInsets,
+    border: EdgeInsets,
+    margin: Margins,
     fixed_width: Option<f32>,
     fixed_height: Option<f32>,
-    /// Offset already consumed along the flow axis, including leading padding.
+    /// Outer child extent already consumed along the flow axis.
     main: f32,
     /// Largest child extent across the flow axis.
     cross: f32,
     /// Whether children flow left to right rather than top to bottom.
     row: bool,
+    /// Whether the logical main-axis order starts at the physical end edge.
+    reverse: bool,
+    /// Main-axis distribution after fixed gaps and margins.
+    justify: StyleKeyword,
+    /// Cross-axis alignment for direct children.
+    align: StyleKeyword,
     /// Space inserted between adjacent children.
     gap: f32,
     /// Whether a child has been placed, so `gap` applies from the second on.
@@ -610,13 +639,22 @@ fn compute_subtree(
     if scene.parent(root).is_none() && scene.kind(root) != Some(NodeKind::Root) {
         return Err(LayoutError::SceneInvariant("first node is not the root"));
     }
+    if scene.display_none(root) {
+        zero_subtree(scene, root, output)?;
+        return Ok(());
+    }
 
     stack.clear();
     stack.push(make_frame(scene, root, constraints, virtual_layout)?);
     while let Some(frame) = stack.last_mut() {
         if let Some(child) = frame.next_child {
             frame.next_child = scene.next_sibling(child);
-            let child_frame = make_frame(scene, child, frame.child_constraints, virtual_layout)?;
+            if scene.display_none(child) {
+                zero_subtree(scene, child, output)?;
+                continue;
+            }
+            let child_constraints = constraints_for_child(scene, frame, child)?;
+            let child_frame = make_frame(scene, child, child_constraints, virtual_layout)?;
             stack.push(child_frame);
             continue;
         }
@@ -635,15 +673,16 @@ fn compute_subtree(
             }
             frame.child_constraints.constrain(measured)
         };
+        let insets = frame.padding.add(frame.border);
         let natural = if frame.row {
             Size::new(
-                frame.main + intrinsic.width + frame.padding.right,
-                frame.cross.max(intrinsic.height) + frame.padding.vertical(),
+                frame.main + intrinsic.width + insets.horizontal(),
+                frame.cross.max(intrinsic.height) + insets.vertical(),
             )
         } else {
             Size::new(
-                frame.cross.max(intrinsic.width) + frame.padding.horizontal(),
-                frame.main + intrinsic.height + frame.padding.bottom,
+                frame.cross.max(intrinsic.width) + insets.horizontal(),
+                frame.main + intrinsic.height + insets.vertical(),
             )
         };
         let requested = Size::new(
@@ -652,29 +691,48 @@ fn compute_subtree(
         );
         let size = frame.constraints.constrain(requested);
         output.sizes[frame.index] = size;
+        arrange_children(scene, &frame, size, output)?;
 
         if let Some(parent) = stack.last_mut() {
             if let Some(item_index) = scene.virtual_item_index(frame.node)
                 && scene.virtual_list(parent.node).is_some()
             {
                 let offset = virtual_item_offset(scene, parent.node, item_index, virtual_layout)?;
-                output.offsets[frame.index] =
-                    Point::new(parent.padding.left, parent.padding.top + offset);
+                let parent_insets = parent.padding.add(parent.border);
+                output.offsets[frame.index] = Point::new(
+                    parent_insets.left + frame.margin.values.left,
+                    parent_insets.top + offset + frame.margin.values.top,
+                );
                 // A virtual list is always a column, so its cross axis is width.
-                parent.cross = parent.cross.max(size.width);
+                parent.cross = parent
+                    .cross
+                    .max(frame.margin.values.left + size.width + frame.margin.values.right);
             } else {
                 if parent.placed {
                     parent.main += parent.gap;
                 }
                 parent.placed = true;
+                let parent_insets = parent.padding.add(parent.border);
                 if parent.row {
-                    output.offsets[frame.index] = Point::new(parent.main, parent.padding.top);
-                    parent.main += size.width;
-                    parent.cross = parent.cross.max(size.height);
+                    output.offsets[frame.index] = Point::new(
+                        parent_insets.left + parent.main + frame.margin.values.left,
+                        parent_insets.top + frame.margin.values.top,
+                    );
+                    parent.main +=
+                        frame.margin.values.left + size.width + frame.margin.values.right;
+                    parent.cross = parent
+                        .cross
+                        .max(frame.margin.values.top + size.height + frame.margin.values.bottom);
                 } else {
-                    output.offsets[frame.index] = Point::new(parent.padding.left, parent.main);
-                    parent.main += size.height;
-                    parent.cross = parent.cross.max(size.width);
+                    output.offsets[frame.index] = Point::new(
+                        parent_insets.left + frame.margin.values.left,
+                        parent_insets.top + parent.main + frame.margin.values.top,
+                    );
+                    parent.main +=
+                        frame.margin.values.top + size.height + frame.margin.values.bottom;
+                    parent.cross = parent
+                        .cross
+                        .max(frame.margin.values.left + size.width + frame.margin.values.right);
                 }
             }
         }
@@ -682,8 +740,44 @@ fn compute_subtree(
     Ok(())
 }
 
+fn zero_subtree(
+    scene: &Scene,
+    root: NodeId,
+    output: &mut LayoutSnapshot,
+) -> Result<(), LayoutError> {
+    let start = scene
+        .resolve(root)
+        .ok_or(LayoutError::SceneInvariant("hidden subtree root is stale"))?;
+    let depth = scene.depth(root).ok_or(LayoutError::SceneInvariant(
+        "hidden subtree root has no depth",
+    ))?;
+    let mut end = start + 1;
+    while let Some(node) = scene.ids().get(end) {
+        if scene.depth(*node).ok_or(LayoutError::SceneInvariant(
+            "hidden subtree node has no depth",
+        ))? <= depth
+        {
+            break;
+        }
+        end += 1;
+    }
+    for index in start..end {
+        output.offsets[index] = Point::ZERO;
+        output.sizes[index] = Size::ZERO;
+    }
+    Ok(())
+}
+
 fn is_fixed_boundary(scene: &Scene, node: NodeId) -> bool {
-    scene.f32_prop(node, Prop::Width).is_some() && scene.f32_prop(node, Prop::Height).is_some()
+    has_fixed_dimension(scene, node, Prop::Width, StyleProperty::Width)
+        && has_fixed_dimension(scene, node, Prop::Height, StyleProperty::Height)
+}
+
+fn has_fixed_dimension(scene: &Scene, node: NodeId, direct: Prop, property: StyleProperty) -> bool {
+    scene.f32_prop(node, direct).is_some()
+        || scene.style_length(node, property, 0).is_some_and(|length| {
+            matches!(length.unit, StyleLengthUnit::Px | StyleLengthUnit::Percent)
+        })
 }
 
 fn is_ancestor(scene: &Scene, ancestor: NodeId, node: NodeId) -> bool {
@@ -738,10 +832,53 @@ fn make_frame(
     let index = scene.resolve(node).ok_or(LayoutError::SceneInvariant(
         "layout encountered a stale node",
     ))?;
-    let min_width = style_dimension(scene, node, Prop::MinWidth)?.unwrap_or(0.0);
-    let min_height = style_dimension(scene, node, Prop::MinHeight)?.unwrap_or(0.0);
-    let max_width = style_dimension(scene, node, Prop::MaxWidth)?.unwrap_or(f32::INFINITY);
-    let max_height = style_dimension(scene, node, Prop::MaxHeight)?.unwrap_or(f32::INFINITY);
+    let width_basis = percentage_basis(incoming.max_width, incoming.min_width);
+    let height_basis = percentage_basis(incoming.max_height, incoming.min_height);
+    let padding = style_padding(scene, node, width_basis)?;
+    let border = style_border(scene, node, width_basis)?;
+    let insets = padding.add(border);
+    let border_box =
+        scene.style_keyword(node, StyleProperty::BoxSizing, 0) == Some(StyleKeyword::BorderBox);
+    let min_width = outer_dimension(
+        scene,
+        node,
+        Prop::MinWidth,
+        StyleProperty::MinWidth,
+        width_basis,
+        insets.horizontal(),
+        border_box,
+    )?
+    .unwrap_or(0.0);
+    let min_height = outer_dimension(
+        scene,
+        node,
+        Prop::MinHeight,
+        StyleProperty::MinHeight,
+        height_basis,
+        insets.vertical(),
+        border_box,
+    )?
+    .unwrap_or(0.0);
+    let max_width = outer_dimension(
+        scene,
+        node,
+        Prop::MaxWidth,
+        StyleProperty::MaxWidth,
+        width_basis,
+        insets.horizontal(),
+        border_box,
+    )?
+    .unwrap_or(f32::INFINITY);
+    let max_height = outer_dimension(
+        scene,
+        node,
+        Prop::MaxHeight,
+        StyleProperty::MaxHeight,
+        height_basis,
+        insets.vertical(),
+        border_box,
+    )?
+    .unwrap_or(f32::INFINITY);
     if min_width > max_width {
         return Err(LayoutError::ContradictoryStyle {
             node,
@@ -761,28 +898,82 @@ fn make_frame(
         });
     }
     let constraints = intersect_constraints(incoming, min_width, max_width, min_height, max_height);
-    let padding = style_padding(scene, node)?;
-    let fixed_width = style_dimension(scene, node, Prop::Width)?;
-    let fixed_height = style_dimension(scene, node, Prop::Height)?;
-    let mut child_constraints = constraints.child_constraints(padding.horizontal());
+    let fixed_width = outer_dimension(
+        scene,
+        node,
+        Prop::Width,
+        StyleProperty::Width,
+        width_basis,
+        insets.horizontal(),
+        border_box,
+    )?;
+    let fixed_height = outer_dimension(
+        scene,
+        node,
+        Prop::Height,
+        StyleProperty::Height,
+        height_basis,
+        insets.vertical(),
+        border_box,
+    )?;
+    // A virtual list always flows vertically: its item offsets come from Core's
+    // height index, not from sibling accumulation.
+    let virtual_list = scene.virtual_list(node);
+    let direction = scene
+        .style_keyword(node, StyleProperty::FlexDirection, 0)
+        .unwrap_or(StyleKeyword::Column);
+    let row = virtual_list.is_none()
+        && (scene
+            .f32_prop(node, Prop::Direction)
+            .is_some_and(|value| value == DIRECTION_ROW)
+            || (scene.f32_prop(node, Prop::Direction).is_none()
+                && matches!(direction, StyleKeyword::Row | StyleKeyword::RowReverse)));
+    let reverse = virtual_list.is_none()
+        && scene.f32_prop(node, Prop::Direction).is_none()
+        && matches!(
+            direction,
+            StyleKeyword::RowReverse | StyleKeyword::ColumnReverse
+        );
+    let outer_width = fixed_width.unwrap_or(constraints.max_width);
+    let outer_height = fixed_height.unwrap_or(constraints.max_height);
+    let mut child_constraints = BoxConstraints {
+        min_width: 0.0,
+        max_width: subtract_insets(outer_width, insets.horizontal()),
+        min_height: 0.0,
+        max_height: if row {
+            subtract_insets(outer_height, insets.vertical())
+        } else {
+            f32::INFINITY
+        },
+    };
     if let Some(width) = fixed_width {
         let outer_width = constraints
             .constrain(Size::new(width, constraints.min_height))
             .width;
-        child_constraints.max_width = (outer_width - padding.horizontal()).max(0.0);
+        child_constraints.max_width = subtract_insets(outer_width, insets.horizontal());
     }
-    if scene.kind(node) == Some(NodeKind::Scroll) {
+    if scene.scrollable_axis(node, true) {
         child_constraints.max_width = f32::INFINITY;
+    }
+    if scene.scrollable_axis(node, false) {
         child_constraints.max_height = f32::INFINITY;
     }
-    // A virtual list always flows vertically: its item offsets come from Core's
-    // height index, not from sibling accumulation.
-    let virtual_list = scene.virtual_list(node);
-    let row = virtual_list.is_none()
-        && scene
-            .f32_prop(node, Prop::Direction)
-            .is_some_and(|value| value == DIRECTION_ROW);
-    let gap = match scene.f32_prop(node, Prop::Gap) {
+    let style_gap_property = if row {
+        StyleProperty::ColumnGap
+    } else {
+        StyleProperty::RowGap
+    };
+    let style_gap_basis = if row {
+        fixed_width.unwrap_or(width_basis)
+    } else {
+        fixed_height.unwrap_or(height_basis)
+    };
+    let gap = match scene.f32_prop(node, Prop::Gap).or_else(|| {
+        resolve_style_length(
+            scene.style_length(node, style_gap_property, 0),
+            style_gap_basis,
+        )
+    }) {
         Some(value) if value.is_finite() && value >= 0.0 => value,
         Some(value) => {
             return Err(LayoutError::InvalidStyle {
@@ -794,9 +985,8 @@ fn make_frame(
         None => 0.0,
     };
     let main = match virtual_list {
-        Some(_) => padding.top + virtual_content_height(scene, node, virtual_layout)?,
-        None if row => padding.left,
-        None => padding.top,
+        Some(_) => virtual_content_height(scene, node, virtual_layout)?,
+        None => 0.0,
     };
     Ok(Frame {
         node,
@@ -805,14 +995,245 @@ fn make_frame(
         child_constraints,
         next_child: scene.first_child(node),
         padding,
+        border,
+        margin: style_margin(scene, node, width_basis)?,
         fixed_width,
         fixed_height,
         main,
         cross: 0.0,
         row,
+        reverse,
+        justify: scene
+            .style_keyword(node, StyleProperty::JustifyContent, 0)
+            .unwrap_or(StyleKeyword::FlexStart),
+        align: scene
+            .style_keyword(node, StyleProperty::AlignItems, 0)
+            .unwrap_or(StyleKeyword::FlexStart),
         gap,
         placed: false,
     })
+}
+
+fn constraints_for_child(
+    scene: &Scene,
+    parent: &Frame,
+    child: NodeId,
+) -> Result<BoxConstraints, LayoutError> {
+    let percentage_basis = percentage_basis(
+        parent.child_constraints.max_width,
+        parent.child_constraints.min_width,
+    );
+    let margin = style_margin(scene, child, percentage_basis)?.values;
+    let mut constraints = parent.child_constraints;
+    constraints.max_width = subtract_insets(constraints.max_width, margin.horizontal());
+    constraints.max_height = subtract_insets(constraints.max_height, margin.vertical());
+    if parent.align == StyleKeyword::Stretch {
+        if parent.row {
+            if !has_requested_dimension(scene, child, Prop::Height, StyleProperty::Height)
+                && constraints.max_height.is_finite()
+            {
+                constraints.min_height = constraints.max_height;
+            }
+        } else if !has_requested_dimension(scene, child, Prop::Width, StyleProperty::Width)
+            && constraints.max_width.is_finite()
+        {
+            constraints.min_width = constraints.max_width;
+        }
+    }
+    Ok(constraints)
+}
+
+fn arrange_children(
+    scene: &Scene,
+    frame: &Frame,
+    size: Size,
+    output: &mut LayoutSnapshot,
+) -> Result<(), LayoutError> {
+    if scene.virtual_list(frame.node).is_some() {
+        return Ok(());
+    }
+    let insets = frame.padding.add(frame.border);
+    let content_main = if frame.row {
+        (size.width - insets.horizontal()).max(0.0)
+    } else {
+        (size.height - insets.vertical()).max(0.0)
+    };
+    let content_cross = if frame.row {
+        (size.height - insets.vertical()).max(0.0)
+    } else {
+        (size.width - insets.horizontal()).max(0.0)
+    };
+    let percentage_basis = (size.width - insets.horizontal()).max(0.0);
+    let mut child_count = 0_usize;
+    let mut auto_main_edges = 0_usize;
+    let mut child = scene.first_child(frame.node);
+    while let Some(node) = child {
+        if !scene.display_none(node) {
+            child_count += 1;
+            let auto = style_margin(scene, node, percentage_basis)?.auto;
+            auto_main_edges += if frame.row {
+                usize::from(auto.left) + usize::from(auto.right)
+            } else {
+                usize::from(auto.top) + usize::from(auto.bottom)
+            };
+        }
+        child = scene.next_sibling(node);
+    }
+    if child_count == 0 {
+        return Ok(());
+    }
+    let free = (content_main - frame.main).max(0.0);
+    let auto_share = if auto_main_edges == 0 {
+        0.0
+    } else {
+        free / auto_main_edges as f32
+    };
+    let distributable = if auto_main_edges == 0 { free } else { 0.0 };
+    let (leading, distributed_gap) = justify_spacing(frame.justify, distributable, child_count);
+    let mut cursor = leading;
+    let mut ordinal = 0_usize;
+    child = scene.first_child(frame.node);
+    while let Some(node) = child {
+        child = scene.next_sibling(node);
+        if scene.display_none(node) {
+            continue;
+        }
+        let index = scene.resolve(node).ok_or(LayoutError::SceneInvariant(
+            "layout child disappeared during arrangement",
+        ))?;
+        let child_size = *output.sizes.get(index).ok_or(LayoutError::SceneInvariant(
+            "layout child has no computed size",
+        ))?;
+        let margin = style_margin(scene, node, percentage_basis)?;
+        if ordinal > 0 {
+            cursor += frame.gap + distributed_gap;
+        }
+        let (
+            leading_margin,
+            trailing_margin,
+            cross_start,
+            cross_end,
+            cross_auto_start,
+            cross_auto_end,
+        ) = if frame.row {
+            (
+                if margin.auto.left {
+                    auto_share
+                } else {
+                    margin.values.left
+                },
+                if margin.auto.right {
+                    auto_share
+                } else {
+                    margin.values.right
+                },
+                margin.values.top,
+                margin.values.bottom,
+                margin.auto.top,
+                margin.auto.bottom,
+            )
+        } else {
+            (
+                if margin.auto.top {
+                    auto_share
+                } else {
+                    margin.values.top
+                },
+                if margin.auto.bottom {
+                    auto_share
+                } else {
+                    margin.values.bottom
+                },
+                margin.values.left,
+                margin.values.right,
+                margin.auto.left,
+                margin.auto.right,
+            )
+        };
+        let child_main = if frame.row {
+            child_size.width
+        } else {
+            child_size.height
+        };
+        let child_cross = if frame.row {
+            child_size.height
+        } else {
+            child_size.width
+        };
+        let outer_main = leading_margin + child_main + trailing_margin;
+        let normal_main = cursor + leading_margin;
+        let main = if frame.reverse {
+            content_main - cursor - outer_main + leading_margin
+        } else {
+            normal_main
+        };
+        let cross_free = (content_cross - child_cross - cross_start - cross_end).max(0.0);
+        let cross = if cross_auto_start || cross_auto_end {
+            cross_start
+                + match (cross_auto_start, cross_auto_end) {
+                    (true, true) => cross_free * 0.5,
+                    (true, false) => cross_free,
+                    (false, true) | (false, false) => 0.0,
+                }
+        } else {
+            cross_start
+                + match frame.align {
+                    StyleKeyword::Center => cross_free * 0.5,
+                    StyleKeyword::End | StyleKeyword::FlexEnd => cross_free,
+                    StyleKeyword::Baseline
+                    | StyleKeyword::FlexStart
+                    | StyleKeyword::Start
+                    | StyleKeyword::Stretch => 0.0,
+                    _ => 0.0,
+                }
+        };
+        output.offsets[index] = if frame.row {
+            Point::new(insets.left + main, insets.top + cross)
+        } else {
+            Point::new(insets.left + cross, insets.top + main)
+        };
+        cursor += outer_main;
+        ordinal += 1;
+    }
+    Ok(())
+}
+
+fn justify_spacing(justify: StyleKeyword, free: f32, child_count: usize) -> (f32, f32) {
+    match justify {
+        StyleKeyword::Center => (free * 0.5, 0.0),
+        StyleKeyword::End | StyleKeyword::FlexEnd => (free, 0.0),
+        StyleKeyword::SpaceBetween if child_count > 1 => (0.0, free / (child_count - 1) as f32),
+        StyleKeyword::SpaceAround => {
+            let step = free / child_count as f32;
+            (step * 0.5, step)
+        }
+        StyleKeyword::SpaceEvenly => {
+            let step = free / (child_count + 1) as f32;
+            (step, step)
+        }
+        StyleKeyword::FlexStart | StyleKeyword::Start | StyleKeyword::SpaceBetween => (0.0, 0.0),
+        _ => (0.0, 0.0),
+    }
+}
+
+fn has_requested_dimension(
+    scene: &Scene,
+    node: NodeId,
+    direct: Prop,
+    property: StyleProperty,
+) -> bool {
+    scene.f32_prop(node, direct).is_some()
+        || scene
+            .style_length(node, property, 0)
+            .is_some_and(|length| length.unit != StyleLengthUnit::Auto)
+}
+
+fn subtract_insets(value: f32, insets: f32) -> f32 {
+    if value.is_infinite() {
+        value
+    } else {
+        (value - insets).max(0.0)
+    }
 }
 
 fn virtual_item_offset(
@@ -872,21 +1293,56 @@ fn intersect_constraints(
     }
 }
 
-fn style_dimension(scene: &Scene, node: NodeId, prop: Prop) -> Result<Option<f32>, LayoutError> {
-    let Some(value) = scene.f32_prop(node, prop) else {
+fn outer_dimension(
+    scene: &Scene,
+    node: NodeId,
+    direct: Prop,
+    property: StyleProperty,
+    percentage_basis: f32,
+    content_box_insets: f32,
+    border_box: bool,
+) -> Result<Option<f32>, LayoutError> {
+    if let Some(value) = scene.f32_prop(node, direct) {
+        if value.is_finite() && value >= 0.0 {
+            return Ok(Some(value));
+        }
+        return Err(LayoutError::InvalidStyle {
+            node,
+            prop: direct,
+            value,
+        });
+    }
+    let Some(value) = resolve_style_length(scene.style_length(node, property, 0), percentage_basis)
+    else {
         return Ok(None);
     };
-    if value.is_finite() && value >= 0.0 {
-        Ok(Some(value))
-    } else {
-        Err(LayoutError::InvalidStyle { node, prop, value })
+    if !value.is_finite() || value < 0.0 {
+        return Err(LayoutError::InvalidComputedStyle {
+            node,
+            property,
+            value,
+        });
     }
+    Ok(Some(if border_box {
+        value
+    } else {
+        value + content_box_insets
+    }))
 }
 
-fn style_padding(scene: &Scene, node: NodeId) -> Result<EdgeInsets, LayoutError> {
-    let Some([top, right, bottom, left]) = scene.vec4_prop(node, Prop::Padding) else {
-        return Ok(EdgeInsets::ZERO);
-    };
+fn style_padding(
+    scene: &Scene,
+    node: NodeId,
+    percentage_basis: f32,
+) -> Result<EdgeInsets, LayoutError> {
+    let [top, right, bottom, left] = scene.vec4_prop(node, Prop::Padding).unwrap_or_else(|| {
+        [
+            style_length_or_zero(scene, node, StyleProperty::PaddingTop, percentage_basis),
+            style_length_or_zero(scene, node, StyleProperty::PaddingRight, percentage_basis),
+            style_length_or_zero(scene, node, StyleProperty::PaddingBottom, percentage_basis),
+            style_length_or_zero(scene, node, StyleProperty::PaddingLeft, percentage_basis),
+        ]
+    });
     for value in [top, right, bottom, left] {
         if !value.is_finite() || value < 0.0 {
             return Err(LayoutError::InvalidStyle {
@@ -902,6 +1358,157 @@ fn style_padding(scene: &Scene, node: NodeId) -> Result<EdgeInsets, LayoutError>
         bottom,
         left,
     })
+}
+
+fn style_margin(
+    scene: &Scene,
+    node: NodeId,
+    percentage_basis: f32,
+) -> Result<Margins, LayoutError> {
+    let (top, auto_top) = margin_value(scene, node, StyleProperty::MarginTop, percentage_basis)?;
+    let (right, auto_right) =
+        margin_value(scene, node, StyleProperty::MarginRight, percentage_basis)?;
+    let (bottom, auto_bottom) =
+        margin_value(scene, node, StyleProperty::MarginBottom, percentage_basis)?;
+    let (left, auto_left) = margin_value(scene, node, StyleProperty::MarginLeft, percentage_basis)?;
+    Ok(Margins {
+        values: EdgeInsets {
+            top,
+            right,
+            bottom,
+            left,
+        },
+        auto: AutoEdges {
+            top: auto_top,
+            right: auto_right,
+            bottom: auto_bottom,
+            left: auto_left,
+        },
+    })
+}
+
+fn margin_value(
+    scene: &Scene,
+    node: NodeId,
+    property: StyleProperty,
+    percentage_basis: f32,
+) -> Result<(f32, bool), LayoutError> {
+    let Some(length) = scene.style_length(node, property, 0) else {
+        return Ok((0.0, false));
+    };
+    if length.unit == StyleLengthUnit::Auto {
+        return Ok((0.0, true));
+    }
+    let value = resolve_style_length(Some(length), percentage_basis).unwrap_or(0.0);
+    if !value.is_finite() {
+        return Err(LayoutError::InvalidComputedStyle {
+            node,
+            property,
+            value,
+        });
+    }
+    Ok((value, false))
+}
+
+fn style_border(
+    scene: &Scene,
+    node: NodeId,
+    percentage_basis: f32,
+) -> Result<EdgeInsets, LayoutError> {
+    Ok(EdgeInsets {
+        top: border_width(
+            scene,
+            node,
+            StyleProperty::BorderTopWidth,
+            StyleProperty::BorderTopStyle,
+            percentage_basis,
+        )?,
+        right: border_width(
+            scene,
+            node,
+            StyleProperty::BorderRightWidth,
+            StyleProperty::BorderRightStyle,
+            percentage_basis,
+        )?,
+        bottom: border_width(
+            scene,
+            node,
+            StyleProperty::BorderBottomWidth,
+            StyleProperty::BorderBottomStyle,
+            percentage_basis,
+        )?,
+        left: border_width(
+            scene,
+            node,
+            StyleProperty::BorderLeftWidth,
+            StyleProperty::BorderLeftStyle,
+            percentage_basis,
+        )?,
+    })
+}
+
+fn border_width(
+    scene: &Scene,
+    node: NodeId,
+    width_property: StyleProperty,
+    style_property: StyleProperty,
+    percentage_basis: f32,
+) -> Result<f32, LayoutError> {
+    if scene.style_keyword(node, style_property, 0) != Some(StyleKeyword::Solid) {
+        return Ok(0.0);
+    }
+    let value = resolve_style_length(
+        scene.style_length(node, width_property, 0),
+        percentage_basis,
+    )
+    .unwrap_or(0.0);
+    if value.is_finite() && value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(LayoutError::InvalidComputedStyle {
+            node,
+            property: width_property,
+            value,
+        })
+    }
+}
+
+fn percentage_basis(maximum: f32, minimum: f32) -> f32 {
+    if maximum.is_finite() {
+        maximum
+    } else {
+        minimum
+    }
+}
+
+fn resolve_style_length(length: Option<StyleLength>, percentage_basis: f32) -> Option<f32> {
+    match length? {
+        StyleLength {
+            unit: StyleLengthUnit::Px,
+            value,
+        } => Some(value),
+        StyleLength {
+            unit: StyleLengthUnit::Percent,
+            value,
+        } => Some(percentage_basis * value / 100.0),
+        StyleLength {
+            unit:
+                StyleLengthUnit::Auto
+                | StyleLengthUnit::None
+                | StyleLengthUnit::Normal
+                | StyleLengthUnit::Number,
+            ..
+        } => None,
+    }
+}
+
+fn style_length_or_zero(
+    scene: &Scene,
+    node: NodeId,
+    property: StyleProperty,
+    percentage_basis: f32,
+) -> f32 {
+    resolve_style_length(scene.style_length(node, property, 0), percentage_basis).unwrap_or(0.0)
 }
 
 fn changed_geometry(previous: &LayoutSnapshot, next: &LayoutSnapshot) -> BitSet {
@@ -923,7 +1530,12 @@ fn changed_geometry(previous: &LayoutSnapshot, next: &LayoutSnapshot) -> BitSet 
 
 #[cfg(test)]
 mod tests {
-    use pingo_abi::{Mutation, MutationBatch, MutationInstruction, NULL_NODE_ID};
+    use pingo_abi::{
+        Mutation, MutationBatch, MutationInstruction, NULL_NODE_ID, ResourceKind,
+        STYLE_ALL_FEATURE_BITS, STYLE_COMPUTED_ENCODING_VARIANT, STYLE_COMPUTED_ENCODING_VERSION,
+        STYLE_LENGTH_AUTO, STYLE_LENGTH_PERCENT, STYLE_LENGTH_PX, STYLE_VALUE_KEYWORD,
+        STYLE_VALUE_LENGTH,
+    };
     use proptest::prelude::*;
 
     use super::*;
@@ -959,6 +1571,277 @@ mod tests {
             prop,
             value,
         }
+    }
+
+    fn computed_style(entries: &[(StyleProperty, u8, Vec<u8>)]) -> Vec<u8> {
+        let payload_bytes = entries
+            .iter()
+            .map(|(_, _, payload)| 8 + payload.len().next_multiple_of(4))
+            .sum::<usize>();
+        let mut bytes = vec![0; 16];
+        bytes[0] = STYLE_COMPUTED_ENCODING_VERSION;
+        bytes[1] = STYLE_COMPUTED_ENCODING_VARIANT;
+        bytes[4..8].copy_from_slice(&STYLE_ALL_FEATURE_BITS.to_le_bytes());
+        bytes[8..12].copy_from_slice(&(entries.len() as u32).to_le_bytes());
+        bytes[12..16].copy_from_slice(&(payload_bytes as u32).to_le_bytes());
+        for (property, tag, payload) in entries {
+            bytes.extend_from_slice(&(*property as u16).to_le_bytes());
+            bytes.push(0);
+            bytes.push(*tag);
+            bytes.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+            bytes.extend_from_slice(&0_u16.to_le_bytes());
+            bytes.extend_from_slice(payload);
+            bytes.resize(bytes.len().next_multiple_of(4), 0);
+        }
+        bytes
+    }
+
+    fn keyword(keyword: StyleKeyword) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(4);
+        bytes.extend_from_slice(&(keyword as u16).to_le_bytes());
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes
+    }
+
+    fn percent(value: f32) -> Vec<u8> {
+        let mut bytes = vec![STYLE_LENGTH_PERCENT, 0, 0, 0];
+        bytes.extend_from_slice(&value.to_le_bytes());
+        bytes
+    }
+
+    fn px(value: f32) -> Vec<u8> {
+        let mut bytes = vec![STYLE_LENGTH_PX, 0, 0, 0];
+        bytes.extend_from_slice(&value.to_le_bytes());
+        bytes
+    }
+
+    fn auto() -> Vec<u8> {
+        let mut bytes = vec![STYLE_LENGTH_AUTO, 0, 0, 0];
+        bytes.extend_from_slice(&0.0_f32.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn computed_display_and_percentage_size_drive_layout_with_direct_prop_priority() {
+        let root = id(0);
+        let hidden = id(1);
+        let hidden_child = id(2);
+        let visible = id(3);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[(
+                        StyleProperty::Display,
+                        STYLE_VALUE_KEYWORD,
+                        keyword(StyleKeyword::None),
+                    )]),
+                },
+                Mutation::DefineResource {
+                    resource_id: 2,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[(
+                        StyleProperty::Width,
+                        STYLE_VALUE_LENGTH,
+                        percent(50.0),
+                    )]),
+                },
+                create(root, NodeKind::Root, None),
+                create(hidden, NodeKind::Container, Some(root)),
+                create(hidden_child, NodeKind::Container, Some(hidden)),
+                create(visible, NodeKind::Container, Some(root)),
+                Mutation::SetRef {
+                    node_id: hidden.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 1,
+                },
+                Mutation::SetRef {
+                    node_id: visible.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 2,
+                },
+                set_f32(hidden, Prop::Width, 200.0),
+                set_f32(hidden, Prop::Height, 40.0),
+                set_f32(hidden_child, Prop::Width, 40.0),
+                set_f32(hidden_child, Prop::Height, 40.0),
+                set_f32(visible, Prop::Width, 80.0),
+                set_f32(visible, Prop::Height, 20.0),
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(200.0, 100.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("style layout");
+
+        assert_eq!(
+            engine.snapshot().geometry(hidden),
+            Some((Point::ZERO, Size::ZERO))
+        );
+        assert_eq!(
+            engine.snapshot().geometry(hidden_child),
+            Some((Point::ZERO, Size::ZERO))
+        );
+        assert_eq!(
+            engine.snapshot().geometry(visible),
+            Some((Point::ZERO, Size::new(80.0, 20.0)))
+        );
+        commit(
+            &mut scene,
+            2,
+            vec![Mutation::ClearProp {
+                node_id: visible.raw(),
+                prop: Prop::Width,
+            }],
+        );
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(200.0, 100.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("percentage layout");
+        assert_eq!(
+            engine.snapshot().geometry(visible),
+            Some((Point::ZERO, Size::new(100.0, 20.0)))
+        );
+    }
+
+    #[test]
+    fn css_box_model_reverse_flex_and_auto_margins_share_one_geometry_path() {
+        let root = id(0);
+        let view = id(1);
+        let first = id(2);
+        let second = id(3);
+        let mut scene = Scene::new();
+        let mut entries = vec![
+            (StyleProperty::Width, STYLE_VALUE_LENGTH, px(100.0)),
+            (StyleProperty::Height, STYLE_VALUE_LENGTH, px(80.0)),
+        ];
+        for property in [
+            StyleProperty::PaddingTop,
+            StyleProperty::PaddingRight,
+            StyleProperty::PaddingBottom,
+            StyleProperty::PaddingLeft,
+        ] {
+            entries.push((property, STYLE_VALUE_LENGTH, px(10.0)));
+        }
+        entries.extend([
+            (
+                StyleProperty::FlexDirection,
+                STYLE_VALUE_KEYWORD,
+                keyword(StyleKeyword::RowReverse),
+            ),
+            (
+                StyleProperty::JustifyContent,
+                STYLE_VALUE_KEYWORD,
+                keyword(StyleKeyword::SpaceBetween),
+            ),
+            (
+                StyleProperty::AlignItems,
+                STYLE_VALUE_KEYWORD,
+                keyword(StyleKeyword::Center),
+            ),
+        ]);
+        for (width, style) in [
+            (StyleProperty::BorderTopWidth, StyleProperty::BorderTopStyle),
+            (
+                StyleProperty::BorderRightWidth,
+                StyleProperty::BorderRightStyle,
+            ),
+            (
+                StyleProperty::BorderBottomWidth,
+                StyleProperty::BorderBottomStyle,
+            ),
+            (
+                StyleProperty::BorderLeftWidth,
+                StyleProperty::BorderLeftStyle,
+            ),
+        ] {
+            entries.push((width, STYLE_VALUE_LENGTH, px(2.0)));
+            entries.push((style, STYLE_VALUE_KEYWORD, keyword(StyleKeyword::Solid)));
+        }
+        entries.sort_unstable_by_key(|(property, _, _)| *property as u16);
+        commit(
+            &mut scene,
+            1,
+            vec![
+                Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&entries),
+                },
+                Mutation::DefineResource {
+                    resource_id: 2,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[
+                        (StyleProperty::MarginRight, STYLE_VALUE_LENGTH, auto()),
+                        (StyleProperty::MarginLeft, STYLE_VALUE_LENGTH, auto()),
+                    ]),
+                },
+                create(root, NodeKind::Root, None),
+                create(view, NodeKind::Container, Some(root)),
+                create(first, NodeKind::Container, Some(view)),
+                create(second, NodeKind::Container, Some(view)),
+                Mutation::SetRef {
+                    node_id: view.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 1,
+                },
+                set_f32(first, Prop::Width, 20.0),
+                set_f32(first, Prop::Height, 10.0),
+                set_f32(second, Prop::Width, 30.0),
+                set_f32(second, Prop::Height, 10.0),
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(300.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("box model layout");
+        assert_eq!(
+            engine.snapshot().geometry(view),
+            Some((Point::ZERO, Size::new(124.0, 104.0)))
+        );
+        assert_eq!(
+            engine.snapshot().geometry(first),
+            Some((Point::new(92.0, 47.0), Size::new(20.0, 10.0)))
+        );
+        assert_eq!(
+            engine.snapshot().geometry(second),
+            Some((Point::new(12.0, 47.0), Size::new(30.0, 10.0)))
+        );
+
+        commit(
+            &mut scene,
+            2,
+            vec![Mutation::SetRef {
+                node_id: first.raw(),
+                prop: Prop::ComputedStyle,
+                resource_id: 2,
+            }],
+        );
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(300.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("auto margin layout");
+        assert_eq!(
+            engine.snapshot().geometry(first),
+            Some((Point::new(67.0, 47.0), Size::new(20.0, 10.0)))
+        );
     }
 
     #[test]

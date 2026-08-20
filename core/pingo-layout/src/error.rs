@@ -1,6 +1,6 @@
 use core::fmt;
 
-use pingo_abi::Prop;
+use pingo_abi::{Prop, StyleProperty};
 use pingo_scene::NodeId;
 
 /// A deterministic layout validation or execution failure.
@@ -16,6 +16,11 @@ pub enum LayoutError {
     InvalidStyle {
         node: NodeId,
         prop: Prop,
+        value: f32,
+    },
+    InvalidComputedStyle {
+        node: NodeId,
+        property: StyleProperty,
         value: f32,
     },
     ContradictoryStyle {

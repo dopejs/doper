@@ -50,6 +50,33 @@ pub enum DisplayCommand {
         /// Interned paint identifier.
         paint_id: u32,
     },
+    /// Fills a rectangle with an inline canonical RGBA color.
+    FillColorRect {
+        /// Rectangle `[x, y, width, height]`.
+        rect: [f32; 4],
+        /// Packed red/green/blue/alpha bytes in `0xRRGGBBAA` order.
+        rgba: u32,
+    },
+    /// Fills a rounded rectangle with an inline canonical RGBA color.
+    FillColorRRect {
+        /// Rectangle `[x, y, width, height]`.
+        rect: [f32; 4],
+        /// Corner radii `[top_left, top_right, bottom_right, bottom_left]`.
+        radii: [f32; 4],
+        /// Packed red/green/blue/alpha bytes in `0xRRGGBBAA` order.
+        rgba: u32,
+    },
+    /// Paints a rounded solid border with independent physical sides.
+    FillColorBorder {
+        /// Outer border rectangle `[x, y, width, height]`.
+        rect: [f32; 4],
+        /// Outer corner radii `[top_left, top_right, bottom_right, bottom_left]`.
+        radii: [f32; 4],
+        /// Physical widths `[top, right, bottom, left]`.
+        widths: [f32; 4],
+        /// Physical side colors `[top, right, bottom, left]`.
+        colors: [u32; 4],
+    },
     /// Fills a rounded rectangle with per-corner radii.
     FillRRect {
         /// Rectangle `[x, y, width, height]`.
@@ -299,6 +326,43 @@ fn decode_command(
             rect: read_f32_array(reader)?,
             paint_id: reader.read_u32()?,
         },
+        DisplayOpcode::FillColorRect => {
+            let rect = read_f32_array(reader)?;
+            if rect[2] < 0.0 || rect[3] < 0.0 {
+                return Err(AbiError::InvalidValue(
+                    "color rectangle has negative extent",
+                ));
+            }
+            DisplayCommand::FillColorRect {
+                rect,
+                rgba: reader.read_u32()?,
+            }
+        }
+        DisplayOpcode::FillColorRRect => {
+            let rect = read_f32_array(reader)?;
+            let radii = read_f32_array(reader)?;
+            validate_rrect(rect, radii)?;
+            DisplayCommand::FillColorRRect {
+                rect,
+                radii,
+                rgba: reader.read_u32()?,
+            }
+        }
+        DisplayOpcode::FillColorBorder => {
+            let rect = read_f32_array(reader)?;
+            let radii = read_f32_array(reader)?;
+            let widths = read_f32_array(reader)?;
+            validate_rrect(rect, radii)?;
+            if widths.iter().any(|width| *width < 0.0) {
+                return Err(AbiError::InvalidValue("border has negative width"));
+            }
+            DisplayCommand::FillColorBorder {
+                rect,
+                radii,
+                widths,
+                colors: read_u32_array(reader)?,
+            }
+        }
         DisplayOpcode::FillRRect => DisplayCommand::FillRRect {
             rect: read_f32_array(reader)?,
             radii: read_f32_array(reader)?,
@@ -402,6 +466,41 @@ fn encode_command(writer: &mut Writer, instruction: &DisplayInstruction) -> Resu
             writer.instruction(DisplayOpcode::FillRect as u8, flags);
             write_f32_array(writer, rect)?;
             writer.u32(*paint_id);
+        }
+        DisplayCommand::FillColorRect { rect, rgba } => {
+            if rect[2] < 0.0 || rect[3] < 0.0 {
+                return Err(AbiError::InvalidValue(
+                    "color rectangle has negative extent",
+                ));
+            }
+            writer.instruction(DisplayOpcode::FillColorRect as u8, flags);
+            write_f32_array(writer, rect)?;
+            writer.u32(*rgba);
+        }
+        DisplayCommand::FillColorRRect { rect, radii, rgba } => {
+            validate_rrect(*rect, *radii)?;
+            writer.instruction(DisplayOpcode::FillColorRRect as u8, flags);
+            write_f32_array(writer, rect)?;
+            write_f32_array(writer, radii)?;
+            writer.u32(*rgba);
+        }
+        DisplayCommand::FillColorBorder {
+            rect,
+            radii,
+            widths,
+            colors,
+        } => {
+            validate_rrect(*rect, *radii)?;
+            if widths.iter().any(|width| *width < 0.0) {
+                return Err(AbiError::InvalidValue("border has negative width"));
+            }
+            writer.instruction(DisplayOpcode::FillColorBorder as u8, flags);
+            write_f32_array(writer, rect)?;
+            write_f32_array(writer, radii)?;
+            write_f32_array(writer, widths)?;
+            for color in colors {
+                writer.u32(*color);
+            }
         }
         DisplayCommand::FillRRect {
             rect,
@@ -510,6 +609,9 @@ fn display_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::ClipRect(_) => DisplayOpcode::ClipRect,
         DisplayCommand::Alpha(_) => DisplayOpcode::Alpha,
         DisplayCommand::FillRect { .. } => DisplayOpcode::FillRect,
+        DisplayCommand::FillColorRect { .. } => DisplayOpcode::FillColorRect,
+        DisplayCommand::FillColorRRect { .. } => DisplayOpcode::FillColorRRect,
+        DisplayCommand::FillColorBorder { .. } => DisplayOpcode::FillColorBorder,
         DisplayCommand::FillRRect { .. } => DisplayOpcode::FillRRect,
         DisplayCommand::FillPath { .. } => DisplayOpcode::FillPath,
         DisplayCommand::DrawGlyphRun { .. } => DisplayOpcode::DrawGlyphRun,
@@ -520,6 +622,20 @@ fn display_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::DrawImage { .. } => DisplayOpcode::DrawImage,
         DisplayCommand::DrawPicture { .. } => DisplayOpcode::DrawPicture,
     }
+}
+
+fn validate_rrect(rect: [f32; 4], radii: [f32; 4]) -> Result<(), AbiError> {
+    if rect[2] < 0.0 || rect[3] < 0.0 {
+        return Err(AbiError::InvalidValue(
+            "rounded rectangle has negative extent",
+        ));
+    }
+    if radii.iter().any(|radius| *radius < 0.0) {
+        return Err(AbiError::InvalidValue(
+            "rounded rectangle has negative radius",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_instruction_size(
@@ -551,6 +667,14 @@ fn read_f32_array<const N: usize>(reader: &mut Reader<'_>) -> Result<[f32; N], A
     let mut result = [0.0; N];
     for value in &mut result {
         *value = reader.read_f32()?;
+    }
+    Ok(result)
+}
+
+fn read_u32_array<const N: usize>(reader: &mut Reader<'_>) -> Result<[u32; N], AbiError> {
+    let mut result = [0; N];
+    for value in &mut result {
+        *value = reader.read_u32()?;
     }
     Ok(result)
 }
@@ -611,6 +735,21 @@ mod tests {
             DisplayCommand::FillRect {
                 rect: [1.0, 2.0, 3.0, 4.0],
                 paint_id: 1,
+            },
+            DisplayCommand::FillColorRect {
+                rect: [1.0, 2.0, 3.0, 4.0],
+                rgba: 0x1122_33ff,
+            },
+            DisplayCommand::FillColorRRect {
+                rect: [1.0, 2.0, 30.0, 40.0],
+                radii: [1.0, 2.0, 3.0, 4.0],
+                rgba: 0x4455_66ff,
+            },
+            DisplayCommand::FillColorBorder {
+                rect: [1.0, 2.0, 30.0, 40.0],
+                radii: [4.0; 4],
+                widths: [1.0, 2.0, 3.0, 4.0],
+                colors: [0x1122_33ff, 0x4455_66ff, 0x7788_99ff, 0xaabb_ccff],
             },
             DisplayCommand::FillRRect {
                 rect: [1.0, 2.0, 3.0, 4.0],

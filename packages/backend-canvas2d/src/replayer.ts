@@ -166,6 +166,38 @@ function validateCommand(
       reader.skipF32(4);
       required(resources.getPaint(reader.u32()), "paint");
       return;
+    case DisplayOpcode.FillColorRect:
+      reader.skipF32(2);
+      if (reader.f32() < 0 || reader.f32() < 0) {
+        replayFail("color rectangle has negative extent");
+      }
+      reader.u32();
+      return;
+    case DisplayOpcode.FillColorRRect: {
+      reader.skipF32(2);
+      if (reader.f32() < 0 || reader.f32() < 0) {
+        replayFail("rounded color rectangle has negative extent");
+      }
+      for (let index = 0; index < 4; index += 1) {
+        if (reader.f32() < 0) replayFail("rounded color rectangle has negative radius");
+      }
+      reader.u32();
+      return;
+    }
+    case DisplayOpcode.FillColorBorder: {
+      reader.skipF32(2);
+      if (reader.f32() < 0 || reader.f32() < 0) {
+        replayFail("color border has negative extent");
+      }
+      for (let index = 0; index < 8; index += 1) {
+        if (reader.f32() < 0) replayFail("color border has a negative radius or width");
+      }
+      reader.u32();
+      reader.u32();
+      reader.u32();
+      reader.u32();
+      return;
+    }
     case DisplayOpcode.FillRRect: {
       reader.skipF32(4);
       for (let index = 0; index < 4; index += 1) {
@@ -305,6 +337,38 @@ function replayCommand(
       context.fillRect(x, y, width, height);
       return;
     }
+    case DisplayOpcode.FillColorRect: {
+      const x = reader.f32();
+      const y = reader.f32();
+      const width = reader.f32();
+      const height = reader.f32();
+      context.fillStyle = rgbaCss(reader.u32());
+      context.fillRect(x, y, width, height);
+      return;
+    }
+    case DisplayOpcode.FillColorRRect: {
+      const x = reader.f32();
+      const y = reader.f32();
+      const width = reader.f32();
+      const height = reader.f32();
+      const topLeft = reader.f32();
+      const topRight = reader.f32();
+      const bottomRight = reader.f32();
+      const bottomLeft = reader.f32();
+      context.fillStyle = rgbaCss(reader.u32());
+      context.beginPath();
+      context.roundRect(x, y, width, height, [topLeft, topRight, bottomRight, bottomLeft]);
+      context.fill();
+      return;
+    }
+    case DisplayOpcode.FillColorBorder: {
+      const rect = [reader.f32(), reader.f32(), reader.f32(), reader.f32()] as const;
+      const radii = [reader.f32(), reader.f32(), reader.f32(), reader.f32()] as const;
+      const widths = [reader.f32(), reader.f32(), reader.f32(), reader.f32()] as const;
+      const colors = [reader.u32(), reader.u32(), reader.u32(), reader.u32()] as const;
+      drawColorBorder(context, rect, radii, widths, colors);
+      return;
+    }
     case DisplayOpcode.FillRRect: {
       const x = reader.f32();
       const y = reader.f32();
@@ -418,6 +482,169 @@ function rgbaCss(value: number): string {
   const blue = (value >>> 8) & 0xff;
   const alpha = value & 0xff;
   return `rgba(${String(red)}, ${String(green)}, ${String(blue)}, ${String(alpha / 255)})`;
+}
+
+function drawColorBorder(
+  context: Canvas2DContext,
+  rect: readonly [number, number, number, number],
+  radii: readonly [number, number, number, number],
+  widths: readonly [number, number, number, number],
+  colors: readonly [number, number, number, number],
+): void {
+  const [x, y, width, height] = rect;
+  const [top, right, bottom, left] = widths;
+  const innerX = x + left;
+  const innerY = y + top;
+  const innerWidth = Math.max(0, width - left - right);
+  const innerHeight = Math.max(0, height - top - bottom);
+  const normalized = normalizeRadii(width, height, radii);
+  const inner = [
+    [Math.max(0, normalized[0] - left), Math.max(0, normalized[0] - top)],
+    [Math.max(0, normalized[1] - right), Math.max(0, normalized[1] - top)],
+    [Math.max(0, normalized[2] - right), Math.max(0, normalized[2] - bottom)],
+    [Math.max(0, normalized[3] - left), Math.max(0, normalized[3] - bottom)],
+  ] as const;
+  context.save();
+  try {
+    context.beginPath();
+    roundedRectPath(context, x, y, width, height, normalized);
+    if (innerWidth > 0 && innerHeight > 0) {
+      roundedRectPath(context, innerX, innerY, innerWidth, innerHeight, inner);
+    }
+    context.clip("evenodd");
+    const outerRight = x + width;
+    const outerBottom = y + height;
+    const innerRight = innerX + innerWidth;
+    const innerBottom = innerY + innerHeight;
+    const polygons = [
+      [x, y, outerRight, y, innerRight, innerY, innerX, innerY],
+      [outerRight, y, outerRight, outerBottom, innerRight, innerBottom, innerRight, innerY],
+      [outerRight, outerBottom, x, outerBottom, innerX, innerBottom, innerRight, innerBottom],
+      [x, outerBottom, x, y, innerX, innerY, innerX, innerBottom],
+    ] as const;
+    for (let side = 0; side < 4; side += 1) {
+      if ((widths[side] ?? 0) <= 0 || ((colors[side] ?? 0) & 0xff) === 0) continue;
+      const polygon = polygons[side];
+      if (polygon === undefined) continue;
+      context.fillStyle = rgbaCss(colors[side] ?? 0);
+      context.beginPath();
+      context.moveTo(polygon[0], polygon[1]);
+      context.lineTo(polygon[2], polygon[3]);
+      context.lineTo(polygon[4], polygon[5]);
+      context.lineTo(polygon[6], polygon[7]);
+      context.closePath();
+      context.fill();
+    }
+  } finally {
+    context.restore();
+  }
+}
+
+function normalizeRadii(
+  width: number,
+  height: number,
+  radii: readonly [number, number, number, number],
+): readonly [number, number, number, number] {
+  const [topLeft, topRight, bottomRight, bottomLeft] = radii;
+  const ratio = (available: number, requested: number): number =>
+    requested <= Number.EPSILON ? 1 : Math.min(1, available / requested);
+  const scale = Math.min(
+    1,
+    ratio(width, topLeft + topRight),
+    ratio(height, topRight + bottomRight),
+    ratio(width, bottomLeft + bottomRight),
+    ratio(height, topLeft + bottomLeft),
+  );
+  return [topLeft * scale, topRight * scale, bottomRight * scale, bottomLeft * scale];
+}
+
+function roundedRectPath(
+  context: Canvas2DContext,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radii:
+    | readonly [number, number, number, number]
+    | readonly [
+        readonly [number, number],
+        readonly [number, number],
+        readonly [number, number],
+        readonly [number, number],
+      ],
+): void {
+  const pairs = radii.map((radius) =>
+    typeof radius === "number" ? ([radius, radius] as const) : radius,
+  );
+  const [topLeft, topRight, bottomRight, bottomLeft] = pairs;
+  context.moveTo(x + (topLeft?.[0] ?? 0), y);
+  context.lineTo(x + width - (topRight?.[0] ?? 0), y);
+  ellipseOrLine(
+    context,
+    x + width - (topRight?.[0] ?? 0),
+    y + (topRight?.[1] ?? 0),
+    topRight?.[0] ?? 0,
+    topRight?.[1] ?? 0,
+    -Math.PI / 2,
+    0,
+    x + width,
+    y + (topRight?.[1] ?? 0),
+  );
+  context.lineTo(x + width, y + height - (bottomRight?.[1] ?? 0));
+  ellipseOrLine(
+    context,
+    x + width - (bottomRight?.[0] ?? 0),
+    y + height - (bottomRight?.[1] ?? 0),
+    bottomRight?.[0] ?? 0,
+    bottomRight?.[1] ?? 0,
+    0,
+    Math.PI / 2,
+    x + width - (bottomRight?.[0] ?? 0),
+    y + height,
+  );
+  context.lineTo(x + (bottomLeft?.[0] ?? 0), y + height);
+  ellipseOrLine(
+    context,
+    x + (bottomLeft?.[0] ?? 0),
+    y + height - (bottomLeft?.[1] ?? 0),
+    bottomLeft?.[0] ?? 0,
+    bottomLeft?.[1] ?? 0,
+    Math.PI / 2,
+    Math.PI,
+    x,
+    y + height - (bottomLeft?.[1] ?? 0),
+  );
+  context.lineTo(x, y + (topLeft?.[1] ?? 0));
+  ellipseOrLine(
+    context,
+    x + (topLeft?.[0] ?? 0),
+    y + (topLeft?.[1] ?? 0),
+    topLeft?.[0] ?? 0,
+    topLeft?.[1] ?? 0,
+    Math.PI,
+    (Math.PI * 3) / 2,
+    x + (topLeft?.[0] ?? 0),
+    y,
+  );
+  context.closePath();
+}
+
+function ellipseOrLine(
+  context: Canvas2DContext,
+  centerX: number,
+  centerY: number,
+  radiusX: number,
+  radiusY: number,
+  startAngle: number,
+  endAngle: number,
+  endX: number,
+  endY: number,
+): void {
+  if (radiusX > 0 && radiusY > 0) {
+    context.ellipse(centerX, centerY, radiusX, radiusY, 0, startAngle, endAngle);
+  } else {
+    context.lineTo(endX, endY);
+  }
 }
 
 function required<T>(value: T | undefined, kind: string): T {

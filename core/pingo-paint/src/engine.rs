@@ -6,6 +6,7 @@ use std::{
 use pingo_abi::{
     DisplayCommand, DisplayInstruction, DisplayList, EditorDecorationKind,
     IMAGE_BITMAP_HEIGHT_OFFSET, IMAGE_BITMAP_WIDTH_OFFSET, NodeKind, Prop, ResourceKind,
+    StyleKeyword, StyleLength, StyleLengthUnit, StyleProperty, StyleTransformOperation,
 };
 use pingo_layout::LayoutSnapshot;
 use pingo_scene::{BitSet, DirtyDomain, NodeId, Scene};
@@ -358,11 +359,19 @@ fn build_display_list(
         if !rebuild.get(index).copied().unwrap_or(true) && current.contains_key(&node) {
             continue;
         }
-        let local: Arc<[DisplayInstruction]> =
-            Arc::from(build_node(scene, layout, index, node, text, virtual_items)?);
+        let hidden = scene.display_none(node);
+        let local: Arc<[DisplayInstruction]> = if hidden {
+            Arc::from([])
+        } else {
+            Arc::from(build_node(scene, layout, index, node, text, virtual_items)?)
+        };
         let mut children = Vec::new();
-        let mut command_count = local.len().checked_add(1).ok_or_else(overflow)?;
-        let mut child = scene.first_child(node);
+        let mut command_count = if hidden {
+            0
+        } else {
+            local.len().checked_add(1).ok_or_else(overflow)?
+        };
+        let mut child = (!hidden).then(|| scene.first_child(node)).flatten();
         while let Some(child_id) = child {
             let cached = updates
                 .get(&child_id)
@@ -423,6 +432,9 @@ fn build_display_list(
     while let Some(item) = stack.pop() {
         match item {
             FlattenItem::Subtree(subtree) => {
+                if subtree.local.is_empty() {
+                    continue;
+                }
                 instructions.extend_from_slice(&subtree.local);
                 stack.push(FlattenItem::Restore);
                 for child in subtree.children.iter().rev() {
@@ -467,8 +479,13 @@ fn build_node(
         let resource = typed_resource(scene, transform_id, ResourceKind::Affine)?;
         let affine = AffineResource::decode(transform_id, resource)?;
         push(&mut instructions, DisplayCommand::Transform(affine.matrix));
+    } else {
+        push_style_transform(scene, node, size, &mut instructions);
     }
-    if let Some(opacity) = scene.f32_prop(node, Prop::Opacity) {
+    if let Some(opacity) = scene
+        .f32_prop(node, Prop::Opacity)
+        .or_else(|| scene.style_f32(node, StyleProperty::Opacity, 0))
+    {
         if !(0.0..=1.0).contains(&opacity) {
             return Err(PaintError::InvalidOpacity { node });
         }
@@ -478,13 +495,26 @@ fn build_node(
     // which the fallback path does not wrap and so can be arbitrarily wider than
     // the box it was measured into. Without this a long line paints across
     // whatever sits beside and below the field.
-    if matches!(
-        scene.kind(node),
-        Some(NodeKind::Scroll | NodeKind::EditableText)
-    ) {
+    let editable_clip = matches!(scene.kind(node), Some(NodeKind::EditableText));
+    let clip_x = editable_clip || scene.clips_axis(node, true);
+    let clip_y = editable_clip || scene.clips_axis(node, false);
+    if clip_x || clip_y {
+        const UNBOUNDED_CLIP: f32 = 1_000_000_000.0;
+        let x = if clip_x { 0.0 } else { -UNBOUNDED_CLIP };
+        let y = if clip_y { 0.0 } else { -UNBOUNDED_CLIP };
+        let width = if clip_x {
+            size.width
+        } else {
+            UNBOUNDED_CLIP * 2.0
+        };
+        let height = if clip_y {
+            size.height
+        } else {
+            UNBOUNDED_CLIP * 2.0
+        };
         push(
             &mut instructions,
-            DisplayCommand::ClipRect([0.0, 0.0, size.width, size.height]),
+            DisplayCommand::ClipRect([x, y, width, height]),
         );
     }
     if scene.kind(node) == Some(NodeKind::EditableText) {
@@ -498,33 +528,87 @@ fn build_node(
             );
         }
     }
-    if let Some(paint_id) = scene.ref_prop(node, Prop::BackgroundColor) {
+    let visible = scene.visible(node);
+    let radius = style_border_radius(scene, node, size);
+    if visible && let Some(paint_id) = scene.ref_prop(node, Prop::BackgroundColor) {
         let resource = typed_resource(scene, paint_id, ResourceKind::Paint)?;
         SolidPaint::decode(paint_id, resource)?;
-        push(
-            &mut instructions,
-            DisplayCommand::FillRect {
-                rect: [0.0, 0.0, size.width, size.height],
-                paint_id,
-            },
-        );
+        if radius > 0.0 {
+            push(
+                &mut instructions,
+                DisplayCommand::FillRRect {
+                    rect: [0.0, 0.0, size.width, size.height],
+                    radii: [radius; 4],
+                    paint_id,
+                },
+            );
+        } else {
+            push(
+                &mut instructions,
+                DisplayCommand::FillRect {
+                    rect: [0.0, 0.0, size.width, size.height],
+                    paint_id,
+                },
+            );
+        }
+    } else if visible
+        && let Some(rgba) = scene.style_rgba(node, StyleProperty::BackgroundColor, 0)
+        && rgba & 0xff != 0
+    {
+        if radius > 0.0 {
+            push(
+                &mut instructions,
+                DisplayCommand::FillColorRRect {
+                    rect: [0.0, 0.0, size.width, size.height],
+                    radii: [radius; 4],
+                    rgba,
+                },
+            );
+        } else {
+            push(
+                &mut instructions,
+                DisplayCommand::FillColorRect {
+                    rect: [0.0, 0.0, size.width, size.height],
+                    rgba,
+                },
+            );
+        }
     }
-    if let Some(image_id) = scene.ref_prop(node, Prop::Image) {
+    if visible && let Some(image_id) = scene.ref_prop(node, Prop::Image) {
         // The whole image is drawn into the node's box. Scene validation has
         // already checked that the declared dimensions describe the pixels that
         // follow, so the source rectangle here cannot exceed the resource.
         let resource = typed_resource(scene, image_id, ResourceKind::Image)?;
         let (image_width, image_height) = image_dimensions(image_id, resource)?;
+        let (source, destination) = image_rects(scene, node, size, image_width, image_height);
         push(
             &mut instructions,
             DisplayCommand::DrawImage {
                 image_id,
-                source: [0.0, 0.0, image_width, image_height],
-                destination: [0.0, 0.0, size.width, size.height],
+                source,
+                destination,
             },
         );
     }
-    let editor_decorations = text.editor_decorations(node);
+    if visible {
+        let (widths, colors) = style_border(scene, node);
+        if widths.iter().any(|width| *width > 0.0) && colors.iter().any(|color| color & 0xff != 0) {
+            push(
+                &mut instructions,
+                DisplayCommand::FillColorBorder {
+                    rect: [0.0, 0.0, size.width, size.height],
+                    radii: [radius; 4],
+                    widths,
+                    colors,
+                },
+            );
+        }
+    }
+    let editor_decorations = if visible {
+        text.editor_decorations(node)
+    } else {
+        &[]
+    };
     for decoration in editor_decorations
         .iter()
         .filter(|decoration| decoration.kind == EditorDecorationKind::Selection)
@@ -538,7 +622,7 @@ fn build_node(
             },
         );
     }
-    if let Some(text_run) = scene.text_run(node) {
+    if visible && let Some(text_run) = scene.text_run(node) {
         typed_resource(scene, text_run.string_id, ResourceKind::Utf8String)?;
         let style_resource = typed_resource(scene, text_run.style_id, ResourceKind::TextStyle)?;
         let style = TextStyleResource::decode(text_run.style_id, style_resource)?;
@@ -587,8 +671,18 @@ fn build_node(
             },
         );
     }
-    if scene.kind(node) == Some(NodeKind::Scroll) {
-        let [scroll_x, scroll_y] = scene.scroll_position(node).unwrap_or([0.0, 0.0]);
+    if visible && scene.is_scroll_container(node) {
+        let [stored_x, stored_y] = scene.scroll_position(node).unwrap_or([0.0, 0.0]);
+        let scroll_x = if scene.scrollable_axis(node, true) {
+            stored_x
+        } else {
+            0.0
+        };
+        let scroll_y = if scene.scrollable_axis(node, false) {
+            stored_y
+        } else {
+            0.0
+        };
         if scroll_x.abs() > f32::EPSILON || scroll_y.abs() > f32::EPSILON {
             push(
                 &mut instructions,
@@ -608,6 +702,199 @@ fn build_node(
         }
     }
     Ok(instructions)
+}
+
+fn image_rects(
+    scene: &Scene,
+    node: NodeId,
+    box_size: pingo_layout::Size,
+    image_width: f32,
+    image_height: f32,
+) -> ([f32; 4], [f32; 4]) {
+    let fit = scene
+        .style_keyword(node, StyleProperty::ObjectFit, 0)
+        .unwrap_or(StyleKeyword::Fill);
+    if fit == StyleKeyword::Fill
+        || image_width <= f32::EPSILON
+        || image_height <= f32::EPSILON
+        || box_size.width <= f32::EPSILON
+        || box_size.height <= f32::EPSILON
+    {
+        return (
+            [0.0, 0.0, image_width, image_height],
+            [0.0, 0.0, box_size.width, box_size.height],
+        );
+    }
+    let contain_scale = (box_size.width / image_width).min(box_size.height / image_height);
+    let scale = match fit {
+        StyleKeyword::Contain => contain_scale,
+        StyleKeyword::Cover => (box_size.width / image_width).max(box_size.height / image_height),
+        StyleKeyword::None => 1.0,
+        StyleKeyword::ScaleDown => contain_scale.min(1.0),
+        _ => 1.0,
+    };
+    let rendered_width = image_width * scale;
+    let rendered_height = image_height * scale;
+    let position = scene
+        .style_position(node, StyleProperty::ObjectPosition, 0)
+        .map_or([0.5, 0.5], |position| {
+            [
+                resolve_object_position(position[0], box_size.width, rendered_width),
+                resolve_object_position(position[1], box_size.height, rendered_height),
+            ]
+        });
+    let offset_x = if scene
+        .style_position(node, StyleProperty::ObjectPosition, 0)
+        .is_some()
+    {
+        position[0]
+    } else {
+        (box_size.width - rendered_width) * 0.5
+    };
+    let offset_y = if scene
+        .style_position(node, StyleProperty::ObjectPosition, 0)
+        .is_some()
+    {
+        position[1]
+    } else {
+        (box_size.height - rendered_height) * 0.5
+    };
+    let visible_left = offset_x.max(0.0);
+    let visible_top = offset_y.max(0.0);
+    let visible_right = (offset_x + rendered_width)
+        .min(box_size.width)
+        .max(visible_left);
+    let visible_bottom = (offset_y + rendered_height)
+        .min(box_size.height)
+        .max(visible_top);
+    let source_x = (visible_left - offset_x) / scale;
+    let source_y = (visible_top - offset_y) / scale;
+    let source_width = (visible_right - visible_left) / scale;
+    let source_height = (visible_bottom - visible_top) / scale;
+    (
+        [source_x, source_y, source_width, source_height],
+        [
+            visible_left,
+            visible_top,
+            visible_right - visible_left,
+            visible_bottom - visible_top,
+        ],
+    )
+}
+
+fn resolve_object_position(length: StyleLength, container: f32, object: f32) -> f32 {
+    match length.unit {
+        StyleLengthUnit::Percent => (container - object) * length.value / 100.0,
+        StyleLengthUnit::Px => length.value,
+        StyleLengthUnit::Auto
+        | StyleLengthUnit::None
+        | StyleLengthUnit::Normal
+        | StyleLengthUnit::Number => (container - object) * 0.5,
+    }
+}
+
+fn style_border_radius(scene: &Scene, node: NodeId, size: pingo_layout::Size) -> f32 {
+    let Some(length) = scene.style_length(node, StyleProperty::BorderRadius, 0) else {
+        return 0.0;
+    };
+    resolve_box_length(length, size.width.min(size.height)).max(0.0)
+}
+
+fn style_border(scene: &Scene, node: NodeId) -> ([f32; 4], [u32; 4]) {
+    let sides = [
+        (
+            StyleProperty::BorderTopWidth,
+            StyleProperty::BorderTopStyle,
+            StyleProperty::BorderTopColor,
+        ),
+        (
+            StyleProperty::BorderRightWidth,
+            StyleProperty::BorderRightStyle,
+            StyleProperty::BorderRightColor,
+        ),
+        (
+            StyleProperty::BorderBottomWidth,
+            StyleProperty::BorderBottomStyle,
+            StyleProperty::BorderBottomColor,
+        ),
+        (
+            StyleProperty::BorderLeftWidth,
+            StyleProperty::BorderLeftStyle,
+            StyleProperty::BorderLeftColor,
+        ),
+    ];
+    let mut widths = [0.0; 4];
+    let mut colors = [0; 4];
+    for (index, (width, style, color)) in sides.into_iter().enumerate() {
+        if scene.style_keyword(node, style, 0) != Some(StyleKeyword::Solid) {
+            continue;
+        }
+        widths[index] = scene
+            .style_length(node, width, 0)
+            .map_or(0.0, |length| resolve_box_length(length, 0.0).max(0.0));
+        colors[index] = scene.style_rgba(node, color, 0).unwrap_or_default();
+    }
+    (widths, colors)
+}
+
+fn push_style_transform(
+    scene: &Scene,
+    node: NodeId,
+    size: pingo_layout::Size,
+    instructions: &mut Vec<DisplayInstruction>,
+) {
+    let Some(operations) = scene
+        .style_transform(node, 0)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let origin = scene
+        .style_position(node, StyleProperty::TransformOrigin, 0)
+        .map_or([size.width * 0.5, size.height * 0.5], |position| {
+            [
+                resolve_box_length(position[0], size.width),
+                resolve_box_length(position[1], size.height),
+            ]
+        });
+    push(
+        instructions,
+        DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, origin[0], origin[1]]),
+    );
+    for operation in operations {
+        let matrix = match *operation {
+            StyleTransformOperation::Matrix(value) => value,
+            StyleTransformOperation::Translate(x, y) => [
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                resolve_box_length(x, size.width),
+                resolve_box_length(y, size.height),
+            ],
+            StyleTransformOperation::Scale([x, y]) => [x, 0.0, 0.0, y, 0.0, 0.0],
+            StyleTransformOperation::Rotate(radians) => {
+                let (sin, cos) = radians.sin_cos();
+                [cos, sin, -sin, cos, 0.0, 0.0]
+            }
+        };
+        push(instructions, DisplayCommand::Transform(matrix));
+    }
+    push(
+        instructions,
+        DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, -origin[0], -origin[1]]),
+    );
+}
+
+fn resolve_box_length(length: StyleLength, basis: f32) -> f32 {
+    match length.unit {
+        StyleLengthUnit::Px => length.value,
+        StyleLengthUnit::Percent => basis * length.value / 100.0,
+        StyleLengthUnit::Auto
+        | StyleLengthUnit::None
+        | StyleLengthUnit::Normal
+        | StyleLengthUnit::Number => 0.0,
+    }
 }
 
 fn overflow() -> PaintError {

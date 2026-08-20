@@ -170,7 +170,13 @@ describe("computed style resolver", () => {
       inlineStyle: { color: "#444", width: 30 },
       legacyStyle: { width: 40 },
     });
-    expect(result.diagnostics).toEqual([]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "legacy-direct-prop-conflict",
+        property: "width",
+        severity: "warning",
+      }),
+    ]);
     expect(result.style.color).toBe("#444444ff");
     expect(result.style.width).toBe("40px");
   });

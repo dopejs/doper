@@ -673,6 +673,38 @@
           "fields": ["f32", "f32", "f32", "f32", "u32"]
         },
         {
+          "name": "FillColorRect",
+          "opcode": 39,
+          "fields": ["f32", "f32", "f32", "f32", "u32"]
+        },
+        {
+          "name": "FillColorRRect",
+          "opcode": 40,
+          "fields": ["f32", "f32", "f32", "f32", "f32", "f32", "f32", "f32", "u32"]
+        },
+        {
+          "name": "FillColorBorder",
+          "opcode": 41,
+          "fields": [
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "u32",
+            "u32",
+            "u32",
+            "u32"
+          ]
+        },
+        {
           "name": "DrawEditorDecoration",
           "opcode": 37,
           "fields": ["f32", "f32", "f32", "f32", "u32", "u16", "pad16"]

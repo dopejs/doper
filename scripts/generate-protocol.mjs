@@ -11,7 +11,13 @@ const check = process.argv.includes("--check");
 const schema = JSON.parse(await readFile(schemaPath, "utf8"));
 validateSchema(schema);
 const rustOutput = renderRust(schema);
-const typeScriptOutput = await format(renderTypeScript(schema), { parser: "typescript" });
+const typeScriptOutput = await format(
+  renderTypeScript(schema).replace(
+    "  Semantics = 16,\n}",
+    "  Semantics = 16,\n  Scroll = 32,\n}",
+  ),
+  { parser: "typescript" },
+);
 
 const outputs = new Map([
   [path.join(root, "core/pingo-abi/src/generated.rs"), rustOutput.replace(/\n+$/u, "\n")],

@@ -24,6 +24,20 @@ export type DisplayCommand =
   | { readonly type: "clipRect"; readonly rect: readonly number[] }
   | { readonly type: "alpha"; readonly value: number }
   | { readonly type: "fillRect"; readonly rect: readonly number[]; readonly paintId: number }
+  | { readonly type: "fillColorRect"; readonly rect: readonly number[]; readonly rgba: number }
+  | {
+      readonly type: "fillColorRRect";
+      readonly rect: readonly number[];
+      readonly radii: readonly number[];
+      readonly rgba: number;
+    }
+  | {
+      readonly type: "fillColorBorder";
+      readonly rect: readonly number[];
+      readonly radii: readonly number[];
+      readonly widths: readonly number[];
+      readonly colors: readonly number[];
+    }
   | {
       readonly type: "fillRRect";
       readonly rect: readonly number[];
@@ -154,6 +168,42 @@ function decodeCommand(reader: DisplayListReader, opcode: DisplayOpcode): Displa
     }
     case DisplayOpcode.FillRect:
       return { type: "fillRect", rect: reader.f32s(4), paintId: reader.u32() };
+    case DisplayOpcode.FillColorRect: {
+      const rect = reader.f32s(4);
+      if ((rect[2] ?? -1) < 0 || (rect[3] ?? -1) < 0) {
+        return fail("color rectangle has negative extent");
+      }
+      return { type: "fillColorRect", rect, rgba: reader.u32() };
+    }
+    case DisplayOpcode.FillColorRRect: {
+      const rect = reader.f32s(4);
+      const radii = reader.f32s(4);
+      if ((rect[2] ?? -1) < 0 || (rect[3] ?? -1) < 0) {
+        return fail("rounded color rectangle has negative extent");
+      }
+      if (radii.some((radius) => radius < 0)) {
+        return fail("rounded color rectangle has negative radius");
+      }
+      return { type: "fillColorRRect", rect, radii, rgba: reader.u32() };
+    }
+    case DisplayOpcode.FillColorBorder: {
+      const rect = reader.f32s(4);
+      const radii = reader.f32s(4);
+      const widths = reader.f32s(4);
+      if ((rect[2] ?? -1) < 0 || (rect[3] ?? -1) < 0) {
+        return fail("color border has negative extent");
+      }
+      if (radii.some((radius) => radius < 0) || widths.some((width) => width < 0)) {
+        return fail("color border has a negative radius or width");
+      }
+      return {
+        type: "fillColorBorder",
+        rect,
+        radii,
+        widths,
+        colors: [reader.u32(), reader.u32(), reader.u32(), reader.u32()],
+      };
+    }
     case DisplayOpcode.FillRRect:
       return {
         type: "fillRRect",

@@ -870,7 +870,7 @@ impl CoreEngine {
         )?;
         let mut ancestor = self.scene.parent(node);
         while let Some(candidate) = ancestor {
-            if self.scene.kind(candidate) == Some(NodeKind::Scroll) {
+            if self.scene.is_scroll_container(candidate) {
                 break;
             }
             ancestor = self.scene.parent(candidate);
@@ -1097,14 +1097,14 @@ impl CoreEngine {
                     .iter()
                     .rev()
                     .copied()
-                    .find(|node| self.scene.kind(*node) == Some(NodeKind::Scroll))
+                    .find(|node| self.scene.is_scroll_container(*node))
             });
             // Text selection wins over scroll dragging when the editable is deeper.
             let editable_is_deeper = hit.as_ref().is_some_and(|hit| {
                 let scroll = hit
                     .path
                     .iter()
-                    .rposition(|node| self.scene.kind(*node) == Some(NodeKind::Scroll));
+                    .rposition(|node| self.scene.is_scroll_container(*node));
                 let editable = hit
                     .path
                     .iter()
@@ -1545,7 +1545,7 @@ impl CoreEngine {
             .hit
             .geometries()
             .filter(|(node, geometry)| {
-                self.scene.kind(*node) == Some(NodeKind::Scroll)
+                self.scene.is_scroll_container(*node)
                     && geometry.aabb.right > geometry.aabb.left
                     && geometry.aabb.bottom > geometry.aabb.top
             })
@@ -1576,6 +1576,9 @@ impl CoreEngine {
         let mut payload = Vec::new();
         let focused = self.editing.active_visual().map(|visual| visual.node);
         for &node in self.scene.ids() {
+            if self.scene.excluded_by_display(node) || !self.scene.visible(node) {
+                continue;
+            }
             let role = self.semantic_string(node, Prop::SemanticRole);
             let label = self.semantic_string(node, Prop::SemanticLabel);
             let mut value = self.semantic_string(node, Prop::SemanticValue);

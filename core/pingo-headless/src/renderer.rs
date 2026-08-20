@@ -136,23 +136,13 @@ impl HeadlessRenderer {
             }
             DisplayCommand::Alpha(alpha) => self.current_mut().alpha *= alpha,
             DisplayCommand::FillRect { rect, paint_id } => {
-                let resource = scene
-                    .resource(paint_id)
-                    .ok_or(HeadlessError::MissingResource {
-                        resource_id: paint_id,
-                    })?;
-                if resource.kind != ResourceKind::Paint {
-                    return Err(HeadlessError::WrongResourceKind {
-                        resource_id: paint_id,
-                        actual: resource.kind,
-                    });
-                }
-                let paint = SolidPaint::decode(paint_id, resource)?;
+                let paint = solid_paint(scene, paint_id)?;
                 let state = self.current().clone();
                 let polygon = state.transform.rect(rect);
                 self.fill_polygon(polygon, &state.clips, paint, state.alpha, width, height);
             }
-            DisplayCommand::FillPlaceholder { rect, rgba }
+            DisplayCommand::FillColorRect { rect, rgba }
+            | DisplayCommand::FillPlaceholder { rect, rgba }
             | DisplayCommand::DrawEditorDecoration { rect, rgba, .. } => {
                 let [red, green, blue, alpha] = rgba.to_be_bytes();
                 let state = self.current().clone();
@@ -170,6 +160,41 @@ impl HeadlessRenderer {
                     width,
                     height,
                 );
+            }
+            DisplayCommand::FillColorRRect { rect, radii, rgba } => {
+                let [red, green, blue, alpha] = rgba.to_be_bytes();
+                let state = self.current().clone();
+                self.fill_rrect(
+                    rect,
+                    radii,
+                    &state,
+                    SolidPaint {
+                        red,
+                        green,
+                        blue,
+                        alpha,
+                    },
+                    width,
+                    height,
+                );
+            }
+            DisplayCommand::FillRRect {
+                rect,
+                radii,
+                paint_id,
+            } => {
+                let paint = solid_paint(scene, paint_id)?;
+                let state = self.current().clone();
+                self.fill_rrect(rect, radii, &state, paint, width, height);
+            }
+            DisplayCommand::FillColorBorder {
+                rect,
+                radii,
+                widths,
+                colors,
+            } => {
+                let state = self.current().clone();
+                self.fill_border(rect, radii, widths, colors, &state, width, height);
             }
             unsupported => {
                 return Err(HeadlessError::UnsupportedCommand(command_opcode(
@@ -219,6 +244,135 @@ impl HeadlessRenderer {
         }
     }
 
+    fn fill_rrect(
+        &mut self,
+        rect: [f32; 4],
+        radii: [f32; 4],
+        state: &State,
+        paint: SolidPaint,
+        width: u32,
+        height: u32,
+    ) {
+        let polygon = state.transform.rect(rect);
+        let Some(bounds) = polygon.bounds(width, height) else {
+            return;
+        };
+        let Some(inverse) = state.transform.inverse() else {
+            return;
+        };
+        let source_alpha = scale_alpha(paint.alpha, state.alpha);
+        if source_alpha == 0 {
+            return;
+        }
+        let radii = normalize_radii(rect[2], rect[3], radii);
+        for y in bounds.top..bounds.bottom {
+            for x in bounds.left..bounds.right {
+                self.metrics.candidate_pixels += 1;
+                let sample = Point {
+                    x: f64::from(x) + 0.5,
+                    y: f64::from(y) + 0.5,
+                };
+                let local = inverse.point_f64(sample);
+                if !rounded_rect_contains(rect, radii, local)
+                    || state.clips.iter().any(|clip| !clip.contains(sample))
+                {
+                    continue;
+                }
+                let pixel = (usize::try_from(y).expect("bounded y")
+                    * usize::try_from(width).expect("bounded width")
+                    + usize::try_from(x).expect("bounded x"))
+                    * 4;
+                blend(
+                    &mut self.pixels[pixel..pixel + 4],
+                    [paint.red, paint.green, paint.blue, source_alpha],
+                );
+                self.metrics.blended_pixels += 1;
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn fill_border(
+        &mut self,
+        rect: [f32; 4],
+        radii: [f32; 4],
+        widths: [f32; 4],
+        colors: [u32; 4],
+        state: &State,
+        surface_width: u32,
+        surface_height: u32,
+    ) {
+        let polygon = state.transform.rect(rect);
+        let Some(bounds) = polygon.bounds(surface_width, surface_height) else {
+            return;
+        };
+        let Some(inverse) = state.transform.inverse() else {
+            return;
+        };
+        let [x, y, width, height] = rect;
+        let [top, right, bottom, left] = widths;
+        let radii = normalize_radii(width, height, radii);
+        let inner = [
+            x + left,
+            y + top,
+            (width - left - right).max(0.0),
+            (height - top - bottom).max(0.0),
+        ];
+        let inner_radii = [
+            [(radii[0] - left).max(0.0), (radii[0] - top).max(0.0)],
+            [(radii[1] - right).max(0.0), (radii[1] - top).max(0.0)],
+            [(radii[2] - right).max(0.0), (radii[2] - bottom).max(0.0)],
+            [(radii[3] - left).max(0.0), (radii[3] - bottom).max(0.0)],
+        ];
+        for pixel_y in bounds.top..bounds.bottom {
+            for pixel_x in bounds.left..bounds.right {
+                self.metrics.candidate_pixels += 1;
+                let sample = Point {
+                    x: f64::from(pixel_x) + 0.5,
+                    y: f64::from(pixel_y) + 0.5,
+                };
+                let local = inverse.point_f64(sample);
+                if !rounded_rect_contains(rect, radii, local)
+                    || (inner[2] > 0.0
+                        && inner[3] > 0.0
+                        && elliptical_rrect_contains(inner, inner_radii, local))
+                    || state.clips.iter().any(|clip| !clip.contains(sample))
+                {
+                    continue;
+                }
+                let distances = [
+                    side_distance(local.y - f64::from(y), top),
+                    side_distance(f64::from(x + width) - local.x, right),
+                    side_distance(f64::from(y + height) - local.y, bottom),
+                    side_distance(local.x - f64::from(x), left),
+                ];
+                let Some(side) = distances
+                    .iter()
+                    .enumerate()
+                    .filter(|(side, _)| widths[*side] > 0.0)
+                    .min_by(|left, right| left.1.total_cmp(right.1))
+                    .map(|(side, _)| side)
+                else {
+                    continue;
+                };
+                let [red, green, blue, alpha] = colors[side].to_be_bytes();
+                let source_alpha = scale_alpha(alpha, state.alpha);
+                if source_alpha == 0 {
+                    continue;
+                }
+                let pixel = (usize::try_from(pixel_y).expect("bounded y")
+                    * usize::try_from(surface_width).expect("bounded width")
+                    + usize::try_from(pixel_x).expect("bounded x"))
+                    * 4;
+                blend(
+                    &mut self.pixels[pixel..pixel + 4],
+                    [red, green, blue, source_alpha],
+                );
+                self.metrics.blended_pixels += 1;
+            }
+        }
+    }
+
     fn current(&self) -> &State {
         self.states.last().expect("DisplayList state is validated")
     }
@@ -228,6 +382,21 @@ impl HeadlessRenderer {
             .last_mut()
             .expect("DisplayList state is validated")
     }
+}
+
+fn solid_paint(scene: &Scene, paint_id: u32) -> Result<SolidPaint, HeadlessError> {
+    let resource = scene
+        .resource(paint_id)
+        .ok_or(HeadlessError::MissingResource {
+            resource_id: paint_id,
+        })?;
+    if resource.kind != ResourceKind::Paint {
+        return Err(HeadlessError::WrongResourceKind {
+            resource_id: paint_id,
+            actual: resource.kind,
+        });
+    }
+    Ok(SolidPaint::decode(paint_id, resource)?)
 }
 
 #[derive(Clone, Debug)]
@@ -273,6 +442,31 @@ impl Affine {
             x: f64::from(m00 * horizontal + m01 * vertical + tx),
             y: f64::from(m10 * horizontal + m11 * vertical + ty),
         }
+    }
+
+    fn point_f64(self, point: Point) -> Point {
+        let [m00, m10, m01, m11, tx, ty] = self.0;
+        Point {
+            x: f64::from(m00) * point.x + f64::from(m01) * point.y + f64::from(tx),
+            y: f64::from(m10) * point.x + f64::from(m11) * point.y + f64::from(ty),
+        }
+    }
+
+    fn inverse(self) -> Option<Self> {
+        let [m00, m10, m01, m11, tx, ty] = self.0;
+        let determinant = m00 * m11 - m10 * m01;
+        if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
+            return None;
+        }
+        let inverse = determinant.recip();
+        Some(Self([
+            m11 * inverse,
+            -m10 * inverse,
+            -m01 * inverse,
+            m00 * inverse,
+            (m01 * ty - m11 * tx) * inverse,
+            (m10 * tx - m00 * ty) * inverse,
+        ]))
     }
 
     fn rect(self, [x, y, width, height]: [f32; 4]) -> Polygon {
@@ -382,6 +576,10 @@ fn validate_supported(display_list: &DisplayList) -> Result<(), HeadlessError> {
             | DisplayCommand::ClipRect(_)
             | DisplayCommand::Alpha(_)
             | DisplayCommand::FillRect { .. }
+            | DisplayCommand::FillColorRect { .. }
+            | DisplayCommand::FillRRect { .. }
+            | DisplayCommand::FillColorRRect { .. }
+            | DisplayCommand::FillColorBorder { .. }
             | DisplayCommand::FillPlaceholder { .. }
             | DisplayCommand::DrawEditorDecoration { .. } => {}
             ref command => return Err(HeadlessError::UnsupportedCommand(command_opcode(command))),
@@ -398,6 +596,9 @@ fn command_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::ClipRect(_) => DisplayOpcode::ClipRect,
         DisplayCommand::Alpha(_) => DisplayOpcode::Alpha,
         DisplayCommand::FillRect { .. } => DisplayOpcode::FillRect,
+        DisplayCommand::FillColorRect { .. } => DisplayOpcode::FillColorRect,
+        DisplayCommand::FillColorRRect { .. } => DisplayOpcode::FillColorRRect,
+        DisplayCommand::FillColorBorder { .. } => DisplayOpcode::FillColorBorder,
         DisplayCommand::FillRRect { .. } => DisplayOpcode::FillRRect,
         DisplayCommand::FillPath { .. } => DisplayOpcode::FillPath,
         DisplayCommand::DrawGlyphRun { .. } => DisplayOpcode::DrawGlyphRun,
@@ -407,6 +608,127 @@ fn command_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::DrawEditorDecoration { .. } => DisplayOpcode::DrawEditorDecoration,
         DisplayCommand::DrawImage { .. } => DisplayOpcode::DrawImage,
         DisplayCommand::DrawPicture { .. } => DisplayOpcode::DrawPicture,
+    }
+}
+
+fn normalize_radii(width: f32, height: f32, radii: [f32; 4]) -> [f32; 4] {
+    let [top_left, top_right, bottom_right, bottom_left] = radii;
+    let scale = [
+        ratio(width, top_left + top_right),
+        ratio(height, top_right + bottom_right),
+        ratio(width, bottom_left + bottom_right),
+        ratio(height, top_left + bottom_left),
+    ]
+    .into_iter()
+    .fold(1.0_f32, f32::min);
+    radii.map(|radius| radius * scale)
+}
+
+fn ratio(available: f32, requested: f32) -> f32 {
+    if requested <= f32::EPSILON {
+        1.0
+    } else {
+        (available / requested).min(1.0)
+    }
+}
+
+fn rounded_rect_contains(rect: [f32; 4], radii: [f32; 4], point: Point) -> bool {
+    let [x, y, width, height] = rect.map(f64::from);
+    if point.x < x || point.x >= x + width || point.y < y || point.y >= y + height {
+        return false;
+    }
+    let radii = radii.map(f64::from);
+    let corners = [
+        (
+            x + radii[0],
+            y + radii[0],
+            radii[0],
+            point.x < x + radii[0],
+            point.y < y + radii[0],
+        ),
+        (
+            x + width - radii[1],
+            y + radii[1],
+            radii[1],
+            point.x >= x + width - radii[1],
+            point.y < y + radii[1],
+        ),
+        (
+            x + width - radii[2],
+            y + height - radii[2],
+            radii[2],
+            point.x >= x + width - radii[2],
+            point.y >= y + height - radii[2],
+        ),
+        (
+            x + radii[3],
+            y + height - radii[3],
+            radii[3],
+            point.x < x + radii[3],
+            point.y >= y + height - radii[3],
+        ),
+    ];
+    for (center_x, center_y, radius, in_x, in_y) in corners {
+        if radius > 0.0 && in_x && in_y {
+            let dx = point.x - center_x;
+            let dy = point.y - center_y;
+            return dx * dx + dy * dy <= radius * radius;
+        }
+    }
+    true
+}
+
+fn elliptical_rrect_contains(rect: [f32; 4], radii: [[f32; 2]; 4], point: Point) -> bool {
+    let [x, y, width, height] = rect.map(f64::from);
+    if point.x < x || point.x >= x + width || point.y < y || point.y >= y + height {
+        return false;
+    }
+    let radii = radii.map(|radius| radius.map(f64::from));
+    let corners = [
+        (
+            x + radii[0][0],
+            y + radii[0][1],
+            radii[0],
+            point.x < x + radii[0][0],
+            point.y < y + radii[0][1],
+        ),
+        (
+            x + width - radii[1][0],
+            y + radii[1][1],
+            radii[1],
+            point.x >= x + width - radii[1][0],
+            point.y < y + radii[1][1],
+        ),
+        (
+            x + width - radii[2][0],
+            y + height - radii[2][1],
+            radii[2],
+            point.x >= x + width - radii[2][0],
+            point.y >= y + height - radii[2][1],
+        ),
+        (
+            x + radii[3][0],
+            y + height - radii[3][1],
+            radii[3],
+            point.x < x + radii[3][0],
+            point.y >= y + height - radii[3][1],
+        ),
+    ];
+    for (center_x, center_y, [radius_x, radius_y], in_x, in_y) in corners {
+        if radius_x > 0.0 && radius_y > 0.0 && in_x && in_y {
+            let dx = (point.x - center_x) / radius_x;
+            let dy = (point.y - center_y) / radius_y;
+            return dx * dx + dy * dy <= 1.0;
+        }
+    }
+    true
+}
+
+fn side_distance(distance: f64, width: f32) -> f64 {
+    if width <= f32::EPSILON {
+        f64::INFINITY
+    } else {
+        distance / f64::from(width)
     }
 }
 
@@ -589,6 +911,29 @@ mod tests {
         assert_eq!(pixel(&image, 2, 1), [20, 40, 60, 128]);
         assert_eq!(pixel(&image, 3, 1), [0, 0, 0, 0]);
         assert_ne!(image.hash(), 0);
+    }
+
+    #[test]
+    fn inline_rounded_rect_excludes_corner_pixels() {
+        let scene = scene_with_paint(SolidPaint {
+            red: 0,
+            green: 0,
+            blue: 0,
+            alpha: 255,
+        });
+        let bytes = display(vec![DisplayCommand::FillColorRRect {
+            rect: [0.0, 0.0, 8.0, 8.0],
+            radii: [4.0; 4],
+            rgba: 0x1234_56ff,
+        }]);
+        let image = HeadlessRenderer::new()
+            .render(&bytes, &scene, 8, 8)
+            .expect("rounded render");
+
+        assert_eq!(pixel(&image, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(pixel(&image, 3, 0), [0x12, 0x34, 0x56, 0xff]);
+        assert_eq!(pixel(&image, 4, 4), [0x12, 0x34, 0x56, 0xff]);
+        assert_eq!(pixel(&image, 7, 7), [0, 0, 0, 0]);
     }
 
     #[test]

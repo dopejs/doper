@@ -8,7 +8,8 @@ use std::fmt;
 use pingo_abi::{
     AFFINE_A_OFFSET, AFFINE_B_OFFSET, AFFINE_C_OFFSET, AFFINE_D_OFFSET, AFFINE_E_OFFSET,
     AFFINE_F_OFFSET, AFFINE_RESOURCE_FIXED_BYTES, AFFINE_RESOURCE_VARIANT, AFFINE_VARIANT_OFFSET,
-    AFFINE_VERSION_OFFSET, Prop, RESOURCE_ENCODING_VERSION,
+    AFFINE_VERSION_OFFSET, Prop, RESOURCE_ENCODING_VERSION, StyleKeyword, StyleLength,
+    StyleLengthUnit, StyleProperty, StyleTransformOperation,
 };
 use pingo_layout::LayoutSnapshot;
 use pingo_scene::{NodeId, Scene};
@@ -72,6 +73,8 @@ pub struct WorldGeometry {
     pub width: f32,
     /// Local height.
     pub height: f32,
+    /// Resolved circular corner radius in local logical pixels.
+    pub radius: f32,
 }
 
 impl WorldGeometry {
@@ -92,7 +95,7 @@ impl WorldGeometry {
             return false;
         };
         let local = inverse.point(point);
-        local.x >= 0.0 && local.x < self.width && local.y >= 0.0 && local.y < self.height
+        rounded_box_contains(local, self.width, self.height, self.radius)
     }
 }
 
@@ -141,6 +144,7 @@ pub struct HitIndex {
     ids: Vec<NodeId>,
     positions: std::collections::HashMap<NodeId, usize>,
     geometry: Vec<WorldGeometry>,
+    hittable: Vec<bool>,
     leaves: Vec<usize>,
     nodes: Vec<BvhNode>,
     root: Option<usize>,
@@ -166,6 +170,18 @@ impl HitIndex {
         }
         let geometry = build_world_geometry(scene, layout)?;
         let topology_changed = self.ids != scene.ids();
+        let hittable = scene
+            .ids()
+            .iter()
+            .copied()
+            .map(|node| {
+                !scene.excluded_by_display(node)
+                    && scene.visible(node)
+                    && scene.style_keyword(node, StyleProperty::PointerEvents, 0)
+                        != Some(StyleKeyword::None)
+            })
+            .collect::<Vec<_>>();
+        let eligibility_changed = self.hittable != hittable;
         self.ids.clear();
         self.ids.extend_from_slice(scene.ids());
         if topology_changed {
@@ -174,7 +190,8 @@ impl HitIndex {
                 .extend(self.ids.iter().copied().enumerate().map(|(i, id)| (id, i)));
         }
         self.geometry = geometry;
-        if topology_changed {
+        self.hittable = hittable;
+        if topology_changed || eligibility_changed {
             self.rebuild();
             self.topology_rebuilds = self.topology_rebuilds.saturating_add(1);
         } else {
@@ -231,8 +248,10 @@ impl HitIndex {
             .geometry
             .iter()
             .enumerate()
-            .filter(|(_, geometry)| {
-                geometry.aabb.contains(point) && geometry.contains_precise(point)
+            .filter(|(index, geometry)| {
+                self.hittable.get(*index).copied().unwrap_or(false)
+                    && geometry.aabb.contains(point)
+                    && geometry.contains_precise(point)
             })
             .map(|(index, _)| index)
             .next_back()?;
@@ -256,7 +275,11 @@ impl HitIndex {
             .geometry
             .iter()
             .enumerate()
-            .filter(|(_, geometry)| geometry.width > 0.0 && geometry.height > 0.0)
+            .filter(|(index, geometry)| {
+                self.hittable.get(*index).copied().unwrap_or(false)
+                    && geometry.width > 0.0
+                    && geometry.height > 0.0
+            })
             .map(|(index, _)| index)
             .collect();
         self.nodes.clear();
@@ -289,6 +312,8 @@ fn build_world_geometry(
         let mut world = parent_space.multiply(Affine::translation(offset.x, offset.y));
         if let Some(resource_id) = scene.ref_prop(node, Prop::Transform) {
             world = world.multiply(decode_affine(scene, resource_id)?);
+        } else if let Some(transform) = style_affine(scene, node, size.width, size.height) {
+            world = world.multiply(transform);
         }
         let own_aabb = world.rect_aabb(size.width, size.height);
         let inherited_clip = scene
@@ -301,16 +326,122 @@ fn build_world_geometry(
             aabb,
             width: size.width,
             height: size.height,
+            radius: scene
+                .style_length(node, StyleProperty::BorderRadius, 0)
+                .map_or(0.0, |length| {
+                    resolve_box_length(length, size.width.min(size.height)).max(0.0)
+                }),
         });
-        let [scroll_x, scroll_y] = scene.scroll_position(node).unwrap_or([0.0, 0.0]);
-        child_spaces.push(world.multiply(Affine::translation(-scroll_x, -scroll_y)));
-        child_clips.push(if scene.kind(node) == Some(pingo_abi::NodeKind::Scroll) {
-            Some(inherited_clip.map_or(own_aabb, |clip| own_aabb.intersect(clip)))
+        let [stored_x, stored_y] = scene.scroll_position(node).unwrap_or([0.0, 0.0]);
+        let scroll_x = if scene.scrollable_axis(node, true) {
+            stored_x
         } else {
-            inherited_clip
-        });
+            0.0
+        };
+        let scroll_y = if scene.scrollable_axis(node, false) {
+            stored_y
+        } else {
+            0.0
+        };
+        child_spaces.push(world.multiply(Affine::translation(-scroll_x, -scroll_y)));
+        child_clips.push(axis_clip(
+            inherited_clip,
+            own_aabb,
+            scene.clips_axis(node, true),
+            scene.clips_axis(node, false),
+        ));
     }
     Ok(result)
+}
+
+fn rounded_box_contains(point: HitPoint, width: f32, height: f32, radius: f32) -> bool {
+    if point.x < 0.0 || point.x >= width || point.y < 0.0 || point.y >= height {
+        return false;
+    }
+    let radius = radius.min(width * 0.5).min(height * 0.5);
+    if radius <= f32::EPSILON {
+        return true;
+    }
+    let center_x = if point.x < radius {
+        radius
+    } else if point.x >= width - radius {
+        width - radius
+    } else {
+        return true;
+    };
+    let center_y = if point.y < radius {
+        radius
+    } else if point.y >= height - radius {
+        height - radius
+    } else {
+        return true;
+    };
+    let dx = point.x - center_x;
+    let dy = point.y - center_y;
+    dx * dx + dy * dy <= radius * radius
+}
+
+fn axis_clip(
+    inherited: Option<WorldRect>,
+    own: WorldRect,
+    horizontal: bool,
+    vertical: bool,
+) -> Option<WorldRect> {
+    if !horizontal && !vertical {
+        return inherited;
+    }
+    let own_axes = WorldRect {
+        left: if horizontal {
+            own.left
+        } else {
+            f32::NEG_INFINITY
+        },
+        top: if vertical { own.top } else { f32::NEG_INFINITY },
+        right: if horizontal { own.right } else { f32::INFINITY },
+        bottom: if vertical { own.bottom } else { f32::INFINITY },
+    };
+    Some(inherited.map_or(own_axes, |clip| own_axes.intersect(clip)))
+}
+
+fn style_affine(scene: &Scene, node: NodeId, width: f32, height: f32) -> Option<Affine> {
+    let operations = scene
+        .style_transform(node, 0)
+        .filter(|value| !value.is_empty())?;
+    let origin = scene
+        .style_position(node, StyleProperty::TransformOrigin, 0)
+        .map_or([width * 0.5, height * 0.5], |position| {
+            [
+                resolve_box_length(position[0], width),
+                resolve_box_length(position[1], height),
+            ]
+        });
+    let mut result = Affine::translation(origin[0], origin[1]);
+    for operation in operations {
+        let next = match *operation {
+            StyleTransformOperation::Matrix(value) => Affine(value),
+            StyleTransformOperation::Translate(x, y) => {
+                Affine::translation(resolve_box_length(x, width), resolve_box_length(y, height))
+            }
+            StyleTransformOperation::Scale([x, y]) => Affine([x, 0.0, 0.0, y, 0.0, 0.0]),
+            StyleTransformOperation::Rotate(radians) => {
+                let (sin, cos) = radians.sin_cos();
+                Affine([cos, sin, -sin, cos, 0.0, 0.0])
+            }
+        };
+        result = result.multiply(next);
+    }
+    Some(result.multiply(Affine::translation(-origin[0], -origin[1])))
+}
+
+fn resolve_box_length(length: StyleLength, basis: f32) -> f32 {
+    match length.unit {
+        StyleLengthUnit::Px => length.value,
+        StyleLengthUnit::Percent => basis * length.value / 100.0,
+        StyleLengthUnit::Auto
+        | StyleLengthUnit::None
+        | StyleLengthUnit::Normal
+        | StyleLengthUnit::Number => 0.0,
+    }
 }
 
 fn decode_affine(scene: &Scene, resource_id: u32) -> Result<Affine, HitError> {

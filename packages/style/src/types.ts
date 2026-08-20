@@ -11,6 +11,7 @@ export type StyleDiagnosticCode =
   | "important-not-supported"
   | "invalid-class-name"
   | "invalid-css"
+  | "legacy-direct-prop-conflict"
   | "property-not-applicable"
   | "state-property-not-supported"
   | "unsupported-selector"

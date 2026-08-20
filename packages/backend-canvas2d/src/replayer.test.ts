@@ -120,6 +120,18 @@ describe("Canvas2DReplayer", () => {
         writeF32s(view, 4, [1, 2, 30, 40, 3, 4, 5, 6]);
         view.setUint32(36, 1, true);
       }),
+      command(DisplayOpcode.FillColorRRect, 36, (view) => {
+        writeF32s(view, 4, [2, 3, 20, 30, 2, 2, 2, 2]);
+        view.setUint32(36, 0x1234_56ff, true);
+      }),
+      command(DisplayOpcode.FillColorBorder, 64, (view) => {
+        writeF32s(view, 4, [0, 0, 40, 30, 5, 5, 5, 5, 1, 2, 3, 4]);
+        for (const [index, color] of [
+          0xff00_00ff, 0x00ff_00ff, 0x0000_ffff, 0xffff_00ff,
+        ].entries()) {
+          view.setUint32(52 + index * 4, color, true);
+        }
+      }),
       command(DisplayOpcode.FillPath, 8, (view) => {
         view.setUint32(4, 2, true);
         view.setUint32(8, 1, true);
@@ -143,9 +155,10 @@ describe("Canvas2DReplayer", () => {
     ]);
     const calls: unknown[][] = [];
 
-    expect(new Canvas2DReplayer().replay(fakeContext(calls), list, resources).commands).toBe(8);
+    expect(new Canvas2DReplayer().replay(fakeContext(calls), list, resources).commands).toBe(10);
     expect(calls).toContainEqual(["transform", 1, 2, 3, 4, 5, 6]);
     expect(calls).toContainEqual(["roundRect", 1, 2, 30, 40, [3, 4, 5, 6]]);
+    expect(calls).toContainEqual(["roundRect", 2, 3, 20, 30, [2, 2, 2, 2]]);
     expect(calls).toContainEqual(["fillPath", pathValue, "#123456"]);
     expect(calls).toContainEqual(["glyph", 3, 16, 10, 20, 4]);
     expect(calls).toContainEqual([
@@ -349,6 +362,10 @@ function fakeContext(calls: unknown[][]): Canvas2DContext {
     beginPath: () => calls.push(["beginPath"]),
     rect: (...values: number[]) => calls.push(["rect", ...values]),
     clip: () => calls.push(["clip"]),
+    closePath: () => calls.push(["closePath"]),
+    moveTo: (...values: number[]) => calls.push(["moveTo", ...values]),
+    lineTo: (...values: number[]) => calls.push(["lineTo", ...values]),
+    ellipse: (...values: number[]) => calls.push(["ellipse", ...values]),
     fillRect: (...values: number[]) => calls.push(["fillRect", ...values, state.fillStyle]),
     translate: (...values: number[]) => calls.push(["translate", ...values]),
     transform: (...values: number[]) => calls.push(["transform", ...values]),
