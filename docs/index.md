@@ -41,8 +41,6 @@ features:
 pnpm add @dopejs/pingo
 ```
 
-> 品牌名已切换为 Pingo。公开 npm 包将在兼容迁移完成后切换到 `@dopejs/pingo`；当前安装命令仍保持为 `@dopejs/pingo`。
-
 ```ts
 import { createElement, createHostedCanvasRoot } from "@dopejs/pingo";
 
