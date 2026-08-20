@@ -44,12 +44,14 @@ The current scope includes TSX function components, hooks/signals, native
 virtual scrolling, multi-level caches, engine-native editable text,
 accessibility, and a pluggable backend.
 
-The current scope explicitly excludes SSR/HTML first paint, general CSS
-compatibility, mini-program/native adapters, and business-level rich-text
-document semantics such as collaboration, formulas, or Markdown commands. The
-engine does own caret, selection, IME composition, clipboard, undo/redo, and
-editable-text primitives; do not push those responsibilities back to business
-EmbedDOM components.
+The current scope explicitly excludes SSR/HTML first paint, general browser
+CSS/CSSOM compatibility, mini-program/native adapters, and business-level
+rich-text document semantics such as collaboration, formulas, or Markdown
+commands. M6+ does include the versioned, diagnosable CSS subset defined in
+`docs/design.md` section 12.1 and `docs/css-events-plan.md`; do not expand that
+support table implicitly. The engine does own caret, selection, IME
+composition, clipboard, undo/redo, and editable-text primitives; do not push
+those responsibilities back to business EmbedDOM components.
 
 Compatibility work is an edge adapter for migration, not a constraint on the
 core architecture. Keep legacy shims outside the core and make them removable
@@ -61,13 +63,16 @@ Keep responsibilities aligned with the module boundaries in `docs/design.md`:
 
 - `core/`: Rust workspace. Scene, layout, text, hit testing, scrolling, paint,
   animation, ABI, and orchestration remain separate crates.
-- `packages/`: TypeScript packages. Runtime, JSX, reconciler, host, backend,
-  widgets, accessibility, and devtools remain independently testable.
+- `packages/`: TypeScript packages. Runtime, JSX, style parsing/cascade,
+  reconciler, host, backend, widgets, accessibility, and devtools remain
+  independently testable.
 - `@dopejs/pingo`: facade package only. It re-exports public APIs and contains
   no implementation logic.
-- Shared schemas: the single source for opcodes, props, invalidation metadata,
-  and binary layouts. Generate Rust and TypeScript representations from them;
-  never maintain matching constants by hand.
+- Shared schemas: the single source for opcodes, props, style property metadata,
+  invalidation, animation types, capability bits, and binary layouts. Generate
+  Rust and TypeScript representations from them; never maintain matching
+  constants by hand. CSS syntax that resolves to an existing canonical value
+  stays in the Shell and must not force an ABI change.
 
 Do not introduce imports that invert these boundaries or make the facade a
 mandatory internal dependency. Business code must depend only on the facade's
@@ -99,6 +104,13 @@ Preserve the following invariants in every implementation and review:
   mutation.
 - Prop semantics determine invalidation domains. Callers do not manually mark
   layout or paint dirty, and no `forceUpdate` escape hatch is provided.
+- The Shell owns CSS text, class selectors, cascade, inheritance, and computed
+  style. The Core consumes only canonical typed values and owns their layout,
+  paint, hit, scroll, interaction-state, and animation semantics; it does not
+  parse CSS or match selectors.
+- Overflow creates View scrolling. Virtualization remains an explicit bounded
+  data contract and must never be inferred from overflow or already-materialized
+  children.
 - Layout results are compared in bulk from double-buffered SoA data. Do not add
   per-node closure/listener allocation to the layout hot path.
 - Time, randomness, and input streams are injectable or replayable. Core output

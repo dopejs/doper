@@ -21,7 +21,9 @@
 ### 非目标（本期明确不做）
 
 - 不做 SSR / 首屏 HTML 输出。
-- 不做通用 CSS 兼容（不实现 CSS 盒模型、层叠、选择器）。
+- 不做通用浏览器 CSS/CSSOM 兼容；M6 起实现版本化、可诊断、可逐项扩展的 CSS
+  子集，其 Shell/Core 边界与支持矩阵见 §12.1 和
+  [`css-events-plan.md`](./css-events-plan.md)。
 - 不做小程序 / 原生端适配（架构上不阻断，但本期不投入）。
 - 不内置业务级富文本文档模型、协同编辑、公式或 Markdown 语义；引擎负责
   可编辑文本基础设施，上层编辑器产品能力仍属于业务层。
@@ -111,18 +113,19 @@ WebGPU 后端则由 Rust 内的 `wgpu` 直接消费 DisplayList，不经过 JS�
 `packages/backend-canvas2d` 和 `packages/facade`。`packages/` 已提供仓库级命名空间，
 目录不重复 `pingo-`；下表的完整名称仅用于 npm 发布与包间导入。
 
-| package                          | 职责                                                         |
-| -------------------------------- | ------------------------------------------------------------ |
-| `@dopejs/pingo`                  | **门面包**。业务唯一直接依赖项，re-export 下列各包的公开 API |
-| `@dopejs/pingo-runtime`          | signals、hooks、function component、生命周期                 |
-| `@dopejs/pingo-jsx`              | JSX runtime、编译期优化（静态提升、props 常量折叠）          |
-| `@dopejs/pingo-reconciler`       | 组件树 → Mutation Stream 编码                                |
-| `@dopejs/pingo-host`             | Worker 生命周期、SAB 通道、能力探测与降级                    |
-| `@dopejs/pingo-editing`          | EditContext/IME/剪贴板桥接、editing controller 与编辑事件    |
-| `@dopejs/pingo-backend-canvas2d` | DisplayList 回放器                                           |
-| `@dopejs/pingo-widgets`          | 内置组件（Flex/Stack/Text/Image/VirtualList/Table…）         |
-| `@dopejs/pingo-a11y`             | 语义树 → DOM 影子树                                          |
-| `@dopejs/pingo-devtools`         | 帧瀑布、cache 命中率、tile 可视化、scene 检查器              |
+| package                          | 职责                                                          |
+| -------------------------------- | ------------------------------------------------------------- |
+| `@dopejs/pingo`                  | **门面包**。业务唯一直接依赖项，re-export 下列各包的公开 API  |
+| `@dopejs/pingo-runtime`          | signals、hooks、function component、生命周期                  |
+| `@dopejs/pingo-jsx`              | JSX runtime、编译期优化（静态提升、props 常量折叠）           |
+| `@dopejs/pingo-style`            | CSS 子集解析、className selector、层叠、继承与 computed style |
+| `@dopejs/pingo-reconciler`       | 组件树 → Mutation Stream 编码                                 |
+| `@dopejs/pingo-host`             | Worker 生命周期、SAB 通道、能力探测与降级                     |
+| `@dopejs/pingo-editing`          | EditContext/IME/剪贴板桥接、editing controller 与编辑事件     |
+| `@dopejs/pingo-backend-canvas2d` | DisplayList 回放器                                            |
+| `@dopejs/pingo-widgets`          | 内置组件（Flex/Stack/Text/Image/VirtualList/Table…）          |
+| `@dopejs/pingo-a11y`             | 语义树 → DOM 影子树                                           |
+| `@dopejs/pingo-devtools`         | 帧瀑布、cache 命中率、tile 可视化、scene 检查器               |
 
 #### 门面包 `@dopejs/pingo`
 
@@ -1799,6 +1802,55 @@ const editor = useTextEditingController({ value: cell.value });
 - **事件种类**：Core 事件流当前只承载 pointer/click/wheel。keyboard 走编辑
   输入协议（见 11.1），focus 语义随 M4-D 语义树引入；两者都不伪装成命中事件。
 
+## 12.1 CSS 子集、基础组件与原生交互演进（M6+ 决策，2026-08-20）
+
+M0–M5 的直接 prop 与 intrinsic 是已发布兼容面，不再作为长期扩展模型。后续公开
+基础组件收敛为 `View`、`Text`、`Image`、`Video`、`Input`、`TextArea`；`Fragment`
+不产生 Scene 节点。`Input` 与 `TextArea` 共享现有 Core EditableText 子系统，`Video`
+由 Host 媒体管线向 Core 提供有界帧资源，不把浏览器媒体对象放进 Scene。
+
+`View` 是唯一通用盒子。普通滚动由 computed `overflow/overflowX/overflowY` 建立，
+不再需要新的 ScrollView node kind。虚拟化是 View 滚动轴上的显式 `virtual` 数据契约：
+包含 axis、itemCount、estimatedItemSize、可选 getItemKey 与 renderItem；它不能从
+overflow 或已物化 children 推断。现有 `scroll` / `virtualList` 保留为兼容入口，分别
+映射到 View overflow 和 View overflow + virtual。
+
+CSS 使用固定的分层边界：
+
+```text
+CSS/style/className
+        ↓
+Shell tokenize/parse/selector/cascade/inheritance/computed style
+        ↓ canonical typed property/value
+Mutation Stream / immutable style resources
+        ↓
+Core layout/paint/hit/scroll/animation
+```
+
+Core 不解析 CSS 文本、不匹配 selector、不保存 className。新增
+`schemas/style.v1.json` 作为 property id、初始值、继承、value grammar、canonical
+layout、失效域、动画类型、适用节点与 feature bit 的单一来源，并生成 TS/Rust 类型、
+编解码、文档表和测试生成器。新 shorthand、颜色写法、`calc()` 等若能归一到已有
+computed value，只改 Shell；只有新增 Core property 语义才版本化 ABI。CSS 子集版本
+独立于 npm engine version 和 ABI，并公开 capability/diagnostic 查询。
+
+首期 selector 只支持同节点 class/compound class 与 `:hover`、`:active`、`:focus`、
+`:focus-visible`。Shell 预编译基础与状态 declarations；Core 根据 pointer/focus 状态位
+选择目标值，不做 selector matching。视觉状态与默认滚动不等待业务回调，业务事件仍按
+capture/target/bubble 异步回 Shell。Input Stream 需要补充 pointerType、enter/leave、
+capture 与焦点生命周期；节点删除、display none、pointer cancel、页面失焦和 transport
+恢复必须清理过期状态。
+
+`display:none` 保留节点、ref 和组件状态，但整个子树不参与 layout、paint、hit、
+semantics 或 scroll extent。transition/animation 使用 Core 渲染时钟并把 durable computed
+style 与逐帧 presentation style 分离；第一批只开放 opacity/transform，layout animation
+在虚拟测量、滚动锚定和每帧 layout 的正确性/性能门禁建立后逐项开放。
+
+完整属性矩阵、API 草案、M6–M8 顺序、兼容与回滚见
+[`css-events-plan.md`](./css-events-plan.md)，架构决策见
+[`ADR-0007`](./adr/0007-css-events-and-foundation-components.md)。计划能力在实现和自动
+验证前不得写成已交付 API。
+
 ---
 
 ## 13. 反应式层（TypeScript）
@@ -1951,6 +2003,9 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 | **M3 滚动 + 文本**        | 原生虚拟滚动、前缀和树、预热；web 字体 shaping、glyph atlas；输出 grapheme/cluster/glyph/line 映射与 caret geometry                                                                                                                                            | 百万行固定 fixture 通过自动 benchmark；文本稳定驱动 selection/caret                                 |
 | **M4 编辑、事件与无障碍** | EditContext 与输入代理、IME、caret/selection、剪贴板、undo/redo、自动滚动；BVH 命中测试、三阶段事件、非 passive 区域协议、语义树与影子 DOM                                                                                                                     | canvas 原生编辑、composition replay 与语义树 E2E 自动通过                                           |
 | **M5 迁移与 WebGPU 验证** | 存量兼容 shim、devtools、迁移文档；wgpu 后端并行验证；平台资格数据仅决定该平台是否默认启用                                                                                                                                                                     | 迁移 fixture、灰度/回退演练和后端差分自动通过                                                       |
+| **M6 CSS + 原生事件基础** | style schema 与生成器；View/Text/Image/Input/TextArea facade；style/className/cascade；display/overflow；View.virtual 纵向等价迁移；pointer lifecycle 与基础伪类                                                                                               | CSS/事件三 transport 契约、增量/全量 oracle、旧 API 等价与回滚演练自动通过                          |
+| **M7 动画 + 轴泛化**      | x/y 单轴虚拟化；ViewHandle 滚动 API；Core transition/keyframes；opacity/transform；reduced motion；按门禁扩展 CSS 属性和值语法                                                                                                                                 | 主线程 stall 下 Worker 动画连续；确定性 timeline、横纵虚拟化与性能/体积门禁通过                     |
+| **M8 Video + 能力扩展**   | Video Host/Core 帧资源与媒体事件/降级；foundation controls；基于需求增加 selector、伪类、CSS grammar 或二维虚拟窗口                                                                                                                                            | 媒体资源有界、降级等价；新增 CSS/事件能力逐项通过 schema、差分、E2E 与资格矩阵                      |
 
 关键排序原则：**M2 之前不碰 WebGPU，M3 之前不碰复杂文本**。收益主要来自双时钟与 Core 内闭环滚动，先把这条主线拿下。
 
@@ -1969,6 +2024,10 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 | **Rust/WASM 工具链复杂度**                 | 构建、调试或升级阻塞核心迭代     | 固定工具链与 ABI；crate 边界隔离；保留 native/headless 路径并让 CI 同时验证                |
 | **跨 Worker + WASM 调试困难**              | 排障成本高，长期拖慢迭代         | devtools 在 M1 就作为一等公民；Core 支持 headless 回放（录制 mutation 流，脱离浏览器复现） |
 | **低端安卓上 WebGPU 反而更慢**             | 后端选型判断错误                 | 后端可插拔；没有对应平台资格数据时不在该平台默认开启 WebGPU                                |
+| **CSS 子集无边界扩张**                     | 包体、语义与维护成本失控         | style schema/能力版本；只实现有 fixture、诊断与出口门禁的属性和值                          |
+| **class/伪类导致祖先级重算**               | pointermove 抖动、滚动掉帧       | 首期同节点 selector；状态 declaration 预编译；记录 style recompute 节点数                  |
+| **动画与布局/虚拟测量互相反馈**            | 抖动、错位、每帧全量布局         | 先开放 opacity/transform；layout animation 独立 feature 与 reference oracle                |
+| **Video 帧传输或解码队列无界**             | 内存增长、媒体掉帧、主线程拥塞   | Host 有界帧池、丢旧保新、能力降级、队列/复制/掉帧指标                                      |
 
 ### 回滚路径
 
@@ -1977,6 +2036,9 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 - M2 的 Worker 化通过 feature flag 控制，线上可一键切回主线程模式。
 - M5 的 WebGPU 后端默认关闭，按机型灰度。
 - 存量兼容 shim 保证业务可以按页面粒度回退到原有渲染路径。
+- M6+ 的 CSS resolver、新组件 facade、interaction styles、Core animation 与 Video
+  分别受独立 rollout flag 控制；关闭时旧 direct props、intrinsic、事件和 virtualList
+  路径保持工作。未知 style/animation 协议必须拒绝，不能降级解释为旧指令。
 
 ---
 

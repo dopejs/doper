@@ -582,6 +582,100 @@ Host 按手势分类，Core 对离散格做有界时长（120ms）的三次缓�
   WebGPU 必须成为默认后端。
 - shim 的依赖方向确保删除 shim 不需要修改 Core。
 
+### M6：CSS 子集、基础组件与原生事件基础
+
+> 当前状态：**方案已接受，尚未实现**。架构边界见 `docs/design.md` §12.1、
+> `docs/css-events-plan.md` 与 ADR-0007。实现不得把计划 API 写成已交付能力。
+
+目标：建立可逐项扩展而不反复改写 Core 边界的 style/event 基础，并把滚动、虚拟化和
+交互状态统一到 View。
+
+按依赖顺序拆为：
+
+#### M6-A style schema 与 Shell resolver
+
+- `schemas/style.v1.json` 单源描述 property id、名称、initial/inherited、grammar、
+  canonical value、invalidation、animation type、适用节点和 feature bit。
+- 生成 TS `PingoStyle`、Rust 元数据/ABI、解析表、支持文档与属性测试生成器。
+- 独立 style package 完成 tokenize/parse、shorthand 展开、class selector、cascade、
+  inheritance、computed style、structured diagnostics 和 capabilities。
+- 首期只支持同节点 class/compound class；不实现 combinator、伪元素和 CSSOM。
+
+#### M6-B 基础组件、display 与 overflow
+
+- 新增 View、Text、Image、Input、TextArea facade；Fragment 不产 Scene 节点。
+- container/text/image/editableText 保持兼容；scroll 映射 View + overflow。
+- `display:flex|none` 跨 layout/paint/hit/semantics/scroll extent 原子生效。
+- overflow 五值与两轴 computed 规则；滚动状态挂在同一 View，不因 style 变化换 id。
+- virtualList 映射到 View + overflow + `virtual`，先证明纵向窗口、像素、占位、诊断等价。
+
+#### M6-C 原生事件状态与伪类
+
+- Input/Event 协议补齐 pointerType、over/out、enter/leave、got/lost capture 与 focus 生命周期。
+- Core 持有 hover/active/focus/focus-visible/capture 状态，处理所有取消和恢复路径。
+- Shell 预编译状态 declarations；Core 只按状态位选择目标值，不匹配 selector。
+- 首期伪类只开放不会触发未解决布局/命中反馈环的属性集合。
+- 事件 capture/target/bubble、default action、editing transaction 和非 passive 区域保持既有边界。
+
+#### M6-D 兼容、诊断与出口
+
+- 旧 intrinsic/direct prop 与新 computed style 的优先级、重复声明诊断和迁移报告。
+- CSS resolver、新 facade、interaction styles 独立 rollout flag 和页面回退演练。
+- devtools/帧报告增加 style recompute、状态变化和各失效域计数。
+- 更新 facade API 快照、迁移扫描器、文档与示例，不删除旧 API。
+
+自动出口命令预留为 `pnpm m6:check`，必须链入 `pnpm m5:check`，并增加：
+
+- parser/cascade/computed-style reference 与 fuzz；
+- incremental computed style ↔ full recompute 属性测试；
+- incremental Core ↔ full layout/paint/hit/semantics 差分；
+- 三 transport 的 display/overflow/event/pseudo E2E；
+- 旧 intrinsic 与新 facade 的等价 fixture；
+- style 无变化时滚动热路径零 recompute，WASM/JS 体积不突破既有门禁。
+
+### M7：Core 动画与虚拟轴泛化
+
+> 当前状态：**计划中**。M6 schema、状态样式和 View scroll contract 是硬前置。
+
+目标：让 transition/keyframes 与虚拟滚动都由 Core 渲染时钟推进，并把现有只沿 Y 的
+virtualizer 泛化为显式 x/y 主轴。
+
+主要交付：
+
+- `virtual.axis = x | y`、estimatedItemSize、getItemKey 与 axis-neutral extent index。
+- ViewHandle 的 scrollTo/scrollBy/setScrollVelocity/capture；root 方法保留兼容。
+- durable computed style 与 presentation style 分层；绝对逻辑时间 timeline。
+- transition duration/delay/easing、retarget/cancel；首期 opacity/transform。
+- immutable keyframe resources；iteration/direction/fill/play-state；reduced-motion override。
+- active/retarget/cancel、animation phase、layout/paint work 与内存的有界诊断。
+
+自动出口命令预留为 `pnpm m7:check`：
+
+- timeline、easing、iteration 和 retarget 的确定性/属性测试；
+- native/wasm、三 transport、worker/self-drive 与录制回放一致；
+- 主线程 stall 时 Worker 动画和虚拟滚动连续；
+- 横纵 virtualizer 对同一 axis-neutral 朴素 oracle 一致；
+- animation frame 无 Shell mutation，完成/暂停后无空转重画；
+- opacity/transform 不触发布局，新增包体与活跃动画内存有绝对预算。
+
+layout animation 不随 M7 默认开放。每个候选属性必须另证每帧 layout、虚拟测量、滚动
+锚定、hit rebuild 与性能门禁后逐项加入。
+
+### M8：Video、foundation controls 与后续能力扩展
+
+> 当前状态：**计划中**。Video API 可早期评审，但媒体管线不进入 M6/M7 关键路径。
+
+- Video 公开组件；Host 管加载/CORS/解码/audio/fallback，Core 消费有界可回收帧资源。
+- poster/object-fit、play/pause/seek/loop/muted 与媒体事件契约。
+- HTMLMediaElement/WebCodecs/Worker 不同能力路径的功能等价、复制和掉帧观测。
+- Pressable/Button/TextField 等 foundation controls 在原生事件、focus 与伪类上组合，不增加
+  Core node kind。
+- 后续 CSS 语法/属性/selector/伪类和二维虚拟化按 style 扩展分类逐项立项；能归一到已有
+  computed value 的扩展不得无故修改 ABI。
+
+`pnpm m8:check` 必须包含媒体资源生命周期、错误/seek/loop/fallback、内存硬预算和浏览器
+E2E；真实硬件解码、功耗与受版权内容仍属平台资格，不能由开发机结果冒充支持声明。
+
 ## 7. 关键依赖与并行关系
 
 关键路径为：
@@ -594,6 +688,9 @@ P0 基线
   → M3 原生滚动通过自动百万行 benchmark
   → M4 原生编辑与语义交互契约
   → M5 迁移 fixture 与发布基建
+  → M6 style schema + View overflow + 原生交互状态
+  → M7 Core animation + x/y 虚拟轴
+  → M8 Video + 按证据扩展 CSS/事件
 ```
 
 可并行但有集成边界的工作：
@@ -607,6 +704,12 @@ P0 基线
 - M4 的输入桥可以在 M0 后独立演进，但必须等待 M3 的 cluster/caret geometry
   契约稳定后才能完成端到端编辑验收。
 - WebGPU 可以在 M5 做隔离探针，不得提前改变 Core 或阻塞 Canvas2D 主线。
+- M6 的 style parser/cascade 与 Core display/overflow 可以并行，但必须先冻结 style schema
+  的 canonical value；伪类依赖事件状态协议，不能用 Shell setState 临时替代。
+- M7 的 animation timeline 与 axis-neutral virtualizer 可以并行；两者共享 Worker clock、
+  frame diagnostics 与 stall fault injection，出口必须合流。
+- M8 Video 可以在 M6 后做隔离探针，但 Host/Core 帧资源协议必须等通用资源预算和事件命名
+  评审通过，不得阻塞 CSS/事件关键路径。
 
 ## 8. 启动阶段执行顺序
 
@@ -681,36 +784,43 @@ P0 基线
 
 ## 10. CI 与发布门禁建设顺序
 
-| 阶段  | 每次提交                                          | 每晚/定期                       | 发布前                        |
-| ----- | ------------------------------------------------- | ------------------------------- | ----------------------------- |
-| P0–M0 | `pnpm m0:check`：format/lint/type/test/build/Rust | 可选平台资格采集                | 自动门禁与 ADR 复核           |
-| M1    | L1 单元、L2 属性、L3 ABI、L4 快集、PC benchmark   | fuzz、差分全集                  | native/wasm 一致性            |
-| M2    | 加入降级契约、并发压力快集                        | loom、故障注入、内存压力        | 三路径回退演练                |
-| M3    | 加入 scroll/text 核心用例                         | 可选平台 P95/P99、30 分钟 soak  | 自动门禁；发布平台另做资格    |
-| M4    | 加入编辑事务、IME 与语义 E2E                      | 浏览器/OS/输入法/屏幕阅读器矩阵 | 原生编辑与无障碍验收          |
-| M5    | 完整合入门禁                                      | 灰度趋势、长稳、WebGPU 对照     | 全层级；发布平台另做资格/soak |
+| 阶段  | 每次提交                                                          | 每晚/定期                        | 发布前                         |
+| ----- | ----------------------------------------------------------------- | -------------------------------- | ------------------------------ |
+| P0–M0 | `pnpm m0:check`：format/lint/type/test/build/Rust                 | 可选平台资格采集                 | 自动门禁与 ADR 复核            |
+| M1    | L1 单元、L2 属性、L3 ABI、L4 快集、PC benchmark                   | fuzz、差分全集                   | native/wasm 一致性             |
+| M2    | 加入降级契约、并发压力快集                                        | loom、故障注入、内存压力         | 三路径回退演练                 |
+| M3    | 加入 scroll/text 核心用例                                         | 可选平台 P95/P99、30 分钟 soak   | 自动门禁；发布平台另做资格     |
+| M4    | 加入编辑事务、IME 与语义 E2E                                      | 浏览器/OS/输入法/屏幕阅读器矩阵  | 原生编辑与无障碍验收           |
+| M5    | 完整合入门禁                                                      | 灰度趋势、长稳、WebGPU 对照      | 全层级；发布平台另做资格/soak  |
+| M6    | style schema/parser/cascade、display/overflow、事件状态、兼容等价 | selector/cascade fuzz、状态压力  | 三 transport、回退与 API 审核  |
+| M7    | timeline/插值、横纵虚拟化、stall 快集                             | animation/virtual soak、内存压力 | reduced-motion、包体与性能门禁 |
+| M8    | Video 生命周期、媒体事件、fallback 与后续能力门禁                 | 解码/seek/loop soak、设备资格    | 媒体能力矩阵与资源回收演练     |
 
 覆盖率下限沿用设计：Rust Core ≥ 85%，核心 crates ≥ 95%，TypeScript ≥ 80%。
 覆盖率只作为底线，不能替代不变式、差分和失败路径测试。
 
 ## 11. 风险台账
 
-| 风险                       | 最早验证 | 预警信号                                       | 应对/回滚                                                    |
-| -------------------------- | -------- | ---------------------------------------------- | ------------------------------------------------------------ |
-| Worker 帧驱动不稳定        | M0       | 相位漂移、阻塞时停止呈现                       | 自驱锁相；失败则架构转向评审                                 |
-| COOP/COEP 无法部署         | M0       | 第三方资源或业务壳不兼容                       | postMessage；量化性能损失并调整范围                          |
-| WASM 启动/体积超标         | M0/M1    | 预算早期已耗尽                                 | 功能裁剪、延迟加载、JS fallback                              |
-| ABI 漂移或内存错误         | M1       | 双侧常量手写、fixture 频繁无解释变化           | 单源生成、golden、roundtrip、fuzz                            |
-| 激进 invalidation 漏标     | M1       | 增量/全量像素差异                              | schema 强校验；全局保守失效开关                              |
-| 双时钟竞态难复现           | M2       | frame_seq 回退、半帧、偶发黑屏                 | 模型检查、录制回放、故障注入、回退单线程                     |
-| Cache 内存失控             | M2/M3    | LRU 无效、长稳持续增长                         | 硬预算、压力回收、关闭 raster cache                          |
-| 文本范围失控               | M1/M3    | 脚本/字体需求持续扩张                          | 明确能力矩阵；先 web font + LTR + fallback                   |
-| EditContext 覆盖或行为不足 | M0/M4    | 浏览器无 API、候选窗错位、composition 事件差异 | 引擎托管输入代理；能力矩阵；录制回放                         |
-| 编辑跨线程失序             | M1/M4    | 丢字、重复提交、selection 回跳                 | revisioned transaction、过期拒绝、单一 composition、故障注入 |
-| 滚动 cache miss 过高       | M3       | fling 时占位和 Shell 请求激增                  | 方向预热、预算调优、场景降级                                 |
-| 无障碍后补导致返工         | M1/M4    | Scene/ABI 无语义位置                           | M1 预留语义模型，M4 完成行为                                 |
-| 存量兼容污染 Core          | 全程     | Core 出现特定旧引擎类型/分支                   | shim 边界隔离、依赖规则、删除性测试                          |
-| 真机指标不可复现           | P0 起    | 只保存汇总值、环境变化大                       | 原始样本、环境元数据、固定设备与协议                         |
+| 风险                       | 最早验证 | 预警信号                                       | 应对/回滚                                                      |
+| -------------------------- | -------- | ---------------------------------------------- | -------------------------------------------------------------- |
+| Worker 帧驱动不稳定        | M0       | 相位漂移、阻塞时停止呈现                       | 自驱锁相；失败则架构转向评审                                   |
+| COOP/COEP 无法部署         | M0       | 第三方资源或业务壳不兼容                       | postMessage；量化性能损失并调整范围                            |
+| WASM 启动/体积超标         | M0/M1    | 预算早期已耗尽                                 | 功能裁剪、延迟加载、JS fallback                                |
+| ABI 漂移或内存错误         | M1       | 双侧常量手写、fixture 频繁无解释变化           | 单源生成、golden、roundtrip、fuzz                              |
+| 激进 invalidation 漏标     | M1       | 增量/全量像素差异                              | schema 强校验；全局保守失效开关                                |
+| 双时钟竞态难复现           | M2       | frame_seq 回退、半帧、偶发黑屏                 | 模型检查、录制回放、故障注入、回退单线程                       |
+| Cache 内存失控             | M2/M3    | LRU 无效、长稳持续增长                         | 硬预算、压力回收、关闭 raster cache                            |
+| 文本范围失控               | M1/M3    | 脚本/字体需求持续扩张                          | 明确能力矩阵；先 web font + LTR + fallback                     |
+| EditContext 覆盖或行为不足 | M0/M4    | 浏览器无 API、候选窗错位、composition 事件差异 | 引擎托管输入代理；能力矩阵；录制回放                           |
+| 编辑跨线程失序             | M1/M4    | 丢字、重复提交、selection 回跳                 | revisioned transaction、过期拒绝、单一 composition、故障注入   |
+| 滚动 cache miss 过高       | M3       | fling 时占位和 Shell 请求激增                  | 方向预热、预算调优、场景降级                                   |
+| 无障碍后补导致返工         | M1/M4    | Scene/ABI 无语义位置                           | M1 预留语义模型，M4 完成行为                                   |
+| 存量兼容污染 Core          | 全程     | Core 出现特定旧引擎类型/分支                   | shim 边界隔离、依赖规则、删除性测试                            |
+| 真机指标不可复现           | P0 起    | 只保存汇总值、环境变化大                       | 原始样本、环境元数据、固定设备与协议                           |
+| CSS 支持范围无界增长       | M6       | 属性半实现、静默忽略、包体持续挤占预算         | style schema/能力版本；缺语义、诊断、oracle 的属性不进入支持表 |
+| class/伪类重算进入热路径   | M6       | pointermove 标脏大子树、滚动帧 style recompute | 首期同节点 selector、状态声明预编译、重算节点数门禁            |
+| animation 与布局反馈       | M7       | 虚拟测量抖动、hit 重建、每帧全量 layout        | 先 opacity/transform；layout animation 独立 feature/门禁       |
+| Video 队列与资源泄漏       | M8       | VideoFrame 堆积、复制尖峰、后台仍解码          | 有界帧池、丢旧保新、可见性暂停、生命周期/内存 fault injection  |
 
 风险台账在里程碑检查时更新。没有明确缓解方案的红色风险必须升级为范围
 或架构决策，不允许只记录状态而不处理。
@@ -726,6 +836,8 @@ P0 基线
 1. 页面级：pingo → 原有渲染路径。
 2. 引擎级：Worker/SAB → postMessage → 主线程 Canvas2D。
 3. 优化级：激进 invalidation、Picture/Raster Cache、未来 WebGPU 可分别关闭。
+4. 能力级：CSS resolver、新组件 facade、interaction styles、Core animation、Video
+   分别关闭；旧 direct props/intrinsic/event/virtualList 继续可用。
 
 回滚开关必须在试点前演练，并记录生效时间、状态迁移和资源清理行为。
 不能把“重新发布旧版本”作为唯一回滚方案。
@@ -734,20 +846,25 @@ P0 基线
 
 以下决策应在对应里程碑前关闭，而不是在实现中隐式选择：
 
-| 决策                           | 截止点    | 所需证据                                         |
-| ------------------------------ | --------- | ------------------------------------------------ |
-| Worker 帧驱动组合              | M0 出口   | 自动故障注入、连续性样本、ADR-0001               |
-| COOP/COEP 与默认 transport     | M0 出口   | capability 测试与三档降级契约                    |
-| monorepo 工具与构建链          | P0 出口   | Rust/TS/WASM/CI 最小闭环                         |
-| schema 格式与生成器            | M1 启动前 | 双侧生成、golden、版本演示                       |
-| NodeId 位布局与 ABI 版本策略   | M1 前半   | 生命周期、容量、兼容分析                         |
-| headless 像素后端              | M1 前半   | 确定性、CI 成本、浏览器差异                      |
-| Raster Cache 预算模型          | M2 前半   | 设备内存与屏幕面积数据                           |
-| 滚动物理参数来源               | M3 前半   | iOS/Android 手感和指标测试                       |
-| 文本首期能力矩阵               | M1 出口前 | 试点业务字体/脚本需求                            |
-| 编辑状态所有权与 revision 协议 | M1 前半   | 外部 value、composition、undo、Worker 重启状态机 |
-| EditContext 与输入代理能力矩阵 | M0 出口   | 自动事件/offset/replay 契约；真机结果进入资格    |
-| WebGPU 是否继续                | M5 出口   | Canvas2D 对照、覆盖率、功耗和稳定性              |
+| 决策                            | 截止点    | 所需证据                                            |
+| ------------------------------- | --------- | --------------------------------------------------- |
+| Worker 帧驱动组合               | M0 出口   | 自动故障注入、连续性样本、ADR-0001                  |
+| COOP/COEP 与默认 transport      | M0 出口   | capability 测试与三档降级契约                       |
+| monorepo 工具与构建链           | P0 出口   | Rust/TS/WASM/CI 最小闭环                            |
+| schema 格式与生成器             | M1 启动前 | 双侧生成、golden、版本演示                          |
+| NodeId 位布局与 ABI 版本策略    | M1 前半   | 生命周期、容量、兼容分析                            |
+| headless 像素后端               | M1 前半   | 确定性、CI 成本、浏览器差异                         |
+| Raster Cache 预算模型           | M2 前半   | 设备内存与屏幕面积数据                              |
+| 滚动物理参数来源                | M3 前半   | iOS/Android 手感和指标测试                          |
+| 文本首期能力矩阵                | M1 出口前 | 试点业务字体/脚本需求                               |
+| 编辑状态所有权与 revision 协议  | M1 前半   | 外部 value、composition、undo、Worker 重启状态机    |
+| EditContext 与输入代理能力矩阵  | M0 出口   | 自动事件/offset/replay 契约；真机结果进入资格       |
+| WebGPU 是否继续                 | M5 出口   | Canvas2D 对照、覆盖率、功耗和稳定性                 |
+| style schema 与首期 CSS 矩阵    | M6 启动前 | canonical value、失效/继承/动画元数据、支持表       |
+| className stylesheet 注册 API   | M6-A      | 多 root 生命周期、source order、诊断和 tree-shaking |
+| pointer/focus 状态协议          | M6-C      | enter/leave/capture/cancel/recovery 事件 fixture    |
+| animation resource/retarget ABI | M7 前半   | 确定性 timeline、背压、恢复和 reduced-motion        |
+| Video Host/Core 帧所有权        | M8 前半   | WebCodecs/HTMLMediaElement fallback 与资源预算      |
 
 ## 14. 计划维护
 

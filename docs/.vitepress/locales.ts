@@ -603,7 +603,7 @@ export function localeConfig(
           items: [
             { text: ui.design, link: "/design" },
             { text: ui.plan, link: "/plan" },
-            { text: ui.adr, link: "/adr/0006-webgpu-backend-decision" },
+            { text: ui.adr, link: "/adr/0007-css-events-and-foundation-components" },
           ],
         },
       ],
