@@ -6,7 +6,7 @@ export default defineConfig({
     dedupe: ["react", "react-dom"],
   },
   optimizeDeps: {
-    entries: ["apps/site/src/LanguageMenu.browser.ts"],
+    entries: ["apps/site/src/**/*.browser.ts"],
   },
   server: {
     headers: {

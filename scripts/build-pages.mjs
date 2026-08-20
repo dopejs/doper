@@ -10,20 +10,15 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const output = path.join(repositoryRoot, "dist-pages");
 
 // GitHub Pages is static hosting and cannot send COOP/COEP headers, so the
-// deployed site runs the postMessage/main-thread fallback. The playground and
-// the Storybook demos report which transport capability detection selected.
+// deployed site runs the postMessage/main-thread fallback. The playground
+// reports which transport capability detection selected.
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 
 // The React site is the root of the deployment and includes the playground.
-// Storybook keeps its own build and is copied in beside it.
 await run("pnpm", ["--filter", "@dopejs/site", "build"], { cwd: repositoryRoot });
-await run("pnpm", ["--filter", "@dopejs/storybook", "build"], { cwd: repositoryRoot });
 
 await cp(path.join(repositoryRoot, "apps/site/dist"), output, { recursive: true });
-await cp(path.join(repositoryRoot, "apps/storybook/dist"), path.join(output, "storybook-app"), {
-  recursive: true,
-});
 
 const version = JSON.parse(
   await readFile(path.join(repositoryRoot, "packages/facade/package.json"), "utf8"),
@@ -108,7 +103,7 @@ async function playgroundPages(root) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const full = path.join(directory, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name !== "assets" && entry.name !== "storybook-app") await walk(full);
+        if (entry.name !== "assets") await walk(full);
       } else if (entry.name === "index.html" && path.basename(directory) === "playground") {
         pages.push(full);
       }

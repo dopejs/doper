@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type * as PingoEngine from "@dopejs/pingo";
 
-import type { Demo, DemoContext } from "../../../../docs/.vitepress/theme/playground/demo";
-import { playgroundMessages } from "../../../../docs/.vitepress/theme/playground/messages";
+import type { Demo, DemoContext } from "./demo";
+import { playgroundMessages } from "./messages";
 
 type EngineModule = typeof PingoEngine;
 type HostedRoot = Awaited<ReturnType<EngineModule["createHostedCanvasRoot"]>>;
@@ -183,10 +183,7 @@ export function Playground({ lang }: PlaygroundProps): ReactNode {
   useEffect(() => {
     let cancelled = false;
     setStatus(messages.loading);
-    void Promise.all([
-      import("@dopejs/pingo"),
-      import("../../../../docs/.vitepress/theme/playground/demos"),
-    ])
+    void Promise.all([import("@dopejs/pingo"), import("./demos")])
       .then(async ([engineModule, demoModule]) => {
         if (cancelled) return;
         engine.current = engineModule;

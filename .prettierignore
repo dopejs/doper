@@ -7,5 +7,3 @@ packages/host/wasm/
 apps/platform-probe/public/wasm/
 pnpm-lock.yaml
 dist-pages/
-docs/.vitepress/cache/
-docs/.vitepress/dist/

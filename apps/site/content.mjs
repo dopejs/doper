@@ -101,7 +101,7 @@ function createMarkdown() {
 async function markdownFiles(directory, prefix = "") {
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (entry.name === ".vitepress" || entry.name === "node_modules") continue;
+    if (entry.name === "node_modules") continue;
     const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
     if (entry.isDirectory()) {
       files.push(...(await markdownFiles(path.join(directory, entry.name), relative)));
@@ -123,7 +123,6 @@ function inlineText(token) {
 function pageLayout(route, frontmatter) {
   if (frontmatter.layout === "home") return "home";
   if (route.endsWith("/playground") || route === "/playground") return "playground";
-  if (route.endsWith("/storybook") || route === "/storybook") return "storybook";
   return "doc";
 }
 
@@ -190,7 +189,7 @@ export async function loadSiteContent() {
       localePath: localeForSource(sourcePath),
       layout,
       html:
-        layout === "playground" || layout === "storybook"
+        layout === "playground"
           ? ""
           : markdown.renderer.render(tokens, markdown.options, environment),
       tableOfContents,

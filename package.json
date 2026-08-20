@@ -44,9 +44,7 @@
     "storybook:build": "pnpm --filter @dopejs/storybook build",
     "docs:dev": "pnpm --filter @dopejs/site dev",
     "docs:build": "pnpm --filter @dopejs/site build",
-    "docs:dev:vitepress": "vitepress dev docs",
-    "docs:build:vitepress": "vitepress build docs",
-    "pages:build": "pnpm packages:build && node scripts/build-pages.mjs",
+    "pages:build": "pnpm core:wasm && pnpm --filter './packages/**' --workspace-concurrency=1 build && pnpm core:wasm:check && node scripts/build-pages.mjs",
     "npm:release:verify": "node scripts/check-npm-release.mjs",
     "npm:release:publish": "pnpm npm:release:verify && pnpm -r publish --access public",
     "m5:backend:diff": "node scripts/check-m5-backend-differential.mjs",
@@ -80,7 +78,6 @@
     "coverage:rust:run": "cargo llvm-cov --workspace --no-report && cargo llvm-cov report --summary-only --fail-under-lines 85 && cargo llvm-cov report --package pingo-abi --summary-only --fail-under-lines 95 && cargo llvm-cov report --package pingo-scene --summary-only --fail-under-lines 95 && cargo llvm-cov report --package pingo-scroll --summary-only --fail-under-lines 95 && cargo llvm-cov report --package pingo-text --summary-only --fail-under-lines 94",
     "typecheck": "pnpm packages:build && pnpm -r typecheck && pnpm site:typecheck",
     "site:typecheck": "pnpm --filter @dopejs/site typecheck",
-    "site:typecheck:vitepress": "vue-tsc --noEmit -p docs/.vitepress/tsconfig.json",
     "style:check": "node scripts/generate-style.mjs --check && pnpm --filter @dopejs/pingo-style build && vitest run packages/style/src/*.test.ts",
     "style:generate": "node scripts/generate-style.mjs",
     "m6:a:check": "pnpm m5:check && pnpm style:check",
@@ -107,9 +104,6 @@
     "typescript": "5.9.3",
     "typescript-eslint": "8.67.0",
     "vite": "8.2.1",
-    "vitepress": "1.6.4",
-    "vitest": "4.1.10",
-    "vue": "3.5.41",
-    "vue-tsc": "3.3.10"
+    "vitest": "4.1.10"
   }
 }

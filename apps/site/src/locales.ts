@@ -1,6 +1,6 @@
-export { SITE_LOCALES, type SiteLocale } from "../../../docs/.vitepress/locales";
+export { SITE_LOCALES, type SiteLocale } from "./locale-data";
 
-import { SITE_LOCALES, type SiteLocale } from "../../../docs/.vitepress/locales";
+import { SITE_LOCALES, type SiteLocale } from "./locale-data";
 
 export function localeForPath(path: string): SiteLocale {
   return (

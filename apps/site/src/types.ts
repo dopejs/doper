@@ -1,4 +1,4 @@
-export type PageLayout = "doc" | "home" | "playground" | "storybook";
+export type PageLayout = "doc" | "home" | "playground";
 
 export interface TableOfContentsItem {
   readonly id: string;

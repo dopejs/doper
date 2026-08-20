@@ -1,9 +1,0 @@
-{
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "target": "ES2022",
-    "types": []
-  },
-  "include": ["config.ts", "theme/**/*.ts", "theme/**/*.vue"]
-}

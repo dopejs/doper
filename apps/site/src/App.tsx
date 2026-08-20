@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import { AppFrame } from "./AppFrame";
 import { LanguageMenu } from "./LanguageMenu";
 import { SITE_LOCALES, localeForPath, pageHref, type SiteLocale } from "./locales";
 import { writeLanguagePreference } from "./language-preference";
@@ -42,7 +41,6 @@ function navItems(locale: SiteLocale): readonly NavItem[] {
     { text: locale.ui.guide, route: "/guide/getting-started" },
     { text: locale.ui.api, route: "/api" },
     { text: locale.ui.playground, route: "/playground" },
-    { text: locale.ui.storybook, route: "/storybook" },
   ];
 }
 
@@ -320,7 +318,7 @@ export function App({ siteDocument, initialLocalePath }: AppProps): ReactNode {
     Object.values(siteDocument.translations)[0]!;
   const { page } = payload;
   const locale = localeForPath(localePath);
-  const special = page.layout === "playground" || page.layout === "storybook";
+  const special = page.layout === "playground";
   const changeLocale = (path: string): void => {
     const next = localeForPath(path).path;
     writeLanguagePreference(next);
@@ -334,8 +332,6 @@ export function App({ siteDocument, initialLocalePath }: AppProps): ReactNode {
     content = <HomePage page={page} />;
   } else if (page.layout === "playground") {
     content = <Playground lang={locale.lang} />;
-  } else if (page.layout === "storybook") {
-    content = <AppFrame src="/storybook-app/" title={page.title} />;
   } else {
     content = (
       <div className="docs-grid">

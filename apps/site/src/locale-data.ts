@@ -1,5 +1,3 @@
-import type { DefaultTheme, LocaleSpecificConfig } from "vitepress";
-
 /**
  * Site locales.
  *
@@ -22,7 +20,6 @@ export interface SiteLocale {
     readonly guide: string;
     readonly api: string;
     readonly playground: string;
-    readonly storybook: string;
     readonly engineering: string;
     readonly design: string;
     readonly plan: string;
@@ -74,7 +71,6 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
       guide: "指南",
       api: "API",
       playground: "Playground",
-      storybook: "Storybook",
       engineering: "工程",
       design: "技术设计",
       plan: "实施计划",
@@ -124,7 +120,6 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
       guide: "指南",
       api: "API",
       playground: "Playground",
-      storybook: "Storybook",
       engineering: "工程",
       design: "技術設計",
       plan: "實施計畫",
@@ -175,7 +170,6 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
       guide: "ガイド",
       api: "API",
       playground: "Playground",
-      storybook: "Storybook",
       engineering: "エンジニアリング",
       design: "技術設計",
       plan: "実装計画",
@@ -225,7 +219,6 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
       guide: "가이드",
       api: "API",
       playground: "Playground",
-      storybook: "Storybook",
       engineering: "엔지니어링",
       design: "기술 설계",
       plan: "구현 계획",
@@ -276,7 +269,6 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
       guide: "Guía",
       api: "API",
       playground: "Playground",
-      storybook: "Storybook",
       engineering: "Ingeniería",
       design: "Diseño técnico",
       plan: "Plan de implementación",
@@ -327,7 +319,6 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
       guide: "Guide",
       api: "API",
       playground: "Playground",
-      storybook: "Storybook",
       engineering: "Ingénierie",
       design: "Conception technique",
       plan: "Plan de mise en œuvre",
@@ -378,7 +369,6 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
       guide: "Leitfaden",
       api: "API",
       playground: "Playground",
-      storybook: "Storybook",
       engineering: "Technik",
       design: "Technischer Entwurf",
       plan: "Umsetzungsplan",
@@ -429,7 +419,6 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
       guide: "Руководство",
       api: "API",
       playground: "Playground",
-      storybook: "Storybook",
       engineering: "Инженерия",
       design: "Технический дизайн",
       plan: "План реализации",
@@ -481,7 +470,6 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
       guide: "الدليل",
       api: "واجهة البرمجة",
       playground: "Playground",
-      storybook: "Storybook",
       engineering: "الهندسة",
       design: "التصميم التقني",
       plan: "خطة التنفيذ",
@@ -533,7 +521,6 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
       guide: "מדריך",
       api: "API",
       playground: "Playground",
-      storybook: "Storybook",
       engineering: "הנדסה",
       design: "תכנון טכני",
       plan: "תוכנית יישום",
@@ -575,117 +562,3 @@ export const SITE_LOCALES: readonly SiteLocale[] = [
     },
   },
 ];
-
-/** Returns the URL prefix of a locale, empty for the root locale. */
-function prefix(locale: SiteLocale): string {
-  return locale.path === "" ? "" : `/${locale.path}`;
-}
-
-/** Builds the VitePress locale entry, including nav, sidebar and UI strings. */
-export function localeConfig(
-  locale: SiteLocale,
-): LocaleSpecificConfig<DefaultTheme.Config> & { label: string } {
-  const base = prefix(locale);
-  const { ui } = locale;
-  return {
-    label: locale.label,
-    lang: locale.lang,
-    ...(locale.dir === undefined ? {} : { dir: locale.dir }),
-    description: locale.description,
-    themeConfig: {
-      nav: [
-        { text: ui.guide, link: `${base}/guide/getting-started` },
-        { text: ui.api, link: `${base}/api/` },
-        { text: ui.playground, link: `${base}/playground` },
-        { text: ui.storybook, link: `${base}/storybook` },
-        {
-          text: ui.engineering,
-          items: [
-            { text: ui.design, link: "/design" },
-            { text: ui.plan, link: "/plan" },
-            { text: ui.adr, link: "/adr/0007-css-events-and-foundation-components" },
-          ],
-        },
-      ],
-      sidebar: {
-        [`${base}/guide/`]: [
-          {
-            text: ui.sectionStart,
-            items: [
-              { text: ui.gettingStarted, link: `${base}/guide/getting-started` },
-              { text: ui.architecture, link: `${base}/guide/architecture` },
-            ],
-          },
-          {
-            text: ui.sectionCapabilities,
-            items: [
-              { text: ui.scrolling, link: `${base}/guide/scrolling` },
-              { text: ui.editing, link: `${base}/guide/editing` },
-              { text: ui.events, link: `${base}/guide/events` },
-              { text: ui.accessibility, link: `${base}/guide/accessibility` },
-            ],
-          },
-          {
-            text: ui.sectionShipping,
-            items: [
-              { text: ui.migration, link: "/migration" },
-              { text: ui.release, link: "/release" },
-              { text: ui.diagnostics, link: "/diagnostics" },
-              { text: ui.runbook, link: "/runbook" },
-            ],
-          },
-        ],
-        [`${base}/api/`]: [{ text: ui.api, items: [{ text: ui.publicApi, link: `${base}/api/` }] }],
-        [`${base}/`]: [
-          {
-            text: ui.sectionEngineering,
-            items: [
-              { text: ui.design, link: "/design" },
-              { text: ui.plan, link: "/plan" },
-              { text: ui.changelog, link: `${base}/changelog` },
-            ],
-          },
-        ],
-      },
-      socialLinks: [
-        { icon: "github", link: "https://github.com/dopejs/pingo" },
-        { icon: "npm", link: "https://www.npmjs.com/package/@dopejs/pingo" },
-      ],
-      outline: { level: [2, 3], label: ui.outline },
-      docFooter: { prev: ui.previousPage, next: ui.nextPage },
-      returnToTopLabel: ui.returnToTop,
-      sidebarMenuLabel: ui.sidebarMenu,
-      darkModeSwitchLabel: ui.appearance,
-      darkModeSwitchTitle: ui.darkMode,
-      lightModeSwitchTitle: ui.appearance,
-      langMenuLabel: ui.languageMenu,
-      lastUpdatedText: ui.lastUpdated,
-      footer: {
-        message: ui.footerMessage,
-        copyright: "© 2026 Pingo contributors",
-      },
-    },
-  };
-}
-
-/** Builds the per-locale translations for the bundled local search index. */
-export function searchLocale(locale: SiteLocale): Record<string, unknown> {
-  const { ui } = locale;
-  return {
-    translations: {
-      button: { buttonText: ui.searchButton, buttonAriaLabel: ui.searchButton },
-      modal: {
-        displayDetails: ui.outline,
-        resetButtonTitle: ui.searchResetButton,
-        backButtonTitle: ui.returnToTop,
-        noResultsText: ui.searchNoResults,
-        footer: {
-          selectText: ui.searchFooterSelect,
-          navigateText: ui.searchFooterNavigate,
-          closeText: ui.searchFooterClose,
-        },
-      },
-    },
-    placeholder: ui.searchPlaceholder,
-  };
-}
