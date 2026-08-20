@@ -5,6 +5,56 @@ ABI 版本独立管理。
 
 ## Unreleased
 
+## 0.2.0
+
+品牌更名与文本编辑正确性。0.x 阶段 minor 允许 breaking：本版同时改了公开
+API 与二进制 ABI。
+
+### Breaking
+
+- 包名 `@dopejs/doper*` → `@dopejs/pingo*`（公开入口 `@dopejs/pingo`）。旧
+  包停留在 0.1.0，不再更新；无别名包。
+- 公开类型去掉 `Doper` 前缀：`PingoNode`、`PingoEvent`、`PingoEventHandler`、
+  `PingoEventPhase`、`PingoElement`、`PingoRoot`、`PingoFont`（及其 options/
+  error 类型）、`PingoImage`、`PingoImageOptions`。
+- JSX 元素品牌符号 `dopejs.doper.element` → `dopejs.pingo.element`：跨版本
+  混用元素描述符会被拒绝。
+- 无障碍镜像属性 `data-doper-*` → `data-pingo-*`；compat 边界的激活判别值
+  `"doper" | "legacy"` → `"pingo" | "legacy"`。
+- ABI 4 → 10。系统字体度量流新增逐码点推进、位置型推进与收缩表；输入流
+  新增 `SetWordBoundaries`。所有 golden 字节夹具随之显式重基。
+- 输入帧对过期 `base_revision` 的命令不再整帧拒绝：位置型编辑单独丢弃并
+  回一条空操作事务对齐输入面，undo/redo 以会话当前 revision 重试。
+
+### 文本与编辑
+
+- caret 与命中测试改用浏览器实测推进，不再用 `font_size * 0.6` 估算；IME
+  预编辑文本与密码遮罩字形一并测量。
+- 相邻全角标点的上下文收缩：位置型推进按字体实际压缩的那一半归属，caret
+  可以落在两个标点之间。
+- 回退文本路径支持软换行；单行框改为框内水平滚动并保持 caret 可见；
+  可编辑节点裁剪到自身盒子。
+- 双击分词使用平台 `Intl.Segmenter` 词典（中日文不再逐字选中）；未聚焦时
+  的首次双击会等聚焦建立后补发。
+- EditContext 模式补齐剪贴板与撤销快捷键；会话结束时解除 EditContext，使
+  画布内外失焦行为一致（移动端软键盘随之收起）。
+- 编辑期不再改变文本框尺寸；撤销后重新绘制。
+- Worker 崩溃恢复保留可编辑配置，密码框不会在恢复帧里显示明文。
+
+### 渲染与性能
+
+- 通用字体族关键字不再被加引号，此前整站实际画的是默认衬线体。
+- 栅格 tile 缓存不再逐帧改变文本栅格化结果。
+- 滚动帧不再整场景标脏；时钟帧在无变化时不再重画；滚动中不再对不可复用
+  的图片分块。
+- Android 惯性改用 spline 模型，iOS 系数修正；画布尺寸变化、移动端触摸与
+  横向滚动的多处阻断修复。
+
+### 站点与工具
+
+- 文档站点、十语言本地化、Playground 与 Storybook 合并到统一站点；新品牌
+  标识。
+
 ## 0.1.0
 
 首个可发布版本。P0–M5 全部工程里程碑完成，`pnpm m5:check`（M0→M5 全链

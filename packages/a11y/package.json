@@ -1,6 +1,6 @@
 {
   "name": "@dopejs/pingo-a11y",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "pingo internal: semantic tree DOM mirror and role-based selectors (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {

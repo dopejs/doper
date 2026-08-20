@@ -1,6 +1,6 @@
 {
   "name": "@dopejs/pingo-widgets",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "pingo internal: TextField/TextArea widgets over the editable primitive (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {

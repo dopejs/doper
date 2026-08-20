@@ -1,6 +1,6 @@
 {
   "name": "@dopejs/pingo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "pingo canvas rendering engine: public facade with TSX, hooks, native scrolling, and canvas-native editing",
   "license": "MIT",
   "repository": {
