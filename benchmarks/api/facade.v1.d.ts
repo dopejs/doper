@@ -17,9 +17,14 @@ export {
 } from "@dopejs/pingo-runtime";
 export {
   Fragment,
+  Image,
+  Input,
   PingoFont,
   PingoFontLoadError,
   PingoImage,
+  Text,
+  TextArea as UnstyledTextArea,
+  View,
   createElement,
   createFont,
   createImage,
@@ -41,6 +46,7 @@ export {
   type PingoFontOptions,
   type EditableInputMode,
   type EditableTextProps,
+  type InputProps,
   type FunctionComponent,
   type HostType,
   type Key,
@@ -48,7 +54,9 @@ export {
   type Ref,
   type ScrollProps,
   type TextProps,
+  type TextAreaProps as UnstyledTextAreaProps,
   type VirtualListProps,
+  type ViewProps,
   type Woff2Decoder,
 } from "@dopejs/pingo-jsx";
 export { type PingoRoot } from "@dopejs/pingo-reconciler";

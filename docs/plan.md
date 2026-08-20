@@ -584,7 +584,7 @@ Host 按手势分类，Core 对离散格做有界时长（120ms）的三次缓�
 
 ### M6：CSS 子集、基础组件与原生事件基础
 
-> 当前状态：**M6-A 已完成，M6-B 尚未开始（2026-08-20）**。单源 style schema、TS/Rust
+> 当前状态：**M6-A 已完成，M6-B facade 适配进行中（2026-08-20）**。单源 style schema、TS/Rust
 > 生成元数据、Shell stylesheet/compiler/cascade/computed resolver、结构化诊断和 capability
 > API 已落地；生成支持表明确标为 resolver-only。M6-A 门禁包含任意 parser 输入、独立
 > candidate-list reference oracle、级联随机差分，以及 memoized/no-change resolver 与全量重算
@@ -612,7 +612,14 @@ Host 按手势分类，Core 对离散格做有界时长（120ms）的三次缓�
 
 #### M6-B 基础组件、display 与 overflow
 
-- 新增 View、Text、Image、Input、TextArea facade；Fragment 不产 Scene 节点。
+状态：**进行中（2026-08-20）**。已交付 `View`、`Text`、`Image`、`Input` 和无装饰
+`UnstyledTextArea` facade compatibility adapter；它们严格映射现有 intrinsic/Core node，
+旧 intrinsic 与装饰型 `TextArea` widget 行为不变。由于已发布同名冲突，最终基础
+`TextArea` 名称需按 `docs/design.md` §12.1 的 breaking-release 迁移执行。当前 adapter
+只接受既有 direct props；`style`/`className`、display/overflow 和 View.virtual 尚未接入。
+
+- 新增 View、Text、Image、Input、TextArea facade；0.x 同名冲突期间使用
+  `UnstyledTextArea` 兼容别名；Fragment 不产 Scene 节点。
 - container/text/image/editableText 保持兼容；scroll 映射 View + overflow。
 - `display:flex|none` 跨 layout/paint/hit/semantics/scroll extent 原子生效。
 - overflow 五值与两轴 computed 规则；滚动状态挂在同一 View，不因 style 变化换 id。

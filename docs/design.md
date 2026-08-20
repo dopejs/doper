@@ -1809,6 +1809,13 @@ M0–M5 的直接 prop 与 intrinsic 是已发布兼容面，不再作为长期�
 不产生 Scene 节点。`Input` 与 `TextArea` 共享现有 Core EditableText 子系统，`Video`
 由 Host 媒体管线向 Core 提供有界帧资源，不把浏览器媒体对象放进 Scene。
 
+v0.2 已公开一个同名的装饰型 `TextArea` widget。0.x 兼容期不得静默改变它的视觉结构：
+无装饰基础组件先在 JSX package 中使用最终名称 `TextArea`，facade 以
+`UnstyledTextArea` 暴露；旧 `TextArea`/`TextAreaProps` 继续指向 widget，并在内部复用
+同一个 EditableText 原语。只有经过迁移报告、codemod、弃用周期和显式 breaking release，
+facade 才能把 `TextArea` 收敛为无装饰基础组件。回滚只需移除新增别名，旧 widget 和 intrinsic
+路径不受影响。
+
 `View` 是唯一通用盒子。普通滚动由 computed `overflow/overflowX/overflowY` 建立，
 不再需要新的 ScrollView node kind。虚拟化是 View 滚动轴上的显式 `virtual` 数据契约：
 包含 axis、itemCount、estimatedItemSize、可选 getItemKey 与 renderItem；它不能从

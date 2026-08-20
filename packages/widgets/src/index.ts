@@ -1,4 +1,6 @@
 import {
+  Input,
+  TextArea as UnstyledTextArea,
   createElement,
   type Color,
   type PingoNode,
@@ -80,10 +82,7 @@ function decoratedField(props: TextFieldProps, multiline: boolean, rows: number)
       height: innerHeight,
       backgroundColor: props.backgroundColor ?? DEFAULT_BACKGROUND,
       padding: FIELD_PADDING,
-      children: createElement(
-        "editableText",
-        editable as unknown as Record<string, unknown>,
-      ) as PingoNode,
+      children: multiline ? UnstyledTextArea(editable) : Input(editable),
     }),
   });
   if (props.error === undefined) return field;

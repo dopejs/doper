@@ -1,6 +1,6 @@
 # CSS 子集、原生事件与基础组件演进方案
 
-> 状态：M6-A Shell resolver 已完成；M6-B Core 集成仍未开始
+> 状态：M6-A Shell resolver 已完成；M6-B facade 适配进行中，Core 集成仍未开始
 > 日期：2026-08-20
 > 关联决策：[`ADR-0007`](./adr/0007-css-events-and-foundation-components.md)
 
@@ -37,6 +37,10 @@ Shell；Worker 可用时，主线程阻塞不会让已经开始的滚动或动�
 `Fragment` 仍是不产生 Scene 节点的描述符。`Input` 和 `TextArea` 是不同的公开语义，
 但不得复制两套编辑内核。`Button`、`Pressable`、`TextField` 等属于组合型 foundation
 widget，不增加 Core 节点种类。
+
+兼容例外：v0.2 facade 已有装饰型 `TextArea`。0.x 期间它保持原名和行为，无装饰基础组件
+暂以 `UnstyledTextArea` 从 facade 暴露；JSX 内部名称仍为 `TextArea`。显式 breaking release
+前不交换这两个名字，旧 widget 已改为复用同一基础 EditableText 适配器。
 
 现有 API 按兼容层迁移：
 
@@ -279,7 +283,8 @@ M6-A 已于 2026-08-20 完成 resolver-only 工程门禁：schema/生成物、�
 Core 已消费 computed style；以下第 2–7 项仍待后续子里程碑交付。
 
 1. style schema、生成器、diagnostics、capabilities 与 reference resolver。
-2. 新组件 facade 与旧 intrinsic 兼容包装；不改变现有行为。
+2. 新组件 facade 与旧 intrinsic 兼容包装；不改变现有行为。（已交付 direct-prop 适配层；
+   `style`/`className` 随后续 Core style 接入开放。）
 3. `style` / `className` / stylesheet 的解析、层叠、继承和 direct-prop adapter。
 4. `display:none`、第一批 box/flex/paint/text 属性。
 5. overflow 统一 View 滚动；现有 virtualList 迁到 `View.virtual` 的纵向等价路径。

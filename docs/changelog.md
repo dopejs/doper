@@ -9,6 +9,9 @@ ABI 版本独立管理。
 
 ## Unreleased
 
+- 启动 M6-B：新增 `View`、`Text`、`Image`、`Input` 与 `UnstyledTextArea` direct-prop
+  compatibility adapter，并保持旧 intrinsic 和装饰型 `TextArea` widget 的结构与行为。
+  `style`/`className`、display/overflow 和 View.virtual 尚未接入。
 - 启动 M6-A：新增版本化单源 style schema、生成的 TS/Rust 元数据、独立 Shell CSS
   subset resolver，以及 `createStyleSheet`、`supportsStyle`、`styleCapabilities` 等 facade API。
   M6-A 还增加了独立 candidate-list reference resolver、seeded parser/cascade 差分、

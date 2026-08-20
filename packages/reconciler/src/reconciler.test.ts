@@ -1,4 +1,9 @@
 import {
+  Fragment,
+  Input,
+  Text,
+  TextArea as UnstyledTextArea,
+  View,
   createElement,
   createFont,
   type PingoEvent,
@@ -23,6 +28,32 @@ class RecordingSink implements MutationSink {
 }
 
 describe("reconciler", () => {
+  it("maps foundation components to the compatible Core node contract", () => {
+    const sink = new RecordingSink();
+    createRoot(sink).render(
+      createElement(View, {
+        children: createElement(Fragment, {
+          children: [
+            createElement(Text, { value: "label" }),
+            createElement(Input, { value: "single", revision: 0n }),
+            createElement(UnstyledTextArea, { value: "multi", revision: 0n }),
+          ],
+        }),
+      }),
+    );
+
+    expect(createdKinds(sink.batches[0])).toEqual([
+      NodeKind.Root,
+      NodeKind.Container,
+      NodeKind.Text,
+      NodeKind.EditableText,
+      NodeKind.EditableText,
+    ]);
+    expect(
+      mutationsOfType(sink.batches[0], "configureEditable").map(({ flags }) => flags & 1),
+    ).toEqual([0, 1]);
+  });
+
   it("mounts a deterministic host tree and removes cleared resources", () => {
     const sink = new RecordingSink();
     const root = createRoot(sink);

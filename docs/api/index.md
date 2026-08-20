@@ -51,6 +51,21 @@ Fragment
 `EditableTextProps`、`EditableInputMode`、`Color`、`EdgeInsets`、`NodeHandle`、`Ref`、
 `PingoNode`、`FunctionComponent`。
 
+M6-B 新增保持 Core 行为不变的组件适配层：
+
+```ts
+View(props: ViewProps)
+Text(props: TextProps)
+Image(props: ImageProps)
+Input(props: InputProps)
+UnstyledTextArea(props: UnstyledTextAreaProps)
+```
+
+它们当前只接受既有 direct props，分别映射到 `container`、`text`、`image` 和共享的
+`editableText` 原语；尚未开放 `style`/`className`。已发布的 `TextArea` 仍是带边框、padding
+与 rows 布局的 widget，为避免 0.x 静默破坏暂不改名；无装饰基础组件因此使用
+`UnstyledTextArea` 兼容别名。
+
 JSX 运行时通过 `@dopejs/pingo/jsx-runtime` 与 `@dopejs/pingo/jsx-dev-runtime` 提供。
 
 ## 样式能力（M6-A）

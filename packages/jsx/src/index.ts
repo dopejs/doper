@@ -1,4 +1,14 @@
 export { PINGO_ELEMENT_TYPE, createElement, isPingoElement, normalizeChildren } from "./element";
+export {
+  Image,
+  Input,
+  Text,
+  TextArea,
+  View,
+  type InputProps,
+  type TextAreaProps,
+  type ViewProps,
+} from "./components";
 export { PingoFont, createFont, type PingoFontOptions } from "./font";
 export { PingoImage, createImage, type PingoImageOptions } from "./image";
 export {
