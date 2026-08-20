@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { AppFrame } from "./AppFrame";
+import { LanguageMenu } from "./LanguageMenu";
 import { SITE_LOCALES, localeForPath, pageHref, type SiteLocale } from "./locales";
 import { writeLanguagePreference } from "./language-preference";
 import { Playground } from "./playground/Playground";
@@ -159,20 +160,7 @@ function SiteHeader({
             <span>{locale.ui.searchButton}</span>
             <kbd>⌘ K</kbd>
           </button>
-          <select
-            className="locale-select"
-            aria-label={locale.ui.languageMenu}
-            value={locale.path}
-            onChange={(event) => {
-              onLocaleChange(event.currentTarget.value);
-            }}
-          >
-            {SITE_LOCALES.map((candidate) => (
-              <option key={candidate.path || "root"} value={candidate.path}>
-                {candidate.label}
-              </option>
-            ))}
-          </select>
+          <LanguageMenu locale={locale} onChange={onLocaleChange} />
           <button
             className="icon-button"
             type="button"
