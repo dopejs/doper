@@ -150,6 +150,14 @@ root.render(
 );
 ```
 
+业务可以在自己的启动或路由 loading 中显式调用 `initializeWasm(input?)`，再创建
+主线程 Core；该调用在当前 JavaScript realm 内幂等、合并并发初始化，并在失败后允许
+重试。Worker 拥有独立 realm，仍由 Host 在 Worker prepare 阶段初始化模块；prepare
+只验证模块能够初始化，不得创建临时 Core，activate 时才创建唯一的正式 Core。
+这是只增不改的公开 API，不改变 ABI 或现有 root 调用；回滚时业务可直接恢复为
+`createWasmCore` 的隐式初始化，Host 的 prepare/activate 优化也可独立回退。初始化复用、
+失败重试、Worker/fallback 回归与公开 API 快照必须纳入自动化门禁。
+
 约束：
 
 - 门面包必须提供 `@dopejs/pingo/jsx-runtime` 与 `@dopejs/pingo/jsx-dev-runtime` 两个子路径导出，转发到 `@dopejs/pingo-jsx`，否则 `jsxImportSource` 无法工作。
@@ -524,6 +532,20 @@ Host 侧有分类的单测矩阵。
 
 **回滚**：Host 端把 `classifyWheel` 恒定返回 `EVENT_FLAG_PRECISE_WHEEL`，即可在不
 改 Core、不改 ABI 的前提下恢复全即时 1:1 行为。
+
+### Core 持有的恒速程序化滚动（ABI v10 → v11，2026-08-20）
+
+说明双时钟的 Demo 不能靠 Shell 定时反复制造 fling：这种做法会自然减速、停顿再启动，
+主线程阻塞时定时器也无法续上。Input Stream 因此新增 `SetScrollVelocity(node_id,
+velocity_x, velocity_y)`，公开 Host 对应 `setScrollVelocity(target, x, y)`。速度单位是逻辑
+像素/秒；Core 在 Worker 渲染时钟的固定子步中持续推进，任一轴到达边界后停止该轴，
+`(0, 0)` 显式停止。新的直接操纵 `ScrollBegin` 会取消恒速状态，保证用户输入立即接管。
+
+这是新增 Input opcode，schema 与双端生成定义同步升到 ABI v11；v11 Core 继续读取最低 v4
+的旧流，包含该必需命令的新流不会被旧 Core 静默降级。验证覆盖 TS/Rust 编解码 round
+trip、Host 单调 input sequence、Core 跨多个 Worker tick 的恒速位移和停止行为，以及浏览器
+主线程阻塞注入。回滚时先让调用方发送零速度，再移除 Host API 与 opcode；Demo 可临时恢复
+为普通手势，但不得再宣称其是连续恒速滚动。
 
 ### 窗口移动的增量布局（2026-08-18）
 

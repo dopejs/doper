@@ -63,6 +63,7 @@ function sampleBatch(): InputBatch {
       { type: "scrollDelta", nodeId: 2, deltaX: -3.5, deltaY: 24.25, elapsedMicros: 16_667 },
       { type: "scrollEnd", nodeId: 2 },
       { type: "scrollCancel", nodeId: 2 },
+      { type: "setScrollVelocity", nodeId: 2, velocityX: 0, velocityY: 216 },
       {
         type: "dispatchEvent",
         eventId: 19,

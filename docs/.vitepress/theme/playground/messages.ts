@@ -40,6 +40,14 @@ export interface PlaygroundMessages {
   readonly transportDescription: string;
   readonly crossOriginIsolated: string;
   readonly transportMode: string;
+  readonly uiClockLabel: string;
+  readonly uiClockHint: string;
+  readonly coreClockLabel: string;
+  readonly coreClockHint: string;
+  readonly actualStall: string;
+  readonly workerFramesDuringStall: string;
+  readonly selfDrivenFramesDuringStall: string;
+  readonly maximumWorkerFrameGap: string;
   readonly blockMainThread: string;
   readonly stallOnMainThread: string;
   readonly stallOnWorker: string;
@@ -85,9 +93,17 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
       "UI 时钟与渲染时钟相互独立。能力探测在 SharedArrayBuffer、postMessage 与主线程 Canvas2D 之间选择传输路径；阻塞主线程试试，Worker 路径下画面仍然连续。",
     crossOriginIsolated: "跨源隔离",
     transportMode: "传输模式",
+    uiClockLabel: "UI / Shell 时钟",
+    uiClockHint: "主线程 rAF 驱动；阻塞时红色游标冻结",
+    coreClockLabel: "Core / Worker 时钟",
+    coreClockHint: "百万行 Core 原生滚动；与按钮无关，始终运行",
+    actualStall: "实际阻塞",
+    workerFramesDuringStall: "阻塞期间 Worker 帧",
+    selfDrivenFramesDuringStall: "其中 Worker 自驱帧",
+    maximumWorkerFrameGap: "Worker 最大帧间隔",
     stallOnMainThread: "当前是主线程路径，阻塞期间动画会停顿——这就是需要 Worker 的原因。",
     stallOnWorker: "当前是 Worker 路径，阻塞期间渲染时钟仍在 Worker 内推进。",
-    blockMainThread: "阻塞主线程 200ms",
+    blockMainThread: "仅阻塞主线程 1 秒",
   },
   "zh-Hant": {
     loading: "正在載入引擎核心（約 1MB WASM）…",
@@ -128,9 +144,17 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
       "UI 時鐘與繪製時鐘彼此獨立。能力偵測在 SharedArrayBuffer、postMessage 與主執行緒 Canvas2D 之間選擇傳輸路徑；阻塞主執行緒試試，Worker 路徑下畫面仍然連續。",
     crossOriginIsolated: "跨來源隔離",
     transportMode: "傳輸模式",
+    uiClockLabel: "UI / Shell 時鐘",
+    uiClockHint: "主執行緒 rAF 驅動；阻塞時紅色游標凍結",
+    coreClockLabel: "Core / Worker 時鐘",
+    coreClockHint: "百萬列 Core 原生捲動；與按鈕無關，持續運行",
+    actualStall: "實際阻塞",
+    workerFramesDuringStall: "阻塞期間 Worker 幀",
+    selfDrivenFramesDuringStall: "其中 Worker 自驅幀",
+    maximumWorkerFrameGap: "Worker 最大幀間隔",
     stallOnMainThread: "目前是主執行緒路徑，阻塞期間動畫會停頓——這就是需要 Worker 的原因。",
     stallOnWorker: "目前是 Worker 路徑，阻塞期間繪製時鐘仍在 Worker 內推進。",
-    blockMainThread: "阻塞主執行緒 200ms",
+    blockMainThread: "僅阻塞主執行緒 1 秒",
   },
   "ja": {
     loading: "エンジンコアを読み込み中（約 1MB の WASM）…",
@@ -171,11 +195,19 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
       "UI クロックとレンダリングクロックは独立しています。能力検出が SharedArrayBuffer、postMessage、メインスレッド Canvas2D の中から転送経路を選びます。メインスレッドをブロックしてみてください。Worker 経路なら表示は途切れません。",
     crossOriginIsolated: "クロスオリジン分離",
     transportMode: "転送モード",
+    uiClockLabel: "UI / Shell クロック",
+    uiClockHint: "メインスレッド rAF 駆動。ブロック中は赤いカーソルが停止します",
+    coreClockLabel: "Core / Worker クロック",
+    coreClockHint: "100 万行の Core ネイティブスクロール。ボタンとは無関係に常時動作します",
+    actualStall: "実際のブロック時間",
+    workerFramesDuringStall: "ブロック中の Worker フレーム",
+    selfDrivenFramesDuringStall: "うち Worker 自走フレーム",
+    maximumWorkerFrameGap: "Worker の最大フレーム間隔",
     stallOnMainThread:
       "現在はメインスレッド経路です。ブロック中はアニメーションが止まります。だから Worker が必要なのです。",
     stallOnWorker:
       "現在は Worker 経路です。ブロック中もレンダリングクロックは Worker 内で進み続けます。",
-    blockMainThread: "メインスレッドを 200ms ブロック",
+    blockMainThread: "メインスレッドだけを 1 秒ブロック",
   },
   "ko": {
     loading: "엔진 코어를 불러오는 중(약 1MB WASM)…",
@@ -216,11 +248,19 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
       "UI 클록과 렌더링 클록은 독립적입니다. 능력 탐지가 SharedArrayBuffer, postMessage, 메인 스레드 Canvas2D 중에서 전송 경로를 고릅니다. 메인 스레드를 막아 보세요. Worker 경로에서는 화면이 계속 이어집니다.",
     crossOriginIsolated: "교차 출처 격리",
     transportMode: "전송 모드",
+    uiClockLabel: "UI / Shell 클록",
+    uiClockHint: "메인 스레드 rAF 구동. 차단 중 빨간 커서가 멈춥니다",
+    coreClockLabel: "Core / Worker 클록",
+    coreClockHint: "100만 행 Core 네이티브 스크롤로 버튼과 무관하게 계속 움직입니다",
+    actualStall: "실제 차단 시간",
+    workerFramesDuringStall: "차단 중 Worker 프레임",
+    selfDrivenFramesDuringStall: "그중 Worker 자체 구동 프레임",
+    maximumWorkerFrameGap: "Worker 최대 프레임 간격",
     stallOnMainThread:
       "지금은 메인 스레드 경로입니다. 차단하는 동안 애니메이션이 멈춥니다. 그래서 Worker가 필요합니다.",
     stallOnWorker:
       "지금은 Worker 경로입니다. 차단하는 동안에도 렌더링 클록은 Worker 안에서 계속 진행됩니다.",
-    blockMainThread: "메인 스레드 200ms 차단",
+    blockMainThread: "메인 스레드만 1초 차단",
   },
   "es": {
     loading: "Cargando el núcleo del motor (unos 1 MB de WASM)…",
@@ -261,11 +301,20 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
       "El reloj de la interfaz y el de renderizado son independientes. La detección de capacidades elige el transporte entre SharedArrayBuffer, postMessage y Canvas2D en el hilo principal. Prueba a bloquear el hilo principal: por la ruta del Worker la imagen sigue fluida.",
     crossOriginIsolated: "Aislamiento de origen",
     transportMode: "Transporte",
+    uiClockLabel: "Reloj UI / Shell",
+    uiClockHint: "Lo impulsa el rAF principal; el cursor rojo se congela al bloquear",
+    coreClockLabel: "Reloj Core / Worker",
+    coreClockHint:
+      "Scroll nativo de un millón de filas en Core; siempre activo, sin depender del botón",
+    actualStall: "Bloqueo real",
+    workerFramesDuringStall: "Fotogramas del Worker durante el bloqueo",
+    selfDrivenFramesDuringStall: "Fotogramas autónomos del Worker",
+    maximumWorkerFrameGap: "Intervalo máximo del Worker",
     stallOnMainThread:
       "Ahora mismo va por el hilo principal: mientras esté bloqueado la animación se detiene. Por eso hace falta el Worker.",
     stallOnWorker:
       "Ahora mismo va por el Worker: aunque el hilo principal esté bloqueado, el reloj de renderizado sigue avanzando.",
-    blockMainThread: "Bloquear el hilo principal 200 ms",
+    blockMainThread: "Bloquear solo el hilo principal 1 s",
   },
   "fr": {
     loading: "Chargement du cœur du moteur (environ 1 Mo de WASM)…",
@@ -307,11 +356,20 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
       "L'horloge de l'interface et celle du rendu sont indépendantes. La détection de capacités choisit le transport entre SharedArrayBuffer, postMessage et Canvas2D sur le thread principal. Essayez de bloquer le thread principal : par la voie du Worker l'affichage reste continu.",
     crossOriginIsolated: "Isolation d'origine",
     transportMode: "Transport",
+    uiClockLabel: "Horloge UI / Shell",
+    uiClockHint: "Pilotée par le rAF principal ; le curseur rouge se fige pendant le blocage",
+    coreClockLabel: "Horloge Core / Worker",
+    coreClockHint:
+      "Défilement Core natif d’un million de lignes, toujours actif indépendamment du bouton",
+    actualStall: "Blocage réel",
+    workerFramesDuringStall: "Images Worker pendant le blocage",
+    selfDrivenFramesDuringStall: "Images autonomes du Worker",
+    maximumWorkerFrameGap: "Intervalle maximal du Worker",
     stallOnMainThread:
       "Nous sommes sur le thread principal : pendant le blocage l'animation s'arrête. C'est précisément pourquoi le Worker est nécessaire.",
     stallOnWorker:
       "Nous sommes sur la voie du Worker : même pendant le blocage, l'horloge de rendu continue d'avancer.",
-    blockMainThread: "Bloquer le thread principal 200 ms",
+    blockMainThread: "Bloquer uniquement le thread principal 1 s",
   },
   "de": {
     loading: "Engine-Kern wird geladen (rund 1 MB WASM)…",
@@ -353,11 +411,20 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
       "Die UI-Uhr und die Rendering-Uhr sind unabhängig. Die Fähigkeitserkennung wählt den Transport zwischen SharedArrayBuffer, postMessage und Canvas2D im Hauptthread. Blockieren Sie ruhig den Hauptthread: auf dem Worker-Pfad bleibt die Darstellung durchgehend.",
     crossOriginIsolated: "Cross-Origin-Isolation",
     transportMode: "Transport",
+    uiClockLabel: "UI-/Shell-Uhr",
+    uiClockHint: "Vom Hauptthread-rAF angetrieben; der rote Zeiger friert beim Blockieren ein",
+    coreClockLabel: "Core-/Worker-Uhr",
+    coreClockHint:
+      "Natives Core-Scrollen mit einer Million Zeilen, unabhängig vom Button ständig aktiv",
+    actualStall: "Tatsächliche Blockade",
+    workerFramesDuringStall: "Worker-Frames während der Blockade",
+    selfDrivenFramesDuringStall: "Davon selbstgetriebene Worker-Frames",
+    maximumWorkerFrameGap: "Maximaler Worker-Frameabstand",
     stallOnMainThread:
       "Aktuell läuft der Hauptthread-Pfad: während der Blockade steht die Animation. Genau dafür gibt es den Worker.",
     stallOnWorker:
       "Aktuell läuft der Worker-Pfad: auch während der Blockade läuft die Rendering-Uhr im Worker weiter.",
-    blockMainThread: "Hauptthread 200 ms blockieren",
+    blockMainThread: "Nur den Hauptthread 1 Sekunde blockieren",
   },
   "ru": {
     loading: "Загружается ядро движка (около 1 МБ WASM)…",
@@ -399,11 +466,20 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
       "Часы интерфейса и часы рендеринга независимы. Определение возможностей выбирает транспорт между SharedArrayBuffer, postMessage и Canvas2D в главном потоке. Попробуйте заблокировать главный поток: на пути через Worker изображение остаётся непрерывным.",
     crossOriginIsolated: "Изоляция источников",
     transportMode: "Транспорт",
+    uiClockLabel: "Часы UI / Shell",
+    uiClockHint: "Работают от rAF главного потока; при блокировке красный курсор замирает",
+    coreClockLabel: "Часы Core / Worker",
+    coreClockHint:
+      "Нативная прокрутка Core на миллион строк работает постоянно и не зависит от кнопки",
+    actualStall: "Фактическая блокировка",
+    workerFramesDuringStall: "Кадры Worker во время блокировки",
+    selfDrivenFramesDuringStall: "Автономные кадры Worker",
+    maximumWorkerFrameGap: "Макс. интервал кадров Worker",
     stallOnMainThread:
       "Сейчас работает путь главного потока: во время блокировки анимация останавливается. Именно поэтому нужен Worker.",
     stallOnWorker:
       "Сейчас работает путь через Worker: даже во время блокировки часы рендеринга продолжают идти.",
-    blockMainThread: "Заблокировать главный поток на 200 мс",
+    blockMainThread: "Заблокировать только главный поток на 1 секунду",
   },
   "ar": {
     loading: "يجري تحميل نواة المحرّك (نحو ١ ميغابايت من WASM)…",
@@ -444,10 +520,18 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
       "ساعة الواجهة وساعة العرض مستقلّتان. ويختار كشف القدرات مسار النقل بين SharedArrayBuffer وpostMessage وCanvas2D على الخيط الرئيسي. جرّب حجب الخيط الرئيسي؛ ففي مسار الـ Worker تبقى الصورة متّصلة.",
     crossOriginIsolated: "العزل بين المصادر",
     transportMode: "مسار النقل",
+    uiClockLabel: "ساعة UI / Shell",
+    uiClockHint: "يقودها rAF في الخيط الرئيسي؛ يتجمّد المؤشر الأحمر أثناء الحجب",
+    coreClockLabel: "ساعة Core / Worker",
+    coreClockHint: "تمرير نواة أصلي لمليون صف يعمل دائمًا وبمعزل عن الزر",
+    actualStall: "مدة الحجب الفعلية",
+    workerFramesDuringStall: "إطارات Worker أثناء الحجب",
+    selfDrivenFramesDuringStall: "إطارات Worker ذاتية الدفع",
+    maximumWorkerFrameGap: "أكبر فجوة بين إطارات Worker",
     stallOnMainThread:
       "المسار الحالي هو الخيط الرئيسي، فتتوقّف الحركة أثناء الحجب؛ ولهذا السبب نحتاج إلى الـ Worker.",
     stallOnWorker: "المسار الحالي هو الـ Worker، وتظلّ ساعة العرض تتقدّم داخله أثناء الحجب.",
-    blockMainThread: "احجب الخيط الرئيسي ٢٠٠ ملّي ثانية",
+    blockMainThread: "احجب الخيط الرئيسي فقط لثانية واحدة",
   },
   "he": {
     loading: "טוען את ליבת המנוע (כ-1MB של WASM)…",
@@ -488,10 +572,18 @@ const MESSAGES: Record<string, PlaygroundMessages> = {
       "שעון הממשק ושעון הרינדור עצמאיים. זיהוי היכולות בוחר את נתיב ההעברה מבין SharedArrayBuffer, postMessage ו-Canvas2D בתהליכון הראשי. נסה לחסום את התהליכון הראשי: בנתיב ה-Worker התצוגה נשארת רציפה.",
     crossOriginIsolated: "בידוד בין מקורות",
     transportMode: "נתיב העברה",
+    uiClockLabel: "שעון UI / Shell",
+    uiClockHint: "מונע ב-rAF של התהליכון הראשי; הסמן האדום קופא בזמן החסימה",
+    coreClockLabel: "שעון Core / Worker",
+    coreClockHint: "גלילת Core נייטיבית של מיליון שורות פועלת תמיד ואינה תלויה בכפתור",
+    actualStall: "חסימה בפועל",
+    workerFramesDuringStall: "פריימי Worker בזמן החסימה",
+    selfDrivenFramesDuringStall: "פריימי Worker בהנעה עצמית",
+    maximumWorkerFrameGap: "מרווח פריים מרבי ב-Worker",
     stallOnMainThread:
       "כרגע פועל נתיב התהליכון הראשי: בזמן החסימה האנימציה נעצרת. בדיוק בשביל זה נדרש ה-Worker.",
     stallOnWorker: "כרגע פועל נתיב ה-Worker: גם בזמן החסימה שעון הרינדור ממשיך להתקדם בתוכו.",
-    blockMainThread: "חסום את התהליכון הראשי ל-200 מ״ש",
+    blockMainThread: "חסום רק את התהליכון הראשי לשנייה אחת",
   },
 };
 

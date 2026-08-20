@@ -13,8 +13,14 @@
 ```ts
 createHostedCanvasRoot(canvas, options?): Promise<HostedCanvasRoot>
 createCanvasRoot(context, core, options?): PingoRoot   // 主线程 M1 路径
+initializeWasm(input?): Promise<void>
 createWasmCore(width, height, input?): Promise<CoreClient>
 ```
+
+`initializeWasm` 让业务把 WASM 初始化纳入自己的启动或路由 loading。它在当前
+JavaScript realm 内是幂等的：并发与后续调用共享第一次成功的初始化，失败不会被缓存，
+可以重试；第一次调用决定自托管 input。Worker 是独立 realm，默认仍由 Host 在 Worker
+中完成初始化。`createWasmCore` 会复用同一 realm 中已经完成或正在进行的初始化。
 
 `HostedCanvasRoot` 方法：
 
@@ -24,6 +30,7 @@ createWasmCore(width, height, input?): Promise<CoreClient>
 | `close()`                                                 | 关闭 root、Worker 与 Core                            |
 | `mode`                                                    | 实际传输路径：`sab` / `post-message` / `main-thread` |
 | `beginScroll` / `scrollBy` / `endScroll` / `cancelScroll` | 直接操纵滚动                                         |
+| `setScrollVelocity(target, x, y)`                         | 由 Core 渲染时钟持续按逻辑像素/秒滚动；`0, 0` 停止   |
 | `focusEditable` / `blurEditable`                          | 激活或结束原生编辑会话                               |
 | `updateEditingGeometry`                                   | 手动提供 IME 几何（通常自动完成）                    |
 | `transportMetrics()` / `inputTransportMetrics()`          | 传输与背压快照                                       |

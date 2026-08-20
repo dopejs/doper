@@ -9,6 +9,17 @@ ABI 版本独立管理。
 
 ## Unreleased
 
+## 0.2.1 - 2026-08-20
+
+- 公开幂等且可重试的 `initializeWasm`，业务可以自行编排 WASM loading；默认 Storybook
+  loading 改为轻量延迟展示，Worker 初始化复用同一入口。
+- 双时钟 Playground 改为进入页面即持续的百万行虚拟滚动；按钮只阻塞主线程，不再
+  启动或重置滚动状态。
+- 新增 Core/Worker 时钟持有的恒速程序化滚动 `setScrollVelocity`；Input Stream
+  增加对应命令，ABI 版本 10 → 11。
+
+## 0.2.0 - 2026-08-20
+
 - 滚轮传递曲线对齐浏览器原生：离散滚轮格改为动画滚动，高精度（触控板）delta 保持即时 1:1；
   Input Stream 的 `DispatchEvent` 新增 flags 字段，ABI 版本 1 → 2。
 - 官网提供简体中文、繁体中文、西班牙语、法语、德语、俄语、希伯来语、阿拉伯语、日语与韩语。

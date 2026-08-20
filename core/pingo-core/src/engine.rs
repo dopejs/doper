@@ -1890,6 +1890,7 @@ fn is_scroll_command(command: &InputCommand) -> bool {
             | InputCommand::ScrollDelta { .. }
             | InputCommand::ScrollEnd { .. }
             | InputCommand::ScrollCancel { .. }
+            | InputCommand::SetScrollVelocity { .. }
     )
 }
 
@@ -4586,6 +4587,46 @@ mod tests {
         assert_eq!(engine.metrics().accepted_input_batches, 3);
         assert_eq!(engine.metrics().scroll_frames, 1);
         assert_eq!(engine.scroll_metrics().input_commands, 3);
+    }
+
+    #[test]
+    fn constant_scroll_velocity_advances_until_core_is_told_to_stop() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&scroll_tree()).expect("initial frame");
+        assert_eq!(
+            engine.input(&input(
+                1,
+                vec![InputCommand::SetScrollVelocity {
+                    node_id: id(1),
+                    velocity_x: 0.0,
+                    velocity_y: 120.0,
+                }],
+            )),
+            Ok(None)
+        );
+
+        for expected_y in [30.0, 60.0] {
+            engine.advance(0.25).expect("tick").expect("scroll frame");
+            assert_eq!(
+                engine
+                    .scene()
+                    .scroll_position(NodeId::from_raw(id(1)).expect("id")),
+                Some([0.0, expected_y])
+            );
+        }
+
+        assert_eq!(
+            engine.input(&input(
+                2,
+                vec![InputCommand::SetScrollVelocity {
+                    node_id: id(1),
+                    velocity_x: 0.0,
+                    velocity_y: 0.0,
+                }],
+            )),
+            Ok(None)
+        );
+        assert_eq!(engine.advance(0.25), Ok(None));
     }
 
     #[test]

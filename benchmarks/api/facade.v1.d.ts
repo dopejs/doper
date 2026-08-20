@@ -85,6 +85,7 @@ export {
   createHostedCanvasRoot,
   createCanvasRoot as createRoot,
   createWasmCore,
+  initializeWasm,
   type ClockAnchorDriver,
   type CanvasRootOptions,
   type CoreClient,

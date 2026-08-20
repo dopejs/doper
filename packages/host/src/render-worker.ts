@@ -9,7 +9,7 @@ import { PostMessageMutationReceiver } from "./post-message";
 import { HybridRenderClock } from "./render-clock";
 import { SabMutationRing } from "./sab-ring";
 import { SabMutationReceiver } from "./sab-transport";
-import { createWasmCore } from "./wasm";
+import { createWasmCore, initializeWasm } from "./wasm";
 import {
   WORKER_PROTOCOL_VERSION,
   isRenderWorkerInboundEnvelope,
@@ -64,7 +64,7 @@ async function handle(message: RenderWorkerInboundMessage): Promise<void> {
         throw new Error("render Worker ABI version predates self-describing instructions");
       }
       sessionId = positiveU32(message.sessionId, "sessionId");
-      await verifyWasmStartup();
+      await initializeWasm();
       prepared = true;
       post({
         capabilities: {
@@ -104,11 +104,6 @@ async function handle(message: RenderWorkerInboundMessage): Promise<void> {
     case "pingo:clock-anchor":
       return;
   }
-}
-
-async function verifyWasmStartup(): Promise<void> {
-  const probe = await createWasmCore(1, 1);
-  probe.free?.();
 }
 
 async function activate(message: WorkerActivateMessage): Promise<void> {

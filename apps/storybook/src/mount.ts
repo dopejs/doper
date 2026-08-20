@@ -24,12 +24,24 @@ export function mountStory(
   canvas.tabIndex = 0;
   host.append(canvas);
 
-  const loading = document.createElement("p");
-  loading.style.cssText =
-    "position:absolute;inset:0;display:grid;place-items:center;margin:0;color:#8d99ab;font-size:12px";
+  // Fast starts stay visually quiet. If startup is actually slow, show a
+  // compact status instead of covering the canvas with a loading surface.
   host.style.position = "relative";
-  host.append(loading);
-  loading.textContent = "正在加载引擎核心…";
+  host.setAttribute("aria-busy", "true");
+  let loading: HTMLSpanElement | undefined;
+  const loadingTimer = window.setTimeout(() => {
+    loading = document.createElement("span");
+    loading.style.cssText =
+      "position:absolute;right:8px;top:8px;padding:3px 6px;border-radius:999px;background:#f4f6f8;color:#6f7b8d;font-size:11px;line-height:1.4;pointer-events:none";
+    loading.textContent = "加载中…";
+    host.append(loading);
+  }, 200);
+
+  const finishLoading = (): void => {
+    window.clearTimeout(loadingTimer);
+    loading?.remove();
+    host.removeAttribute("aria-busy");
+  };
 
   let root: HostedCanvasRoot | undefined;
   let disposed = false;
@@ -45,14 +57,14 @@ export function mountStory(
     },
   })
     .then((created) => {
-      loading.remove();
+      finishLoading();
       if (disposed) return created.close();
       root = created;
       created.render(render());
       return undefined;
     })
     .catch((cause: unknown) => {
-      loading.remove();
+      finishLoading();
       const box = document.createElement("pre");
       box.style.cssText = "margin:0;padding:8px;color:#b3261e;font-size:12px";
       box.textContent = String(cause);
@@ -62,6 +74,7 @@ export function mountStory(
   const observer = new MutationObserver(() => {
     if (host.isConnected) return;
     disposed = true;
+    finishLoading();
     observer.disconnect();
     void root?.close();
   });

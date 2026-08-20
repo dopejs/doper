@@ -170,6 +170,7 @@ pub fn edit_command_from_input(
         | InputCommand::ScrollDelta { .. }
         | InputCommand::ScrollEnd { .. }
         | InputCommand::ScrollCancel { .. }
+        | InputCommand::SetScrollVelocity { .. }
         | InputCommand::DispatchEvent { .. } => {
             return Err(InputReplayError::UnsupportedCommand);
         }

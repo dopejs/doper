@@ -108,6 +108,25 @@ async function checkAbiRoundtrip() {
   assertEqual(inputHex, inputGolden, "TypeScript input encoder vs golden");
   assertEqual(roundTripInRust("input", inputHex), inputHex, "TypeScript to Rust input round trip");
 
+  const velocityInputHex = encodeHex(
+    editing.encodeInputBatch({
+      frameSeq: 78,
+      commands: [
+        {
+          type: "setScrollVelocity",
+          nodeId: 0x0010_0007,
+          velocityX: 0,
+          velocityY: 216,
+        },
+      ],
+    }),
+  );
+  assertEqual(
+    roundTripInRust("input", velocityInputHex),
+    velocityInputHex,
+    "TypeScript to Rust constant scroll velocity round trip",
+  );
+
   const textMetricBytes = host.encodeSystemTextMetricBatch([
     {
       type: "upsert",

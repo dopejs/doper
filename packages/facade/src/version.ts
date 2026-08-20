@@ -1,7 +1,7 @@
 import { ABI_VERSION } from "@dopejs/pingo-host";
 
 /** Engine release version for incident reports and rollout dashboards. */
-export const ENGINE_VERSION = "0.2.0";
+export const ENGINE_VERSION = "0.2.1";
 
 /** Binary protocol version negotiated across the Shell/Core boundary. */
 export const ENGINE_ABI_VERSION: number = ABI_VERSION;

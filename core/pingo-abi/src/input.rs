@@ -328,6 +328,15 @@ pub enum InputCommand {
         /// Generation-bearing target scroll node.
         node_id: u32,
     },
+    /// Starts or updates Core-owned constant-velocity scrolling; zero stops it.
+    SetScrollVelocity {
+        /// Generation-bearing target scroll node.
+        node_id: u32,
+        /// Horizontal logical pixels per second.
+        velocity_x: f32,
+        /// Vertical logical pixels per second.
+        velocity_y: f32,
+    },
     /// Routes one pointer/wheel sample through Core world geometry.
     DispatchEvent {
         /// Host-monotonic event identifier used by the reverse result.
@@ -711,6 +720,19 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
         InputOpcode::ScrollCancel => InputCommand::ScrollCancel {
             node_id: reader.read_u32()?,
         },
+        InputOpcode::SetScrollVelocity => {
+            let node_id = reader.read_u32()?;
+            let velocity_x = reader.read_f32()?;
+            let velocity_y = reader.read_f32()?;
+            if velocity_x.abs() > MAX_SCROLL_DELTA || velocity_y.abs() > MAX_SCROLL_DELTA {
+                return Err(AbiError::InvalidValue("scroll velocity exceeds maximum"));
+            }
+            InputCommand::SetScrollVelocity {
+                node_id,
+                velocity_x,
+                velocity_y,
+            }
+        }
         InputOpcode::DispatchEvent => {
             let event_id = reader.read_u32()?;
             let kind = InputEventKind::decode(reader.read_u16()?)?;
@@ -882,6 +904,18 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             writer.f32(*delta_y)?;
             writer.u32(*elapsed_micros);
         }
+        InputCommand::SetScrollVelocity {
+            node_id,
+            velocity_x,
+            velocity_y,
+        } => {
+            if velocity_x.abs() > MAX_SCROLL_DELTA || velocity_y.abs() > MAX_SCROLL_DELTA {
+                return Err(AbiError::InvalidValue("scroll velocity exceeds maximum"));
+            }
+            writer.u32(*node_id);
+            writer.f32(*velocity_x)?;
+            writer.f32(*velocity_y)?;
+        }
         InputCommand::DispatchEvent {
             event_id,
             kind,
@@ -968,6 +1002,7 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::ScrollDelta { .. } => InputOpcode::ScrollDelta,
         InputCommand::ScrollEnd { .. } => InputOpcode::ScrollEnd,
         InputCommand::ScrollCancel { .. } => InputOpcode::ScrollCancel,
+        InputCommand::SetScrollVelocity { .. } => InputOpcode::SetScrollVelocity,
         InputCommand::DispatchEvent { .. } => InputOpcode::DispatchEvent,
     }
 }
@@ -1186,6 +1221,11 @@ mod tests {
                 }),
                 instruction(InputCommand::ScrollEnd { node_id: 2 }),
                 instruction(InputCommand::ScrollCancel { node_id: 2 }),
+                instruction(InputCommand::SetScrollVelocity {
+                    node_id: 2,
+                    velocity_x: 0.0,
+                    velocity_y: 216.0,
+                }),
                 instruction(InputCommand::RequestCharacterBounds {
                     node_id: 1,
                     start: 0,

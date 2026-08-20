@@ -112,9 +112,16 @@ struct ScrollAxes {
     x: ScrollPhysics,
     y: VerticalAxis,
     estimated_velocity: [f64; 2],
+    continuous_velocity: [f64; 2],
 }
 
 impl ScrollAxes {
+    fn has_continuous_velocity(&self) -> bool {
+        self.continuous_velocity
+            .iter()
+            .any(|velocity| velocity.abs() > f64::EPSILON)
+    }
+
     fn new(
         content: [f64; 2],
         viewport: [f64; 2],
@@ -138,6 +145,7 @@ impl ScrollAxes {
                 )?)),
             },
             estimated_velocity: [0.0; 2],
+            continuous_velocity: [0.0; 2],
         };
         result.jump_to(position)?;
         Ok(result)
@@ -189,6 +197,7 @@ impl ScrollAxes {
     }
 
     fn begin(&mut self) {
+        self.continuous_velocity = [0.0; 2];
         self.x.begin_drag();
         self.y.physics_mut().begin_drag();
         self.estimated_velocity = [0.0; 2];
@@ -226,7 +235,17 @@ impl ScrollAxes {
 
     /// Returns whether either axis still owes a wheel animation frame.
     fn is_animating(&self) -> bool {
-        self.x.is_animating() || self.y.physics().is_animating()
+        self.has_continuous_velocity() || self.x.is_animating() || self.y.physics().is_animating()
+    }
+
+    fn set_velocity(&mut self, velocity: [f32; 2]) -> Result<(), CoreError> {
+        self.x.begin_drag();
+        self.y.physics_mut().begin_drag();
+        self.x.end_drag(0.0)?;
+        self.y.physics_mut().end_drag(0.0)?;
+        self.estimated_velocity = [0.0; 2];
+        self.continuous_velocity = velocity.map(f64::from);
+        Ok(())
     }
 
     fn end(&mut self, retain_velocity: bool) -> Result<(), CoreError> {
@@ -242,6 +261,27 @@ impl ScrollAxes {
     }
 
     fn advance(&mut self, elapsed: f64) -> Result<ScrollAdvance, CoreError> {
+        if self.has_continuous_velocity() {
+            let previous = [self.x.position(), self.y.physics().position()];
+            let x = (previous[0] + self.continuous_velocity[0] * elapsed)
+                .clamp(0.0, self.x.maximum_position());
+            let y_maximum = self.y.physics().maximum_position();
+            let y = (previous[1] + self.continuous_velocity[1] * elapsed).clamp(0.0, y_maximum);
+            self.x.jump_to(x)?;
+            self.y.physics_mut().jump_to(y)?;
+            let x_changed = (x - previous[0]).abs() > f64::EPSILON;
+            let y_changed = (y - previous[1]).abs() > f64::EPSILON;
+            if !x_changed && self.continuous_velocity[0].abs() > f64::EPSILON {
+                self.continuous_velocity[0] = 0.0;
+            }
+            if !y_changed && self.continuous_velocity[1].abs() > f64::EPSILON {
+                self.continuous_velocity[1] = 0.0;
+            }
+            return Ok(ScrollAdvance {
+                active: self.has_continuous_velocity(),
+                changed: x_changed || y_changed,
+            });
+        }
         let x = self.x.advance(elapsed)?;
         let y = self.y.physics_mut().advance(elapsed)?;
         Ok(ScrollAdvance {
@@ -469,11 +509,14 @@ impl ScrollController {
                 } => changed |= state.delta(*delta_x, *delta_y, *elapsed_micros)?,
                 InputCommand::ScrollEnd { .. } => state.end(true)?,
                 InputCommand::ScrollCancel { .. } => state.end(false)?,
+                InputCommand::SetScrollVelocity {
+                    velocity_x,
+                    velocity_y,
+                    ..
+                } => state.set_velocity([*velocity_x, *velocity_y])?,
                 _ => return Err(CoreError::UnsupportedInputCommand),
             }
-            active |= !state.x.is_dragging()
-                && (state.x.velocity().abs() > f64::EPSILON
-                    || state.y.physics().velocity().abs() > f64::EPSILON);
+            active |= state.is_animating();
         }
         let positions = staged
             .iter()
@@ -810,7 +853,8 @@ fn input_node(command: &InputCommand) -> Result<NodeId, CoreError> {
         InputCommand::ScrollBegin { node_id }
         | InputCommand::ScrollDelta { node_id, .. }
         | InputCommand::ScrollEnd { node_id }
-        | InputCommand::ScrollCancel { node_id } => *node_id,
+        | InputCommand::ScrollCancel { node_id }
+        | InputCommand::SetScrollVelocity { node_id, .. } => *node_id,
         _ => return Err(CoreError::UnsupportedInputCommand),
     };
     NodeId::from_raw(raw).map_err(CoreError::Scene)

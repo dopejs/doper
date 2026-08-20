@@ -1,6 +1,6 @@
 {
   "name": "@dopejs/pingo-reconciler",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "pingo internal: component tree reconciler and mutation stream encoder (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {

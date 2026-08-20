@@ -135,6 +135,12 @@ export type InputCommand =
   | { readonly type: "scrollEnd"; readonly nodeId: number }
   | { readonly type: "scrollCancel"; readonly nodeId: number }
   | {
+      readonly type: "setScrollVelocity";
+      readonly nodeId: number;
+      readonly velocityX: number;
+      readonly velocityY: number;
+    }
+  | {
       readonly type: "dispatchEvent";
       readonly eventId: number;
       readonly kind: InputEventKind;
@@ -260,6 +266,14 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
       writer.f32(command.deltaX);
       writer.f32(command.deltaY);
       writer.u32(command.elapsedMicros);
+      return;
+    case "setScrollVelocity":
+      assertU32(command.nodeId, "scroll nodeId");
+      assertScrollDelta(command.velocityX, "scroll velocityX");
+      assertScrollDelta(command.velocityY, "scroll velocityY");
+      writer.u32(command.nodeId);
+      writer.f32(command.velocityX);
+      writer.f32(command.velocityY);
       return;
     case "requestCharacterBounds":
       assertU32(command.nodeId, "editable nodeId");
@@ -488,6 +502,14 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
       return { type: "scrollEnd", nodeId: reader.u32() };
     case InputOpcode.ScrollCancel:
       return { type: "scrollCancel", nodeId: reader.u32() };
+    case InputOpcode.SetScrollVelocity: {
+      const nodeId = reader.u32();
+      const velocityX = reader.f32();
+      const velocityY = reader.f32();
+      assertScrollDelta(velocityX, "scroll velocityX");
+      assertScrollDelta(velocityY, "scroll velocityY");
+      return { type: "setScrollVelocity", nodeId, velocityX, velocityY };
+    }
     case InputOpcode.DispatchEvent: {
       const eventId = reader.u32();
       const kind = eventKind(reader.u16());
@@ -558,6 +580,8 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.ScrollEnd;
     case "scrollCancel":
       return InputOpcode.ScrollCancel;
+    case "setScrollVelocity":
+      return InputOpcode.SetScrollVelocity;
     case "dispatchEvent":
       return InputOpcode.DispatchEvent;
   }

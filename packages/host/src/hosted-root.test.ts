@@ -47,6 +47,7 @@ describe("createHostedCanvasRoot", () => {
     root.beginScroll({ nodeId: 0x0010_0001 });
     root.scrollBy({ nodeId: 0x0010_0001 }, -2.5, 30, 16.667);
     root.endScroll(0x0010_0001);
+    root.setScrollVelocity(0x0010_0001, 0, 216);
 
     expect(core.inputs.map((bytes) => decodeInputBatch(bytes))).toEqual([
       { frameSeq: 1, commands: [{ type: "scrollBegin", nodeId: 0x0010_0001 }] },
@@ -63,6 +64,17 @@ describe("createHostedCanvasRoot", () => {
         ],
       },
       { frameSeq: 3, commands: [{ type: "scrollEnd", nodeId: 0x0010_0001 }] },
+      {
+        frameSeq: 4,
+        commands: [
+          {
+            type: "setScrollVelocity",
+            nodeId: 0x0010_0001,
+            velocityX: 0,
+            velocityY: 216,
+          },
+        ],
+      },
     ]);
     expect(() => root.scrollBy(0x0010_0001, 0, 1, 0)).toThrow(/elapsedMs/u);
     await root.close();

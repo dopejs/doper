@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 10,
+  "abiVersion": 11,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -590,6 +590,11 @@
           "name": "ScrollCancel",
           "opcode": 35,
           "fields": ["u32"]
+        },
+        {
+          "name": "SetScrollVelocity",
+          "opcode": 36,
+          "fields": ["u32", "f32", "f32"]
         },
         {
           "name": "DispatchEvent",

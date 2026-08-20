@@ -141,6 +141,7 @@ export interface HostedCanvasRoot extends PingoRoot {
   scrollBy(target: ScrollTarget, deltaX: number, deltaY: number, elapsedMs: number): void;
   endScroll(target: ScrollTarget): void;
   cancelScroll(target: ScrollTarget): void;
+  setScrollVelocity(target: ScrollTarget, velocityX: number, velocityY: number): void;
   focusEditable(target: ScrollTarget): void;
   blurEditable(): void;
   updateEditingGeometry(geometry: EditingGeometry): void;
@@ -324,6 +325,18 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   /** Cancels direct manipulation and retains only edge rebound. */
   public cancelScroll(target: ScrollTarget): void {
     this.sendScroll([{ type: "scrollCancel", nodeId: scrollNodeId(target) }]);
+  }
+
+  /** Sets Core-owned constant scroll velocity; two zero components stop it. */
+  public setScrollVelocity(target: ScrollTarget, velocityX: number, velocityY: number): void {
+    this.sendScroll([
+      {
+        type: "setScrollVelocity",
+        nodeId: scrollNodeId(target),
+        velocityX,
+        velocityY,
+      },
+    ]);
   }
 
   /** Activates native text services for one mounted EditableText node. */

@@ -5,14 +5,33 @@ import type { CoreClient } from "./main-thread";
 /** Inputs supported by wasm-bindgen's web-target loader. */
 export type WasmCoreInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
+let initialization: Promise<void> | undefined;
+
+/**
+ * Loads and instantiates the packaged product WASM in the current JavaScript realm.
+ *
+ * The first call selects the module input. Concurrent and later calls share the
+ * same initialization, so application startup code can own its loading UI
+ * without causing `createWasmCore` to load the module again. A failed attempt is
+ * not cached and may be retried.
+ */
+export function initializeWasm(input?: WasmCoreInput | Promise<WasmCoreInput>): Promise<void> {
+  initialization ??= (input === undefined ? initialize() : initialize({ module_or_path: input }))
+    .then(() => undefined)
+    .catch((cause: unknown) => {
+      initialization = undefined;
+      throw cause;
+    });
+  return initialization;
+}
+
 /** Initializes the packaged product WASM and creates one disposable Core. */
 export async function createWasmCore(
   width: number,
   height: number,
   input?: WasmCoreInput | Promise<WasmCoreInput>,
 ): Promise<CoreClient> {
-  if (input === undefined) await initialize();
-  else await initialize({ module_or_path: input });
+  await initializeWasm(input);
   return new WasmCore(width, height, prefersIosScrollPhysics());
 }
 
