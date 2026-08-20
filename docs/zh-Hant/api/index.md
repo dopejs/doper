@@ -12,7 +12,7 @@
 
 ```ts
 createHostedCanvasRoot(canvas, options?): Promise<HostedCanvasRoot>
-createCanvasRoot(context, core, options?): DoperRoot   // 主執行緒 M1 路徑
+createCanvasRoot(context, core, options?): PingoRoot   // 主執行緒 M1 路徑
 createWasmCore(width, height, input?): Promise<CoreClient>
 ```
 
@@ -35,14 +35,14 @@ createWasmCore(width, height, input?): Promise<CoreClient>
 ## 元素與 JSX
 
 ```ts
-createElement(type, props, key?): DoperElement
+createElement(type, props, key?): PingoElement
 Fragment
 ```
 
 主機元素：`container`、`text`、`scroll`、`virtualList`、`editableText`。
 型別：`CommonProps`、`ContainerProps`、`TextProps`、`ScrollProps`、`VirtualListProps`、
 `EditableTextProps`、`EditableInputMode`、`Color`、`EdgeInsets`、`NodeHandle`、`Ref`、
-`DoperNode`、`FunctionComponent`。
+`PingoNode`、`FunctionComponent`。
 
 JSX 執行階段透過 `@dopejs/pingo/jsx-runtime` 與 `@dopejs/pingo/jsx-dev-runtime` 提供。
 
@@ -67,8 +67,8 @@ useTextEditingController(options);
 ## Widgets
 
 ```ts
-TextField(props): DoperNode
-TextArea(props): DoperNode
+TextField(props): PingoNode
+TextArea(props): PingoNode
 ```
 
 ## 無障礙
@@ -84,13 +84,13 @@ queryAllByRole(root, role, { name? }): HTMLElement[]
 ## 字體
 
 ```ts
-createFont(options): DoperFont
-loadFont(source, options?): Promise<DoperFont>
+createFont(options): PingoFont
+loadFont(source, options?): Promise<PingoFont>
 ```
 
 支援 TTF / OTF / TTC / WOFF / WOFF2（WOFF2 解碼器按需動態載入）。
-型別：`DoperFontSource`、`DoperFontOptions`、`DoperFontLoadOptions`、
-`DoperFontLoadError`、`DoperFontLoadErrorCode`、`Woff2Decoder`。
+型別：`PingoFontSource`、`PingoFontOptions`、`PingoFontLoadOptions`、
+`PingoFontLoadError`、`PingoFontLoadErrorCode`、`Woff2Decoder`。
 
 ## 發佈與診斷
 

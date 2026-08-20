@@ -8,7 +8,7 @@ const output = await run("cargo", [
   "--release",
   "--quiet",
   "--package",
-  "doper-scroll",
+  "pingo-scroll",
   "--example",
   "m3_scroll_benchmark",
 ]);

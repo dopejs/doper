@@ -6,7 +6,7 @@ La latence de queue des listes virtuelles en DOM vient de l'enchaînement : l'é
 remonte au thread principal, déclenche un setState, un diff, puis un recalcul de mise en page. Dès que le
 thread principal est occupé, des images sautent.
 
-doper place le calcul de la fenêtre dans le Core : en régime établi, le défilement **n'appelle jamais la
+pingo place le calcul de la fenêtre dans le Core : en régime établi, le défilement **n'appelle jamais la
 couche TypeScript**. Celle-ci se contente de matérialiser la plage visible selon la fenêtre de préchauffe
 planifiée par le Core ; si les données ne sont pas prêtes, on dessine un substitut et on complète lors
 d'images ultérieures.

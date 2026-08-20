@@ -14,7 +14,7 @@ cas de dérive.
 
 ```ts
 createHostedCanvasRoot(canvas, options?): Promise<HostedCanvasRoot>
-createCanvasRoot(context, core, options?): DoperRoot   // chemin M1 sur le thread principal
+createCanvasRoot(context, core, options?): PingoRoot   // chemin M1 sur le thread principal
 createWasmCore(width, height, input?): Promise<CoreClient>
 ```
 
@@ -37,14 +37,14 @@ Options courantes : `onFrame`, `onHostError`, `onEditTransaction`, `onEventTrans
 ## Éléments et JSX
 
 ```ts
-createElement(type, props, key?): DoperElement
+createElement(type, props, key?): PingoElement
 Fragment
 ```
 
 Éléments hôtes : `container`, `text`, `scroll`, `virtualList`, `editableText`.
 Types : `CommonProps`, `ContainerProps`, `TextProps`, `ScrollProps`, `VirtualListProps`,
 `EditableTextProps`, `EditableInputMode`, `Color`, `EdgeInsets`, `NodeHandle`, `Ref`,
-`DoperNode`, `FunctionComponent`.
+`PingoNode`, `FunctionComponent`.
 
 Le runtime JSX est fourni via `@dopejs/pingo/jsx-runtime` et `@dopejs/pingo/jsx-dev-runtime`.
 
@@ -69,8 +69,8 @@ Types : `EditTransaction`, `EditingGeometry`, `EditingSelection`, `NativeTextInp
 ## Widgets
 
 ```ts
-TextField(props): DoperNode
-TextArea(props): DoperNode
+TextField(props): PingoNode
+TextArea(props): PingoNode
 ```
 
 ## Accessibilité
@@ -86,13 +86,13 @@ Types : `SemanticNode`, `SemanticMirrorNode`, `SemanticTreeMirrorOptions`.
 ## Polices
 
 ```ts
-createFont(options): DoperFont
-loadFont(source, options?): Promise<DoperFont>
+createFont(options): PingoFont
+loadFont(source, options?): Promise<PingoFont>
 ```
 
 Prise en charge de TTF / OTF / TTC / WOFF / WOFF2 (le décodeur WOFF2 est chargé à la demande).
-Types : `DoperFontSource`, `DoperFontOptions`, `DoperFontLoadOptions`,
-`DoperFontLoadError`, `DoperFontLoadErrorCode`, `Woff2Decoder`.
+Types : `PingoFontSource`, `PingoFontOptions`, `PingoFontLoadOptions`,
+`PingoFontLoadError`, `PingoFontLoadErrorCode`, `Woff2Decoder`.
 
 ## Publication et diagnostic
 

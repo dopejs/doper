@@ -42,7 +42,7 @@ describe("probe collector archive", () => {
   });
 
   it("writes each run once without overwriting prior evidence", async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), "doper-probe-collector-"));
+    const directory = await mkdtemp(path.join(tmpdir(), "pingo-probe-collector-"));
     temporaryDirectories.push(directory);
     const report = {
       build: { id: "abc123", mode: "production" },
@@ -187,7 +187,7 @@ describe("probe collector archive", () => {
 });
 
 async function temporaryDirectory() {
-  const directory = await mkdtemp(path.join(tmpdir(), "doper-probe-collector-"));
+  const directory = await mkdtemp(path.join(tmpdir(), "pingo-probe-collector-"));
   temporaryDirectories.push(directory);
   return directory;
 }

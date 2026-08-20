@@ -1,15 +1,15 @@
-import { createElement, type DoperNode } from "@dopejs/pingo";
+import { createElement, type PingoNode } from "@dopejs/pingo";
 
 import type { Demo, DemoContext } from "../demo";
 
 const BOX = 120;
 let animationHandle: number | undefined;
 
-function scene(context: DemoContext, angleOffset: number): DoperNode {
+function scene(context: DemoContext, angleOffset: number): PingoNode {
   const { width, height } = context;
   const cx = width / 2;
   const cy = height / 2;
-  const children: DoperNode[] = [];
+  const children: PingoNode[] = [];
   for (let index = 0; index < 3; index += 1) {
     const angle = angleOffset + (index * Math.PI * 2) / 3;
     children.push(

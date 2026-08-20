@@ -1,8 +1,8 @@
 import {
   createElement,
   createFont,
-  type DoperEvent,
-  type DoperNode,
+  type PingoEvent,
+  type PingoNode,
   type NodeHandle,
 } from "@dopejs/pingo-jsx";
 import { signal, useEffect } from "@dopejs/pingo-runtime";
@@ -146,7 +146,7 @@ describe("reconciler", () => {
   it("preserves keyed host identity while reordering siblings", () => {
     const sink = new RecordingSink();
     const root = createRoot(sink);
-    const list = (order: readonly string[]): DoperNode =>
+    const list = (order: readonly string[]): PingoNode =>
       createElement("container", {
         children: order.map((value) => createElement("text", { value, key: value })),
       });
@@ -165,7 +165,7 @@ describe("reconciler", () => {
     const scheduled: Array<() => void> = [];
     const value = signal("first");
     const root = createRoot(sink, { schedule: (task) => scheduled.push(task) });
-    const App = (): DoperNode => createElement("text", { value: value.get() });
+    const App = (): PingoNode => createElement("text", { value: value.get() });
 
     root.render(createElement(App, {}));
     value.set("second");
@@ -181,7 +181,7 @@ describe("reconciler", () => {
   it("runs refs and effects only after the mutation frame commits", () => {
     const sink = new RecordingSink();
     const ref = vi.fn((_handle: NodeHandle | null) => sink.events.push("ref"));
-    const App = (): DoperNode => {
+    const App = (): PingoNode => {
       useEffect(() => {
         sink.events.push("effect");
       }, []);
@@ -217,16 +217,16 @@ describe("reconciler", () => {
     const root = createRoot(sink, { onPostCommitError: (error) => errors.push(error) });
     root.render(
       createElement("container", {
-        onClickCapture: (event: DoperEvent) => {
+        onClickCapture: (event: PingoEvent) => {
           calls.push(`outer:${String(event.eventPhase)}:${String(event.currentTarget.nodeId)}`);
           throw new Error("observed callback failure");
         },
         onClick: () => calls.push("outer-bubble"),
         children: createElement("text", {
           value: "target",
-          onClickCapture: (event: DoperEvent) =>
+          onClickCapture: (event: PingoEvent) =>
             calls.push(`target-capture:${String(event.eventPhase)}`),
-          onClick: (event: DoperEvent) => {
+          onClick: (event: PingoEvent) => {
             calls.push(`target-bubble:${String(event.eventPhase)}:${String(event.target.nodeId)}`);
             event.preventDefault();
             event.stopPropagation();
@@ -390,7 +390,7 @@ describe("reconciler", () => {
   it("disposes component subscriptions after a fatal initial frame", () => {
     const scheduled: Array<() => void> = [];
     const source = signal("first");
-    const App = (): DoperNode => createElement("text", { value: source.get() });
+    const App = (): PingoNode => createElement("text", { value: source.get() });
     const root = createRoot(
       {
         commit: () => {
@@ -407,7 +407,7 @@ describe("reconciler", () => {
 
   it("runs effect cleanup after a successful removal commit", () => {
     const sink = new RecordingSink();
-    const App = (): DoperNode => {
+    const App = (): PingoNode => {
       useEffect(() => {
         sink.events.push("effect");
         return () => sink.events.push("cleanup");
@@ -430,7 +430,7 @@ describe("reconciler", () => {
         if (reject) throw new Error("sink failure");
       },
     };
-    const App = (): DoperNode => {
+    const App = (): PingoNode => {
       useEffect(() => {
         events.push("effect");
         return () => events.push("cleanup");

@@ -10,7 +10,7 @@ const native = JSON.parse(
     "--locked",
     "--quiet",
     "--package",
-    "doper-core",
+    "pingo-core",
     "--example",
     "m3_virtual_differential",
   ]),
@@ -18,9 +18,9 @@ const native = JSON.parse(
 if (native.version !== 1) throw new Error("native M3 differential report version mismatch");
 
 const wasmModule = await import(
-  pathToFileURL(path.join(root, "packages/host/wasm/doper_core.js")).href
+  pathToFileURL(path.join(root, "packages/host/wasm/pingo_core.js")).href
 );
-const wasmBytes = await readFile(path.join(root, "packages/host/wasm/doper_core_bg.wasm"));
+const wasmBytes = await readFile(path.join(root, "packages/host/wasm/pingo_core_bg.wasm"));
 await wasmModule.default({ module_or_path: wasmBytes });
 const core = new wasmModule.WasmCore(160, 80);
 try {

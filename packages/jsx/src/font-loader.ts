@@ -1,5 +1,5 @@
 import { MAX_RESOURCE_BYTES, SFNT_FONT_DATA_OFFSET } from "./generated";
-import { createFont, type DoperFont, type DoperFontOptions } from "./font";
+import { createFont, type PingoFont, type PingoFontOptions } from "./font";
 
 const MAX_FONT_BYTES = MAX_RESOURCE_BYTES - SFNT_FONT_DATA_OFFSET;
 const WOFF_HEADER_BYTES = 44;
@@ -10,10 +10,10 @@ const MAX_FONT_TABLES = 4096;
 const CHECKSUM_MAGIC = 0xb1b0_afba;
 
 /** Input accepted by {@link loadFont}. Response bodies are consumed exactly once. */
-export type DoperFontSource = string | URL | Request | Response | ArrayBuffer | ArrayBufferView;
+export type PingoFontSource = string | URL | Request | Response | ArrayBuffer | ArrayBufferView;
 
 /** Optional network and WOFF2-decoder controls for an explicit font load. */
-export interface DoperFontLoadOptions extends DoperFontOptions {
+export interface PingoFontLoadOptions extends PingoFontOptions {
   /** Cancels fetch and streamed body reads. */
   readonly signal?: AbortSignal;
   /** Overrides the ambient fetch implementation, primarily for controlled hosts and tests. */
@@ -27,8 +27,8 @@ export type Woff2Decoder = (
   input: Uint8Array,
 ) => Promise<ArrayBuffer | ArrayBufferView> | ArrayBuffer | ArrayBufferView;
 
-/** Stable failure categories exposed by {@link DoperFontLoadError}. */
-export type DoperFontLoadErrorCode =
+/** Stable failure categories exposed by {@link PingoFontLoadError}. */
+export type PingoFontLoadErrorCode =
   | "aborted"
   | "decode-failed"
   | "fetch-failed"
@@ -38,11 +38,11 @@ export type DoperFontLoadErrorCode =
   | "unsupported-format";
 
 /** Operator-facing font loading error with a machine-readable category. */
-export class DoperFontLoadError extends Error {
-  public override readonly name = "DoperFontLoadError";
+export class PingoFontLoadError extends Error {
+  public override readonly name = "PingoFontLoadError";
 
   public constructor(
-    public readonly code: DoperFontLoadErrorCode,
+    public readonly code: PingoFontLoadErrorCode,
     message: string,
     options?: ErrorOptions,
   ) {
@@ -56,13 +56,13 @@ export class DoperFontLoadError extends Error {
  * host before the font can enter a Scene transaction.
  */
 export async function loadFont(
-  source: DoperFontSource,
-  options: DoperFontLoadOptions = {},
-): Promise<DoperFont> {
+  source: PingoFontSource,
+  options: PingoFontLoadOptions = {},
+): Promise<PingoFont> {
   checkAbort(options.signal);
   const bytes = await readFontSource(source, options);
   const format = fontFormat(bytes);
-  const fontOptions: DoperFontOptions = {
+  const fontOptions: PingoFontOptions = {
     ...(options.faceIndex === undefined ? {} : { faceIndex: options.faceIndex }),
     ...(options.fallbackFamily === undefined ? {} : { fallbackFamily: options.fallbackFamily }),
   };
@@ -76,21 +76,21 @@ export async function loadFont(
     try {
       return createFont(copyBytes(await decoder(bytes.slice())), fontOptions);
     } catch (error) {
-      if (error instanceof DoperFontLoadError) throw error;
-      throw new DoperFontLoadError("decode-failed", "failed to decode WOFF2 font", {
+      if (error instanceof PingoFontLoadError) throw error;
+      throw new PingoFontLoadError("decode-failed", "failed to decode WOFF2 font", {
         cause: error,
       });
     }
   }
-  throw new DoperFontLoadError(
+  throw new PingoFontLoadError(
     "unsupported-format",
     "font source must contain SFNT, WOFF, or WOFF2 bytes",
   );
 }
 
 async function readFontSource(
-  source: DoperFontSource,
-  options: DoperFontLoadOptions,
+  source: PingoFontSource,
+  options: PingoFontLoadOptions,
 ): Promise<Uint8Array> {
   if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
     const bytes = copyBytes(source);
@@ -102,7 +102,7 @@ async function readFontSource(
   }
   const fetcher = options.fetch ?? globalThis.fetch;
   if (typeof fetcher !== "function") {
-    throw new DoperFontLoadError(
+    throw new PingoFontLoadError(
       "unsupported-environment",
       "loadFont requires fetch for URL and Request sources",
     );
@@ -113,17 +113,17 @@ async function readFontSource(
     });
     return await readResponse(response, options.signal);
   } catch (error) {
-    if (error instanceof DoperFontLoadError) throw error;
+    if (error instanceof PingoFontLoadError) throw error;
     if (options.signal?.aborted === true) {
-      throw new DoperFontLoadError("aborted", "font load was aborted", { cause: error });
+      throw new PingoFontLoadError("aborted", "font load was aborted", { cause: error });
     }
-    throw new DoperFontLoadError("fetch-failed", "failed to fetch font source", { cause: error });
+    throw new PingoFontLoadError("fetch-failed", "failed to fetch font source", { cause: error });
   }
 }
 
 async function readResponse(response: Response, signal?: AbortSignal): Promise<Uint8Array> {
   if (!response.ok) {
-    throw new DoperFontLoadError(
+    throw new PingoFontLoadError(
       "fetch-failed",
       `font response failed with HTTP ${String(response.status)}`,
     );
@@ -132,7 +132,7 @@ async function readResponse(response: Response, signal?: AbortSignal): Promise<U
   if (declared !== null) {
     const length = Number(declared);
     if (Number.isFinite(length) && length > MAX_FONT_BYTES) {
-      throw new DoperFontLoadError(
+      throw new PingoFontLoadError(
         "response-too-large",
         `font response exceeds the ${String(MAX_FONT_BYTES)} byte limit`,
       );
@@ -199,7 +199,7 @@ async function inflateWoffTable(
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
   if (typeof DecompressionStream === "undefined") {
-    throw new DoperFontLoadError(
+    throw new PingoFontLoadError(
       "unsupported-environment",
       "WOFF decoding requires DecompressionStream support",
     );
@@ -209,16 +209,16 @@ async function inflateWoffTable(
     const stream = source.pipeThrough(new DecompressionStream("deflate"));
     return await readStream(stream, expectedBytes, signal, "WOFF table");
   } catch (error) {
-    if (error instanceof DoperFontLoadError) {
+    if (error instanceof PingoFontLoadError) {
       if (error.code === "response-too-large") {
         throw invalidData("WOFF table decompressed beyond its declared length");
       }
       throw error;
     }
     if (signal?.aborted === true) {
-      throw new DoperFontLoadError("aborted", "font load was aborted", { cause: error });
+      throw new PingoFontLoadError("aborted", "font load was aborted", { cause: error });
     }
-    throw new DoperFontLoadError("decode-failed", "failed to inflate WOFF table", {
+    throw new PingoFontLoadError("decode-failed", "failed to inflate WOFF table", {
       cause: error,
     });
   }
@@ -233,13 +233,13 @@ async function readStream(
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  let rejectAbort: ((error: DoperFontLoadError) => void) | undefined;
-  const aborted = new Promise<never>((_resolve, reject: (error: DoperFontLoadError) => void) => {
+  let rejectAbort: ((error: PingoFontLoadError) => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject: (error: PingoFontLoadError) => void) => {
     rejectAbort = reject;
   });
   const onAbort = (): void => {
     rejectAbort?.(
-      new DoperFontLoadError("aborted", "font load was aborted", { cause: signal?.reason }),
+      new PingoFontLoadError("aborted", "font load was aborted", { cause: signal?.reason }),
     );
   };
   signal?.addEventListener("abort", onAbort, { once: true });
@@ -253,7 +253,7 @@ async function readStream(
       if (!(value instanceof Uint8Array)) throw invalidData(`${label} emitted non-byte data`);
       total = checkedAdd(total, value.byteLength, `${label} length overflow`);
       if (total > limit) {
-        throw new DoperFontLoadError(
+        throw new PingoFontLoadError(
           "response-too-large",
           `${label} exceeds the ${String(limit)} byte limit`,
         );
@@ -470,14 +470,14 @@ function copyBytes(input: ArrayBuffer | ArrayBufferView): Uint8Array {
 
 function checkAbort(signal?: AbortSignal): void {
   if (signal?.aborted === true) {
-    throw new DoperFontLoadError("aborted", "font load was aborted", { cause: signal.reason });
+    throw new PingoFontLoadError("aborted", "font load was aborted", { cause: signal.reason });
   }
 }
 
 function enforceSourceLimit(length: number): void {
   if (length === 0) throw invalidData("font source is empty");
   if (length > MAX_FONT_BYTES) {
-    throw new DoperFontLoadError(
+    throw new PingoFontLoadError(
       "response-too-large",
       `font source exceeds the ${String(MAX_FONT_BYTES)} byte limit`,
     );
@@ -510,8 +510,8 @@ function tag(value: string): number {
   );
 }
 
-function invalidData(message: string): DoperFontLoadError {
-  return new DoperFontLoadError("invalid-data", message);
+function invalidData(message: string): PingoFontLoadError {
+  return new PingoFontLoadError("invalid-data", message);
 }
 
 function required<T>(value: T | undefined, label: string): T {

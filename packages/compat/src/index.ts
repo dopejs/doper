@@ -1,22 +1,22 @@
 import {
   createHostedCanvasRoot,
-  type DoperNode,
+  type PingoNode,
   type HostedCanvasRoot,
   type HostedCanvasRootOptions,
 } from "@dopejs/pingo";
 
-/** Why an active page left the doper rendering path. */
+/** Why an active page left the pingo rendering path. */
 export type CompatFallbackReason =
   | { readonly kind: "disabled" }
   | { readonly kind: "initialization-failed"; readonly error: Error }
   | { readonly kind: "runtime-error"; readonly error: Error }
   | { readonly kind: "manual"; readonly detail?: string };
 
-/** The page-granular legacy rendering path doper migrates away from. */
+/** The page-granular legacy rendering path pingo migrates away from. */
 export interface LegacyRenderer {
   /** Re-takes ownership of the container after a fallback or while disabled. */
   mount(container: HTMLElement): void;
-  /** Releases the container before doper takes over. */
+  /** Releases the container before pingo takes over. */
   unmount(container: HTMLElement): void;
 }
 
@@ -30,8 +30,8 @@ export interface CompatPageOptions {
   /** Stable page identity used in reports and rollout decisions. */
   readonly pageId: string;
   readonly container: HTMLElement;
-  /** Produces the doper content for this page. */
-  readonly render: () => DoperNode;
+  /** Produces the pingo content for this page. */
+  readonly render: () => PingoNode;
   /** Legacy path that must stay mountable for page-granular rollback. */
   readonly legacy: LegacyRenderer;
   /** Rollout switch; false keeps the legacy renderer active. */
@@ -50,16 +50,16 @@ export interface CompatPageOptions {
 /** One migrated page whose rendering path can be flipped at runtime. */
 export interface CompatPage {
   readonly pageId: string;
-  readonly active: "doper" | "legacy";
-  /** Switches to doper; resolves to the path that ended up active. */
-  enable(): Promise<"doper" | "legacy">;
+  readonly active: "pingo" | "legacy";
+  /** Switches to pingo; resolves to the path that ended up active. */
+  enable(): Promise<"pingo" | "legacy">;
   /** Switches back to the legacy renderer immediately. */
   fallback(detail?: string): void;
   close(): Promise<void>;
 }
 
 /**
- * Mounts a migration boundary that renders through doper when enabled and
+ * Mounts a migration boundary that renders through pingo when enabled and
  * falls back to the legacy renderer on initialization or repeated runtime
  * failures. The shim depends only on the public facade; removing it never
  * requires Core changes.
@@ -76,7 +76,7 @@ export async function mountCompatPage(options: CompatPageOptions): Promise<Compa
 
 class CompatPageController implements CompatPage {
   readonly #options: CompatPageOptions;
-  #active: "doper" | "legacy" = "legacy";
+  #active: "pingo" | "legacy" = "legacy";
   #canvas: HTMLCanvasElement | undefined;
   #closed = false;
   #legacyMounted = false;
@@ -93,13 +93,13 @@ class CompatPageController implements CompatPage {
     return this.#options.pageId;
   }
 
-  public get active(): "doper" | "legacy" {
+  public get active(): "pingo" | "legacy" {
     return this.#active;
   }
 
-  public async enable(): Promise<"doper" | "legacy"> {
+  public async enable(): Promise<"pingo" | "legacy"> {
     if (this.#closed) throw new Error("compat page is closed");
-    if (this.#active === "doper" || this.#switching) return this.#active;
+    if (this.#active === "pingo" || this.#switching) return this.#active;
     this.#switching = true;
     try {
       const document = this.#options.container.ownerDocument;
@@ -118,7 +118,7 @@ class CompatPageController implements CompatPage {
       this.#canvas = canvas;
       this.#root = root;
       this.#runtimeErrors = 0;
-      this.#active = "doper";
+      this.#active = "pingo";
     } catch (cause) {
       this.mountLegacy({
         kind: "initialization-failed",
@@ -138,16 +138,16 @@ class CompatPageController implements CompatPage {
   public async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
-    await this.teardownDoper();
+    await this.teardownPingo();
     if (this.#legacyMounted) {
       this.#options.legacy.unmount(this.#options.container);
       this.#legacyMounted = false;
     }
   }
 
-  /** Mounts the legacy path and reports why doper is not active. */
+  /** Mounts the legacy path and reports why pingo is not active. */
   public mountLegacy(reason: CompatFallbackReason): void {
-    void this.teardownDoper();
+    void this.teardownPingo();
     if (!this.#legacyMounted) {
       this.#options.legacy.mount(this.#options.container);
       this.#legacyMounted = true;
@@ -157,7 +157,7 @@ class CompatPageController implements CompatPage {
   }
 
   private handleRuntimeError(error: Error): void {
-    if (this.#active !== "doper") return;
+    if (this.#active !== "pingo") return;
     this.#runtimeErrors += 1;
     if (this.#runtimeErrors >= (this.#options.maxRuntimeErrors ?? 3)) {
       this.mountLegacy({ kind: "runtime-error", error });
@@ -171,7 +171,7 @@ class CompatPageController implements CompatPage {
     }
   }
 
-  private async teardownDoper(): Promise<void> {
+  private async teardownPingo(): Promise<void> {
     const root = this.#root;
     const canvas = this.#canvas;
     this.#root = undefined;

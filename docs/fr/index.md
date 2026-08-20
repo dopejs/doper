@@ -62,7 +62,7 @@ l'arbre de composants : le calcul de la fenêtre et le remplissage se font dans 
 
 ## Ce qu'il ne fait pas
 
-doper est un moteur de rendu, pas un navigateur. Il **ne traite pas** le SSR ni le premier rendu
+pingo est un moteur de rendu, pas un navigateur. Il **ne traite pas** le SSR ni le premier rendu
 HTML, la compatibilité CSS générale (modèle de boîte, cascade, sélecteurs), les couches d'adaptation
 mini-applications ou natif, ni la sémantique de texte riche métier (collaboration, formules,
 commandes Markdown).

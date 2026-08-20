@@ -58,7 +58,7 @@ const bridges: NativeTextInputBridge[] = [];
 
 afterEach(() => {
   for (const bridge of bridges.splice(0)) bridge.dispose();
-  document.querySelectorAll("[data-doper-input-proxy]").forEach((node) => node.remove());
+  document.querySelectorAll("[data-pingo-input-proxy]").forEach((node) => node.remove());
 });
 
 describe("NativeTextInputBridge", () => {
@@ -122,7 +122,7 @@ describe("NativeTextInputBridge", () => {
     });
     bridges.push(bridge);
     bridge.activate(editableTarget());
-    const proxy = document.querySelector<HTMLTextAreaElement>("[data-doper-input-proxy]");
+    const proxy = document.querySelector<HTMLTextAreaElement>("[data-pingo-input-proxy]");
     expect(bridge.mode).toBe("textarea-proxy");
     expect(proxy).not.toBeNull();
     expect(proxy?.value).toBe("ab");

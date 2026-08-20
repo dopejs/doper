@@ -123,10 +123,10 @@ describe("SabMutationTransport", () => {
     const onError = vi.fn();
     const sender = new SabMutationTransport(main, ring, { onError, sessionId: 11 });
     sender.enqueue(20, frame(20));
-    worker.postMessage({ frameSeq: 20, kind: "doper:sab-ack", sessionId: 10, version: 1 });
+    worker.postMessage({ frameSeq: 20, kind: "pingo:sab-ack", sessionId: 10, version: 1 });
     await Promise.resolve();
     expect(onError).not.toHaveBeenCalled();
-    worker.postMessage({ frameSeq: 21, kind: "doper:sab-ack", sessionId: 11, version: 1 });
+    worker.postMessage({ frameSeq: 21, kind: "pingo:sab-ack", sessionId: 11, version: 1 });
     await expect(sender.drain()).rejects.toThrow(/out of order/u);
     expect(onError).toHaveBeenCalledOnce();
   });
@@ -147,7 +147,7 @@ describe("SabMutationTransport", () => {
     const onError = vi.fn();
     const sender = new SabMutationTransport(main, ring, { onError, sessionId: 5 });
     sender.enqueue(1, frame(1));
-    worker.postMessage({ kind: "doper:sab-ack", sessionId: 5, version: 1 });
+    worker.postMessage({ kind: "pingo:sab-ack", sessionId: 5, version: 1 });
     await expect(sender.drain()).rejects.toThrow(/malformed/u);
     expect(onError).toHaveBeenCalledOnce();
   });

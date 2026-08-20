@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dopejs.dev/schemas/m0-business-audit-v1.json",
-  "title": "doper M0 business COOP/COEP audit evidence",
+  "title": "pingo M0 business COOP/COEP audit evidence",
   "type": "object",
   "additionalProperties": false,
   "required": [

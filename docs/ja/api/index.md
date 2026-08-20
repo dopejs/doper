@@ -12,7 +12,7 @@
 
 ```ts
 createHostedCanvasRoot(canvas, options?): Promise<HostedCanvasRoot>
-createCanvasRoot(context, core, options?): DoperRoot   // メインスレッドの M1 経路
+createCanvasRoot(context, core, options?): PingoRoot   // メインスレッドの M1 経路
 createWasmCore(width, height, input?): Promise<CoreClient>
 ```
 
@@ -35,14 +35,14 @@ createWasmCore(width, height, input?): Promise<CoreClient>
 ## 要素と JSX
 
 ```ts
-createElement(type, props, key?): DoperElement
+createElement(type, props, key?): PingoElement
 Fragment
 ```
 
 ホスト要素：`container`、`text`、`scroll`、`virtualList`、`editableText`。
 型：`CommonProps`、`ContainerProps`、`TextProps`、`ScrollProps`、`VirtualListProps`、
 `EditableTextProps`、`EditableInputMode`、`Color`、`EdgeInsets`、`NodeHandle`、`Ref`、
-`DoperNode`、`FunctionComponent`。
+`PingoNode`、`FunctionComponent`。
 
 JSX ランタイムは `@dopejs/pingo/jsx-runtime` と `@dopejs/pingo/jsx-dev-runtime` で提供します。
 
@@ -67,8 +67,8 @@ useTextEditingController(options);
 ## ウィジェット
 
 ```ts
-TextField(props): DoperNode
-TextArea(props): DoperNode
+TextField(props): PingoNode
+TextArea(props): PingoNode
 ```
 
 ## アクセシビリティ
@@ -84,13 +84,13 @@ queryAllByRole(root, role, { name? }): HTMLElement[]
 ## フォント
 
 ```ts
-createFont(options): DoperFont
-loadFont(source, options?): Promise<DoperFont>
+createFont(options): PingoFont
+loadFont(source, options?): Promise<PingoFont>
 ```
 
 TTF / OTF / TTC / WOFF / WOFF2 に対応します（WOFF2 デコーダは必要時に動的読み込み）。
-型：`DoperFontSource`、`DoperFontOptions`、`DoperFontLoadOptions`、
-`DoperFontLoadError`、`DoperFontLoadErrorCode`、`Woff2Decoder`。
+型：`PingoFontSource`、`PingoFontOptions`、`PingoFontLoadOptions`、
+`PingoFontLoadError`、`PingoFontLoadErrorCode`、`Woff2Decoder`。
 
 ## リリースと診断
 

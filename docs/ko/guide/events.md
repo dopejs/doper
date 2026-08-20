@@ -30,7 +30,7 @@ BVH와 단순 선형 구현의 결과가 일치한다는 것은 속성 테스트
 사용할 수 있는 핸들러는 `onPointerDown`, `onPointerUp`, `onPointerMove`, `onPointerCancel`,
 `onClick`, `onWheel`이며 각각 `*Capture` 버전이 있습니다.
 
-`DoperEvent`는 `target`, `currentTarget`, `eventPhase`, 캔버스 로컬 논리 좌표 `x`/`y`,
+`PingoEvent`는 `target`, `currentTarget`, `eventPhase`, 캔버스 로컬 논리 좌표 `x`/`y`,
 `deltaX`/`deltaY`, `buttons`, 수정자 키, `preventDefault()`, `stopPropagation()`,
 `stopImmediatePropagation()`을 제공합니다.
 

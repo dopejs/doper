@@ -1,5 +1,5 @@
-import type { DoperFont } from "./font";
-import type { DoperImage } from "./image";
+import type { PingoFont } from "./font";
+import type { PingoImage } from "./image";
 import type { EditTransaction, TextEditingController } from "@dopejs/pingo-editing";
 
 /** Stable list identity used by localized reconciliation. */
@@ -18,15 +18,15 @@ export interface NodeHandle {
 export type Ref<T> = { current: T | null } | ((value: T | null) => void);
 
 /** DOM-style event phase after Core world-space hit testing. */
-export type DoperEventPhase = 1 | 2 | 3;
+export type PingoEventPhase = 1 | 2 | 3;
 
 /** Stable Shell event object; coordinates are canvas-local logical pixels. */
-export interface DoperEvent {
+export interface PingoEvent {
   readonly type: "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel";
   readonly eventId: number;
   readonly target: NodeHandle;
   readonly currentTarget: NodeHandle;
-  readonly eventPhase: DoperEventPhase;
+  readonly eventPhase: PingoEventPhase;
   readonly x: number;
   readonly y: number;
   readonly deltaX: number;
@@ -45,7 +45,7 @@ export interface DoperEvent {
 }
 
 /** Handler invoked during Core-resolved capture or bubble propagation. */
-export type DoperEventHandler = (event: DoperEvent) => void;
+export type PingoEventHandler = (event: PingoEvent) => void;
 
 /** RGBA color accepted by portable solid-paint encoding. */
 export type Color =
@@ -64,7 +64,7 @@ export type EdgeInsets = number | readonly [number, number, number, number];
 export interface CommonProps {
   readonly key?: Key;
   readonly ref?: Ref<NodeHandle>;
-  readonly children?: DoperNode;
+  readonly children?: PingoNode;
   readonly width?: number;
   readonly height?: number;
   readonly minWidth?: number;
@@ -86,18 +86,18 @@ export interface CommonProps {
   readonly opacity?: number;
   readonly transform?: readonly [number, number, number, number, number, number];
   readonly onTap?: () => void;
-  readonly onPointerDownCapture?: DoperEventHandler;
-  readonly onPointerDown?: DoperEventHandler;
-  readonly onPointerUpCapture?: DoperEventHandler;
-  readonly onPointerUp?: DoperEventHandler;
-  readonly onPointerMoveCapture?: DoperEventHandler;
-  readonly onPointerMove?: DoperEventHandler;
-  readonly onPointerCancelCapture?: DoperEventHandler;
-  readonly onPointerCancel?: DoperEventHandler;
-  readonly onClickCapture?: DoperEventHandler;
-  readonly onClick?: DoperEventHandler;
-  readonly onWheelCapture?: DoperEventHandler;
-  readonly onWheel?: DoperEventHandler;
+  readonly onPointerDownCapture?: PingoEventHandler;
+  readonly onPointerDown?: PingoEventHandler;
+  readonly onPointerUpCapture?: PingoEventHandler;
+  readonly onPointerUp?: PingoEventHandler;
+  readonly onPointerMoveCapture?: PingoEventHandler;
+  readonly onPointerMove?: PingoEventHandler;
+  readonly onPointerCancelCapture?: PingoEventHandler;
+  readonly onPointerCancel?: PingoEventHandler;
+  readonly onClickCapture?: PingoEventHandler;
+  readonly onClick?: PingoEventHandler;
+  readonly onWheelCapture?: PingoEventHandler;
+  readonly onWheel?: PingoEventHandler;
   readonly semanticRole?: string;
   readonly semanticLabel?: string;
   readonly semanticValue?: string;
@@ -113,7 +113,7 @@ export type ContainerProps = CommonProps;
  * dimensions; with one, the image is scaled into that box.
  */
 export interface ImageProps extends Omit<CommonProps, "children"> {
-  readonly source: DoperImage;
+  readonly source: PingoImage;
 }
 
 /** Clipped Core-owned scrolling element. */
@@ -126,7 +126,7 @@ export interface ScrollProps extends CommonProps {
 export interface VirtualListProps extends Omit<CommonProps, "children"> {
   readonly itemCount: number;
   readonly estimatedItemHeight: number;
-  readonly renderItem: (index: number) => DoperNode;
+  readonly renderItem: (index: number) => PingoNode;
   readonly baseOverscanViewports?: number;
   readonly velocityHorizonSeconds?: number;
   readonly maximumAheadViewports?: number;
@@ -141,7 +141,7 @@ export interface TextProps extends Omit<CommonProps, "children"> {
   readonly color?: Color;
   readonly fontFamily?: string;
   /** Explicit immutable SFNT font; unsupported input falls back as a whole run. */
-  readonly font?: DoperFont;
+  readonly font?: PingoFont;
   readonly fontSize?: number;
   readonly fontWeight?: number;
   readonly lineHeight?: number;
@@ -169,17 +169,17 @@ export interface EditableTextProps extends Omit<TextProps, "children"> {
 }
 
 /** Function component evaluated inside a reconciler-owned hook scope. */
-export type FunctionComponent<Props = Record<string, never>> = (props: Props) => DoperNode;
+export type FunctionComponent<Props = Record<string, never>> = (props: Props) => PingoNode;
 
 /** Fragment marker accepted as an element type. */
-export const Fragment: unique symbol = Symbol.for("dopejs.doper.fragment");
+export const Fragment: unique symbol = Symbol.for("dopejs.pingo.fragment");
 
 /** Host, component, or Fragment element type. */
 export type ElementType<Props = Record<string, unknown>> =
   HostType | FunctionComponent<Props> | typeof Fragment;
 
 /** Erased immutable descriptor used in heterogeneous child collections. */
-export interface AnyDoperElement {
+export interface AnyPingoElement {
   readonly $$typeof: symbol;
   readonly type: HostType | FunctionComponent<never> | typeof Fragment;
   readonly key: Key | null;
@@ -187,21 +187,21 @@ export interface AnyDoperElement {
 }
 
 /** Immutable JSX descriptor preserving component prop inference. */
-export interface DoperElement<
+export interface PingoElement<
   Props extends Record<string, unknown> = Record<string, unknown>,
-> extends AnyDoperElement {
+> extends AnyPingoElement {
   readonly type: ElementType<Props>;
   readonly props: Readonly<Props>;
 }
 
 /** Values accepted in component and host children. */
-export type DoperNode =
-  AnyDoperElement | string | number | bigint | boolean | null | undefined | readonly DoperNode[];
+export type PingoNode =
+  AnyPingoElement | string | number | bigint | boolean | null | undefined | readonly PingoNode[];
 
 /** TypeScript automatic-JSX namespace. */
 // eslint-disable-next-line @typescript-eslint/no-namespace -- TypeScript's JSX import-source contract requires this namespace name.
 export declare namespace JSX {
-  export type Element = AnyDoperElement;
+  export type Element = AnyPingoElement;
   export interface ElementChildrenAttribute {
     children: unknown;
   }

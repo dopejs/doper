@@ -6,9 +6,9 @@
 //! axis-aligned affine transforms, axis-aligned clips, alpha, solid fills).
 //! Rotational transforms are out of scope for this probe and rejected.
 
-use doper_abi::{DisplayCommand, DisplayList, ResourceKind};
-use doper_paint::SolidPaint;
-use doper_scene::Scene;
+use pingo_abi::{DisplayCommand, DisplayList, ResourceKind};
+use pingo_paint::SolidPaint;
+use pingo_scene::Scene;
 use wgpu::util::DeviceExt;
 
 /// Probe failure; the caller reports and never falls back silently.
@@ -92,7 +92,7 @@ impl GpuProbeRenderer {
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .map_err(|error| ProbeError::Gpu(error.to_string()))?;
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("doper-gpu-probe"),
+            label: Some("pingo-gpu-probe"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -101,7 +101,7 @@ impl GpuProbeRenderer {
             ..Default::default()
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("doper-gpu-probe"),
+            label: Some("pingo-gpu-probe"),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -483,11 +483,11 @@ pub fn compare_pixels(gpu: &[u8], oracle: &[u8]) -> DiffReport {
 
 #[cfg(test)]
 mod tests {
-    use doper_abi::{
+    use pingo_abi::{
         DisplayInstruction, EditorDecorationKind, Mutation, MutationBatch, MutationInstruction,
         NULL_NODE_ID, NodeKind, ResourceKind,
     };
-    use doper_headless::HeadlessRenderer;
+    use pingo_headless::HeadlessRenderer;
 
     use super::*;
 
@@ -500,7 +500,7 @@ mod tests {
                     MutationInstruction {
                         flags: 0,
                         mutation: Mutation::CreateNode {
-                            node_id: doper_scene::NodeId::new(0, 1).expect("root id").raw(),
+                            node_id: pingo_scene::NodeId::new(0, 1).expect("root id").raw(),
                             kind: NodeKind::Root,
                             parent: NULL_NODE_ID,
                             before_sibling: NULL_NODE_ID,

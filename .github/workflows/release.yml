@@ -71,7 +71,7 @@ jobs:
       - name: Full engineering gates (M0-M5)
         run: pnpm m5:check
         env:
-          VITE_DOPER_BUILD_ID: ${{ github.sha }}
+          VITE_PINGO_BUILD_ID: ${{ github.sha }}
 
       - name: Verify publishable tarballs
         run: pnpm npm:release:verify
@@ -94,7 +94,7 @@ jobs:
             gh release upload "$RELEASE_TAG" release-artifacts/* --clobber
           else
             gh release create "$RELEASE_TAG" \
-              --title "doper $RELEASE_TAG" \
+              --title "pingo $RELEASE_TAG" \
               --generate-notes \
               release-artifacts/*
           fi

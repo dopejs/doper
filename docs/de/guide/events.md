@@ -30,7 +30,7 @@ Das Ereignismodell folgt dem DOM: Capture → Ziel → Bubble.
 Verfügbare Handler: `onPointerDown`, `onPointerUp`, `onPointerMove`, `onPointerCancel`, `onClick`,
 `onWheel`, jeweils mit passender `*Capture`-Variante.
 
-`DoperEvent` bietet `target`, `currentTarget`, `eventPhase`, die canvas-lokalen logischen Koordinaten
+`PingoEvent` bietet `target`, `currentTarget`, `eventPhase`, die canvas-lokalen logischen Koordinaten
 `x`/`y`, `deltaX`/`deltaY`, `buttons`, die Modifikatortasten sowie `preventDefault()`,
 `stopPropagation()` und `stopImmediatePropagation()`.
 

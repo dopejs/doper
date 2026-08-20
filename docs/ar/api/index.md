@@ -12,7 +12,7 @@
 
 ```ts
 createHostedCanvasRoot(canvas, options?): Promise<HostedCanvasRoot>
-createCanvasRoot(context, core, options?): DoperRoot   // مسار M1 على الخيط الرئيسي
+createCanvasRoot(context, core, options?): PingoRoot   // مسار M1 على الخيط الرئيسي
 createWasmCore(width, height, input?): Promise<CoreClient>
 ```
 
@@ -35,14 +35,14 @@ createWasmCore(width, height, input?): Promise<CoreClient>
 ## العناصر وJSX
 
 ```ts
-createElement(type, props, key?): DoperElement
+createElement(type, props, key?): PingoElement
 Fragment
 ```
 
 عناصر المضيف: `container` و`text` و`scroll` و`virtualList` و`editableText`.
 الأنواع: `CommonProps` و`ContainerProps` و`TextProps` و`ScrollProps` و`VirtualListProps`
 و`EditableTextProps` و`EditableInputMode` و`Color` و`EdgeInsets` و`NodeHandle` و`Ref`
-و`DoperNode` و`FunctionComponent`.
+و`PingoNode` و`FunctionComponent`.
 
 وتُتاح بيئة تشغيل JSX عبر `@dopejs/pingo/jsx-runtime` و`@dopejs/pingo/jsx-dev-runtime`.
 
@@ -67,8 +67,8 @@ useTextEditingController(options);
 ## العناصر الجاهزة
 
 ```ts
-TextField(props): DoperNode
-TextArea(props): DoperNode
+TextField(props): PingoNode
+TextArea(props): PingoNode
 ```
 
 ## إمكانية الوصول
@@ -84,13 +84,13 @@ queryAllByRole(root, role, { name? }): HTMLElement[]
 ## الخطوط
 
 ```ts
-createFont(options): DoperFont
-loadFont(source, options?): Promise<DoperFont>
+createFont(options): PingoFont
+loadFont(source, options?): Promise<PingoFont>
 ```
 
 مدعومة الصيغ TTF / OTF / TTC / WOFF / WOFF2 (يُحمَّل مفكِّك WOFF2 عند الحاجة).
-الأنواع: `DoperFontSource` و`DoperFontOptions` و`DoperFontLoadOptions`
-و`DoperFontLoadError` و`DoperFontLoadErrorCode` و`Woff2Decoder`.
+الأنواع: `PingoFontSource` و`PingoFontOptions` و`PingoFontLoadOptions`
+و`PingoFontLoadError` و`PingoFontLoadErrorCode` و`Woff2Decoder`.
 
 ## الإصدار والتشخيص
 

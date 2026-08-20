@@ -80,7 +80,7 @@ export class RenderWorkerClient {
   #fatalError: Error | undefined;
   #pending:
     | {
-        readonly expected: "doper:prepared" | "doper:ready" | "doper:shutdown-complete";
+        readonly expected: "pingo:prepared" | "pingo:ready" | "pingo:shutdown-complete";
         readonly reject: (error: Error) => void;
         readonly resolve: () => void;
         readonly timer: number;
@@ -128,12 +128,12 @@ export class RenderWorkerClient {
     this.#state = "preparing";
     const message: WorkerPrepareMessage = {
       abiVersion: ABI_VERSION,
-      kind: "doper:prepare",
+      kind: "pingo:prepare",
       protocolVersion: WORKER_PROTOCOL_VERSION,
       sessionId: this.#sessionId,
     };
     try {
-      await this.request("doper:prepared", message);
+      await this.request("pingo:prepared", message);
     } catch (cause) {
       const error = toError(cause, "render Worker prepare failed");
       this.fail(error);
@@ -165,7 +165,7 @@ export class RenderWorkerClient {
       canvas: activation.canvas,
       devicePixelRatio: positiveFinite(activation.devicePixelRatio, "Worker device pixel ratio"),
       height,
-      kind: "doper:activate",
+      kind: "pingo:activate",
       mode: activation.mode,
       rasterCache: activation.rasterCache,
       ...(activation.inputRingBuffer === undefined
@@ -176,7 +176,7 @@ export class RenderWorkerClient {
       width,
     };
     try {
-      await this.request("doper:ready", message, [activation.canvas]);
+      await this.request("pingo:ready", message, [activation.canvas]);
       if (this.#readyMode !== activation.mode) {
         throw new Error(
           `render Worker activated ${String(this.#readyMode)}, expected ${activation.mode}`,
@@ -194,7 +194,7 @@ export class RenderWorkerClient {
   public postClockAnchor(sequence: number, timestamp: number): void {
     if (this.#state !== "ready") return;
     const message: WorkerClockAnchorMessage = {
-      kind: "doper:clock-anchor",
+      kind: "pingo:clock-anchor",
       sequence: positiveU32(sequence, "clock anchor sequence"),
       sessionId: this.#sessionId,
       timestamp: finite(timestamp, "clock anchor timestamp"),
@@ -208,7 +208,7 @@ export class RenderWorkerClient {
     const owned = bytes.slice();
     const message: WorkerInputMessage = {
       bytes: owned,
-      kind: "doper:input",
+      kind: "pingo:input",
       sessionId: this.#sessionId,
     };
     this.#worker.postMessage(message, [owned.buffer]);
@@ -220,7 +220,7 @@ export class RenderWorkerClient {
     const message: WorkerResizeMessage = {
       devicePixelRatio,
       height,
-      kind: "doper:resize",
+      kind: "pingo:resize",
       sessionId: this.#sessionId,
       width,
     };
@@ -231,7 +231,7 @@ export class RenderWorkerClient {
   public postInputWake(): void {
     this.requireState("ready");
     const message: WorkerInputWakeMessage = {
-      kind: "doper:input-wake",
+      kind: "pingo:input-wake",
       sessionId: this.#sessionId,
     };
     this.#worker.postMessage(message);
@@ -244,11 +244,11 @@ export class RenderWorkerClient {
       return;
     }
     const message: WorkerShutdownMessage = {
-      kind: "doper:shutdown",
+      kind: "pingo:shutdown",
       sessionId: this.#sessionId,
     };
     try {
-      await this.request("doper:shutdown-complete", message);
+      await this.request("pingo:shutdown-complete", message);
     } catch {
       // Shutdown is best-effort; terminate is the bounded completion guarantee.
     }
@@ -283,42 +283,42 @@ export class RenderWorkerClient {
     }
     if (message.sessionId !== this.#sessionId) return;
     switch (message.kind) {
-      case "doper:prepared":
+      case "pingo:prepared":
         this.#capabilities = message.capabilities;
         this.resolvePending(message.kind);
         return;
-      case "doper:ready":
+      case "pingo:ready":
         this.#readyMode = message.mode;
         this.resolvePending(message.kind);
         return;
-      case "doper:shutdown-complete":
+      case "pingo:shutdown-complete":
         this.resolvePending(message.kind);
         return;
-      case "doper:frame":
+      case "pingo:frame":
         if (this.#state === "ready") this.#onFrame?.(message.report);
         return;
-      case "doper:clock-metrics":
+      case "pingo:clock-metrics":
         if (this.#state === "ready") this.#onClockMetrics?.(message.metrics);
         return;
-      case "doper:virtual-refill":
+      case "pingo:virtual-refill":
         if (this.#state === "ready") this.#onVirtualRefills?.(message.requests);
         return;
-      case "doper:edit-transaction":
+      case "pingo:edit-transaction":
         if (this.#state === "ready") this.#onEditTransaction?.(message.transaction);
         return;
-      case "doper:event-transaction":
+      case "pingo:event-transaction":
         if (this.#state === "ready") this.#onEventTransaction?.(message.transaction);
         return;
-      case "doper:non-passive-regions":
+      case "pingo:non-passive-regions":
         if (this.#state === "ready") this.#onNonPassiveRegions?.(message.regions);
         return;
-      case "doper:editing-geometry":
+      case "pingo:editing-geometry":
         if (this.#state === "ready") this.#onEditingGeometry?.(message.frame);
         return;
-      case "doper:semantics":
+      case "pingo:semantics":
         if (this.#state === "ready") this.#onSemantics?.(message.nodes);
         return;
-      case "doper:fatal":
+      case "pingo:fatal":
         this.fail(new Error(`render Worker failed: ${message.error}`));
     }
   };
@@ -332,7 +332,7 @@ export class RenderWorkerClient {
   };
 
   private request(
-    expected: "doper:prepared" | "doper:ready" | "doper:shutdown-complete",
+    expected: "pingo:prepared" | "pingo:ready" | "pingo:shutdown-complete",
     message: unknown,
     transfer: readonly Transferable[] = [],
   ): Promise<void> {
@@ -354,7 +354,7 @@ export class RenderWorkerClient {
     });
   }
 
-  private resolvePending(kind: "doper:prepared" | "doper:ready" | "doper:shutdown-complete"): void {
+  private resolvePending(kind: "pingo:prepared" | "pingo:ready" | "pingo:shutdown-complete"): void {
     const pending = this.#pending;
     if (pending === undefined || pending.expected !== kind) {
       this.fail(new Error(`unexpected render Worker response ${kind}`));
@@ -397,7 +397,7 @@ export class RenderWorkerClient {
 /** Default bundler-resolved production Worker factory. */
 export function createRenderWorker(): Worker {
   return new Worker(new URL("./render-worker", import.meta.url), {
-    name: "doper-render",
+    name: "pingo-render",
     type: "module",
   });
 }

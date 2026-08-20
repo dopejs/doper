@@ -226,7 +226,7 @@ export class EditingProbe {
 
   #createInputProxy(): HTMLTextAreaElement {
     const proxy = document.createElement("textarea");
-    proxy.dataset.doperInputProxy = "true";
+    proxy.dataset.pingoInputProxy = "true";
     proxy.value = this.#text;
     proxy.setSelectionRange(this.#text.length, this.#text.length);
     proxy.autocapitalize = "off";

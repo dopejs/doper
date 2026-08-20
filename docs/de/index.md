@@ -62,7 +62,7 @@ Komponentenbaum nicht zurück: Fensterberechnung und Nachfüllen passieren im Co
 
 ## Was es nicht tut
 
-doper ist eine Rendering-Engine, kein Browser. **Nicht abgedeckt** sind SSR und HTML-Erstdarstellung,
+pingo ist eine Rendering-Engine, kein Browser. **Nicht abgedeckt** sind SSR und HTML-Erstdarstellung,
 allgemeine CSS-Kompatibilität (Boxmodell, Kaskade, Selektoren), Adapterschichten für Mini-Programme
 oder Native sowie fachliche Rich-Text-Semantik (Kollaboration, Formeln, Markdown-Befehle).
 

@@ -40,7 +40,7 @@ scope.addEventListener("message", (event: MessageEvent<unknown>) => {
       fatal(new Error("render Worker request is malformed"));
     return;
   }
-  if (message.kind === "doper:clock-anchor") {
+  if (message.kind === "pingo:clock-anchor") {
     if (message.sessionId === sessionId && active)
       clock?.anchor(message.sequence, message.timestamp);
     return;
@@ -51,7 +51,7 @@ scope.addEventListener("message", (event: MessageEvent<unknown>) => {
 async function handle(message: RenderWorkerInboundMessage): Promise<void> {
   if (failed) return;
   switch (message.kind) {
-    case "doper:prepare":
+    case "pingo:prepare":
       if (prepared || active) throw new Error("render Worker was prepared more than once");
       if (message.protocolVersion !== WORKER_PROTOCOL_VERSION) {
         throw new Error("render Worker protocol version mismatch");
@@ -71,37 +71,37 @@ async function handle(message: RenderWorkerInboundMessage): Promise<void> {
           offscreenCanvas: typeof OffscreenCanvas === "function",
           sharedArrayBuffer: typeof SharedArrayBuffer === "function",
         },
-        kind: "doper:prepared",
+        kind: "pingo:prepared",
         sessionId,
       });
       return;
-    case "doper:activate":
+    case "pingo:activate":
       await activate(message);
       return;
-    case "doper:shutdown":
+    case "pingo:shutdown":
       if (message.sessionId !== sessionId) return;
       disposeRuntime();
-      post({ kind: "doper:shutdown-complete", sessionId });
+      post({ kind: "pingo:shutdown-complete", sessionId });
       scope.close();
       return;
-    case "doper:resize":
+    case "pingo:resize":
       if (!active || message.sessionId !== sessionId) return;
       // Applied straight away rather than queued: the canvas is already the new
       // size on screen, so every frame until this lands would be stretched.
       sink?.resize(message.width, message.height, message.devicePixelRatio);
       return;
-    case "doper:input":
+    case "pingo:input":
       if (!active || message.sessionId !== sessionId) return;
       drainInputRing();
       // Queue rather than apply: the render clock drains the queue once per
       // frame, so a burst costs one canvas replay instead of one per event.
       pendingInput.push(message.bytes);
       return;
-    case "doper:input-wake":
+    case "pingo:input-wake":
       if (!active || message.sessionId !== sessionId) return;
       drainInputRing();
       return;
-    case "doper:clock-anchor":
+    case "pingo:clock-anchor":
       return;
   }
 }
@@ -123,16 +123,16 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
     context,
     core,
     (report) => {
-      post({ kind: "doper:frame", report, sessionId });
+      post({ kind: "pingo:frame", report, sessionId });
     },
     message.rasterCache ? createDefaultRasterCache(context, fatal) : undefined,
-    (requests) => post({ kind: "doper:virtual-refill", requests, sessionId }),
+    (requests) => post({ kind: "pingo:virtual-refill", requests, sessionId }),
     fatal,
-    (transaction) => post({ kind: "doper:edit-transaction", transaction, sessionId }),
-    (transaction) => post({ kind: "doper:event-transaction", transaction, sessionId }),
-    (regions) => post({ kind: "doper:non-passive-regions", regions, sessionId }),
-    (frame) => post({ kind: "doper:editing-geometry", frame, sessionId }),
-    (nodes) => post({ kind: "doper:semantics", nodes, sessionId }),
+    (transaction) => post({ kind: "pingo:edit-transaction", transaction, sessionId }),
+    (transaction) => post({ kind: "pingo:event-transaction", transaction, sessionId }),
+    (regions) => post({ kind: "pingo:non-passive-regions", regions, sessionId }),
+    (frame) => post({ kind: "pingo:editing-geometry", frame, sessionId }),
+    (nodes) => post({ kind: "pingo:semantics", nodes, sessionId }),
   );
   // A worker cannot read devicePixelRatio, so the main thread supplies it;
   // without this the replay scale and glyph raster stay at 1x on HiDPI.
@@ -173,11 +173,11 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
     if (clockFramesSinceReport >= 60) {
       clockFramesSinceReport = 0;
       const metrics = clock?.metrics();
-      if (metrics !== undefined) post({ kind: "doper:clock-metrics", metrics, sessionId });
+      if (metrics !== undefined) post({ kind: "pingo:clock-metrics", metrics, sessionId });
     }
   });
   active = true;
-  post({ kind: "doper:ready", mode: message.mode, sessionId });
+  post({ kind: "pingo:ready", mode: message.mode, sessionId });
 }
 
 function disposeRuntime(): void {
@@ -224,7 +224,7 @@ function fatal(cause: unknown): void {
   const error = cause instanceof Error ? cause : new Error("render Worker failed", { cause });
   disposeRuntime();
   try {
-    post({ kind: "doper:fatal", error: error.message, sessionId });
+    post({ kind: "pingo:fatal", error: error.message, sessionId });
   } catch {
     // A native Worker error event is the final recovery signal if posting fails.
   }

@@ -227,7 +227,7 @@ async function readGolden(name) {
 function roundTripInRust(kind, hex) {
   const result = spawnSync(
     "cargo",
-    ["run", "--quiet", "-p", "doper-abi", "--example", "abi_roundtrip", "--", kind],
+    ["run", "--quiet", "-p", "pingo-abi", "--example", "abi_roundtrip", "--", kind],
     { cwd: root, encoding: "utf8", input: `${hex}\n` },
   );
   if (result.status !== 0) {

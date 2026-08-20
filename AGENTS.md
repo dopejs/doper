@@ -1,4 +1,4 @@
-# doper Engineering Guide
+# pingo Engineering Guide
 
 This file is the working agreement for coding agents and contributors in this
 repository. Read [`docs/design.md`](docs/design.md) before making architectural
@@ -8,7 +8,7 @@ truth; this file turns its decisions into day-to-day engineering rules.
 
 ## Project status
 
-doper is a ground-up Web canvas rendering engine for high-performance
+pingo is a ground-up Web canvas rendering engine for high-performance
 interaction, virtual scrolling, and canvas-native editing. It is currently in
 the design/prototyping stage. The planned stack is a Rust-to-WASM core, a
 TypeScript shell, and a pluggable rendering backend with Canvas2D first.
@@ -17,7 +17,7 @@ Existing engines are migration inputs, not implementation blueprints or
 performance baselines. Redesign the architecture from first principles. Do not
 copy source, reproduce internal abstractions by default, or carry forward
 compatibility quirks without a measured product need. Performance gates use
-doper's absolute targets. Target-branch and historical data are diagnostic
+pingo's absolute targets. Target-branch and historical data are diagnostic
 signals only; they must not become a substitute for the absolute targets.
 
 Do not present planned packages, crates, APIs, benchmarks, or platform support
@@ -162,7 +162,7 @@ Optimize only against representative benchmarks or profiles. For hot paths:
   evict under memory pressure.
 - Record cache hit rate, over-invalidation rate, frame phases, frame-time
   percentiles, and memory usage.
-- Track changes against comparable doper history when it exists and investigate
+- Track changes against comparable pingo history when it exists and investigate
   material regressions, but decide acceptance from the absolute product targets.
   External-engine comparisons are optional research, never a merge or release
   prerequisite.

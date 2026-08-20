@@ -1,5 +1,5 @@
 {
-  "crate": "doper-probe-wasm-budget",
+  "crate": "pingo-probe-wasm-budget",
   "gzipBytes": 236368,
   "headroomBytes": 173232,
   "maximumGzipBytes": 307200,

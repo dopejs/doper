@@ -13,7 +13,7 @@
 
 ```ts
 createHostedCanvasRoot(canvas, options?): Promise<HostedCanvasRoot>
-createCanvasRoot(context, core, options?): DoperRoot   // путь M1 в главном потоке
+createCanvasRoot(context, core, options?): PingoRoot   // путь M1 в главном потоке
 createWasmCore(width, height, input?): Promise<CoreClient>
 ```
 
@@ -36,14 +36,14 @@ createWasmCore(width, height, input?): Promise<CoreClient>
 ## Элементы и JSX
 
 ```ts
-createElement(type, props, key?): DoperElement
+createElement(type, props, key?): PingoElement
 Fragment
 ```
 
 Элементы хоста: `container`, `text`, `scroll`, `virtualList`, `editableText`.
 Типы: `CommonProps`, `ContainerProps`, `TextProps`, `ScrollProps`, `VirtualListProps`,
 `EditableTextProps`, `EditableInputMode`, `Color`, `EdgeInsets`, `NodeHandle`, `Ref`,
-`DoperNode`, `FunctionComponent`.
+`PingoNode`, `FunctionComponent`.
 
 Среда выполнения JSX доступна через `@dopejs/pingo/jsx-runtime` и `@dopejs/pingo/jsx-dev-runtime`.
 
@@ -68,8 +68,8 @@ useTextEditingController(options);
 ## Виджеты
 
 ```ts
-TextField(props): DoperNode
-TextArea(props): DoperNode
+TextField(props): PingoNode
+TextArea(props): PingoNode
 ```
 
 ## Доступность
@@ -85,13 +85,13 @@ queryAllByRole(root, role, { name? }): HTMLElement[]
 ## Шрифты
 
 ```ts
-createFont(options): DoperFont
-loadFont(source, options?): Promise<DoperFont>
+createFont(options): PingoFont
+loadFont(source, options?): Promise<PingoFont>
 ```
 
 Поддерживаются TTF / OTF / TTC / WOFF / WOFF2 (декодер WOFF2 подгружается по требованию).
-Типы: `DoperFontSource`, `DoperFontOptions`, `DoperFontLoadOptions`,
-`DoperFontLoadError`, `DoperFontLoadErrorCode`, `Woff2Decoder`.
+Типы: `PingoFontSource`, `PingoFontOptions`, `PingoFontLoadOptions`,
+`PingoFontLoadError`, `PingoFontLoadErrorCode`, `Woff2Decoder`.
 
 ## Выпуск и диагностика
 

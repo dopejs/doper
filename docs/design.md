@@ -1,4 +1,4 @@
-# doper 渲染引擎 · 技术设计
+# pingo 渲染引擎 · 技术设计
 
 > 状态：草案 v0.2
 > 定位：面向高性能交互、虚拟滚动与原生编辑的 Web canvas 渲染引擎
@@ -48,7 +48,7 @@ FPS，但资格判断以帧时间分位数与掉帧率为主，避免平均 FPS 
 | WASM 体积（gzip）                           | < 400KB                                   |
 | WASM 冷启对首帧的额外延迟                   | < 50ms（streaming compile + JS 降级兜底） |
 
-同设备、同构建口径下的 doper 历史数据用于发现趋势和定位回归，不单独决定
+同设备、同构建口径下的 pingo 历史数据用于发现趋势和定位回归，不单独决定
 Pass/Fail。只要正确性成立且绝对指标全部达标，就不要求与目标分支或任何外部引擎
 比较后才能通过；历史回退一旦使绝对指标失守，则按绝对门禁失败。
 
@@ -93,23 +93,23 @@ WebGPU 后端则由 Rust 内的 `wgpu` 直接消费 DisplayList，不经过 JS�
 
 | crate          | 职责                                                             |
 | -------------- | ---------------------------------------------------------------- |
-| `doper-scene`  | SoA scene 数据结构、拓扑维护、脏标记位图                         |
-| `doper-layout` | 约束布局求解（BoxConstraints 单趟）、布局缓存                    |
-| `doper-text`   | 文本布局、shaping（web 字体路径）、测量缓存、glyph atlas         |
-| `doper-edit`   | 编辑会话、selection/caret、IME composition、编辑事务与 undo/redo |
-| `doper-hit`    | BVH 空间索引、命中测试、事件路径构建                             |
-| `doper-scroll` | 滚动物理、前缀和树、可见区间求解、预热调度                       |
-| `doper-paint`  | DisplayList 构建、Picture cache、tile 划分与失效                 |
-| `doper-anim`   | 时间轴、插值、animation driver                                   |
-| `doper-abi`    | Mutation/Input/Recording/DisplayList 编解码与版本协商            |
-| `doper-core`   | 顶层编排、帧循环、commit 协议、wasm-bindgen 入口                 |
-| `doper-gpu`    | （M3+）wgpu 后端                                                 |
+| `pingo-scene`  | SoA scene 数据结构、拓扑维护、脏标记位图                         |
+| `pingo-layout` | 约束布局求解（BoxConstraints 单趟）、布局缓存                    |
+| `pingo-text`   | 文本布局、shaping（web 字体路径）、测量缓存、glyph atlas         |
+| `pingo-edit`   | 编辑会话、selection/caret、IME composition、编辑事务与 undo/redo |
+| `pingo-hit`    | BVH 空间索引、命中测试、事件路径构建                             |
+| `pingo-scroll` | 滚动物理、前缀和树、可见区间求解、预热调度                       |
+| `pingo-paint`  | DisplayList 构建、Picture cache、tile 划分与失效                 |
+| `pingo-anim`   | 时间轴、插值、animation driver                                   |
+| `pingo-abi`    | Mutation/Input/Recording/DisplayList 编解码与版本协商            |
+| `pingo-core`   | 顶层编排、帧循环、commit 协议、wasm-bindgen 入口                 |
+| `pingo-gpu`    | （M3+）wgpu 后端                                                 |
 
 ### TypeScript packages（`packages/`）
 
 仓库内目录使用去掉公共前缀后的职责名，例如 `packages/reconciler`、
 `packages/backend-canvas2d` 和 `packages/facade`。`packages/` 已提供仓库级命名空间，
-目录不重复 `doper-`；下表的完整名称仅用于 npm 发布与包间导入。
+目录不重复 `pingo-`；下表的完整名称仅用于 npm 发布与包间导入。
 
 | package                          | 职责                                                         |
 | -------------------------------- | ------------------------------------------------------------ |
@@ -210,10 +210,10 @@ pub struct Scene {
 2. **正确性依赖业务补丁**：业务不应通过静态标注或 `forceUpdate` 猜测引擎内部依赖。
 3. **热路径动态分配**：布局变化检测不得为每个节点分配闭包或监听器。
 
-因此 doper 从自身 Scene、约束布局与 DisplayList 不变式推导失效模型，并用全量参考
+因此 pingo 从自身 Scene、约束布局与 DisplayList 不变式推导失效模型，并用全量参考
 路径做差分验证；不以任何存量引擎的内部规则或抽象作为实现来源。
 
-### doper 的五层模型
+### pingo 的五层模型
 
 **L1 · 依赖自动捕获，业务零标注**
 
@@ -442,7 +442,7 @@ policy；关闭 Worker 后直接使用 M1 主线程路径。
 `SharedArrayBuffer` 需要 COOP/COEP 跨源隔离响应头，这是**业务侧的外部依赖，可能一票否决**。降级链：
 
 1. SAB 不可用 → `postMessage` 传 mutation（多一次拷贝，延迟略增，仍在 Worker 内合成）。
-2. Worker/OffscreenCanvas 不可用 → 全部退回主线程单线程模式，功能不缺失，性能按 doper 自身的主线程基线独立记录。
+2. Worker/OffscreenCanvas 不可用 → 全部退回主线程单线程模式，功能不缺失，性能按 pingo 自身的主线程基线独立记录。
 
 降级在 `@dopejs/pingo-host` 的能力探测中自动完成，业务无感知。
 
@@ -454,7 +454,7 @@ policy；关闭 Worker 后直接使用 M1 主线程路径。
 
 ### 组成
 
-- **物理**：`doper-scroll` 内实现惯性、回弹、边界，与平台手感对齐（iOS/Android 参数分离）。
+- **物理**：`pingo-scroll` 内实现惯性、回弹、边界，与平台手感对齐（iOS/Android 参数分离）。
 - **区间求解**：不定高 item 用前缀和树（Fenwick / 分段平衡树），`offset → index` 与 `index → offset` 均 O(log n)，支持百万级 item。
 - **测量修正**：item 实际高度与估算不符时，增量修正前缀和树并触发一次局部布局，不引发全量重排。
 - **预热**：按滚动方向与速度预测落点，在空闲时预构建/预光栅化 buffer 区。目标是把 cache miss 率压到接近 0。
@@ -517,8 +517,8 @@ Shell 的最新 durable value 获胜：部分重叠请求裁到新边界，完�
 旧解码器会拒绝带标志位的帧，因此 `abiVersion` 从 1 提升到 2，由既有的版本协商在
 握手期给出明确的不兼容结果，而不是等到第一次触摸板滚动才失败。
 
-**验证**：`doper-scroll` 的动画累加、有界完成时间、边界夹取、取消路径与"小于停止
-距离立即应用"各有单测；`doper-core` 有一条引擎级测试断言同一份 delta 在两种标志下分别是即时
+**验证**：`pingo-scroll` 的动画累加、有界完成时间、边界夹取、取消路径与"小于停止
+距离立即应用"各有单测；`pingo-core` 有一条引擎级测试断言同一份 delta 在两种标志下分别是即时
 到位和先动画后精确落点；ABI 侧有编解码 round trip 与保留位 fail-closed 覆盖；
 Host 侧有分类的单测矩阵。
 
@@ -527,7 +527,7 @@ Host 侧有分类的单测矩阵。
 
 ### 窗口移动的增量布局（2026-08-18）
 
-虚拟滚动每帧都在移动窗口，而 `doper-layout` 的增量路径以「拓扑未变」为前提——窗口移动
+虚拟滚动每帧都在移动窗口，而 `pingo-layout` 的增量路径以「拓扑未变」为前提——窗口移动
 必然增删子节点，于是每帧都退回全量布局。代价随窗口大小增长而非随变化量增长，滚动手感
 和预热策略因此互相牵制：窗口开大能减少占位骨架但每帧布局更贵，开小则反之。
 
@@ -577,7 +577,7 @@ Scene）降到 60，稳定后 39。
 
 虚拟滚动此前**每移动一次窗口就要对整个 Scene 重新布局一次**。
 
-`doper-layout` 的增量布局以「拓扑未变」为前提：它按下标复用上一帧的双缓冲几何，
+`pingo-layout` 的增量布局以「拓扑未变」为前提：它按下标复用上一帧的双缓冲几何，
 `front.ids != scene.ids()` 就退回 `prepare_full`，从根节点重算。而虚拟列表每次窗口
 移动都会增删子节点，拓扑必变——**增量布局在最需要它的场景里从不生效**。
 
@@ -630,8 +630,8 @@ Scene）降到 60，稳定后 39。
    复位；若窗口在 Shell 应答前移走，该位永远为真，之后再次可见时不会重新请求，
    变成永久空白。现在离开预热窗口的未应答项会被重新标记为可请求。
 
-**验证**：`doper-core` 有一条断言"每个计数到的 placeholder 都必须真的被画出来、
-且矩形非空、颜色不透明"；`doper-scroll` 有滚轮前瞻与未应答重试的回归测试。
+**验证**：`pingo-core` 有一条断言"每个计数到的 placeholder 都必须真的被画出来、
+且矩形非空、颜色不透明"；`pingo-scroll` 有滚轮前瞻与未应答重试的回归测试。
 
 ### 补建往返：消费端合并（M5 缺陷修复，2026-08-18）
 
@@ -664,7 +664,7 @@ Scene）降到 60，稳定后 39。
 补一个 Core 早已不要的窗口"看起来完全一样——正是缺了这两个区间，前六个假设全部猜错。
 定位靠的就是"可见区在 [491,510]、已物化区却停在 [374,496]"这一条对照。
 
-**回滚**：三处改动彼此独立。输入批处理回退为 `doper:input` 消息内直接调用 `sink.input()`；
+**回滚**：三处改动彼此独立。输入批处理回退为 `pingo:input` 消息内直接调用 `sink.input()`；
 补建合并回退为 `queueMicrotask`；窗口形状回退为按 `starved` 收窄。任一处回退都不改变
 ABI，只会让骨架时间回到修复前的量级。
 
@@ -683,7 +683,7 @@ ABI，只会让骨架时间回到修复前的量级。
    滚动都在左右晃。现在没有可滚动余量的轴不回弹，与浏览器对内层滚动容器的行为一致
    （可滚动轴在边缘的回弹不受影响）。
 
-**验证**：`doper-scroll` 有"无可滚动余量的轴不移动也不回弹、可滚动轴仍在边缘回弹"的
+**验证**：`pingo-scroll` 有"无可滚动余量的轴不移动也不回弹、可滚动轴仍在边缘回弹"的
 单测；host 既有的"只在 Core 发布的区域内同步抑制滚轮默认行为"用例覆盖第 1 点，并且
 正是它抓到了抑制被调用两次。浏览器实测：25/25 滚轮事件 `defaultPrevented`，页面
 `scrollY` 不动。
@@ -700,7 +700,7 @@ ABI，只会让骨架时间回到修复前的量级。
    Mutation Stream 没有整数 prop 值类型，所以方向以精确的 f32 传递。
    虚拟列表恒为列流：它的 item 偏移来自 Core 的高度索引，不参与兄弟累加。
 2. **image 图元没有打通**。`NodeKind::Image`、`DrawImage` 指令、Canvas2D 后端的
-   `drawImage` 回放都在，但 `doper-paint` 从未为 Image 节点发出指令，也没有公开的
+   `drawImage` 回放都在，但 `pingo-paint` 从未为 Image 节点发出指令，也没有公开的
    `image` intrinsic 或 Shell 侧上传路径。现在 `Prop::Image` 指向一个
    `ImageBitmap` 资源，绘制时整图铺进节点矩形；未显式指定宽高时取图片自身像素尺寸。
 
@@ -714,7 +714,7 @@ ABI，只会让骨架时间回到修复前的量级。
 **信任边界**：`validate_image_resource` 在 Scene 提交时核对声明的宽高与像素长度是否
 自洽——不核对的话，一个与后续字节不符的宽高会让解码方越界读取。
 
-**验证**：`doper-layout` 有 row/gap/padding/负 gap 拒绝的单测；
+**验证**：`pingo-layout` 有 row/gap/padding/负 gap 拒绝的单测；
 `packages/facade/src/m5-rich-cell.browser.ts` 对**真实像素**断言横向排列与图片绘制
 （含自然尺寸路径与四象限颜色，翻转或 stride 错误会直接失败）；golden 字节夹具随
 abiVersion 2→3 显式重基。
@@ -752,15 +752,15 @@ u32 字节长度。长度字必须紧跟在头之后而不是放在指令末尾�
 `DecodeReport { skipped_instructions, producer_abi_version }`。降级如果没人看得见，就和
 "解码器丢了数据"无法区分。跳过的指令仍计入声明总数，否则计数校验会拒绝每一次降级。
 
-**验证**：`doper-abi` 57 个单测（含转义往返、跳过契约的两面、越界/倒退 seek、长度与载荷
+**验证**：`pingo-abi` 57 个单测（含转义往返、跳过契约的两面、越界/倒退 seek、长度与载荷
 不符）；跨语言 `pnpm contracts:check` 通过；6 个 golden 字节夹具与所有手写指令夹具随
-abiVersion 3→4 显式重基；`doper-abi` 行覆盖 95.04%（门槛 95%）。
+abiVersion 3→4 显式重基；`pingo-abi` 行覆盖 95.04%（门槛 95%）。
 
 **降级是可见的**（frameDiagnostics v5）。Core 在 commit 与 input 两条路径上都用
 `decode_with_report`，把跳过计数与观测到的最高生产方版本累加进 `CoreMetrics`，再经
 `skippedInstructions` / `producerAbiVersion` 两个诊断字段浮到宿主与 playground HUD——
 HUD 只在非零时显示这一行。此前这两个值在 8 条流里都是产出后即丢弃，等于没有降级可观测性；
-`doper-core` 有一条端到端断言"被跳过的指令必须计数并出现在诊断字长里，而同一条指令未标记
+`pingo-core` 有一条端到端断言"被跳过的指令必须计数并出现在诊断字长里，而同一条指令未标记
 时仍然致命"。
 
 **worker 握手也放宽了**。它原本对 `abiVersion` 做严格相等，即使流层已经能读——那会让一次
@@ -774,7 +774,7 @@ HUD 只在非零时显示这一行。此前这两个值在 8 条流里都是产�
 
 反馈"PC 端滚动卡顿感明显"。先换量具：此前测的都是"甩动后骨架多久消失"，那是恢复指标；
 卡顿要看引擎**实际交付帧**的间隔，而 requestAnimationFrame 采样测到的是显示器节拍，与
-引擎产帧无关。playground 现在记录每帧交付时刻（`__doperFrameLog`），主线程回放耗时也
+引擎产帧无关。playground 现在记录每帧交付时刻（`__pingoFrameLog`），主线程回放耗时也
 进了帧报告（`replayMs`）——没有它，一帧慢下来无法区分是 Core 出列表慢还是后端画得慢。
 
 **实测**（1280×800，富单元格 demo，180 次连续滚轮）：引擎只交付 46 帧，帧间隔
@@ -887,7 +887,7 @@ P99 47.4 → 17.9ms，**超过 32ms 的帧 16 → 0**。
 桌面平台串因而需要"Mac + 多点触控"这条）。判定刻意保守：认不出是 Apple 的一律用较短的
 Android 滑行——在读不出平台的设备上这是更安全的一侧。
 
-**验证**：`doper-scroll` 断言 iOS 档下 2000 px/s 的释放滑行落在 900–1100px（即约 v₀/2.002）。
+**验证**：`pingo-scroll` 断言 iOS 档下 2000 px/s 的释放滑行落在 900–1100px（即约 v₀/2.002）。
 
 ### Android 不是"另一个系数"，是另一个模型（2026-08-18）
 
@@ -915,7 +915,7 @@ AOSP `OverScroller.SplineOverScroller` 的闭式解（friction 0.015、INFLEXION
 `ViewConfiguration.getScaledMaximumFlingVelocity` = 8000。iOS 没有同类公开常量，那一侧的
 8000 是防抖动估计的护栏而非平台值，已在代码里注明。
 
-**验证**：`doper-scroll` 断言 Android 档在 500 / 2000 / 8000 px/s 三个速度上滑行距离与 AOSP
+**验证**：`pingo-scroll` 断言 Android 档在 500 / 2000 / 8000 px/s 三个速度上滑行距离与 AOSP
 闭式解的误差均小于 2%（58.3 / 647.4 / 7186.4 px），并断言"四倍释放速度滑行超过八倍距离"
 这一 spline 特有性质；另有触边交接与超速钳制两条。手感只有这些能自动化断言，所以锁住它们。
 
@@ -932,7 +932,7 @@ worker 模式下还需要一条跨线程消息，而协议里没有。
 - `set_viewport` 从"只改约束"改为返回替换帧。只改约束什么都不会发生：画布继续显示按旧
   盒子测量的内容，在新盒子上被裁掉而不是重排。这与同文件 `set_device_pixel_ratio` 的
   既定模式一致。
-- worker 协议增加 `doper:resize`（版本 7→8），worker 收到即刻应用而非入队——画布在屏幕上
+- worker 协议增加 `pingo:resize`（版本 7→8），worker 收到即刻应用而非入队——画布在屏幕上
   已经是新尺寸了，排队意味着这期间每一帧都是拉伸的。
 - 宿主暴露 `resize(width, height)`，并**默认用 `ResizeObserver` 跟随画布自身的盒子**。
   每个 canvas 应用都会在窗口缩放或手机旋转时撞上这件事，而漏掉 resize 不会大声失败，
@@ -967,7 +967,7 @@ checkbox/缩略图/正文/金额/按钮累加约 598，金额列和按钮整个�
 而内容触及范围恰恰是必须穿过该边界的量。两者本质冲突，所以放在滚动侧按需计算：只有滚动
 节点需要它，且只覆盖已物化的子树。
 
-**验证**：`doper-core` 断言"每个子节点单独放得下、但累加偏移超出行盒"这一真实形状下横向
+**验证**：`pingo-core` 断言"每个子节点单独放得下、但累加偏移超出行盒"这一真实形状下横向
 可滚（单个超宽子节点会被父约束钳住，复现不出问题）；host 单测断言一批多条事务时反向流
 逐条排空。移动端模拟实测横向拖动可以把金额列和按钮滑出来。
 
@@ -999,10 +999,10 @@ abiVersion 6 改为 `(codePoint: u32, advance: f32)[]`——原因见下一条�
 代价是丢掉字距调整（fallback 路径本来就没有整形器），换来的是刚敲进去、还没被测量的码点
 只有那一两帧退回估算，其余全部正确。
 
-**验证**：`doper-core` 断言同一个点击位置在"有测量推进"下解析到偏移 3、在"无测量推进"下
+**验证**：`pingo-core` 断言同一个点击位置在"有测量推进"下解析到偏移 3、在"无测量推进"下
 解析到 4（四个全角字 16px vs 估算 9.6px，第四个停靠点已差出一个字形）；host 单测断言
 普通文本对不带推进、节点变可编辑后强制重测、已带推进的后续帧不再重测；backend 单测断言
-每个不同码点只测一次且换行推进为 0；`doper-abi` 断言超限与超出载荷的 advance 计数都被
+每个不同码点只测一次且换行推进为 0；`pingo-abi` 断言超限与超出载荷的 advance 计数都被
 拒绝；6 个 golden 字节夹具随 abiVersion 4→5 显式重基（其中 replay-recording 内嵌了度量流，
 因此同时增长了推进载荷）。
 
@@ -1047,10 +1047,10 @@ abiVersion 6 改为 `(codePoint: u32, advance: f32)[]`——原因见下一条�
 那次度量帧的显示列表**被正常接受而不是丢弃**：增量回放是对着上一份已接受的列表做差分的，
 跳过一份会让回放器失步。紧随其后的输入帧会立刻覆盖这些像素。
 
-**验证**：`doper-core` 用 `RequestCharacterBounds` 断言合成 U+5019（该码点不在 Scene 字符串
+**验证**：`pingo-core` 用 `RequestCharacterBounds` 断言合成 U+5019（该码点不在 Scene 字符串
 里）后候选窗矩形是 left=32 / width=16；把该码点从推进表里删掉后同一断言给出 width=9.6，
 即这条测试确实能鉴别。host 单测断言预编辑触发一次重测、同一码点再来不重复通知 Core；
-backend 单测断言 `extraCodePoints` 与字符串码点合并去重且按码点升序；`doper-abi` 断言代理对、
+backend 单测断言 `extraCodePoints` 与字符串码点合并去重且按码点升序；`pingo-abi` 断言代理对、
 超范围码点、乱序与重复表项都被拒绝；6 个 golden 字节夹具随 abiVersion 5→6 显式重基。
 
 **残留风险**：真机 IME 行为属于平台资格认证，仓库门禁只覆盖协议与几何。合成期间宿主会
@@ -1086,7 +1086,7 @@ if !self.edit_overrides.contains_key(&node)
 两者在全角文本上差异为零，在长拉丁文本上是几像素级，远小于此前的 40%。要彻底消除需要
 在编辑期也做整行测量，那会把每次按键变成一次 `measureText`，暂不做。
 
-**验证**：`doper-core` 断言实测 32 → 聚焦后仍 32 → 插入一个全角字后 48。把测量路径改回
+**验证**：`pingo-core` 断言实测 32 → 聚焦后仍 32 → 插入一个全角字后 48。把测量路径改回
 旧行为复跑，聚焦这一步就给出 19.2，即这条测试能鉴别。
 
 ### 通用族名被加了引号，整块画布画的是默认衬线体（2026-08-19）
@@ -1210,7 +1210,7 @@ headless 复现不了，是因为两侧都是软件栅格化。
 
 **两个独立成因**：
 
-1. **没有裁剪**。`doper-paint` 里只有 `NodeKind::Scroll` 会发 `ClipRect`
+1. **没有裁剪**。`pingo-paint` 里只有 `NodeKind::Scroll` 会发 `ClipRect`
    （`engine.rs:471`）。可编辑节点画的是**它自己的值**，而这个值可以比它被测量进去的盒子宽
    得多，于是直接溢出。
 2. **回退路径不换行**。整形路径有 `wrap_paragraph(max_width)`，`max_width` 也确实接了
@@ -1229,7 +1229,7 @@ headless 复现不了，是因为两侧都是软件栅格化。
 加回去再映射成文本偏移，编辑几何把它减掉，IME 候选窗因此跟着字形走。偏移变化会强制整节点
 重绘，因为它移动的是该节点里的每一个字形，子树缓存对那一帧不再可信。
 
-**回退路径的软换行**。断行放在 `doper-text::soft_break_offsets`：用与整形路径**同一套**
+**回退路径的软换行**。断行放在 `pingo-text::soft_break_offsets`：用与整形路径**同一套**
 UAX #14 断点（`unicode_linebreak::linebreaks`），配合宿主测出的逐码点推进做贪心装箱；单个词
 整行装不下时按字素边界切，等价于 `overflow-wrap: anywhere`。断点由**测量**产出并记录
 （`WrappedRun`），caret 停靠点与绘制都复用同一批，避免三处各自推导、各自算错。绘制不需要新
@@ -1237,8 +1237,8 @@ UAX #14 断点（`unicode_linebreak::linebreaks`），配合宿主测出的逐�
 `\n` 分行。**该串只交给绘制**——它的偏移与会话值不一致，caret 与命中测试始终用未换行的值。
 单行框（`EDITABLE_MULTILINE` 未置位）不换行，改走上面的水平滚动。
 
-**验证**：`doper-paint` 断言可编辑节点会发出 `ClipRect([0,0,w,h])`；`doper-text` 五条断行单测
-（拉丁按词、超长词按字素切、硬换行不被上报、非法宽度关闭换行、汉字纯宽度装箱）；`doper-core`
+**验证**：`pingo-paint` 断言可编辑节点会发出 `ClipRect([0,0,w,h])`；`pingo-text` 五条断行单测
+（拉丁按词、超长词按字素切、硬换行不被上报、非法宽度关闭换行、汉字纯宽度装箱）；`pingo-core`
 断言多行框画出 `"alpha \nbeta \ngamma"` 而单行框保持一行，以及单行框 caret 在末尾时停在右边缘
 内一个 caret 条、回到行首时贴左边缘。把裁剪条件、偏移写入、换行宽度分别去掉复跑，对应断言
 都会失败。
@@ -1275,8 +1275,8 @@ UAX #14 断点（`unicode_linebreak::linebreaks`），配合宿主测出的逐�
   而不是拿它去选一段用户已经改过的文本。
 - 平台没有 `Intl.Segmenter` 时宿主不发，行为退回今天的样子。
 
-**验证**：`doper-abi` 断言变长往返（空集/单元素/多元素）、超限计数、越出载荷的计数、乱序与
-重复；`doper-edit` 分词命令不被当作编辑命令；`doper-core` 断言同一次双击在"无边界"下选中
+**验证**：`pingo-abi` 断言变长往返（空集/单元素/多元素）、超限计数、越出载荷的计数、乱序与
+重复；`pingo-edit` 分词命令不被当作编辑命令；`pingo-core` 断言同一次双击在"无边界"下选中
 `[2,3]`、在"有边界"下选中 `[2,4]`、在"revision 过期"下退回 `[2,3]`；**浏览器**端到端断言真实
 `Intl.Segmenter` 下双击"今天天气很好"选中两个码点——把宿主发送那一步去掉复跑，选中的是
 `3..4` 一个字。
@@ -1446,7 +1446,7 @@ metric 早退追加 `breaks.is_empty()` 条件：有软换行时该度量描述�
 标点上，而不是全部码点。若某字体收缩的一对里两半都不与自身收缩，会漏掉，那一对保持今天
 的行为——严格不劣于现状。
 
-**验证**：`doper-core` 断言删除中间字符使两标点相邻后（Scene 字符串刻意不更新）停靠点为
+**验证**：`pingo-core` 断言删除中间字符使两标点相邻后（Scene 字符串刻意不更新）停靠点为
 26/34/44，禁用收缩分支复跑得到 42；真实浏览器断言字体确实收缩时该对必须出现在表里且
 delta 与实测一致；playground 端到端复测漂移 +7.17 → +0.17。6 个 golden 随 abiVersion 8→9
 重基。
@@ -1477,7 +1477,7 @@ actualBoundingBoxRight(b)` 得到第二个字形的实际起点，减去第一�
 `delta - firstDelta`。宿主同样把位置型推进按归属重新分配（前缀差分给出的和是对的，只是
 分配错了）。
 
-**验证**：`doper-core` 断言 "A、X、B" 删掉 X 后停靠点为 18/34/44（此前 26/34/44），把归属
+**验证**：`pingo-core` 断言 "A、X、B" 删掉 X 后停靠点为 18/34/44（此前 26/34/44），把归属
 改回后视复跑得 26；浏览器测试用**像素**测出第二个字形起点，断言 `firstDelta` 与之一致——
 刻意不复用生产路径的 measureText 算术；playground 端到端断言两个停靠点 82.50/96.50 对齐
 像素真值 82.33/96.33。6 个 golden 随 abiVersion 9→10 重基。
@@ -1499,10 +1499,14 @@ Worker 传输下出现。
 工作区名 `doper-workspace` → `pingo-workspace`。子路径导出（`/jsx-runtime`、`/jsx-dev-runtime`、
 `/backend-canvas2d`）与 `jsxImportSource` 随之更新，API 快照重新生成。
 
-**本次未改**（等确认再动）：Rust crate 名 `doper-*`、WASM 产物 `doper_core_bg.wasm`、仓库
-目录名、JSX 元素符号 `Symbol.for("dopejs.doper.element")`、以及公开类型名里的 `Doper`
-前缀（`DoperNode`、`DoperEvent`、`DoperRoot` 等）。后者是**破坏性 API 变更**，需要单独决定
-是否改名以及是否保留别名。
+**随后补完**（同日，包尚未对外发布，因此不保留别名）：Rust crate `doper-*` → `pingo-*`
+（目录、Cargo 名、`use` 路径、探针导出符号），WASM 产物随 crate 变为 `pingo_core_bg.wasm`；
+JSX 元素符号 `dopejs.doper.element` → `dopejs.pingo.element`；公开类型前缀 `Doper*` →
+`Pingo*`（`PingoNode`、`PingoEvent`、`PingoRoot`、`PingoFont`、`PingoImage` 等）；worker 协议
+消息名 `doper:*` → `pingo:*`；无障碍镜像的 `data-doper-*` 属性、compat 的
+`"doper" | "legacy"` 判别值、devtools 全局 `__doper*` 一并改名。
+
+仓库本地目录名由维护者自行处理。
 
 ### 富单元格暴露的能力缺口
 
@@ -1570,7 +1574,7 @@ DisplayList。bitmap 面积、批次字节数和记录数均有 fail-closed 上�
 塞进逐 draw 的 WASM→JS 调用。若 glyph batch 或显式字体路径失败，整段文本走宿主
 fallback，不允许一半 atlas、一半 fallback 造成 caret/advance 分歧。
 
-实现状态（2026-08-16）：`doper-text` 已建立独立的无 unsafe Core 基础，使用
+实现状态（2026-08-16）：`pingo-text` 已建立独立的无 unsafe Core 基础，使用
 `swash` 完成显式 SFNT 字体的 LTR shaping，使用 UAX #14 数据完成基础换行，并输出
 UTF-8/UTF-16、grapheme、cluster、glyph、line 与 caret 映射；Text Shape Cache 和
 灰度 outline glyph atlas 均使用可观测的字节预算 LRU。公开 `createFont` 会复制并冻结
@@ -1587,7 +1591,7 @@ TTF/OTF/TTC、WOFF1 与 WOFF2。网络响应和解码结果受同一 8 MiB 资�
 按照 W3C 容器目录进行完整范围/对齐/重叠检查并通过 `DecompressionStream` 有界解压，
 WOFF2 在头部预检后才动态加载 decoder-only WASM，也允许受控宿主注入等价 decoder。
 加载、解码、取消、格式与环境能力错误有稳定错误码；失败的 Promise 不会生成半有效
-`DoperFont`。decoder-only 模块不进入默认同步入口，也不计入产品 Core WASM。
+`PingoFont`。decoder-only 模块不进入默认同步入口，也不计入产品 Core WASM。
 
 系统字体测量使用 schema 生成、版本化的 `DOPT` System Text Metrics Batch。Host
 在 Mutation Stream 提交前，从事务后的 UTF-8 string/TextStyle 资源快照中按
@@ -1849,13 +1853,13 @@ function Cell({ row, col }: CellProps) {
 
 | 模块           | 不变式                                                                                                                               |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `doper-scene`  | 任意 mutation 序列后，拓扑序成立（父 index < 子 index）；无悬垂 NodeId；free list 与 generation 自洽                                 |
-| `doper-layout` | 布局结果满足传入约束；相同约束 + 相同输入 → 相同输出（幂等）；relayoutBoundary 内的变更不影响边界外的布局结果                        |
-| `doper-scroll` | 前缀和树：`offset(index(o)) ≤ o < offset(index(o)+1)`；任意增删改后与朴素线性实现结果一致                                            |
-| `doper-hit`    | BVH 命中结果与朴素逐节点遍历一致（**这是典型的差分 oracle**）                                                                        |
-| `doper-abi`    | 任意指令流 `encode(decode(x)) == x`；截断/损坏输入不 panic、不越界                                                                   |
-| `doper-text`   | 换行结果不超出给定宽度；相同输入 → 相同 glyph 序列                                                                                   |
-| `doper-edit`   | 任意编辑序列不产生非法 offset 或拆分 grapheme；undo/redo 可逆；过期 revision 不覆盖新状态；composition commit 等价于一个原子 replace |
+| `pingo-scene`  | 任意 mutation 序列后，拓扑序成立（父 index < 子 index）；无悬垂 NodeId；free list 与 generation 自洽                                 |
+| `pingo-layout` | 布局结果满足传入约束；相同约束 + 相同输入 → 相同输出（幂等）；relayoutBoundary 内的变更不影响边界外的布局结果                        |
+| `pingo-scroll` | 前缀和树：`offset(index(o)) ≤ o < offset(index(o)+1)`；任意增删改后与朴素线性实现结果一致                                            |
+| `pingo-hit`    | BVH 命中结果与朴素逐节点遍历一致（**这是典型的差分 oracle**）                                                                        |
+| `pingo-abi`    | 任意指令流 `encode(decode(x)) == x`；截断/损坏输入不 panic、不越界                                                                   |
+| `pingo-text`   | 换行结果不超出给定宽度；相同输入 → 相同 glyph 序列                                                                                   |
+| `pingo-edit`   | 任意编辑序列不产生非法 offset 或拆分 grapheme；undo/redo 可逆；过期 revision 不覆盖新状态；composition commit 等价于一个原子 replace |
 
 原则：**凡是有"朴素但显然正确"的参考实现的模块，都必须做差分测试**。朴素实现作为测试专用代码保留在仓库中，不参与生产构建。
 
@@ -1902,7 +1906,7 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 
 ### 15.7 覆盖率与门禁策略
 
-- Rust core 行覆盖率 ≥ 85%，`doper-abi` / `doper-scene` / `doper-scroll` 等核心 crate ≥ 95%。
+- Rust core 行覆盖率 ≥ 85%，`pingo-abi` / `pingo-scene` / `pingo-scroll` 等核心 crate ≥ 95%。
 - TS 侧 ≥ 80%。
 - **覆盖率是下限而非目标**：不允许通过无断言测试刷指标，评审时关注不变式覆盖而非行覆盖。
 - 合入门禁 = L1 + L2 + L3 + L4(快集) + L7(核心) + L8(PC benchmark) 全绿。

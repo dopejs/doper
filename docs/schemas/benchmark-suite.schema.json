@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dopejs.dev/schemas/benchmark-suite-v1.json",
-  "title": "doper benchmark suite",
+  "title": "pingo benchmark suite",
   "type": "object",
   "additionalProperties": false,
   "required": ["suiteVersion", "seed", "scenarios"],

@@ -29,7 +29,7 @@ await run("cargo", [
   "--locked",
   "--quiet",
   "-p",
-  "doper-text",
+  "pingo-text",
   "--example",
   "m3_text_conformance",
   "--",

@@ -1,0 +1,37 @@
+[package]
+name = "pingo-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pingo-abi = { path = "../pingo-abi" }
+pingo-edit = { path = "../pingo-edit" }
+pingo-hit = { path = "../pingo-hit" }
+pingo-layout = { path = "../pingo-layout" }
+pingo-paint = { path = "../pingo-paint" }
+pingo-scene = { path = "../pingo-scene" }
+pingo-scroll = { path = "../pingo-scroll" }
+pingo-text = { path = "../pingo-text" }
+
+[dev-dependencies]
+pingo-headless = { path = "../pingo-headless" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.127"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

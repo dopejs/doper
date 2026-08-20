@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-08-15
-- 决策者：doper maintainers
+- 决策者：pingo maintainers
 - 关联设计：`docs/design.md` §6、§7、§15.4
 
 ## Context
@@ -40,7 +40,7 @@ instruction_count:u32]`。
 
 ## Compatibility impact
 
-这是 doper 的首个正式 ABI，没有需要迁移的既有发布版本。未来任何不兼容布局变化都
+这是 pingo 的首个正式 ABI，没有需要迁移的既有发布版本。未来任何不兼容布局变化都
 必须提升 ABI 版本、生成新 golden，并在 Host 握手中保留可诊断的降级行为。目录名不
 属于 ABI；TypeScript 包目录保持简洁，npm 包名仍使用 `@dopejs/pingo-*` 命名空间。
 
@@ -51,7 +51,7 @@ instruction_count:u32]`。
   不变式。
 - `pnpm protocol:check` 用正式 golden 执行 TypeScript 编码 → Rust 解码/重编码，
   并让两侧共同接受同一 DisplayList golden。
-- Rust 属性测试对任意字节输入验证解码不 panic；`core/doper-abi/fuzz` 为 Mutation、
+- Rust 属性测试对任意字节输入验证解码不 panic；`core/pingo-abi/fuzz` 为 Mutation、
   Input、Recording 与 DisplayList 提供四个 `cargo-fuzz` target，供 nightly 和发布前
   持续运行。
 

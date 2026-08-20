@@ -50,7 +50,7 @@ export async function checkWasmManifest() {
   } catch {
     return ["packages/host/wasm/manifest.json is missing; run pnpm core:wasm"];
   }
-  const bytes = await readFile(path.join(wasmRoot, "doper_core_bg.wasm"));
+  const bytes = await readFile(path.join(wasmRoot, "pingo_core_bg.wasm"));
   if (bytes.byteLength !== manifest.rawBytes) {
     problems.push(
       `WASM asset is ${String(bytes.byteLength)} bytes; manifest built ${String(manifest.rawBytes)}`,

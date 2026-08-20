@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { createElement, isDoperElement, normalizeChildren } from "./element";
+import { createElement, isPingoElement, normalizeChildren } from "./element";
 import { Fragment } from "./types";
 
 describe("JSX element protocol", () => {
   it("extracts identity without mutating or leaking key into component props", () => {
     const props = { width: 10, key: "fallback" };
     const element = createElement("container", props, "explicit");
-    expect(isDoperElement(element)).toBe(true);
+    expect(isPingoElement(element)).toBe(true);
     expect(element.key).toBe("explicit");
     expect(element.props).toEqual({ width: 10 });
     expect(props).toEqual({ width: 10, key: "fallback" });

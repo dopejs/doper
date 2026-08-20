@@ -12,7 +12,7 @@
 
 ```ts
 createHostedCanvasRoot(canvas, options?): Promise<HostedCanvasRoot>
-createCanvasRoot(context, core, options?): DoperRoot   // 메인 스레드 M1 경로
+createCanvasRoot(context, core, options?): PingoRoot   // 메인 스레드 M1 경로
 createWasmCore(width, height, input?): Promise<CoreClient>
 ```
 
@@ -35,14 +35,14 @@ createWasmCore(width, height, input?): Promise<CoreClient>
 ## 요소와 JSX
 
 ```ts
-createElement(type, props, key?): DoperElement
+createElement(type, props, key?): PingoElement
 Fragment
 ```
 
 호스트 요소: `container`, `text`, `scroll`, `virtualList`, `editableText`.
 타입: `CommonProps`, `ContainerProps`, `TextProps`, `ScrollProps`, `VirtualListProps`,
 `EditableTextProps`, `EditableInputMode`, `Color`, `EdgeInsets`, `NodeHandle`, `Ref`,
-`DoperNode`, `FunctionComponent`.
+`PingoNode`, `FunctionComponent`.
 
 JSX 런타임은 `@dopejs/pingo/jsx-runtime`과 `@dopejs/pingo/jsx-dev-runtime`으로 제공합니다.
 
@@ -67,8 +67,8 @@ useTextEditingController(options);
 ## 위젯
 
 ```ts
-TextField(props): DoperNode
-TextArea(props): DoperNode
+TextField(props): PingoNode
+TextArea(props): PingoNode
 ```
 
 ## 접근성
@@ -84,13 +84,13 @@ queryAllByRole(root, role, { name? }): HTMLElement[]
 ## 폰트
 
 ```ts
-createFont(options): DoperFont
-loadFont(source, options?): Promise<DoperFont>
+createFont(options): PingoFont
+loadFont(source, options?): Promise<PingoFont>
 ```
 
 TTF / OTF / TTC / WOFF / WOFF2를 지원합니다(WOFF2 디코더는 필요할 때 동적 로드).
-타입: `DoperFontSource`, `DoperFontOptions`, `DoperFontLoadOptions`,
-`DoperFontLoadError`, `DoperFontLoadErrorCode`, `Woff2Decoder`.
+타입: `PingoFontSource`, `PingoFontOptions`, `PingoFontLoadOptions`,
+`PingoFontLoadError`, `PingoFontLoadErrorCode`, `Woff2Decoder`.
 
 ## 릴리스와 진단
 

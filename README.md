@@ -1,6 +1,6 @@
 # Pingo
 
-Pingo（原 doper）是一套从零设计的 Web Canvas 渲染引擎，目标是提供高性能 TSX 运行时、
+Pingo（原 pingo）是一套从零设计的 Web Canvas 渲染引擎，目标是提供高性能 TSX 运行时、
 原生虚拟滚动、确定性的 Rust/WASM Core、版本化二进制 ABI，以及完整的文本
 渲染与 Canvas 原生编辑能力。
 

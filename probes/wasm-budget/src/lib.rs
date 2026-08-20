@@ -43,7 +43,7 @@ fn push_bounded(
 // SAFETY: This crate owns this globally unique probe export name.
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
-pub extern "C" fn doper_budget_reset_inputs() {
+pub extern "C" fn pingo_budget_reset_inputs() {
     FONT_INPUT.with_borrow_mut(Vec::clear);
     TEXT_INPUT.with_borrow_mut(Vec::clear);
 }
@@ -53,7 +53,7 @@ pub extern "C" fn doper_budget_reset_inputs() {
 // SAFETY: This crate owns this globally unique probe export name.
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
-pub extern "C" fn doper_budget_push_font_byte(value: u32) -> u32 {
+pub extern "C" fn pingo_budget_push_font_byte(value: u32) -> u32 {
     push_bounded(&FONT_INPUT, value, MAX_FONT_BYTES)
 }
 
@@ -62,7 +62,7 @@ pub extern "C" fn doper_budget_push_font_byte(value: u32) -> u32 {
 // SAFETY: This crate owns this globally unique probe export name.
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
-pub extern "C" fn doper_budget_push_text_byte(value: u32) -> u32 {
+pub extern "C" fn pingo_budget_push_text_byte(value: u32) -> u32 {
     push_bounded(&TEXT_INPUT, value, MAX_TEXT_BYTES)
 }
 
@@ -74,7 +74,7 @@ pub extern "C" fn doper_budget_push_text_byte(value: u32) -> u32 {
 // SAFETY: This crate owns this globally unique probe export name.
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
-pub extern "C" fn doper_budget_grapheme_count() -> u32 {
+pub extern "C" fn pingo_budget_grapheme_count() -> u32 {
     TEXT_INPUT
         .with_borrow(|bytes| str::from_utf8(bytes.as_slice()).map_or(INVALID_INPUT, grapheme_count))
 }
@@ -87,7 +87,7 @@ pub extern "C" fn doper_budget_grapheme_count() -> u32 {
 // SAFETY: This crate owns this globally unique probe export name.
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
-pub extern "C" fn doper_budget_shape_count() -> u32 {
+pub extern "C" fn pingo_budget_shape_count() -> u32 {
     FONT_INPUT.with_borrow(|font| {
         TEXT_INPUT.with_borrow(|text_bytes| {
             let Ok(text) = str::from_utf8(text_bytes.as_slice()) else {
@@ -117,7 +117,7 @@ pub extern "C" fn doper_budget_shape_count() -> u32 {
 // SAFETY: This crate owns this globally unique probe export name.
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
-pub extern "C" fn doper_budget_raster_bytes(glyph_id: u32, size_bits: u32) -> u32 {
+pub extern "C" fn pingo_budget_raster_bytes(glyph_id: u32, size_bits: u32) -> u32 {
     let size = f32::from_bits(size_bits);
     let Ok(glyph_id) = u16::try_from(glyph_id) else {
         return INVALID_INPUT;
@@ -143,31 +143,31 @@ pub extern "C" fn doper_budget_raster_bytes(glyph_id: u32, size_bits: u32) -> u3
 #[cfg(test)]
 mod tests {
     use super::{
-        INVALID_INPUT, doper_budget_grapheme_count, doper_budget_push_text_byte,
-        doper_budget_raster_bytes, doper_budget_reset_inputs,
+        INVALID_INPUT, pingo_budget_grapheme_count, pingo_budget_push_text_byte,
+        pingo_budget_raster_bytes, pingo_budget_reset_inputs,
     };
 
     #[test]
     fn counts_user_perceived_characters_from_bounded_input() {
-        doper_budget_reset_inputs();
+        pingo_budget_reset_inputs();
         for byte in "a\u{0301}👨‍👩‍👧‍👦한".bytes() {
-            assert_eq!(doper_budget_push_text_byte(u32::from(byte)), 1);
+            assert_eq!(pingo_budget_push_text_byte(u32::from(byte)), 1);
         }
-        assert_eq!(doper_budget_grapheme_count(), 3);
+        assert_eq!(pingo_budget_grapheme_count(), 3);
     }
 
     #[test]
     fn rejects_non_byte_and_malformed_utf8_inputs() {
-        doper_budget_reset_inputs();
-        assert_eq!(doper_budget_push_text_byte(256), 0);
-        assert_eq!(doper_budget_push_text_byte(0xFF), 1);
-        assert_eq!(doper_budget_grapheme_count(), INVALID_INPUT);
+        pingo_budget_reset_inputs();
+        assert_eq!(pingo_budget_push_text_byte(256), 0);
+        assert_eq!(pingo_budget_push_text_byte(0xFF), 1);
+        assert_eq!(pingo_budget_grapheme_count(), INVALID_INPUT);
         assert_eq!(
-            doper_budget_raster_bytes(1, 0.0_f32.to_bits()),
+            pingo_budget_raster_bytes(1, 0.0_f32.to_bits()),
             INVALID_INPUT
         );
         assert_eq!(
-            doper_budget_raster_bytes(u32::MAX, 12.0_f32.to_bits()),
+            pingo_budget_raster_bytes(u32::MAX, 12.0_f32.to_bits()),
             INVALID_INPUT
         );
     }

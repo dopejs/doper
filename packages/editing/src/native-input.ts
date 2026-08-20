@@ -534,7 +534,7 @@ function beforeInputCommand(
 
 function createProxy(ownerDocument: Document): HTMLTextAreaElement {
   const proxy = ownerDocument.createElement("textarea");
-  proxy.dataset.doperInputProxy = "true";
+  proxy.dataset.pingoInputProxy = "true";
   proxy.autocapitalize = "off";
   proxy.autocomplete = "off";
   proxy.spellcheck = false;

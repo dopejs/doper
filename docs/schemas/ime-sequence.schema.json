@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dopejs.dev/schemas/ime-sequence-v1.json",
-  "title": "doper IME event sequence",
+  "title": "pingo IME event sequence",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "provenance", "description", "initialText", "events"],

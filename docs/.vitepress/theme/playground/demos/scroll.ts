@@ -1,4 +1,4 @@
-import { createElement, createImage, type DoperImage, type DoperNode } from "@dopejs/pingo";
+import { createElement, createImage, type PingoImage, type PingoNode } from "@dopejs/pingo";
 
 import type { Demo, DemoContext } from "../demo";
 
@@ -30,7 +30,7 @@ const CHANNELS = ["自营", "分销", "跨境", "预售", "团购"] as const;
  * Core no matter how many rows reference it. Generating a distinct bitmap per
  * row would instead upload `width * height * 4` bytes per visible item.
  */
-const THUMBNAILS: DoperImage[] = Array.from({ length: 6 }, (_, palette) =>
+const THUMBNAILS: PingoImage[] = Array.from({ length: 6 }, (_, palette) =>
   createImage(thumbnailPixels(palette), THUMBNAIL_PIXELS, THUMBNAIL_PIXELS, {
     label: "商品缩略图",
   }),
@@ -65,7 +65,7 @@ function thumbnailPixels(palette: number): Uint8Array {
 }
 
 /** One chip: a filled box whose padding sizes it around its label. */
-function tag(key: string, label: string, background: string, color: string): DoperNode {
+function tag(key: string, label: string, background: string, color: string): PingoNode {
   return createElement("container", {
     key,
     backgroundColor: background,
@@ -74,7 +74,7 @@ function tag(key: string, label: string, background: string, color: string): Dop
   });
 }
 
-function cell(index: number, context: DemoContext): DoperNode {
+function cell(index: number, context: DemoContext): PingoNode {
   const status = STATUSES[index % STATUSES.length] ?? STATUSES[0];
   const channel = CHANNELS[index % CHANNELS.length] ?? CHANNELS[0];
   const ticked = selected.has(index);
@@ -199,7 +199,7 @@ function cell(index: number, context: DemoContext): DoperNode {
   });
 }
 
-function scene(context: DemoContext): DoperNode {
+function scene(context: DemoContext): PingoNode {
   const { width, height } = context;
   return createElement("container", {
     width,

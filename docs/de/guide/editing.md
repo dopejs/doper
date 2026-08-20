@@ -6,7 +6,7 @@ Die klassische Schwäche canvas-basierter Lösungen besteht darin, bei Eingabebe
 das canvas zu legen. Daraus folgt eine ganze Kette von Problemen: versetzter Cursor, verrutschtes
 IME-Kandidatenfenster, nicht synchrones Scrollen, gebrochene Barrierefreiheit.
 
-doper behandelt Bearbeitung als erstklassige Fähigkeit des Core: Cursor, Auswahl, Ziehauswahl,
+pingo behandelt Bearbeitung als erstklassige Fähigkeit des Core: Cursor, Auswahl, Ziehauswahl,
 Wortauswahl per Doppelklick, Tastaturnavigation, IME-Komposition, Position des Kandidatenfensters,
 Zwischenablage, Rückgängig/Wiederherstellen, Nur-Lesen und Passwort implementiert die Engine.
 **Die Anwendung erzeugt, positioniert und synchronisiert kein einziges HTML-Eingabeelement.**

@@ -1,11 +1,11 @@
 {
   "name": "@dopejs/pingo-reconciler",
   "version": "0.1.0",
-  "description": "doper internal: component tree reconciler and mutation stream encoder (use @dopejs/pingo)",
+  "description": "pingo internal: component tree reconciler and mutation stream encoder (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dopejs/doper.git",
+    "url": "git+https://github.com/dopejs/pingo.git",
     "directory": "packages/reconciler"
   },
   "publishConfig": {

@@ -1,5 +1,5 @@
 import { createElement } from "./element";
-import { Fragment, type DoperElement, type ElementType, type JSX, type Key } from "./types";
+import { Fragment, type PingoElement, type ElementType, type JSX, type Key } from "./types";
 
 /** Development JSX transform with source arguments intentionally excluded from runtime state. */
 export function jsxDEV<Props extends Record<string, unknown>>(
@@ -9,7 +9,7 @@ export function jsxDEV<Props extends Record<string, unknown>>(
   _isStaticChildren: boolean,
   _source: unknown,
   _self: unknown,
-): DoperElement<Props> {
+): PingoElement<Props> {
   return createElement(type, props, key);
 }
 

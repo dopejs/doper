@@ -1,11 +1,11 @@
 {
   "name": "@dopejs/pingo-widgets",
   "version": "0.1.0",
-  "description": "doper internal: TextField/TextArea widgets over the editable primitive (use @dopejs/pingo)",
+  "description": "pingo internal: TextField/TextArea widgets over the editable primitive (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dopejs/doper.git",
+    "url": "git+https://github.com/dopejs/pingo.git",
     "directory": "packages/widgets"
   },
   "publishConfig": {

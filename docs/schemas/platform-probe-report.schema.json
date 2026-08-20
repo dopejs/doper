@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dopejs.dev/schemas/platform-probe-report-v1.json",
-  "title": "doper platform probe report",
+  "title": "pingo platform probe report",
   "type": "object",
   "additionalProperties": false,
   "required": ["build", "deviceId", "runId", "version"],

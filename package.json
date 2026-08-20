@@ -75,7 +75,7 @@
     "coverage:ts": "node scripts/run-with-rust-target-cleanup.mjs pnpm coverage:ts:run",
     "coverage:ts:run": "pnpm packages:build && vitest run --coverage",
     "coverage:rust": "node scripts/run-with-rust-target-cleanup.mjs pnpm coverage:rust:run",
-    "coverage:rust:run": "cargo llvm-cov --workspace --no-report && cargo llvm-cov report --summary-only --fail-under-lines 85 && cargo llvm-cov report --package doper-abi --summary-only --fail-under-lines 95 && cargo llvm-cov report --package doper-scene --summary-only --fail-under-lines 95 && cargo llvm-cov report --package doper-scroll --summary-only --fail-under-lines 95 && cargo llvm-cov report --package doper-text --summary-only --fail-under-lines 94",
+    "coverage:rust:run": "cargo llvm-cov --workspace --no-report && cargo llvm-cov report --summary-only --fail-under-lines 85 && cargo llvm-cov report --package pingo-abi --summary-only --fail-under-lines 95 && cargo llvm-cov report --package pingo-scene --summary-only --fail-under-lines 95 && cargo llvm-cov report --package pingo-scroll --summary-only --fail-under-lines 95 && cargo llvm-cov report --package pingo-text --summary-only --fail-under-lines 94",
     "typecheck": "pnpm packages:build && pnpm -r typecheck && pnpm site:typecheck",
     "site:typecheck": "vue-tsc --noEmit -p docs/.vitepress/tsconfig.json",
     "core:wasm": "node scripts/run-with-rust-target-cleanup.mjs pnpm core:wasm:run",

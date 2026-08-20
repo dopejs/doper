@@ -28,7 +28,7 @@ root.render(
     backgroundColor: "#ffffffff",
     padding: 24,
     children: createElement("text", {
-      value: "Hello doper",
+      value: "Hello pingo",
       fontSize: 24,
       lineHeight: 32,
       color: "#1f2329ff",

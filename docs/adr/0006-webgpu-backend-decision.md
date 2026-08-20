@@ -2,7 +2,7 @@
 
 - 状态：Accepted（决策结论：**Continue Experiment**）
 - 日期：2026-08-17
-- 决策者：doper maintainers
+- 决策者：pingo maintainers
 - 关联设计：`docs/design.md` §3.1、§16、§17；`docs/plan.md` M5-D
 
 ## Context

@@ -1,8 +1,8 @@
 import {
   createRoot,
   decodeMutationBatch,
-  type CoreDrivenDoperRoot,
-  type DoperRoot,
+  type CoreDrivenPingoRoot,
+  type PingoRoot,
   type MutationSink,
   type RootOptions,
 } from "@dopejs/pingo-reconciler";
@@ -131,7 +131,7 @@ export interface HostedCanvasRootOptions extends RootOptions {
 const PENDING_WORD_SELECTION_MS = 600;
 
 /** Public root whose transport can fail over without replacing Shell component state. */
-export interface HostedCanvasRoot extends DoperRoot {
+export interface HostedCanvasRoot extends PingoRoot {
   readonly canvas: HTMLCanvasElement;
   readonly decision: HostTransportDecision;
   readonly mode: HostTransportMode;
@@ -198,7 +198,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #mainFrameTimestamp: number | undefined;
   #recovery: Promise<void> | undefined;
   #recovering = false;
-  #root: CoreDrivenDoperRoot | undefined;
+  #root: CoreDrivenPingoRoot | undefined;
   #transferred = false;
   #transport: MutationTransport | undefined;
   #unmounted = false;
@@ -370,7 +370,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.attachCanvasEventListeners();
   }
 
-  public render(node: Parameters<DoperRoot["render"]>[0]): void {
+  public render(node: Parameters<PingoRoot["render"]>[0]): void {
     this.requireRoot().render(node);
   }
 
@@ -1293,12 +1293,12 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     ring.close();
   }
 
-  private requireRoot(): DoperRoot {
+  private requireRoot(): PingoRoot {
     if (this.#root === undefined) throw new Error("hosted root is not initialized");
     return this.#root;
   }
 
-  private requireCoreRoot(): CoreDrivenDoperRoot {
+  private requireCoreRoot(): CoreDrivenPingoRoot {
     if (this.#root === undefined) throw new Error("hosted root is not initialized");
     return this.#root;
   }

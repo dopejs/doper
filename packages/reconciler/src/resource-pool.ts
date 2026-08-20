@@ -1,4 +1,4 @@
-import type { Color, DoperFont, DoperImage } from "@dopejs/pingo-jsx";
+import type { Color, PingoFont, PingoImage } from "@dopejs/pingo-jsx";
 
 import {
   AFFINE_A_OFFSET,
@@ -220,7 +220,7 @@ export function encodeTextStyle(
 }
 
 /** Encodes one copied, decoded SFNT font face for Core-owned shaping. */
-export function encodeSfntFont(font: DoperFont): Uint8Array {
+export function encodeSfntFont(font: PingoFont): Uint8Array {
   const data = font.copyBytes();
   if (data.byteLength === 0 || data.byteLength > MAX_RESOURCE_BYTES) {
     throw new RangeError("font resource is empty or exceeds the resource byte budget");
@@ -241,7 +241,7 @@ export function encodeSfntFont(font: DoperFont): Uint8Array {
 }
 
 /** Encodes one copied RGBA8 bitmap for Core-owned image drawing. */
-export function encodeImageBitmap(image: DoperImage): Uint8Array {
+export function encodeImageBitmap(image: PingoImage): Uint8Array {
   const pixels = image.copyPixels();
   const expected = image.width * image.height * 4;
   if (pixels.byteLength !== expected) {

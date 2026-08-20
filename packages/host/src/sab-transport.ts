@@ -13,21 +13,21 @@ interface MessageEndpoint {
 }
 
 interface WakeMessage {
-  readonly kind: "doper:sab-wake";
+  readonly kind: "pingo:sab-wake";
   readonly sessionId: number;
   readonly version: number;
 }
 
 interface AckMessage {
   readonly frameSeq: number;
-  readonly kind: "doper:sab-ack";
+  readonly kind: "pingo:sab-ack";
   readonly sessionId: number;
   readonly version: number;
 }
 
 interface ErrorMessage {
   readonly error: string;
-  readonly kind: "doper:sab-error";
+  readonly kind: "pingo:sab-error";
   readonly sessionId: number;
   readonly version: number;
 }
@@ -206,7 +206,7 @@ export class SabMutationTransport {
       this.fail(new Error("SAB transport version mismatch"));
       return;
     }
-    if (message.kind === "doper:sab-error") {
+    if (message.kind === "pingo:sab-error") {
       this.fail(new Error(`render Worker rejected SAB mutation: ${message.error}`));
       return;
     }
@@ -240,7 +240,7 @@ export class SabMutationTransport {
 
   private wake(): void {
     const message: WakeMessage = {
-      kind: "doper:sab-wake",
+      kind: "pingo:sab-wake",
       sessionId: this.#sessionId,
       version: TRANSPORT_VERSION,
     };
@@ -370,7 +370,7 @@ export class SabMutationReceiver {
           this.#lastSequence = frame.frameSeq;
           const acknowledgement: AckMessage = {
             frameSeq: frame.frameSeq,
-            kind: "doper:sab-ack",
+            kind: "pingo:sab-ack",
             sessionId: this.#sessionId,
             version: TRANSPORT_VERSION,
           };
@@ -415,7 +415,7 @@ export class SabMutationReceiver {
     const error = toError(cause, "render Worker SAB mutation failed");
     const message: ErrorMessage = {
       error: error.message,
-      kind: "doper:sab-error",
+      kind: "pingo:sab-error",
       sessionId: this.#sessionId,
       version: TRANSPORT_VERSION,
     };
@@ -433,7 +433,7 @@ function isWake(value: unknown): value is WakeMessage {
   if (!isWakeEnvelope(value)) return false;
   const message = value as { kind?: unknown; sessionId?: unknown; version?: unknown };
   return (
-    message.kind === "doper:sab-wake" &&
+    message.kind === "pingo:sab-wake" &&
     isPositiveU32(message.sessionId) &&
     Number.isInteger(message.version)
   );
@@ -441,28 +441,28 @@ function isWake(value: unknown): value is WakeMessage {
 
 function isWakeEnvelope(
   value: unknown,
-): value is Record<string, unknown> & { readonly kind: "doper:sab-wake" } {
+): value is Record<string, unknown> & { readonly kind: "pingo:sab-wake" } {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as { kind?: unknown }).kind === "doper:sab-wake"
+    (value as { kind?: unknown }).kind === "pingo:sab-wake"
   );
 }
 
 function isResponse(value: unknown): value is AckMessage | ErrorMessage {
   if (!isResponseEnvelope(value)) return false;
   if (!isPositiveU32(value.sessionId) || !Number.isInteger(value.version)) return false;
-  return value.kind === "doper:sab-ack"
+  return value.kind === "pingo:sab-ack"
     ? isPositiveU32(value.frameSeq)
     : typeof value.error === "string";
 }
 
 function isResponseEnvelope(
   value: unknown,
-): value is Record<string, unknown> & { readonly kind: "doper:sab-ack" | "doper:sab-error" } {
+): value is Record<string, unknown> & { readonly kind: "pingo:sab-ack" | "pingo:sab-error" } {
   if (typeof value !== "object" || value === null) return false;
   const kind = (value as { kind?: unknown }).kind;
-  return kind === "doper:sab-ack" || kind === "doper:sab-error";
+  return kind === "pingo:sab-ack" || kind === "pingo:sab-error";
 }
 
 function isPositiveU32(value: unknown): value is number {

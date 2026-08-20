@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dopejs.dev/schemas/ime-recording-v2.json",
-  "title": "doper recorded IME session",
+  "title": "pingo recorded IME session",
   "type": "object",
   "additionalProperties": false,
   "required": [

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dopejs.dev/schemas/m0-evidence-manifest-v1.json",
-  "title": "doper platform qualification evidence manifest",
+  "title": "pingo platform qualification evidence manifest",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "buildId", "businessAudit", "decision", "devices", "storage"],

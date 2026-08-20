@@ -1,4 +1,4 @@
-import type { DoperNode, HostedCanvasRoot, HostedCanvasRootOptions } from "@dopejs/pingo";
+import type { PingoNode, HostedCanvasRoot, HostedCanvasRootOptions } from "@dopejs/pingo";
 
 import type { PlaygroundMessages } from "./messages";
 
@@ -25,7 +25,7 @@ export interface Demo {
   /** Extra root options; the shell always supplies observability callbacks. */
   readonly rootOptions?: Omit<HostedCanvasRootOptions, "onFrame" | "onHostError">;
   /** Builds the scene for the current viewport. */
-  render(context: DemoContext): DoperNode;
+  render(context: DemoContext): PingoNode;
   /** Runs after the first render; returns a cleanup function when needed. */
   activate?(context: DemoContext): (() => void) | void;
 }

@@ -1,5 +1,5 @@
 /** Options accepted when copying pixels into an immutable image. */
-export interface DoperImageOptions {
+export interface PingoImageOptions {
   /** Human-readable label forwarded to accessibility. */
   readonly label?: string;
 }
@@ -15,7 +15,7 @@ export interface DoperImageOptions {
  * cell needs; large images want an encoded path with asynchronous staging, which
  * is a separate decision.
  */
-export class DoperImage {
+export class PingoImage {
   readonly #pixels: Uint8Array;
 
   /** Bitmap width in pixels. */
@@ -47,8 +47,8 @@ export function createImage(
   pixels: ArrayBuffer | ArrayBufferView,
   width: number,
   height: number,
-  options: DoperImageOptions = {},
-): DoperImage {
+  options: PingoImageOptions = {},
+): PingoImage {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
     throw new RangeError("image dimensions must be positive integers");
   }
@@ -67,5 +67,5 @@ export function createImage(
   }
   const label = options.label ?? "";
   if (typeof label !== "string") throw new TypeError("image label must be a string");
-  return new DoperImage(bytes, width, height, label);
+  return new PingoImage(bytes, width, height, label);
 }

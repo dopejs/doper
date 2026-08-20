@@ -77,8 +77,8 @@ export interface WasmBudgetProbeResult {
 }
 
 interface ProbeWasmExports extends WebAssembly.Exports {
-  doper_probe_abi_version(): number;
-  doper_probe_mix(value: number): number;
+  pingo_probe_abi_version(): number;
+  pingo_probe_mix(value: number): number;
 }
 
 interface WasmManifest {
@@ -87,7 +87,7 @@ interface WasmManifest {
 }
 
 interface WasmBudgetExports extends WebAssembly.Exports {
-  doper_budget_grapheme_count(): number;
+  pingo_budget_grapheme_count(): number;
 }
 
 interface WasmBudgetManifest extends WasmManifest {
@@ -492,7 +492,7 @@ export class PlatformProbeRunner {
   async wasmColdStart(): Promise<WasmProbeResult> {
     const fetchStartedAt = performance.now();
     const [response, manifestResponse] = await Promise.all([
-      fetch("/wasm/doper_probe.wasm", { cache: "no-store" }),
+      fetch("/wasm/pingo_probe.wasm", { cache: "no-store" }),
       fetch("/wasm/manifest.json", { cache: "no-store" }),
     ]);
     const fetchMs = performance.now() - fetchStartedAt;
@@ -509,11 +509,11 @@ export class PlatformProbeRunner {
     const compileAndInstantiateMs = performance.now() - compileStartedAt;
     const exports = instance.instance.exports as ProbeWasmExports;
     const callStartedAt = performance.now();
-    const mixedValue = exports.doper_probe_mix(42);
+    const mixedValue = exports.pingo_probe_mix(42);
     const firstCallMs = performance.now() - callStartedAt;
 
     return {
-      abiVersion: exports.doper_probe_abi_version(),
+      abiVersion: exports.pingo_probe_abi_version(),
       compileAndInstantiateMs: round(compileAndInstantiateMs),
       fetchMs: round(fetchMs),
       firstCallMs: round(firstCallMs),
@@ -527,7 +527,7 @@ export class PlatformProbeRunner {
   async wasmBudgetColdStart(): Promise<WasmBudgetProbeResult> {
     const fetchStartedAt = performance.now();
     const [response, manifestResponse] = await Promise.all([
-      fetch("/wasm/doper_budget.wasm", { cache: "no-store" }),
+      fetch("/wasm/pingo_budget.wasm", { cache: "no-store" }),
       fetch("/wasm/budget-manifest.json", { cache: "no-store" }),
     ]);
     const fetchMs = performance.now() - fetchStartedAt;
@@ -544,7 +544,7 @@ export class PlatformProbeRunner {
     const compileAndInstantiateMs = performance.now() - compileStartedAt;
     const exports = instance.instance.exports as WasmBudgetExports;
     const callStartedAt = performance.now();
-    const graphemeCount = exports.doper_budget_grapheme_count();
+    const graphemeCount = exports.pingo_budget_grapheme_count();
     const firstCallMs = performance.now() - callStartedAt;
 
     return {

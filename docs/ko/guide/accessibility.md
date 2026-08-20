@@ -2,7 +2,7 @@
 
 ## 첫날부터 아키텍처에 넣는다
 
-canvas 내용은 본질적으로 스크린 리더에 보이지 않습니다. doper는 접근성을 출시 후에 덧씌우는
+canvas 내용은 본질적으로 스크린 리더에 보이지 않습니다. pingo는 접근성을 출시 후에 덧씌우는
 레이어로 다루지 않습니다. Core가 시맨틱 트리(role / label / value / bounds / focusable)를 유지하고,
 `@dopejs/pingo-a11y`가 이를 canvas 옆의 절대 위치 DOM 섀도 트리로 증분 반영합니다.
 

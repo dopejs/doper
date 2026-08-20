@@ -47,7 +47,7 @@ await preloadEngineAssets(output);
 async function preloadEngineAssets(root) {
   const assets = await collectAssets(path.join(root, "assets"));
   const worker = assets.find((asset) => /render-worker-.*\.js$/u.test(asset));
-  const wasm = assets.find((asset) => /doper_core_bg-.*\.wasm$/u.test(asset));
+  const wasm = assets.find((asset) => /pingo_core_bg-.*\.wasm$/u.test(asset));
   if (worker === undefined || wasm === undefined) {
     throw new Error("pages build is missing the render worker or Core WASM asset");
   }
@@ -115,4 +115,4 @@ async function playgroundPages(root) {
   return pages;
 }
 
-process.stdout.write(`Pages site built at dist-pages (doper v${version})\n`);
+process.stdout.write(`Pages site built at dist-pages (pingo v${version})\n`);

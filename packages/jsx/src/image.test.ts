@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DoperImage, createImage } from "./image";
+import { PingoImage, createImage } from "./image";
 
 describe("createImage", () => {
   it("copies the pixels it was handed", () => {
@@ -10,7 +10,7 @@ describe("createImage", () => {
     const image = createImage(pixels, 2, 1, { label: "swatch" });
     pixels.fill(0);
 
-    expect(image).toBeInstanceOf(DoperImage);
+    expect(image).toBeInstanceOf(PingoImage);
     expect([...image.copyPixels()]).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(image.width).toBe(2);
     expect(image.height).toBe(1);

@@ -8,16 +8,16 @@ import path from "node:path";
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const source = path.join(
   repositoryRoot,
-  "target/wasm32-unknown-unknown/release/doper_probe_wasm.wasm",
+  "target/wasm32-unknown-unknown/release/pingo_probe_wasm.wasm",
 );
 const outputDirectory = path.join(repositoryRoot, "apps/platform-probe/public/wasm");
-const output = path.join(outputDirectory, "doper_probe.wasm");
+const output = path.join(outputDirectory, "pingo_probe.wasm");
 
 await run("cargo", [
   "build",
   "--locked",
   "--package",
-  "doper-probe-wasm",
+  "pingo-probe-wasm",
   "--release",
   "--target",
   "wasm32-unknown-unknown",

@@ -2,7 +2,7 @@
 
 ## Vom ersten Tag an in der Architektur
 
-Canvas-Inhalte sind für Screenreader von Natur aus unsichtbar. doper behandelt Barrierefreiheit nicht als
+Canvas-Inhalte sind für Screenreader von Natur aus unsichtbar. pingo behandelt Barrierefreiheit nicht als
 Schicht, die nach der Veröffentlichung übergestülpt wird: Der Core pflegt einen Semantikbaum
 (role / label / value / bounds / focusable), und `@dopejs/pingo-a11y` bildet ihn inkrementell auf einen
 absolut positionierten DOM-Schattenbaum neben dem canvas ab.

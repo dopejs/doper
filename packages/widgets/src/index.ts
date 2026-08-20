@@ -1,7 +1,7 @@
 import {
   createElement,
   type Color,
-  type DoperNode,
+  type PingoNode,
   type EditableInputMode,
   type EditableTextProps,
 } from "@dopejs/pingo-jsx";
@@ -43,7 +43,7 @@ const DEFAULT_TEXT: Color = "#1f2329ff";
 const BORDER_WIDTH = 1;
 const FIELD_PADDING = 8;
 
-function decoratedField(props: TextFieldProps, multiline: boolean, rows: number): DoperNode {
+function decoratedField(props: TextFieldProps, multiline: boolean, rows: number): PingoNode {
   const fontSize = props.fontSize ?? 14;
   const lineHeight = props.lineHeight ?? Math.round(fontSize * 1.5);
   const width = props.width ?? 240;
@@ -83,31 +83,31 @@ function decoratedField(props: TextFieldProps, multiline: boolean, rows: number)
       children: createElement(
         "editableText",
         editable as unknown as Record<string, unknown>,
-      ) as DoperNode,
+      ) as PingoNode,
     }),
   });
   if (props.error === undefined) return field;
   return createElement("container", {
     width,
     children: [
-      field as DoperNode,
+      field as PingoNode,
       createElement("text", {
         value: props.error,
         color: props.errorColor ?? DEFAULT_ERROR,
         fontSize: Math.max(10, fontSize - 2),
         lineHeight: Math.max(12, lineHeight - 4),
         semanticRole: "alert",
-      }) as DoperNode,
+      }) as PingoNode,
     ],
   });
 }
 
 /** Single-line decorated input composing only the engine editable primitive. */
-export function TextField(props: TextFieldProps): DoperNode {
+export function TextField(props: TextFieldProps): PingoNode {
   return decoratedField(props, false, 1);
 }
 
 /** Multiline decorated input composing only the engine editable primitive. */
-export function TextArea(props: TextAreaProps): DoperNode {
+export function TextArea(props: TextAreaProps): PingoNode {
   return decoratedField(props, true, props.rows ?? 3);
 }

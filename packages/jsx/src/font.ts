@@ -3,7 +3,7 @@ import { MAX_RESOURCE_BYTES, SFNT_FONT_DATA_OFFSET } from "./generated";
 const MAX_SFNT_DATA_BYTES = MAX_RESOURCE_BYTES - SFNT_FONT_DATA_OFFSET;
 
 /** Options for one immutable, explicitly loaded SFNT font face. */
-export interface DoperFontOptions {
+export interface PingoFontOptions {
   /** Face index for a TrueType/OpenType collection. */
   readonly faceIndex?: number;
   /** CSS family used only when the explicit Core font path falls back. */
@@ -11,7 +11,7 @@ export interface DoperFontOptions {
 }
 
 /** Immutable explicit font handle accepted by text and editable-text nodes. */
-export class DoperFont {
+export class PingoFont {
   readonly #bytes: Uint8Array;
 
   /** Collection face index consumed by Core shaping. */
@@ -40,8 +40,8 @@ export class DoperFont {
  */
 export function createFont(
   input: ArrayBuffer | ArrayBufferView,
-  options: DoperFontOptions = {},
-): DoperFont {
+  options: PingoFontOptions = {},
+): PingoFont {
   const bytes =
     input instanceof ArrayBuffer
       ? new Uint8Array(input.slice(0))
@@ -58,7 +58,7 @@ export function createFont(
   }
   const fallbackFamily = options.fallbackFamily ?? "sans-serif";
   if (fallbackFamily.length === 0) throw new RangeError("fallbackFamily must not be empty");
-  return new DoperFont(bytes, faceIndex, fallbackFamily);
+  return new PingoFont(bytes, faceIndex, fallbackFamily);
 }
 
 function hasSfntSignature(bytes: Uint8Array): boolean {

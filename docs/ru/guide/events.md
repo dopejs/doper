@@ -30,7 +30,7 @@ Property-тесты гарантируют, что BVH и наивная лин�
 Доступные обработчики: `onPointerDown`, `onPointerUp`, `onPointerMove`, `onPointerCancel`, `onClick`,
 `onWheel`, у каждого есть версия `*Capture`.
 
-`DoperEvent` предоставляет `target`, `currentTarget`, `eventPhase`, логические координаты внутри canvas
+`PingoEvent` предоставляет `target`, `currentTarget`, `eventPhase`, логические координаты внутри canvas
 `x`/`y`, `deltaX`/`deltaY`, `buttons`, клавиши-модификаторы, `preventDefault()`, `stopPropagation()` и
 `stopImmediatePropagation()`.
 

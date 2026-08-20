@@ -14,7 +14,7 @@ const rustOutput = renderRust(schema);
 const typeScriptOutput = await format(renderTypeScript(schema), { parser: "typescript" });
 
 const outputs = new Map([
-  [path.join(root, "core/doper-abi/src/generated.rs"), rustOutput.replace(/\n+$/u, "\n")],
+  [path.join(root, "core/pingo-abi/src/generated.rs"), rustOutput.replace(/\n+$/u, "\n")],
   [path.join(root, "packages/reconciler/src/generated.ts"), typeScriptOutput],
   [path.join(root, "packages/jsx/src/generated.ts"), typeScriptOutput],
   [path.join(root, "packages/editing/src/generated.ts"), typeScriptOutput],

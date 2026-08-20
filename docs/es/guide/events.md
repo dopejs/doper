@@ -32,7 +32,7 @@ El modelo de eventos se alinea con el DOM: captura → objetivo → burbuja.
 Manejadores disponibles: `onPointerDown`, `onPointerUp`, `onPointerMove`, `onPointerCancel`,
 `onClick`, `onWheel`, cada uno con su versión `*Capture`.
 
-`DoperEvent` ofrece `target`, `currentTarget`, `eventPhase`, las coordenadas lógicas locales al canvas
+`PingoEvent` ofrece `target`, `currentTarget`, `eventPhase`, las coordenadas lógicas locales al canvas
 `x`/`y`, `deltaX`/`deltaY`, `buttons`, las teclas modificadoras, `preventDefault()`,
 `stopPropagation()` y `stopImmediatePropagation()`.
 

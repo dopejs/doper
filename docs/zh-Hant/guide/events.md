@@ -28,7 +28,7 @@ BVH 與樸素線性實作有屬性測試保證結果一致——最佳化路徑�
 可用 handler：`onPointerDown`、`onPointerUp`、`onPointerMove`、`onPointerCancel`、
 `onClick`、`onWheel`，每個都有對應的 `*Capture` 版本。
 
-`DoperEvent` 提供 `target`、`currentTarget`、`eventPhase`、畫布區域邏輯座標 `x`/`y`、
+`PingoEvent` 提供 `target`、`currentTarget`、`eventPhase`、畫布區域邏輯座標 `x`/`y`、
 `deltaX`/`deltaY`、`buttons`、修飾鍵、`preventDefault()`、`stopPropagation()`、
 `stopImmediatePropagation()`。
 

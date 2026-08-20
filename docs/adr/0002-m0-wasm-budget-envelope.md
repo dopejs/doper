@@ -2,7 +2,7 @@
 
 - 状态：Accepted（仅限 M0 预算探针）
 - 日期：2026-08-14
-- 决策者：doper maintainers
+- 决策者：pingo maintainers
 - 关联设计：`docs/design.md` §2、§15、§16
 
 ## Context

@@ -29,7 +29,7 @@
 המטפלים הזמינים: `onPointerDown`, `onPointerUp`, `onPointerMove`, `onPointerCancel`, `onClick`,
 `onWheel`, ולכל אחד גרסת `*Capture`.
 
-‏`DoperEvent` מספק את `target`, `currentTarget`, `eventPhase`, את הקואורדינטות הלוגיות המקומיות ל-canvas
+‏`PingoEvent` מספק את `target`, `currentTarget`, `eventPhase`, את הקואורדינטות הלוגיות המקומיות ל-canvas
 ‏`x`/`y`, את `deltaX`/`deltaY`, את `buttons`, את מקשי ההצמדה, וכן `preventDefault()`,
 `stopPropagation()` ו-`stopImmediatePropagation()`.
 

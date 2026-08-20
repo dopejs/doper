@@ -2,13 +2,13 @@ import {
   createElement,
   createHostedCanvasRoot,
   TextField,
-  type DoperNode,
+  type PingoNode,
   type FrameReport,
 } from "@dopejs/pingo";
 import { afterEach, describe, expect, it } from "vitest";
 
 /** Representative migration page: heading, editable search, virtual list. */
-function renderMigrationFixture(): DoperNode {
+function renderMigrationFixture(): PingoNode {
   return createElement("container", {
     width: 320,
     children: [

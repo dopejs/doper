@@ -19,16 +19,16 @@ describe("RenderWorkerClient", () => {
       sessionId: 9,
     });
     worker.onPost = (message) => {
-      if (hasKind(message, "doper:prepare")) {
+      if (hasKind(message, "pingo:prepare")) {
         worker.emitMessage({
           capabilities: { offscreenCanvas: true, sharedArrayBuffer: true },
-          kind: "doper:prepared",
+          kind: "pingo:prepared",
           sessionId: 9,
         });
-      } else if (hasKind(message, "doper:activate")) {
-        worker.emitMessage({ kind: "doper:ready", mode: "post-message", sessionId: 9 });
-      } else if (hasKind(message, "doper:shutdown")) {
-        worker.emitMessage({ kind: "doper:shutdown-complete", sessionId: 9 });
+      } else if (hasKind(message, "pingo:activate")) {
+        worker.emitMessage({ kind: "pingo:ready", mode: "post-message", sessionId: 9 });
+      } else if (hasKind(message, "pingo:shutdown")) {
+        worker.emitMessage({ kind: "pingo:shutdown-complete", sessionId: 9 });
       }
     };
 
@@ -47,7 +47,7 @@ describe("RenderWorkerClient", () => {
     });
     expect(client.state).toBe("ready");
     worker.emitMessage({
-      kind: "doper:frame",
+      kind: "pingo:frame",
       report: {
         commands: 1,
         displayListBytes: 16,
@@ -58,7 +58,7 @@ describe("RenderWorkerClient", () => {
       sessionId: 9,
     });
     worker.emitMessage({
-      kind: "doper:clock-metrics",
+      kind: "pingo:clock-metrics",
       metrics: {
         acceptedAnchors: 1,
         anchoredFrames: 2,
@@ -72,7 +72,7 @@ describe("RenderWorkerClient", () => {
       sessionId: 9,
     });
     worker.emitMessage({
-      kind: "doper:virtual-refill",
+      kind: "pingo:virtual-refill",
       requests: [{ nodeId: 0x0010_0001, start: 4, end: 8 }],
       sessionId: 9,
     });
@@ -80,7 +80,7 @@ describe("RenderWorkerClient", () => {
     expect(onClockMetrics).toHaveBeenCalledOnce();
     expect(onVirtualRefills).toHaveBeenCalledWith([{ nodeId: 0x0010_0001, start: 4, end: 8 }]);
     worker.emitMessage({
-      kind: "doper:event-transaction",
+      kind: "pingo:event-transaction",
       sessionId: 9,
       transaction: {
         eventId: 1,
@@ -99,7 +99,7 @@ describe("RenderWorkerClient", () => {
     });
     expect(onEventTransaction).toHaveBeenCalledOnce();
     worker.emitMessage({
-      kind: "doper:non-passive-regions",
+      kind: "pingo:non-passive-regions",
       regions: [{ flags: 1, left: 0, top: 0, right: 50, bottom: 40 }],
       sessionId: 9,
     });
@@ -107,10 +107,10 @@ describe("RenderWorkerClient", () => {
       { flags: 1, left: 0, top: 0, right: 50, bottom: 40 },
     ]);
     client.postClockAnchor(1, 123);
-    expect(worker.posts.at(-1)).toMatchObject({ kind: "doper:clock-anchor", sequence: 1 });
+    expect(worker.posts.at(-1)).toMatchObject({ kind: "pingo:clock-anchor", sequence: 1 });
     const input = Uint8Array.of(1, 2, 3, 4);
     client.postInput(input);
-    expect(worker.posts.at(-1)).toMatchObject({ kind: "doper:input", bytes: input });
+    expect(worker.posts.at(-1)).toMatchObject({ kind: "pingo:input", bytes: input });
     expect((worker.posts.at(-1) as { bytes: Uint8Array }).bytes).not.toBe(input);
     expect(input).toEqual(Uint8Array.of(1, 2, 3, 4));
     await client.close();
@@ -142,8 +142,8 @@ describe("RenderWorkerClient", () => {
     const client = new RenderWorkerClient(worker, { onFatal, sessionId: 14 });
     await client.prepare();
     worker.onPost = (message) => {
-      if (hasKind(message, "doper:activate")) {
-        worker.emitMessage({ kind: "doper:ready", mode: "post-message", sessionId: 14 });
+      if (hasKind(message, "pingo:activate")) {
+        worker.emitMessage({ kind: "pingo:ready", mode: "post-message", sessionId: 14 });
       }
     };
 
@@ -182,16 +182,16 @@ describe("RenderWorkerClient", () => {
     const worker = new FakeWorker();
     const client = new RenderWorkerClient(worker, { sessionId: 12 });
     const preparing = client.prepare();
-    worker.emitMessage({ kind: "doper:prepared", sessionId: 11 });
+    worker.emitMessage({ kind: "pingo:prepared", sessionId: 11 });
     worker.emitMessage({
       capabilities: { offscreenCanvas: false, sharedArrayBuffer: false },
-      kind: "doper:prepared",
+      kind: "pingo:prepared",
       sessionId: 11,
     });
     expect(client.state).toBe("preparing");
     worker.emitMessage({
       capabilities: { offscreenCanvas: true, sharedArrayBuffer: false },
-      kind: "doper:prepared",
+      kind: "pingo:prepared",
       sessionId: 12,
     });
     await preparing;
@@ -204,7 +204,7 @@ describe("RenderWorkerClient", () => {
     const onFatal = vi.fn();
     const client = new RenderWorkerClient(worker, { onFatal, sessionId: 13 });
     const preparing = client.prepare();
-    worker.emitMessage({ kind: "doper:prepared", sessionId: 13 });
+    worker.emitMessage({ kind: "pingo:prepared", sessionId: 13 });
     await expect(preparing).rejects.toThrow(/malformed/u);
     expect(client.state).toBe("failed");
     expect(onFatal).toHaveBeenCalledOnce();
@@ -255,10 +255,10 @@ class FakeWorker {
 function preparedWorker(sessionId: number): FakeWorker {
   const worker = new FakeWorker();
   worker.onPost = (message) => {
-    if (hasKind(message, "doper:prepare")) {
+    if (hasKind(message, "pingo:prepare")) {
       worker.emitMessage({
         capabilities: { offscreenCanvas: true, sharedArrayBuffer: true },
-        kind: "doper:prepared",
+        kind: "pingo:prepared",
         sessionId,
       });
     }

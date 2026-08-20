@@ -62,7 +62,7 @@ componentes: el cálculo de la ventana y el relleno ocurren dentro del Core.
 
 ## Lo que no hace
 
-doper es un motor de renderizado, no un navegador. **No cubre** SSR ni primer pintado en HTML,
+pingo es un motor de renderizado, no un navegador. **No cubre** SSR ni primer pintado en HTML,
 compatibilidad general con CSS (modelo de caja, cascada, selectores), capas de adaptación a
 mini-apps o nativo, ni semántica de texto enriquecido a nivel de producto (colaboración, fórmulas,
 comandos Markdown).

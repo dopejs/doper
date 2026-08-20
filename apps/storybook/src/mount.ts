@@ -1,14 +1,14 @@
-import { createHostedCanvasRoot, type DoperNode, type HostedCanvasRoot } from "@dopejs/pingo";
+import { createHostedCanvasRoot, type PingoNode, type HostedCanvasRoot } from "@dopejs/pingo";
 
 /**
- * Mounts one doper scene on its own canvas for a story.
+ * Mounts one pingo scene on its own canvas for a story.
  *
- * doper renders to canvas rather than DOM, so each story returns a host
+ * pingo renders to canvas rather than DOM, so each story returns a host
  * element and drives an engine root inside it. Roots are closed when the
  * element leaves the document so switching stories never leaks a Worker.
  */
 export function mountStory(
-  render: () => DoperNode,
+  render: () => PingoNode,
   options: { width?: number; height?: number } = {},
 ): HTMLElement {
   const width = options.width ?? 480;

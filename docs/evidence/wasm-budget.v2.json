@@ -1,8 +1,8 @@
 {
-  "crate": "doper-probe-wasm-budget",
+  "crate": "pingo-probe-wasm-budget",
   "baselines": {
     "aarch64-apple-darwin": {
-      "gzipBytes": 148459,
+      "gzipBytes": 148458,
       "rawBytes": 377967
     },
     "x86_64-unknown-linux-gnu": {

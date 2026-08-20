@@ -2,14 +2,14 @@
 
 use std::time::Instant;
 
-use doper_abi::{
+use pingo_abi::{
     DisplayCommand, DisplayInstruction, DisplayList, Mutation, MutationBatch, MutationInstruction,
     NULL_NODE_ID, NodeKind, ResourceKind,
 };
-use doper_gpu_probe::GpuProbeRenderer;
-use doper_headless::HeadlessRenderer;
-use doper_paint::SolidPaint;
-use doper_scene::Scene;
+use pingo_gpu_probe::GpuProbeRenderer;
+use pingo_headless::HeadlessRenderer;
+use pingo_paint::SolidPaint;
+use pingo_scene::Scene;
 
 const WIDTH: u32 = 512;
 const HEIGHT: u32 = 512;
@@ -72,7 +72,7 @@ fn workload() -> (Scene, Vec<u8>) {
     let mut mutations = vec![MutationInstruction {
         flags: 0,
         mutation: Mutation::CreateNode {
-            node_id: doper_scene::NodeId::new(0, 1).expect("root id").raw(),
+            node_id: pingo_scene::NodeId::new(0, 1).expect("root id").raw(),
             kind: NodeKind::Root,
             parent: NULL_NODE_ID,
             before_sibling: NULL_NODE_ID,

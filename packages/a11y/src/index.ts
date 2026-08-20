@@ -35,7 +35,7 @@ export class SemanticTreeMirror {
     this.#options = options;
     const document = canvas.ownerDocument;
     this.#container = document.createElement("div");
-    this.#container.setAttribute("data-doper-semantics", "");
+    this.#container.setAttribute("data-pingo-semantics", "");
     Object.assign(this.#container.style, {
       position: "absolute",
       left: "0",
@@ -61,7 +61,7 @@ export class SemanticTreeMirror {
       let element = this.#elements.get(node.nodeId);
       if (element === undefined) {
         element = this.#container.ownerDocument.createElement("div");
-        element.setAttribute("data-doper-node", String(node.nodeId));
+        element.setAttribute("data-pingo-node", String(node.nodeId));
         Object.assign(element.style, {
           position: "absolute",
           color: "transparent",
@@ -69,7 +69,7 @@ export class SemanticTreeMirror {
           overflow: "hidden",
         });
         element.addEventListener("focus", () => {
-          const raw = element?.getAttribute("data-doper-node");
+          const raw = element?.getAttribute("data-pingo-node");
           if (raw !== null && raw !== undefined) {
             this.#options.onFocusRequest?.(Number(raw));
           }
@@ -116,7 +116,7 @@ export function queryAllByRole(
   options: { readonly name?: string } = {},
 ): HTMLElement[] {
   const matches: HTMLElement[] = [];
-  for (const element of root.querySelectorAll<HTMLElement>(`[data-doper-node][role]`)) {
+  for (const element of root.querySelectorAll<HTMLElement>(`[data-pingo-node][role]`)) {
     if (element.getAttribute("role") !== role) continue;
     if (options.name !== undefined && element.getAttribute("aria-label") !== options.name) continue;
     matches.push(element);

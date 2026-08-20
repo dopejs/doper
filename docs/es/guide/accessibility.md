@@ -2,7 +2,7 @@
 
 ## En la arquitectura desde el primer día
 
-El contenido de un canvas es, por naturaleza, invisible para un lector de pantalla. doper no trata la
+El contenido de un canvas es, por naturaleza, invisible para un lector de pantalla. pingo no trata la
 accesibilidad como una capa que se añade después de publicar: el Core mantiene un árbol semántico
 (role / label / value / bounds / focusable) y `@dopejs/pingo-a11y` lo proyecta de forma incremental
 como un árbol DOM en la sombra, posicionado en absoluto junto al canvas.

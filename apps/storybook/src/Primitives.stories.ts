@@ -30,7 +30,7 @@ const meta: Meta<TextArgs> = {
       { width: 460, height: 120 },
     ),
   args: {
-    value: "doper 文本原语：shaping、换行与 caret 几何都来自 Core。",
+    value: "pingo 文本原语：shaping、换行与 caret 几何都来自 Core。",
     fontSize: 16,
     lineHeight: 24,
     color: "#1f2329ff",

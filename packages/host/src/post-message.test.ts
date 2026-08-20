@@ -122,7 +122,7 @@ describe("PostMessageMutationTransport", () => {
     sender.enqueue(8, frame(8));
     worker.postMessage({
       frameSeq: 8,
-      kind: "doper:mutation-ack",
+      kind: "pingo:mutation-ack",
       sessionId: 41,
       version: 1,
     });
@@ -130,7 +130,7 @@ describe("PostMessageMutationTransport", () => {
     expect(onError).not.toHaveBeenCalled();
     worker.postMessage({
       frameSeq: 9,
-      kind: "doper:mutation-ack",
+      kind: "pingo:mutation-ack",
       sessionId: 42,
       version: 1,
     });
@@ -153,7 +153,7 @@ describe("PostMessageMutationTransport", () => {
     const onError = vi.fn();
     const sender = new PostMessageMutationTransport(main, { onError, sessionId: 5 });
     sender.enqueue(1, frame(1));
-    worker.postMessage({ kind: "doper:mutation-ack", sessionId: 5, version: 1 });
+    worker.postMessage({ kind: "pingo:mutation-ack", sessionId: 5, version: 1 });
     await expect(sender.drain()).rejects.toThrow(/malformed/u);
     expect(onError).toHaveBeenCalledOnce();
   });

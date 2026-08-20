@@ -71,116 +71,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "doper-abi"
-version = "0.1.0"
-dependencies = [
- "proptest",
-]
-
-[[package]]
-name = "doper-core"
-version = "0.1.0"
-dependencies = [
- "doper-abi",
- "doper-edit",
- "doper-headless",
- "doper-hit",
- "doper-layout",
- "doper-paint",
- "doper-scene",
- "doper-scroll",
- "doper-text",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "doper-edit"
-version = "0.1.0"
-dependencies = [
- "doper-abi",
- "proptest",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "doper-headless"
-version = "0.1.0"
-dependencies = [
- "doper-abi",
- "doper-paint",
- "doper-scene",
- "proptest",
-]
-
-[[package]]
-name = "doper-hit"
-version = "0.1.0"
-dependencies = [
- "doper-abi",
- "doper-layout",
- "doper-scene",
- "proptest",
-]
-
-[[package]]
-name = "doper-layout"
-version = "0.1.0"
-dependencies = [
- "doper-abi",
- "doper-scene",
- "proptest",
-]
-
-[[package]]
-name = "doper-paint"
-version = "0.1.0"
-dependencies = [
- "doper-abi",
- "doper-layout",
- "doper-scene",
- "proptest",
-]
-
-[[package]]
-name = "doper-probe-wasm"
-version = "0.0.0"
-
-[[package]]
-name = "doper-probe-wasm-budget"
-version = "0.0.0"
-dependencies = [
- "fontdue",
- "swash",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "doper-scene"
-version = "0.1.0"
-dependencies = [
- "doper-abi",
- "proptest",
-]
-
-[[package]]
-name = "doper-scroll"
-version = "0.1.0"
-dependencies = [
- "proptest",
-]
-
-[[package]]
-name = "doper-text"
-version = "0.1.0"
-dependencies = [
- "fontdue",
- "swash",
- "ttf-parser",
- "unicode-linebreak",
- "unicode-segmentation",
-]
-
-[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -275,6 +165,116 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "pingo-abi"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
+name = "pingo-core"
+version = "0.1.0"
+dependencies = [
+ "pingo-abi",
+ "pingo-edit",
+ "pingo-headless",
+ "pingo-hit",
+ "pingo-layout",
+ "pingo-paint",
+ "pingo-scene",
+ "pingo-scroll",
+ "pingo-text",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "pingo-edit"
+version = "0.1.0"
+dependencies = [
+ "pingo-abi",
+ "proptest",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "pingo-headless"
+version = "0.1.0"
+dependencies = [
+ "pingo-abi",
+ "pingo-paint",
+ "pingo-scene",
+ "proptest",
+]
+
+[[package]]
+name = "pingo-hit"
+version = "0.1.0"
+dependencies = [
+ "pingo-abi",
+ "pingo-layout",
+ "pingo-scene",
+ "proptest",
+]
+
+[[package]]
+name = "pingo-layout"
+version = "0.1.0"
+dependencies = [
+ "pingo-abi",
+ "pingo-scene",
+ "proptest",
+]
+
+[[package]]
+name = "pingo-paint"
+version = "0.1.0"
+dependencies = [
+ "pingo-abi",
+ "pingo-layout",
+ "pingo-scene",
+ "proptest",
+]
+
+[[package]]
+name = "pingo-probe-wasm"
+version = "0.0.0"
+
+[[package]]
+name = "pingo-probe-wasm-budget"
+version = "0.0.0"
+dependencies = [
+ "fontdue",
+ "swash",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "pingo-scene"
+version = "0.1.0"
+dependencies = [
+ "pingo-abi",
+ "proptest",
+]
+
+[[package]]
+name = "pingo-scroll"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
+name = "pingo-text"
+version = "0.1.0"
+dependencies = [
+ "fontdue",
+ "swash",
+ "ttf-parser",
+ "unicode-linebreak",
+ "unicode-segmentation",
+]
 
 [[package]]
 name = "ppv-lite86"

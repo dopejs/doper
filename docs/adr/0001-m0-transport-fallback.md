@@ -2,12 +2,12 @@
 
 - 状态：Accepted
 - 日期：2026-08-14
-- 决策者：doper maintainers
+- 决策者：pingo maintainers
 - 关联设计：`docs/design.md` §8
 
 ## Context
 
-doper 需要在主线程阻塞时继续滚动与绘制。SharedArrayBuffer 需要业务部署
+pingo 需要在主线程阻塞时继续滚动与绘制。SharedArrayBuffer 需要业务部署
 COOP/COEP；部分平台可能缺少 SAB、Worker 或 OffscreenCanvas。必须在 M0 用相同
 绘制行为证明三档路径，而不能只检查 API 是否存在。
 

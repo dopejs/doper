@@ -360,7 +360,7 @@ function scene(width = 120) {
     children: createElement("text", {
       color: "#ffffff",
       fontSize: 16,
-      value: "doper M2",
+      value: "pingo M2",
     }),
   });
 }

@@ -6,7 +6,7 @@ Le défaut classique des solutions à base de canvas consiste à poser un `input
 dès qu'il faut saisir du texte. S'ensuit une cascade de problèmes : curseur décalé, fenêtre de candidats
 IME mal placée, défilement désynchronisé, accessibilité rompue.
 
-doper traite l'édition comme une capacité de premier ordre du Core : curseur, sélection, sélection par
+pingo traite l'édition comme une capacité de premier ordre du Core : curseur, sélection, sélection par
 glissement, double-clic pour sélectionner un mot, navigation clavier, composition IME, position de la
 fenêtre de candidats, presse-papiers, annuler/rétablir, lecture seule et mot de passe sont implémentés
 par le moteur.

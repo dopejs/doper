@@ -1,10 +1,10 @@
 // Representative migrated page: renders through the compat boundary with a
 // page-granular legacy fallback. This fixture is the input for the automated
 // migration scanner and the shadow/rollback drills.
-import { createElement, TextField, type DoperNode } from "@dopejs/pingo";
+import { createElement, TextField, type PingoNode } from "@dopejs/pingo";
 import { mountCompatPage, type LegacyRenderer } from "@dopejs/pingo-compat";
 
-export function renderOrdersPage(): DoperNode {
+export function renderOrdersPage(): PingoNode {
   return createElement("container", {
     width: 640,
     children: [
@@ -33,7 +33,7 @@ export function mountOrdersPage(
     enabled,
     onFallback: (reason) => {
       // Rollout observability hook; business code reports, never rethrows.
-      console.warn("doper fallback", reason);
+      console.warn("pingo fallback", reason);
     },
   });
 }

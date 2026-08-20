@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { verifyWasmIntegrity, WasmIntegrityError } from "./integrity";
 
-const bytes = new TextEncoder().encode("doper wasm bytes");
+const bytes = new TextEncoder().encode("pingo wasm bytes");
 // SHA-256 of the fixture above, computed once and pinned.
 const digestOf = async (input: Uint8Array): Promise<string> => {
   const digest = await crypto.subtle.digest("SHA-256", input.slice().buffer);

@@ -8,7 +8,7 @@ const output = await runCapture("cargo", [
   "--locked",
   "--release",
   "--package",
-  "doper-core",
+  "pingo-core",
   "--example",
   "m1_benchmark",
 ]);

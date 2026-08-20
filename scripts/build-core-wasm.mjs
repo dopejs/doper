@@ -17,25 +17,25 @@ if (wasmPackVersion !== "wasm-pack 0.14.0") {
 
 await run("wasm-pack", [
   "build",
-  "core/doper-core",
+  "core/pingo-core",
   "--target",
   "web",
   "--release",
   "--out-dir",
   "../../target/core-wasm-package",
   "--out-name",
-  "doper_core",
+  "pingo_core",
 ]);
 
 await mkdir(packageDirectory, { recursive: true });
-const artifacts = ["doper_core.js", "doper_core.d.ts", "doper_core_bg.wasm"];
+const artifacts = ["pingo_core.js", "pingo_core.d.ts", "pingo_core_bg.wasm"];
 await Promise.all(
   artifacts.map((artifact) =>
     copyFile(path.join(buildDirectory, artifact), path.join(packageDirectory, artifact)),
   ),
 );
 
-const wasmPath = path.join(packageDirectory, "doper_core_bg.wasm");
+const wasmPath = path.join(packageDirectory, "pingo_core_bg.wasm");
 const [{ size: rawBytes }, gzipBytes, wasmBytes] = await Promise.all([
   stat(wasmPath),
   gzipSize(wasmPath),

@@ -12,7 +12,7 @@
 
 ```ts
 createHostedCanvasRoot(canvas, options?): Promise<HostedCanvasRoot>
-createCanvasRoot(context, core, options?): DoperRoot   // נתיב M1 בתהליכון הראשי
+createCanvasRoot(context, core, options?): PingoRoot   // נתיב M1 בתהליכון הראשי
 createWasmCore(width, height, input?): Promise<CoreClient>
 ```
 
@@ -35,14 +35,14 @@ createWasmCore(width, height, input?): Promise<CoreClient>
 ## רכיבים ו-JSX
 
 ```ts
-createElement(type, props, key?): DoperElement
+createElement(type, props, key?): PingoElement
 Fragment
 ```
 
 רכיבי מארח: `container`, `text`, `scroll`, `virtualList`, `editableText`.
 טיפוסים: `CommonProps`, `ContainerProps`, `TextProps`, `ScrollProps`, `VirtualListProps`,
 `EditableTextProps`, `EditableInputMode`, `Color`, `EdgeInsets`, `NodeHandle`, `Ref`,
-`DoperNode`, `FunctionComponent`.
+`PingoNode`, `FunctionComponent`.
 
 סביבת הריצה של JSX זמינה דרך `@dopejs/pingo/jsx-runtime` ו-`@dopejs/pingo/jsx-dev-runtime`.
 
@@ -67,8 +67,8 @@ useTextEditingController(options);
 ## רכיבים מוכנים
 
 ```ts
-TextField(props): DoperNode
-TextArea(props): DoperNode
+TextField(props): PingoNode
+TextArea(props): PingoNode
 ```
 
 ## נגישות
@@ -84,13 +84,13 @@ queryAllByRole(root, role, { name? }): HTMLElement[]
 ## גופנים
 
 ```ts
-createFont(options): DoperFont
-loadFont(source, options?): Promise<DoperFont>
+createFont(options): PingoFont
+loadFont(source, options?): Promise<PingoFont>
 ```
 
 נתמכים TTF / OTF / TTC / WOFF / WOFF2 (מפענח ה-WOFF2 נטען לפי הצורך).
-טיפוסים: `DoperFontSource`, `DoperFontOptions`, `DoperFontLoadOptions`,
-`DoperFontLoadError`, `DoperFontLoadErrorCode`, `Woff2Decoder`.
+טיפוסים: `PingoFontSource`, `PingoFontOptions`, `PingoFontLoadOptions`,
+`PingoFontLoadError`, `PingoFontLoadErrorCode`, `Woff2Decoder`.
 
 ## שחרור גרסה ואבחון
 

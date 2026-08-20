@@ -2,7 +2,7 @@
 
 ## 從第一天進架構
 
-canvas 內容天生對螢幕閱讀器不可見。doper 不把無障礙當作發佈後再補的覆蓋層：
+canvas 內容天生對螢幕閱讀器不可見。pingo 不把無障礙當作發佈後再補的覆蓋層：
 Core 維護語意樹（role / label / value / bounds / focusable），
 `@dopejs/pingo-a11y` 把它增量映射為 canvas 旁的絕對定位 DOM 影子樹。
 

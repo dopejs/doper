@@ -1,6 +1,6 @@
-# doper 迁移指南
+# pingo 迁移指南
 
-> 状态：M5-A 初版。面向按页面粒度从存量渲染引擎迁移到 doper 的业务团队。
+> 状态：M5-A 初版。面向按页面粒度从存量渲染引擎迁移到 pingo 的业务团队。
 > 存量引擎代码不在本仓库；本指南约定的是边界契约与回退操作。
 
 ## 1. 迁移模型
@@ -14,14 +14,14 @@ import { mountCompatPage } from "@dopejs/pingo-compat";
 const page = await mountCompatPage({
   pageId: "orders",
   container,
-  render: renderOrdersPage, // 返回 doper JSX/DoperNode
+  render: renderOrdersPage, // 返回 pingo JSX/PingoNode
   legacy: legacyOrdersRenderer, // 存量路径，必须保持可挂载
   enabled: rollout.isEnabled("orders"), // 灰度开关
   onFallback: (reason) => report(reason), // 观测钩子
 });
 ```
 
-- `enabled: false` 时页面完全由存量渲染器接管，doper 不初始化。
+- `enabled: false` 时页面完全由存量渲染器接管，pingo 不初始化。
 - `page.enable()` / `page.fallback(detail)` 支持运行时切换；
   初始化失败与连续运行时错误（默认 3 次）自动回退到存量路径。
 - shim 只依赖 `@dopejs/pingo` 公开 facade；删除 shim 不需要修改引擎。
@@ -48,7 +48,7 @@ const page = await mountCompatPage({
 
 ## 4. 回退操作
 
-1. **灰度关断**：把页面的 `enabled` 置 false 并重新加载，doper 不再初始化。
+1. **灰度关断**：把页面的 `enabled` 置 false 并重新加载，pingo 不再初始化。
 2. **运行时回退**：调用 `page.fallback("原因")`；存量渲染器立即重新挂载。
 3. **自动回退**：初始化失败或连续 host 错误达到阈值时自动触发，
    `onFallback` 携带 `initialization-failed` / `runtime-error` 原因。

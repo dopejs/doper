@@ -12,7 +12,7 @@
 
 ```ts
 createHostedCanvasRoot(canvas, options?): Promise<HostedCanvasRoot>
-createCanvasRoot(context, core, options?): DoperRoot   // 主线程 M1 路径
+createCanvasRoot(context, core, options?): PingoRoot   // 主线程 M1 路径
 createWasmCore(width, height, input?): Promise<CoreClient>
 ```
 
@@ -35,14 +35,14 @@ createWasmCore(width, height, input?): Promise<CoreClient>
 ## 元素与 JSX
 
 ```ts
-createElement(type, props, key?): DoperElement
+createElement(type, props, key?): PingoElement
 Fragment
 ```
 
 主机元素：`container`、`text`、`scroll`、`virtualList`、`editableText`。
 类型：`CommonProps`、`ContainerProps`、`TextProps`、`ScrollProps`、`VirtualListProps`、
 `EditableTextProps`、`EditableInputMode`、`Color`、`EdgeInsets`、`NodeHandle`、`Ref`、
-`DoperNode`、`FunctionComponent`。
+`PingoNode`、`FunctionComponent`。
 
 JSX 运行时通过 `@dopejs/pingo/jsx-runtime` 与 `@dopejs/pingo/jsx-dev-runtime` 提供。
 
@@ -67,8 +67,8 @@ useTextEditingController(options);
 ## Widgets
 
 ```ts
-TextField(props): DoperNode
-TextArea(props): DoperNode
+TextField(props): PingoNode
+TextArea(props): PingoNode
 ```
 
 ## 无障碍
@@ -84,13 +84,13 @@ queryAllByRole(root, role, { name? }): HTMLElement[]
 ## 字体
 
 ```ts
-createFont(options): DoperFont
-loadFont(source, options?): Promise<DoperFont>
+createFont(options): PingoFont
+loadFont(source, options?): Promise<PingoFont>
 ```
 
 支持 TTF / OTF / TTC / WOFF / WOFF2（WOFF2 解码器按需动态加载）。
-类型：`DoperFontSource`、`DoperFontOptions`、`DoperFontLoadOptions`、
-`DoperFontLoadError`、`DoperFontLoadErrorCode`、`Woff2Decoder`。
+类型：`PingoFontSource`、`PingoFontOptions`、`PingoFontLoadOptions`、
+`PingoFontLoadError`、`PingoFontLoadErrorCode`、`Woff2Decoder`。
 
 ## 发布与诊断
 

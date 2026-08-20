@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dopejs.dev/schemas/m0-storage-verification-v1.json",
-  "title": "doper M0 immutable storage and restore evidence",
+  "title": "pingo M0 immutable storage and restore evidence",
   "type": "object",
   "additionalProperties": false,
   "required": [

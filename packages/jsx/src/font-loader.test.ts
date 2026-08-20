@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compress } from "woff2-encoder";
 
-import { DoperFontLoadError, loadFont } from "./font-loader";
+import { PingoFontLoadError, loadFont } from "./font-loader";
 
 describe("explicit font loading", () => {
   it("loads copied SFNT bytes from buffers and successful responses", async () => {
@@ -99,9 +99,9 @@ describe("explicit font loading", () => {
 
   it("exposes stable error metadata", () => {
     const cause = new Error("cause");
-    const error = new DoperFontLoadError("decode-failed", "bad font", { cause });
+    const error = new PingoFontLoadError("decode-failed", "bad font", { cause });
     expect(error).toBeInstanceOf(Error);
-    expect(error.name).toBe("DoperFontLoadError");
+    expect(error.name).toBe("PingoFontLoadError");
     expect(error.code).toBe("decode-failed");
     expect(error.cause).toBe(cause);
   });
@@ -114,7 +114,7 @@ describe("explicit font loading", () => {
       try {
         await loadFont(corrupted);
       } catch (error) {
-        expect(error).toBeInstanceOf(DoperFontLoadError);
+        expect(error).toBeInstanceOf(PingoFontLoadError);
       }
     }
   });

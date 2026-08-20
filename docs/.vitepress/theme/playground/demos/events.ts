@@ -1,4 +1,4 @@
-import { createElement, type DoperEvent, type DoperNode } from "@dopejs/pingo";
+import { createElement, type PingoEvent, type PingoNode } from "@dopejs/pingo";
 
 import type { Demo, DemoContext } from "../demo";
 
@@ -15,12 +15,12 @@ function phaseName(phase: 1 | 2 | 3): string {
   return phase === 1 ? "capture" : phase === 2 ? "target" : "bubble";
 }
 
-function scene(context: DemoContext): DoperNode {
+function scene(context: DemoContext): PingoNode {
   const { width, height } = context;
   const handlers = (name: string) => ({
-    onPointerDownCapture: (event: DoperEvent) =>
+    onPointerDownCapture: (event: PingoEvent) =>
       record(`${name}  ${phaseName(event.eventPhase)}  #${String(event.eventId)}`),
-    onPointerDown: (event: DoperEvent) =>
+    onPointerDown: (event: PingoEvent) =>
       record(`${name}  ${phaseName(event.eventPhase)}  #${String(event.eventId)}`),
   });
   return createElement("container", {

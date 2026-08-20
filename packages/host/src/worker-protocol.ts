@@ -15,7 +15,7 @@ export const WORKER_PROTOCOL_VERSION = 8 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
-  readonly kind: "doper:prepare";
+  readonly kind: "pingo:prepare";
   readonly protocolVersion: number;
   readonly sessionId: number;
 }
@@ -25,7 +25,7 @@ export interface WorkerActivateMessage {
   /** Main-thread device pixel ratio; a worker cannot observe it itself. */
   readonly devicePixelRatio: number;
   readonly height: number;
-  readonly kind: "doper:activate";
+  readonly kind: "pingo:activate";
   readonly mode: Exclude<HostTransportMode, "main-thread">;
   readonly rasterCache: boolean;
   readonly inputRingBuffer?: SharedArrayBuffer;
@@ -35,20 +35,20 @@ export interface WorkerActivateMessage {
 }
 
 export interface WorkerClockAnchorMessage {
-  readonly kind: "doper:clock-anchor";
+  readonly kind: "pingo:clock-anchor";
   readonly sequence: number;
   readonly sessionId: number;
   readonly timestamp: number;
 }
 
 export interface WorkerShutdownMessage {
-  readonly kind: "doper:shutdown";
+  readonly kind: "pingo:shutdown";
   readonly sessionId: number;
 }
 
 export interface WorkerInputMessage {
   readonly bytes: Uint8Array;
-  readonly kind: "doper:input";
+  readonly kind: "pingo:input";
   readonly sessionId: number;
 }
 
@@ -56,13 +56,13 @@ export interface WorkerInputMessage {
 export interface WorkerResizeMessage {
   readonly devicePixelRatio: number;
   readonly height: number;
-  readonly kind: "doper:resize";
+  readonly kind: "pingo:resize";
   readonly sessionId: number;
   readonly width: number;
 }
 
 export interface WorkerInputWakeMessage {
-  readonly kind: "doper:input-wake";
+  readonly kind: "pingo:input-wake";
   readonly sessionId: number;
 }
 
@@ -82,72 +82,72 @@ export interface RenderWorkerCapabilities {
 
 export interface WorkerPreparedMessage {
   readonly capabilities: RenderWorkerCapabilities;
-  readonly kind: "doper:prepared";
+  readonly kind: "pingo:prepared";
   readonly sessionId: number;
 }
 
 export interface WorkerReadyMessage {
-  readonly kind: "doper:ready";
+  readonly kind: "pingo:ready";
   readonly mode: Exclude<HostTransportMode, "main-thread">;
   readonly sessionId: number;
 }
 
 export interface WorkerFrameMessage {
-  readonly kind: "doper:frame";
+  readonly kind: "pingo:frame";
   readonly report: FrameReport;
   readonly sessionId: number;
 }
 
 export interface WorkerClockMetricsMessage {
-  readonly kind: "doper:clock-metrics";
+  readonly kind: "pingo:clock-metrics";
   readonly metrics: RenderClockMetrics;
   readonly sessionId: number;
 }
 
 export interface WorkerVirtualRefillMessage {
-  readonly kind: "doper:virtual-refill";
+  readonly kind: "pingo:virtual-refill";
   readonly requests: readonly VirtualRefillRange[];
   readonly sessionId: number;
 }
 
 export interface WorkerEditTransactionMessage {
-  readonly kind: "doper:edit-transaction";
+  readonly kind: "pingo:edit-transaction";
   readonly sessionId: number;
   readonly transaction: EditTransaction;
 }
 
 export interface WorkerEventTransactionMessage {
-  readonly kind: "doper:event-transaction";
+  readonly kind: "pingo:event-transaction";
   readonly sessionId: number;
   readonly transaction: EventTransaction;
 }
 
 export interface WorkerNonPassiveRegionsMessage {
-  readonly kind: "doper:non-passive-regions";
+  readonly kind: "pingo:non-passive-regions";
   readonly regions: readonly NonPassiveRegion[];
   readonly sessionId: number;
 }
 
 export interface WorkerEditingGeometryMessage {
   readonly frame: EditingGeometryFrame;
-  readonly kind: "doper:editing-geometry";
+  readonly kind: "pingo:editing-geometry";
   readonly sessionId: number;
 }
 
 export interface WorkerSemanticsMessage {
-  readonly kind: "doper:semantics";
+  readonly kind: "pingo:semantics";
   readonly nodes: readonly SemanticNode[];
   readonly sessionId: number;
 }
 
 export interface WorkerFatalMessage {
   readonly error: string;
-  readonly kind: "doper:fatal";
+  readonly kind: "pingo:fatal";
   readonly sessionId: number;
 }
 
 export interface WorkerShutdownCompleteMessage {
-  readonly kind: "doper:shutdown-complete";
+  readonly kind: "pingo:shutdown-complete";
   readonly sessionId: number;
 }
 
@@ -168,15 +168,15 @@ export type RenderWorkerOutboundMessage =
 export function isRenderWorkerInboundMessage(value: unknown): value is RenderWorkerInboundMessage {
   if (!isRecord(value) || !isPositiveU32(value.sessionId)) return false;
   switch (value.kind) {
-    case "doper:prepare":
+    case "pingo:prepare":
       return isPositiveU32(value.abiVersion) && isPositiveU32(value.protocolVersion);
-    case "doper:resize":
+    case "pingo:resize":
       return (
         isPositiveFinite(value.devicePixelRatio) &&
         isPositiveFinite(value.width) &&
         isPositiveFinite(value.height)
       );
-    case "doper:activate":
+    case "pingo:activate":
       return (
         isWorkerMode(value.mode) &&
         isPositiveFinite(value.devicePixelRatio) &&
@@ -187,13 +187,13 @@ export function isRenderWorkerInboundMessage(value: unknown): value is RenderWor
         (value.mode === "post-message" ||
           (isSharedArrayBuffer(value.ringBuffer) && isSharedArrayBuffer(value.inputRingBuffer)))
       );
-    case "doper:clock-anchor":
+    case "pingo:clock-anchor":
       return isPositiveU32(value.sequence) && isFiniteNumber(value.timestamp);
-    case "doper:input":
+    case "pingo:input":
       return value.bytes instanceof Uint8Array;
-    case "doper:input-wake":
+    case "pingo:input-wake":
       return true;
-    case "doper:shutdown":
+    case "pingo:shutdown":
       return true;
     default:
       return false;
@@ -203,13 +203,13 @@ export function isRenderWorkerInboundMessage(value: unknown): value is RenderWor
 export function isRenderWorkerInboundEnvelope(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
-    value.kind === "doper:prepare" ||
-    value.kind === "doper:resize" ||
-    value.kind === "doper:activate" ||
-    value.kind === "doper:clock-anchor" ||
-    value.kind === "doper:input" ||
-    value.kind === "doper:input-wake" ||
-    value.kind === "doper:shutdown"
+    value.kind === "pingo:prepare" ||
+    value.kind === "pingo:resize" ||
+    value.kind === "pingo:activate" ||
+    value.kind === "pingo:clock-anchor" ||
+    value.kind === "pingo:input" ||
+    value.kind === "pingo:input-wake" ||
+    value.kind === "pingo:shutdown"
   );
 }
 
@@ -218,33 +218,33 @@ export function isRenderWorkerOutboundMessage(
 ): value is RenderWorkerOutboundMessage {
   if (!isRecord(value) || !isPositiveU32(value.sessionId)) return false;
   switch (value.kind) {
-    case "doper:prepared":
+    case "pingo:prepared":
       return (
         isRecord(value.capabilities) &&
         typeof value.capabilities.offscreenCanvas === "boolean" &&
         typeof value.capabilities.sharedArrayBuffer === "boolean"
       );
-    case "doper:ready":
+    case "pingo:ready":
       return isWorkerMode(value.mode);
-    case "doper:frame":
+    case "pingo:frame":
       return isFrameReport(value.report);
-    case "doper:clock-metrics":
+    case "pingo:clock-metrics":
       return isClockMetrics(value.metrics);
-    case "doper:virtual-refill":
+    case "pingo:virtual-refill":
       return Array.isArray(value.requests) && value.requests.every(isVirtualRefillRange);
-    case "doper:edit-transaction":
+    case "pingo:edit-transaction":
       return isEditTransaction(value.transaction);
-    case "doper:event-transaction":
+    case "pingo:event-transaction":
       return isEventTransaction(value.transaction);
-    case "doper:non-passive-regions":
+    case "pingo:non-passive-regions":
       return Array.isArray(value.regions) && value.regions.every(isNonPassiveRegion);
-    case "doper:editing-geometry":
+    case "pingo:editing-geometry":
       return isEditingGeometryFrame(value.frame);
-    case "doper:semantics":
+    case "pingo:semantics":
       return Array.isArray(value.nodes) && value.nodes.every(isSemanticNode);
-    case "doper:fatal":
+    case "pingo:fatal":
       return typeof value.error === "string";
-    case "doper:shutdown-complete":
+    case "pingo:shutdown-complete":
       return true;
     default:
       return false;
@@ -254,18 +254,18 @@ export function isRenderWorkerOutboundMessage(
 export function isRenderWorkerOutboundEnvelope(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
-    value.kind === "doper:prepared" ||
-    value.kind === "doper:ready" ||
-    value.kind === "doper:frame" ||
-    value.kind === "doper:clock-metrics" ||
-    value.kind === "doper:virtual-refill" ||
-    value.kind === "doper:edit-transaction" ||
-    value.kind === "doper:event-transaction" ||
-    value.kind === "doper:non-passive-regions" ||
-    value.kind === "doper:editing-geometry" ||
-    value.kind === "doper:semantics" ||
-    value.kind === "doper:fatal" ||
-    value.kind === "doper:shutdown-complete"
+    value.kind === "pingo:prepared" ||
+    value.kind === "pingo:ready" ||
+    value.kind === "pingo:frame" ||
+    value.kind === "pingo:clock-metrics" ||
+    value.kind === "pingo:virtual-refill" ||
+    value.kind === "pingo:edit-transaction" ||
+    value.kind === "pingo:event-transaction" ||
+    value.kind === "pingo:non-passive-regions" ||
+    value.kind === "pingo:editing-geometry" ||
+    value.kind === "pingo:semantics" ||
+    value.kind === "pingo:fatal" ||
+    value.kind === "pingo:shutdown-complete"
   );
 }
 

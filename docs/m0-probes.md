@@ -12,10 +12,10 @@ pnpm probe:dev
 
 浏览器打开终端输出的地址，点击 **Run full probe**，完成后使用 **Export JSON**
 保存包含环境、构建标识、设备标识、唯一 run id、原始样本、汇总和错误的报告。
-正式采集时通过 `VITE_DOPER_BUILD_ID` 注入 commit 或构建标识，并通过
-`VITE_DOPER_DEVICE_ID` 注入 `device-matrix.md` 中登记的物理设备资产 ID；未设置时
+正式采集时通过 `VITE_PINGO_BUILD_ID` 注入 commit 或构建标识，并通过
+`VITE_PINGO_DEVICE_ID` 注入 `device-matrix.md` 中登记的物理设备资产 ID；未设置时
 分别使用 `local-uncommitted` 与 `local-dev`，不得把该结果上传为正式基线。
-每次正式采集还必须通过 `VITE_DOPER_ROLE_ID` 或 URL 的 `roleId` 指定七个矩阵角色
+每次正式采集还必须通过 `VITE_PINGO_ROLE_ID` 或 URL 的 `roleId` 指定七个矩阵角色
 之一。物理资产 ID 与角色分离，同一设备切换浏览器时使用相同 `deviceId`、不同
 `roleId`。
 报告 v1 的机器可读契约位于
@@ -40,7 +40,7 @@ UTF-16 selection 和 composition 状态外，还记录 control/selection bounds�
 正式录制执行：
 
 ```bash
-pnpm ime:replay -- doper-ime-<recording-id>.json
+pnpm ime:replay -- pingo-ime-<recording-id>.json
 ```
 
 回放器会重新应用 EditContext `textupdate`，校验 textarea proxy 的状态快照，并拒绝
@@ -99,8 +99,8 @@ batch 完整性与同 role/device/build 的 batch 重复性判定。重复性只
 先把 commit 固化进 production build，再启动同源采集器：
 
 ```bash
-VITE_DOPER_BUILD_ID=<full-commit> pnpm build
-DOPER_PROBE_COLLECTOR_TOKEN=<at-least-24-random-characters> \
+VITE_PINGO_BUILD_ID=<full-commit> pnpm build
+PINGO_PROBE_COLLECTOR_TOKEN=<at-least-24-random-characters> \
   pnpm probe:collect -- \
   --host 0.0.0.0 \
   --cert /secure/server.crt \
@@ -126,7 +126,7 @@ IME 归档使用相同协议。采集 staging 文件系统必须支持 exclusive
 `fsync`；不支持时采集器失败关闭，应改用受支持的本地 staging 后再复制到外部 WORM
 存储，不能降级为可覆盖写入。
 `/api/summary` 提供机器可读趋势，`/trends` 提供只读页面。启用令牌时趋势页使用
-HTTP Basic 登录，用户名为 `doper`、密码为同一令牌。
+HTTP Basic 登录，用户名为 `pingo`、密码为同一令牌。
 
 IME 归档位于独立的 `ime/v2` namespace，不会被平台报告 summary 当作 v1 报告读取。
 两个写接口与趋势接口使用同一鉴权和 10 MiB 请求上限。

@@ -1,16 +1,16 @@
 [workspace]
 resolver = "2"
 members = [
-  "core/doper-abi",
-  "core/doper-core",
-  "core/doper-edit",
-  "core/doper-headless",
-  "core/doper-hit",
-  "core/doper-layout",
-  "core/doper-paint",
-  "core/doper-scene",
-  "core/doper-scroll",
-  "core/doper-text",
+  "core/pingo-abi",
+  "core/pingo-core",
+  "core/pingo-edit",
+  "core/pingo-headless",
+  "core/pingo-hit",
+  "core/pingo-layout",
+  "core/pingo-paint",
+  "core/pingo-scene",
+  "core/pingo-scroll",
+  "core/pingo-text",
   "probes/wasm-budget",
   "probes/wasm-cold-start",
 ]
@@ -18,7 +18,7 @@ members = [
 [workspace.package]
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/dopejs/doper"
+repository = "https://github.com/dopejs/pingo"
 rust-version = "1.96"
 
 [profile.release]

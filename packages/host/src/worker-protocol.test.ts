@@ -12,7 +12,7 @@ describe("render Worker protocol validation", () => {
     expect(
       isRenderWorkerInboundMessage({
         abiVersion: 1,
-        kind: "doper:prepare",
+        kind: "pingo:prepare",
         protocolVersion: 1,
         sessionId: 7,
       }),
@@ -23,7 +23,7 @@ describe("render Worker protocol validation", () => {
         height: 100,
         inputRingBuffer: new SharedArrayBuffer(64),
         devicePixelRatio: 2,
-        kind: "doper:activate",
+        kind: "pingo:activate",
         mode: "sab",
         rasterCache: true,
         ringBuffer: new SharedArrayBuffer(64),
@@ -36,7 +36,7 @@ describe("render Worker protocol validation", () => {
         canvas: {},
         height: 100,
         devicePixelRatio: 2,
-        kind: "doper:activate",
+        kind: "pingo:activate",
         mode: "sab",
         rasterCache: true,
         ringBuffer: new SharedArrayBuffer(64),
@@ -44,10 +44,10 @@ describe("render Worker protocol validation", () => {
         width: 100,
       }),
     ).toBe(false);
-    expect(isRenderWorkerInboundMessage({ kind: "doper:input-wake", sessionId: 7 })).toBe(true);
+    expect(isRenderWorkerInboundMessage({ kind: "pingo:input-wake", sessionId: 7 })).toBe(true);
     expect(
       isRenderWorkerInboundMessage({
-        kind: "doper:clock-anchor",
+        kind: "pingo:clock-anchor",
         sequence: 1,
         sessionId: 7,
         timestamp: Number.NaN,
@@ -56,44 +56,44 @@ describe("render Worker protocol validation", () => {
     expect(
       isRenderWorkerInboundMessage({
         bytes: Uint8Array.of(1, 2, 3, 4),
-        kind: "doper:input",
+        kind: "pingo:input",
         sessionId: 7,
       }),
     ).toBe(true);
-    expect(isRenderWorkerInboundMessage({ bytes: [], kind: "doper:input", sessionId: 7 })).toBe(
+    expect(isRenderWorkerInboundMessage({ bytes: [], kind: "pingo:input", sessionId: 7 })).toBe(
       false,
     );
     expect(
       isRenderWorkerOutboundMessage({
         capabilities: { offscreenCanvas: true, sharedArrayBuffer: false },
-        kind: "doper:prepared",
+        kind: "pingo:prepared",
         sessionId: 7,
       }),
     ).toBe(true);
     expect(
       isRenderWorkerOutboundMessage({
         capabilities: { offscreenCanvas: "yes", sharedArrayBuffer: false },
-        kind: "doper:prepared",
+        kind: "pingo:prepared",
         sessionId: 7,
       }),
     ).toBe(false);
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:non-passive-regions",
+        kind: "pingo:non-passive-regions",
         regions: [{ flags: 3, left: 0, top: 0, right: 100, bottom: 80 }],
         sessionId: 7,
       }),
     ).toBe(true);
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:non-passive-regions",
+        kind: "pingo:non-passive-regions",
         regions: [{ flags: 0, left: 0, top: 0, right: 100, bottom: 80 }],
         sessionId: 7,
       }),
     ).toBe(false);
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:event-transaction",
+        kind: "pingo:event-transaction",
         sessionId: 7,
         transaction: {
           eventId: 1,
@@ -113,7 +113,7 @@ describe("render Worker protocol validation", () => {
     ).toBe(true);
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:event-transaction",
+        kind: "pingo:event-transaction",
         sessionId: 7,
         transaction: {
           eventId: 1,
@@ -133,7 +133,7 @@ describe("render Worker protocol validation", () => {
     ).toBe(false);
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:editing-geometry",
+        kind: "pingo:editing-geometry",
         frame: {
           nodeId: 17,
           selectionStart: 2,
@@ -149,7 +149,7 @@ describe("render Worker protocol validation", () => {
     ).toBe(true);
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:editing-geometry",
+        kind: "pingo:editing-geometry",
         frame: {
           nodeId: 17,
           selectionStart: 4,
@@ -163,7 +163,7 @@ describe("render Worker protocol validation", () => {
     ).toBe(false);
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:editing-geometry",
+        kind: "pingo:editing-geometry",
         frame: {
           nodeId: 17,
           selectionStart: 2,
@@ -177,14 +177,14 @@ describe("render Worker protocol validation", () => {
     ).toBe(false);
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:virtual-refill",
+        kind: "pingo:virtual-refill",
         requests: [{ nodeId: 0x0010_0001, start: 4, end: 8 }],
         sessionId: 7,
       }),
     ).toBe(true);
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:virtual-refill",
+        kind: "pingo:virtual-refill",
         requests: [{ nodeId: 1, start: 8, end: 4 }],
         sessionId: 7,
       }),
@@ -192,16 +192,16 @@ describe("render Worker protocol validation", () => {
   });
 
   it("recognizes protocol envelopes independently from payload validity", () => {
-    expect(isRenderWorkerInboundEnvelope({ kind: "doper:activate" })).toBe(true);
-    expect(isRenderWorkerOutboundEnvelope({ kind: "doper:frame" })).toBe(true);
-    expect(isRenderWorkerOutboundEnvelope({ kind: "doper:mutation-ack" })).toBe(false);
+    expect(isRenderWorkerInboundEnvelope({ kind: "pingo:activate" })).toBe(true);
+    expect(isRenderWorkerOutboundEnvelope({ kind: "pingo:frame" })).toBe(true);
+    expect(isRenderWorkerOutboundEnvelope({ kind: "pingo:mutation-ack" })).toBe(false);
     expect(isRenderWorkerInboundEnvelope(null)).toBe(false);
   });
 
   it("validates frame diagnostics and clock metrics before callbacks", () => {
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:frame",
+        kind: "pingo:frame",
         report: {
           commands: 1,
           displayListBytes: 16,
@@ -225,7 +225,7 @@ describe("render Worker protocol validation", () => {
     ).toBe(true);
     expect(
       isRenderWorkerOutboundMessage({
-        kind: "doper:clock-metrics",
+        kind: "pingo:clock-metrics",
         metrics: {
           acceptedAnchors: 1,
           anchoredFrames: 2,

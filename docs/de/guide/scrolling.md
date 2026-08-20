@@ -6,7 +6,7 @@ Die Ausreißerlatenz DOM-basierter virtueller Listen entsteht durch die Kette: d
 zurück in den Hauptthread, löst setState aus, dann Diff, dann Neulayout. Sobald der Hauptthread
 beschäftigt ist, fallen Frames aus.
 
-doper legt die Fensterberechnung in den Core: laufendes Scrollen **ruft die TypeScript-Schale nie auf**.
+pingo legt die Fensterberechnung in den Core: laufendes Scrollen **ruft die TypeScript-Schale nie auf**.
 Sie materialisiert nur den sichtbaren Bereich gemäß dem vom Core geplanten Vorwärmfenster; sind die Daten
 noch nicht da, wird ein Platzhalter gezeichnet und in späteren Frames nachgereicht.
 

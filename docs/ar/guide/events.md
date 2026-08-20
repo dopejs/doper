@@ -29,7 +29,7 @@
 المعالِجات المتاحة: `onPointerDown` و`onPointerUp` و`onPointerMove` و`onPointerCancel` و`onClick`
 و`onWheel`، ولكلٍّ منها نسخة `*Capture`.
 
-ويوفّر `DoperEvent` الحقول `target` و`currentTarget` و`eventPhase` والإحداثيات المنطقية المحلّية للـ
+ويوفّر `PingoEvent` الحقول `target` و`currentTarget` و`eventPhase` والإحداثيات المنطقية المحلّية للـ
 canvas ‏`x`/`y`، و`deltaX`/`deltaY` و`buttons` ومفاتيح التعديل، إضافةً إلى `preventDefault()`
 و`stopPropagation()` و`stopImmediatePropagation()`.
 

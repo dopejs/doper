@@ -61,7 +61,7 @@ export async function checkNpmRelease() {
     }
   }
 
-  const staging = await mkdtemp(path.join(tmpdir(), "doper-release-"));
+  const staging = await mkdtemp(path.join(tmpdir(), "pingo-release-"));
   try {
     for (const [name, { directory }] of manifests) {
       problems.push(...(await checkTarball(name, directory, staging)));
@@ -88,7 +88,7 @@ async function checkTarball(name, directory, staging) {
   const files = listing.trim().split("\n");
   const required = ["package/package.json", "package/dist/index.js", "package/dist/index.d.ts"];
   if (directory === "host") {
-    required.push("package/wasm/doper_core_bg.wasm", "package/wasm/manifest.json");
+    required.push("package/wasm/pingo_core_bg.wasm", "package/wasm/manifest.json");
   }
   if (directory === "jsx") {
     required.push("package/dist/jsx-runtime.js", "package/dist/jsx-dev-runtime.js");

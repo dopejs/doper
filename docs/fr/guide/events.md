@@ -32,7 +32,7 @@ Le modèle d'événements s'aligne sur le DOM : capture → cible → bouillonne
 Gestionnaires disponibles : `onPointerDown`, `onPointerUp`, `onPointerMove`, `onPointerCancel`,
 `onClick`, `onWheel`, chacun avec sa version `*Capture`.
 
-`DoperEvent` expose `target`, `currentTarget`, `eventPhase`, les coordonnées logiques locales au canvas
+`PingoEvent` expose `target`, `currentTarget`, `eventPhase`, les coordonnées logiques locales au canvas
 `x`/`y`, `deltaX`/`deltaY`, `buttons`, les touches de modification, `preventDefault()`,
 `stopPropagation()` et `stopImmediatePropagation()`.
 

@@ -17,8 +17,8 @@ export {
 export { NodeIdAllocator, NodeIdError, decodeNodeId, type DecodedNodeId } from "./node-id";
 export {
   createRoot,
-  type CoreDrivenDoperRoot,
-  type DoperRoot,
+  type CoreDrivenPingoRoot,
+  type PingoRoot,
   type EditableStateSnapshot,
   type MutationSink,
   type RootOptions,

@@ -1,11 +1,11 @@
 {
   "name": "@dopejs/pingo-host",
   "version": "0.1.0",
-  "description": "doper internal: canvas host, worker transports, and product WASM core (use @dopejs/pingo)",
+  "description": "pingo internal: canvas host, worker transports, and product WASM core (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dopejs/doper.git",
+    "url": "git+https://github.com/dopejs/pingo.git",
     "directory": "packages/host"
   },
   "publishConfig": {

@@ -1,4 +1,4 @@
-# doper npm 发布流程
+# pingo npm 发布流程
 
 > 状态：初版（2026-08-17）。发布集共 10 个包：公开入口 `@dopejs/pingo`、
 > 迁移边界 `@dopejs/pingo-compat`，以及它们的依赖闭包（runtime/jsx/
@@ -67,7 +67,7 @@ pnpm 在打包时自动把 `workspace:*` 重写为当前精确版本，
 
 `scripts/check-npm-release.mjs` 对**实际 tarball** 断言：
 
-- `dist/` 产物、类型与 source map 齐备；host 包含 `wasm/doper_core_bg.wasm`
+- `dist/` 产物、类型与 source map 齐备；host 包含 `wasm/pingo_core_bg.wasm`
   与 SHA-256 `manifest.json`（与 `pnpm release:check` 的完整性口径一致）。
 - 不泄漏 `src/`、`*.test.*`、`*.browser.*`。
 - 无残留 `workspace:` 依赖区间；`@dopejs/*` 依赖闭包全部在发布集内。

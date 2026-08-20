@@ -65,7 +65,7 @@ describe("mountCompatPage", () => {
     expect(reasons).toEqual([{ kind: "disabled" }]);
 
     // The switch can be flipped on later without re-mounting the page.
-    expect(await page.enable()).toBe("doper");
+    expect(await page.enable()).toBe("pingo");
     expect(events.slice(1)).toEqual([
       "root-created",
       "render",
@@ -75,7 +75,7 @@ describe("mountCompatPage", () => {
     await page.close();
   });
 
-  it("falls back to legacy when doper initialization fails", async () => {
+  it("falls back to legacy when pingo initialization fails", async () => {
     const { reasons, container, legacy, rootFactory } = harness({ failInit: true });
     const page = await mountCompatPage({
       pageId: "orders",
@@ -104,9 +104,9 @@ describe("mountCompatPage", () => {
       onFallback: (reason) => reasons.push(reason),
       rootFactory: rootFactory,
     });
-    expect(page.active).toBe("doper");
+    expect(page.active).toBe("pingo");
     hooks.onHostError?.(new Error("frame stall"));
-    expect(page.active).toBe("doper");
+    expect(page.active).toBe("pingo");
     hooks.onHostError?.(new Error("frame stall"));
     expect(page.active).toBe("legacy");
     expect(reasons[0]).toMatchObject({ kind: "runtime-error" });

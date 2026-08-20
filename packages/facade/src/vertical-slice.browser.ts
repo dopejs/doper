@@ -36,7 +36,7 @@ describe("browser product vertical slice", () => {
         height: 48,
         backgroundColor: "#1a73e8",
         children: createElement("text", {
-          value: "doper",
+          value: "pingo",
           color: "#ffffff",
           fontSize: 16,
         }),

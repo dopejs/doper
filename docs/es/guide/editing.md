@@ -6,7 +6,7 @@ El punto débil clásico de las soluciones sobre canvas es poner un `input` HTML
 cuando hace falta escribir. De ahí vienen en cadena el cursor desalineado, la ventana de candidatos
 del IME fuera de sitio, el scroll desincronizado y la accesibilidad rota.
 
-doper trata la edición como una capacidad de primera clase del Core: cursor, selección, arrastre,
+pingo trata la edición como una capacidad de primera clase del Core: cursor, selección, arrastre,
 doble clic para seleccionar palabra, navegación con teclado, composición IME, posición de la ventana
 de candidatos, portapapeles, deshacer/rehacer, sólo lectura y contraseña los implementa el motor.
 **La aplicación no crea, no posiciona y no sincroniza ningún control de entrada HTML.**

@@ -102,11 +102,11 @@ async function mount(demo: Demo): Promise<void> {
         if (token !== generation) return;
         // Devtools affordance: the HUD is throttled, so expose the unthrottled
         // report for inspection and measurement from the console.
-        (globalThis as { __doperFrame?: unknown }).__doperFrame = report;
+        (globalThis as { __pingoFrame?: unknown }).__pingoFrame = report;
         // Devtools affordance: when each frame was actually delivered, so frame
         // pacing can be measured from the console. A requestAnimationFrame
         // sampler measures the display's cadence, not the engine's.
-        const log = ((globalThis as { __doperFrameLog?: number[][] }).__doperFrameLog ??= []);
+        const log = ((globalThis as { __pingoFrameLog?: number[][] }).__pingoFrameLog ??= []);
         log.push([
           performance.now(),
           report.core?.dirtyPaintNodes ?? 0,
@@ -143,7 +143,7 @@ async function mount(demo: Demo): Promise<void> {
       // Devtools affordance: the worker's own clock, so a frame that never
       // arrived can be told apart from one the clock never produced.
       onClockMetrics: (metrics) => {
-        (globalThis as { __doperClock?: unknown }).__doperClock = metrics;
+        (globalThis as { __pingoClock?: unknown }).__pingoClock = metrics;
       },
       onHostError: (error) => {
         if (token === generation) failure.value = `${error.name}: ${error.message}`;
@@ -151,7 +151,7 @@ async function mount(demo: Demo): Promise<void> {
       onVirtualRefills: (requests) => {
         // Devtools affordance: when Core asked for a window, so the round trip
         // to a materialized window can be measured from the console.
-        const log = ((globalThis as { __doperRefills?: unknown[] }).__doperRefills ??= []);
+        const log = ((globalThis as { __pingoRefills?: unknown[] }).__pingoRefills ??= []);
         for (const request of requests) {
           log.push({ at: performance.now(), start: request.start, end: request.end });
         }

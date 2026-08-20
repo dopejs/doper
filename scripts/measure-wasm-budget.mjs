@@ -10,7 +10,7 @@ const productBudgetBytes = 400 * 1024;
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const wasmPath = path.join(
   repositoryRoot,
-  "target/wasm32-unknown-unknown/release/doper_probe_wasm_budget.wasm",
+  "target/wasm32-unknown-unknown/release/pingo_probe_wasm_budget.wasm",
 );
 const outputDirectory = path.join(repositoryRoot, "target/probe-artifacts");
 const publicDirectory = path.join(repositoryRoot, "apps/platform-probe/public/wasm");
@@ -29,7 +29,7 @@ await run("cargo", [
   "build",
   "--locked",
   "--package",
-  "doper-probe-wasm-budget",
+  "pingo-probe-wasm-budget",
   "--release",
   "--target",
   "wasm32-unknown-unknown",
@@ -37,7 +37,7 @@ await run("cargo", [
 
 const [{ size: rawBytes }, gzipBytes] = await Promise.all([stat(wasmPath), gzipSize(wasmPath)]);
 const report = {
-  crate: "doper-probe-wasm-budget",
+  crate: "pingo-probe-wasm-budget",
   gzipBytes,
   headroomBytes: productBudgetBytes - gzipBytes,
   maximumGzipBytes,
@@ -88,7 +88,7 @@ await mkdir(outputDirectory, { recursive: true });
 await mkdir(publicDirectory, { recursive: true });
 const serializedReport = `${JSON.stringify(report, null, 2)}\n`;
 await Promise.all([
-  copyFile(wasmPath, path.join(publicDirectory, "doper_budget.wasm")),
+  copyFile(wasmPath, path.join(publicDirectory, "pingo_budget.wasm")),
   writeFile(path.join(outputDirectory, "wasm-budget.v1.json"), serializedReport, "utf8"),
   writeFile(path.join(publicDirectory, "budget-manifest.json"), serializedReport, "utf8"),
 ]);

@@ -30,7 +30,7 @@ BVH と素朴な線形実装の結果が一致することはプロパティテ�
 利用できるハンドラは `onPointerDown`、`onPointerUp`、`onPointerMove`、`onPointerCancel`、
 `onClick`、`onWheel` で、それぞれに `*Capture` 版があります。
 
-`DoperEvent` は `target`、`currentTarget`、`eventPhase`、キャンバスローカルの論理座標 `x`/`y`、
+`PingoEvent` は `target`、`currentTarget`、`eventPhase`、キャンバスローカルの論理座標 `x`/`y`、
 `deltaX`/`deltaY`、`buttons`、修飾キー、`preventDefault()`、`stopPropagation()`、
 `stopImmediatePropagation()` を提供します。
 

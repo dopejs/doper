@@ -49,7 +49,7 @@ jobs:
 
       - run: pnpm pages:build
         env:
-          VITE_DOPER_BUILD_ID: ${{ github.sha }}
+          VITE_PINGO_BUILD_ID: ${{ github.sha }}
 
       - uses: actions/configure-pages@v5
 

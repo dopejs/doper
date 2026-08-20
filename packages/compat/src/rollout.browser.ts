@@ -11,7 +11,7 @@ describe("M5 rollout and rollback drill", () => {
     document.body.replaceChildren();
   });
 
-  it("switches a live page between doper and the legacy path in both directions", async () => {
+  it("switches a live page between pingo and the legacy path in both directions", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     const reasons: CompatFallbackReason[] = [];
@@ -44,8 +44,8 @@ describe("M5 rollout and rollback drill", () => {
     expect(container.contains(legacyNode)).toBe(true);
     expect(container.querySelector("canvas")).toBeNull();
 
-    // Flip the switch: doper renders real frames and legacy DOM leaves.
-    expect(await page.enable()).toBe("doper");
+    // Flip the switch: pingo renders real frames and legacy DOM leaves.
+    expect(await page.enable()).toBe("pingo");
     const canvas = container.querySelector("canvas");
     expect(canvas).not.toBeNull();
     expect(container.contains(legacyNode)).toBe(false);
@@ -58,11 +58,11 @@ describe("M5 rollout and rollback drill", () => {
     expect(container.querySelector("canvas")).toBeNull();
 
     // The page can be re-enabled after the incident is resolved.
-    expect(await page.enable()).toBe("doper");
+    expect(await page.enable()).toBe("pingo");
     expect(container.querySelector("canvas")).not.toBeNull();
   });
 
-  it("falls back automatically when doper initialization fails", async () => {
+  it("falls back automatically when pingo initialization fails", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     const reasons: CompatFallbackReason[] = [];

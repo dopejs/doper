@@ -3,17 +3,17 @@
 [workspace]
 
 [package]
-name = "doper-gpu-probe"
+name = "pingo-gpu-probe"
 version = "0.0.0"
 edition = "2024"
 license = "MIT"
 publish = false
 
 [dependencies]
-doper-abi = { path = "../../core/doper-abi" }
-doper-headless = { path = "../../core/doper-headless" }
-doper-paint = { path = "../../core/doper-paint" }
-doper-scene = { path = "../../core/doper-scene" }
+pingo-abi = { path = "../../core/pingo-abi" }
+pingo-headless = { path = "../../core/pingo-headless" }
+pingo-paint = { path = "../../core/pingo-paint" }
+pingo-scene = { path = "../../core/pingo-scene" }
 bytemuck = { version = "=1.25.2", features = ["derive"] }
 pollster = "=1.0.1"
 wgpu = "=30.0.0"

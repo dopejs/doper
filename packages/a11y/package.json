@@ -1,11 +1,11 @@
 {
   "name": "@dopejs/pingo-a11y",
   "version": "0.1.0",
-  "description": "doper internal: semantic tree DOM mirror and role-based selectors (use @dopejs/pingo)",
+  "description": "pingo internal: semantic tree DOM mirror and role-based selectors (use @dopejs/pingo)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dopejs/doper.git",
+    "url": "git+https://github.com/dopejs/pingo.git",
     "directory": "packages/a11y"
   },
   "publishConfig": {

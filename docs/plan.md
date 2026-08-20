@@ -1,4 +1,4 @@
-# doper 总体实施计划
+# pingo 总体实施计划
 
 > 状态：草案 v0.2  
 > 依据：[`design.md`](design.md)  
@@ -17,9 +17,9 @@
 - 从第一天建立确定性、差分测试、性能门禁、可观测性和降级能力。
 - 提供 canvas 内原生 caret、selection、IME 和文本编辑，业务不再为输入能力
   创建 EmbedDOM 控件。
-- 用外围兼容层支持存量迁移，不让存量引擎的内部模型限制 doper Core。
+- 用外围兼容层支持存量迁移，不让存量引擎的内部模型限制 pingo Core。
 
-存量实现只作为迁移输入，不是性能对照组或架构模板。doper 的完成标准由自身
+存量实现只作为迁移输入，不是性能对照组或架构模板。pingo 的完成标准由自身
 绝对指标和正确性 oracle 决定；目标分支与历史数据只用于趋势诊断。
 
 ## 2. 成功标准
@@ -35,7 +35,7 @@
 - `touchmove` 到呈现延迟 ≤ 2 帧。
 - 主线程人为阻塞 200ms 时滚动不停顿。
 - PC 连续交互帧时间 P95 ≤ 16.7ms、P99 ≤ 25ms，10 秒掉帧率 < 0.5%。
-- 记录 doper 自身的历史趋势；P95/吞吐变化超过 5% 时触发调查，但只有绝对指标
+- 记录 pingo 自身的历史趋势；P95/吞吐变化超过 5% 时触发调查，但只有绝对指标
   失守才判定性能门禁失败。
 - WASM gzip < 400KB，冷启动额外延迟 < 50ms。
 
@@ -58,7 +58,7 @@
 ### 2.4 迁移
 
 - 存量页面可以按页面或场景灰度迁移。
-- Worker、WebGPU 和 doper 整体均有可操作的回退开关。
+- Worker、WebGPU 和 pingo 整体均有可操作的回退开关。
 - 存量兼容 shim 位于边界层，可独立删除，不污染 Core。
 
 完整数值及测试口径以 `design.md` 为准。本文件不得降低设计中的验收线。
@@ -152,7 +152,7 @@ W5 不是收尾工作。每个功能必须把对应测试和观测能力作为�
 - 固定代表性场景：静态表格、连续滚动、动态高度列表、图片列表、高频局部
   更新，以及单元格编辑/IME composition。
 - 固定自动化 benchmark 口径，以及可选平台资格的设备矩阵、采样和分位数算法。
-- 建立 doper 自身的绝对性能基线、可复现采集和历史趋势报告。
+- 建立 pingo 自身的绝对性能基线、可复现采集和历史趋势报告。
 - 明确外部依赖和试点业务是平台资格输入，不是工程出口依赖。
 
 出口门禁：
@@ -228,10 +228,10 @@ postMessage 路径，通过 capability override 降级该平台，不回滚已�
 主要交付：
 
 - 单源 schema 与 Rust/TS 代码生成。
-- `doper-abi`：Mutation Stream、DisplayList、版本协商和畸形输入处理。
-- `doper-scene`：SoA、generation NodeId、脏位图、commit 时拓扑紧凑化。
-- `doper-layout`：约束布局、relayout boundary、双缓冲结果比较。
-- `doper-edit` 最小数据模型：revision、selection/affinity、composition、原子
+- `pingo-abi`：Mutation Stream、DisplayList、版本协商和畸形输入处理。
+- `pingo-scene`：SoA、generation NodeId、脏位图、commit 时拓扑紧凑化。
+- `pingo-layout`：约束布局、relayout boundary、双缓冲结果比较。
+- `pingo-edit` 最小数据模型：revision、selection/affinity、composition、原子
   edit transaction，以及 UTF-16/UTF-8/grapheme offset 映射。
 - 最小 Paint/Canvas2D 回放路径以及 Picture 的不可变表示。
 - signals、基础 hooks、JSX runtime、reconciler 和 facade 的最小公开 API。
@@ -298,7 +298,7 @@ web 字体 shaping、复杂排版和 glyph atlas 属于 M3。M1 的“像素对�
 ### M3：原生虚拟滚动与文本
 
 > 当前状态：**M3 已完成（2026-08-16）**。M3-A 已交付
-> `doper-scroll` 的 iOS/Android 物理、Fenwick HeightIndex、变量高度锚点纠偏、方向
+> `pingo-scroll` 的 iOS/Android 物理、Fenwick HeightIndex、变量高度锚点纠偏、方向
 > 预热、占位/补建指标，以及 Shell 的 `<virtualList>` 有界窗口物化。独立 SAB Input
 > ring、postMessage 和主线程三路径均通过真实 Chromium；cache 开关、朴素前缀和、
 > native/wasm32 DisplayList 与补建窗口均严格差分一致。M3-B 已交付显式字体的
@@ -326,7 +326,7 @@ web 字体 shaping、复杂排版和 glyph atlas 属于 M3。M1 的“像素对�
 
 #### M3-B Text
 
-状态：**已完成（2026-08-16）**。`doper-text` 的显式 SFNT 校验、LTR shaping、UAX #14 基础
+状态：**已完成（2026-08-16）**。`pingo-text` 的显式 SFNT 校验、LTR shaping、UAX #14 基础
 换行、grapheme/cluster/glyph/line/caret 映射、有界 Text Shape Cache，以及受
 WASM 体积门禁约束的灰度 outline glyph atlas 已完成；真实 SFNT 自动门禁为
 `pnpm m3:text:foundation`。公开 `createFont`/`font` API、版本化 SFNT 资源、Core
@@ -372,7 +372,7 @@ bidi、复杂脚本及完整 CJK 避头尾只有在核心指标稳定且通过�
 > 仍属平台资格采集，不影响工程完成；bidi 视觉导航与 widgets placeholder 为
 > 显式延后项（见子阶段与范围澄清）。
 
-目标：使 doper 达到可用于真实输入和交互页面的完整性，业务不再依赖
+目标：使 pingo 达到可用于真实输入和交互页面的完整性，业务不再依赖
 EmbedDOM 呼起 HTML 输入控件。
 
 按依赖顺序拆为四个子阶段。M4-A 是 M4-B 的前置；M4-C 与 M4-D 相互独立，可在
@@ -384,7 +384,7 @@ M4-B 稳定后并行推进。
 
 已完成（未提交切片 + `dc860ef`）：
 
-- `doper-hit` crate：世界几何构建、增量 BVH（拓扑变化 rebuild / 几何 refit）、
+- `pingo-hit` crate：世界几何构建、增量 BVH（拓扑变化 rebuild / 几何 refit）、
   逆仿射精确判定、朴素线性 oracle 与 `bvh_matches_linear_oracle` 属性测试。
 - Core→Host Event Transaction 流：版本化 `DOPV` 编码、Rust/TS 双端逐条对齐的
   校验、drain 背压门禁、miss 不产生背压、混合输入批原子回滚。
@@ -414,7 +414,7 @@ M4-B 稳定后并行推进。
 - editing geometry 回路已闭合：Host 在 commit/input/advance 后消费
   `editing_geometry()` 自动回传 control/selection/character bounds；
   `characterboundsupdate` 本地不足时经 `RequestCharacterBounds` 请求并由下一
-  次 geometry 回传应答；Worker 协议 v5 新增 `doper:editing-geometry` 消息。
+  次 geometry 回传应答；Worker 协议 v5 新增 `pingo:editing-geometry` 消息。
 - 文本 point→offset 命中：`PlaceCaret`（opcode 15）在 Core 把点映射到最近
   caret stop（先行后列），支持 shift 扩展与 UAX #29 双击选词
   （`word_range_utf16`）；Host 在活动编辑器 bounds 内合成点击/拖选/双击，
@@ -447,7 +447,7 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
   作为显式延后项随该布局能力交付，不以 hack 实现。
 - composition 矩阵已覆盖组合字符、emoji ZWJ、RTL（希伯来文逻辑序编辑 + 词
   选择）、CJK 多段候选转换，验证 grapheme 原子性、单一 undo 单元与 revision
-  单调（doper-edit 会话测试）。
+  单调（pingo-edit 会话测试）。
 - 密码隐私由既有自动测试覆盖：Core display 永不含明文、密码目标剪贴板阻断、
   DOPR 录制显式跳过敏感流。
 - `pnpm m4:perf` 已建立：`m4_editing_benchmark`（1,000 键击混合插入/导航/
@@ -468,7 +468,7 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 - 焦点模型：focusable/focused 随快照导出；镜像元素进入 tab 顺序，聚焦转发到
   `focusEditable` 激活引擎编辑与原生输入服务（键盘契约浏览器测试）。
 - 真实 Chromium E2E：语义镜像填充、role/name 选择器、密码值不进入 DOM、
-  键盘聚焦转发全部通过；Worker 协议 v6 新增 `doper:semantics` 消息与结构
+  键盘聚焦转发全部通过；Worker 协议 v6 新增 `pingo:semantics` 消息与结构
   校验。
 - 语义树可观测性以 `onSemantics` 回调与 `dirtySemanticsNodes` 帧诊断提供；
   独立 devtools UI 与真实屏幕阅读器矩阵归平台资格/后续工具链，不阻塞工程
@@ -507,7 +507,7 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 状态：**已完成（2026-08-17）**。
 
 - `@dopejs/pingo-compat` 边界包：按页面粒度的挂载/卸载适配器与回退开关，
-  业务经它接入 doper 并可一键切回存量渲染路径；依赖方向 compat → facade
+  业务经它接入 pingo 并可一键切回存量渲染路径；依赖方向 compat → facade
   单向，删除 shim 不改 Core（自动依赖方向检查）。
 - 迁移指南 `docs/migration.md`：接入步骤、能力矩阵、已知限制与回退操作。
 - 自动迁移检查工具：扫描业务源码中不被公开 API 支持的用法（内部包直接
@@ -527,10 +527,10 @@ word-boundary 单测）、TS 210 项、真实 Chromium 17 项（含点击聚焦�
 
 状态：**已完成（2026-08-17）**。
 
-- 代表性迁移 fixture 的 shadow 对照：同一输入双跑 doper 与参考 oracle，
+- 代表性迁移 fixture 的 shadow 对照：同一输入双跑 pingo 与参考 oracle，
   自动像素/语义对比门禁。
 - 灰度与自动回退：per-page 开关、运行时故障（初始化失败、帧超时、Core
-  poison）自动禁用 doper 并回退，故障注入演练测试覆盖每条回退路径。
+  poison）自动禁用 pingo 并回退，故障注入演练测试覆盖每条回退路径。
 - 运行手册 `docs/runbook.md`：灰度比例操作、观测指标、事故回退步骤。
 
 #### M5-D WebGPU 隔离原型与数据决策
@@ -614,7 +614,7 @@ P0 基线
 
 - 明确各工作流的责任边界、接口和外部协作关系。
 - 初始化 workspace、CI、ADR 模板、benchmark 数据格式。
-- 冻结第一批 doper benchmark 场景、设备矩阵和采样协议。
+- 冻结第一批 pingo benchmark 场景、设备矩阵和采样协议。
 - 建立风险台账；COOP/COEP、设备、试点业务 owner 在启动平台资格时指定。
 
 ### 步骤 2：帧驱动与采集探针
@@ -723,7 +723,7 @@ P0 基线
 
 需要保留三个独立开关：
 
-1. 页面级：doper → 原有渲染路径。
+1. 页面级：pingo → 原有渲染路径。
 2. 引擎级：Worker/SAB → postMessage → 主线程 Canvas2D。
 3. 优化级：激进 invalidation、Picture/Raster Cache、未来 WebGPU 可分别关闭。
 

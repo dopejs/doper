@@ -305,7 +305,7 @@ function dispatchText(
   offset: number,
 ): void {
   if (mode === "textarea-proxy") {
-    const proxy = document.querySelector<HTMLTextAreaElement>("[data-doper-input-proxy]");
+    const proxy = document.querySelector<HTMLTextAreaElement>("[data-pingo-input-proxy]");
     if (proxy === null) throw new Error("textarea proxy is unavailable");
     proxy.dispatchEvent(
       new InputEvent("beforeinput", {
@@ -332,7 +332,7 @@ function dispatchText(
 
 function nativeSurfaceValue(canvas: HTMLCanvasElement, mode: "auto" | "textarea-proxy"): string {
   if (mode === "textarea-proxy") {
-    return document.querySelector<HTMLTextAreaElement>("[data-doper-input-proxy]")?.value ?? "";
+    return document.querySelector<HTMLTextAreaElement>("[data-pingo-input-proxy]")?.value ?? "";
   }
   return (Reflect.get(canvas, "editContext") as BrowserEditContext).text;
 }

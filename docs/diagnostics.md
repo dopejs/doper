@@ -1,4 +1,4 @@
-# doper 错误诊断与事故上报
+# pingo 错误诊断与事故上报
 
 > 状态：M5-B 初版。面向线上事故排查与灰度看板接入。
 
@@ -20,7 +20,7 @@ report({ ...engineIdentity(), pageId, mode: root.mode });
 
 | 来源          | 形态                                                                                 | 处置                                                           |
 | ------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| ABI 解码      | `invalid doper ABI stream: …`（畸形/截断/版本不符输入被原子拒绝）                    | 采集字节长度与首 16 字节 magic；核对 `abiVersion` 与资源完整性 |
+| ABI 解码      | `invalid pingo ABI stream: …`（畸形/截断/版本不符输入被原子拒绝）                    | 采集字节长度与首 16 字节 magic；核对 `abiVersion` 与资源完整性 |
 | Core 派生失败 | Core poison：实例关闭，后续调用返回 `Poisoned`                                       | Host 自动用完整快照重建；连续 poison 走 compat 自动回退        |
 | Host 传输     | `onHostError` 回调（transport 背压、Worker 崩溃、恢复失败）                          | Worker 路径自动降级/重建；记录 `transportMetrics()` 快照       |
 | 迁移边界      | `onFallback` 原因：`disabled` / `initialization-failed` / `runtime-error` / `manual` | 见 `docs/runbook.md` 回退步骤                                  |

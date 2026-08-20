@@ -1,25 +1,25 @@
-export { DOPER_ELEMENT_TYPE, createElement, isDoperElement, normalizeChildren } from "./element";
-export { DoperFont, createFont, type DoperFontOptions } from "./font";
-export { DoperImage, createImage, type DoperImageOptions } from "./image";
+export { PINGO_ELEMENT_TYPE, createElement, isPingoElement, normalizeChildren } from "./element";
+export { PingoFont, createFont, type PingoFontOptions } from "./font";
+export { PingoImage, createImage, type PingoImageOptions } from "./image";
 export {
-  DoperFontLoadError,
+  PingoFontLoadError,
   loadFont,
-  type DoperFontLoadErrorCode,
-  type DoperFontLoadOptions,
-  type DoperFontSource,
+  type PingoFontLoadErrorCode,
+  type PingoFontLoadOptions,
+  type PingoFontSource,
   type Woff2Decoder,
 } from "./font-loader";
 export {
   Fragment,
-  type AnyDoperElement,
+  type AnyPingoElement,
   type Color,
   type CommonProps,
   type ContainerProps,
-  type DoperElement,
-  type DoperEvent,
-  type DoperEventHandler,
-  type DoperEventPhase,
-  type DoperNode,
+  type PingoElement,
+  type PingoEvent,
+  type PingoEventHandler,
+  type PingoEventPhase,
+  type PingoNode,
   type EdgeInsets,
   type EditableInputMode,
   type EditableTextProps,

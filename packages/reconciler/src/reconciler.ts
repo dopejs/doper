@@ -1,18 +1,18 @@
 import {
   Fragment,
-  DoperFont,
+  PingoFont,
   createElement,
-  isDoperElement,
+  isPingoElement,
   normalizeChildren,
-  type AnyDoperElement,
+  type AnyPingoElement,
   type Color,
   type CommonProps,
-  type DoperNode,
-  type DoperEvent,
-  type DoperEventHandler,
+  type PingoNode,
+  type PingoEvent,
+  type PingoEventHandler,
   type EditableTextProps,
   type FunctionComponent,
-  DoperImage,
+  PingoImage,
   type HostType,
   type ImageProps,
   type Key,
@@ -49,8 +49,8 @@ export interface RootOptions {
 }
 
 /** Public lifecycle for a localized component/host tree. */
-export interface DoperRoot {
-  render(node: DoperNode): void;
+export interface PingoRoot {
+  render(node: PingoNode): void;
   flushSync(): void;
   invokeCallback(callbackId: number): void;
   unmount(): void;
@@ -58,7 +58,7 @@ export interface DoperRoot {
 }
 
 /** Internal Host contract for applying asynchronous Core virtual windows. */
-export interface CoreDrivenDoperRoot extends DoperRoot {
+export interface CoreDrivenPingoRoot extends PingoRoot {
   refillVirtualRanges(requests: readonly VirtualRangeRequest[]): void;
   applyEditTransaction(transaction: EditTransaction): void;
   applyEventTransaction(transaction: EventTransaction): void;
@@ -117,16 +117,16 @@ interface HostInstance extends BaseInstance {
   ref: Ref<NodeHandle> | undefined;
   scrollPosition: readonly [number, number] | undefined;
   virtualItemIndex: number | undefined;
-  virtualItems: Map<number, DoperNode>;
+  virtualItems: Map<number, PingoNode>;
   /** Wrapper elements per index, reused so unchanged items skip re-diffing. */
-  virtualWrappers: Map<number, DoperNode>;
+  virtualWrappers: Map<number, PingoNode>;
   virtualList: NormalizedVirtualList | undefined;
   virtualRange: readonly [number, number] | undefined;
   editable: NormalizedEditable | undefined;
   editableSelection: { anchor: number; focus: number } | undefined;
   onEditTransaction: ((transaction: EditTransaction) => void) | undefined;
   onSubmit: (() => void) | undefined;
-  eventHandlers: Map<EventHandlerKey, DoperEventHandler>;
+  eventHandlers: Map<EventHandlerKey, PingoEventHandler>;
 }
 
 interface ComponentInstance extends BaseInstance {
@@ -139,10 +139,10 @@ interface ComponentInstance extends BaseInstance {
 
 type Instance = HostInstance | ComponentInstance;
 type Owner = RootOwner | HostInstance | ComponentInstance;
-type ChildDescriptor = AnyDoperElement | string;
+type ChildDescriptor = AnyPingoElement | string;
 
 interface NormalizedHostProps {
-  readonly children: DoperNode;
+  readonly children: PingoNode;
   readonly ref: Ref<NodeHandle> | undefined;
   readonly scalars: Map<Prop, number>;
   readonly vectors: Map<Prop, readonly [number, number, number, number]>;
@@ -166,7 +166,7 @@ interface NormalizedHostProps {
   readonly virtualItemIndex: number | undefined;
   readonly virtualList: NormalizedVirtualList | undefined;
   readonly editable: NormalizedEditable | undefined;
-  readonly eventHandlers: Map<EventHandlerKey, DoperEventHandler>;
+  readonly eventHandlers: Map<EventHandlerKey, PingoEventHandler>;
 }
 
 type EventHandlerKey = `${InputEventKind}:${"bubble" | "capture"}`;
@@ -187,7 +187,7 @@ interface NormalizedVirtualList {
   readonly baseOverscanViewports: number;
   readonly velocityHorizonSeconds: number;
   readonly maximumAheadViewports: number;
-  readonly renderItem: (index: number) => DoperNode;
+  readonly renderItem: (index: number) => PingoNode;
 }
 
 interface CallbackEntry {
@@ -262,14 +262,14 @@ const VIRTUAL_LIST_KEYS = new Set([
   "renderItem",
   "velocityHorizonSeconds",
 ]);
-const VIRTUAL_ITEM_INDEX = Symbol("doper.virtualItemIndex");
+const VIRTUAL_ITEM_INDEX = Symbol("pingo.virtualItemIndex");
 
 /** Creates one deterministic component tree and Mutation Stream producer. */
-export function createRoot(sink: MutationSink, options: RootOptions = {}): CoreDrivenDoperRoot {
+export function createRoot(sink: MutationSink, options: RootOptions = {}): CoreDrivenPingoRoot {
   return new ReconcilerRoot(sink, options);
 }
 
-class ReconcilerRoot implements CoreDrivenDoperRoot {
+class ReconcilerRoot implements CoreDrivenPingoRoot {
   readonly #sink: MutationSink;
   readonly #schedule: (task: () => void) => void;
   readonly #onFatalError: ((error: Error) => void) | undefined;
@@ -306,7 +306,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
     return this.#failed;
   }
 
-  public render(node: DoperNode): void {
+  public render(node: PingoNode): void {
     this.assertUsable();
     this.perform(() => {
       const rootNodeId = this.ensureRootNode();
@@ -678,7 +678,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
     owner: Owner,
     coreParent: number,
     previous: Instance[],
-    node: DoperNode,
+    node: PingoNode,
   ): Instance[] {
     const descriptors = normalizeChildren(node);
     assertUniqueKeys(descriptors);
@@ -817,7 +817,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
   ): Instance {
     instance.descriptor = descriptor;
     if (instance.kind === "component") {
-      if (typeof descriptor === "string" || !isDoperElement(descriptor)) {
+      if (typeof descriptor === "string" || !isPingoElement(descriptor)) {
         throw new Error("component descriptor changed unexpectedly");
       }
       instance.props = descriptor.props;
@@ -988,7 +988,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
     if (instance.virtualRange?.[0] === start && instance.virtualRange[1] === end) return;
     const config = instance.virtualList;
     if (config === undefined) throw new Error("virtual list instance has no configuration");
-    const children: DoperNode[] = [];
+    const children: PingoNode[] = [];
     for (let index = start; index < end; index += 1) {
       let wrapper = instance.virtualWrappers.get(index);
       if (wrapper === undefined) {
@@ -1004,7 +1004,7 @@ class ReconcilerRoot implements CoreDrivenDoperRoot {
         wrapper = createElement(
           "container",
           props as unknown as Record<string, unknown>,
-          `doper:virtual:${String(index)}`,
+          `pingo:virtual:${String(index)}`,
         );
         instance.virtualWrappers.set(index, wrapper);
       }
@@ -1371,7 +1371,7 @@ function normalizeHostProps(
     const lineHeight = optionalPositive(props.lineHeight, fontSize * 1.2, "lineHeight");
     const fontWeight = optionalWeight(props.fontWeight);
     const font = props.font;
-    if (font !== undefined && !(font instanceof DoperFont)) {
+    if (font !== undefined && !(font instanceof PingoFont)) {
       throw new TypeError("font must be created by createFont");
     }
     const fontFamily =
@@ -1394,7 +1394,7 @@ function normalizeHostProps(
   let image: Uint8Array | undefined;
   if (type === "image") {
     const source = (props as unknown as ImageProps).source;
-    if (!(source instanceof DoperImage)) {
+    if (!(source instanceof PingoImage)) {
       throw new TypeError("image source must be created by createImage");
     }
     image = encodeImageBitmap(source);
@@ -1509,7 +1509,7 @@ function normalizeHostProps(
     );
   }
   return {
-    children: allowsHostChildren(type) ? (props.children as DoperNode) : undefined,
+    children: allowsHostChildren(type) ? (props.children as PingoNode) : undefined,
     ref,
     scalars,
     vectors,
@@ -1714,7 +1714,7 @@ function normalizeCallback(value: unknown, label: string): (() => void) | undefi
 
 function normalizeEventHandlers(
   props: Readonly<Record<string, unknown>>,
-): Map<EventHandlerKey, DoperEventHandler> {
+): Map<EventHandlerKey, PingoEventHandler> {
   const bindings = [
     ["pointerdown:capture", "onPointerDownCapture"],
     ["pointerdown:bubble", "onPointerDown"],
@@ -1729,12 +1729,12 @@ function normalizeEventHandlers(
     ["wheel:capture", "onWheelCapture"],
     ["wheel:bubble", "onWheel"],
   ] as const satisfies readonly (readonly [EventHandlerKey, string])[];
-  const result = new Map<EventHandlerKey, DoperEventHandler>();
+  const result = new Map<EventHandlerKey, PingoEventHandler>();
   for (const [key, property] of bindings) {
     const value = props[property];
     if (value === undefined) continue;
     if (typeof value !== "function") throw new TypeError(`${property} must be a function`);
-    result.set(key, value as DoperEventHandler);
+    result.set(key, value as PingoEventHandler);
   }
   return result;
 }
@@ -1749,7 +1749,7 @@ class PropagationState {
     this.#transaction = transaction;
   }
 
-  public eventFor(nodeId: number, phase: "bubble" | "capture"): DoperEvent {
+  public eventFor(nodeId: number, phase: "bubble" | "capture"): PingoEvent {
     const transaction = this.#transaction;
     const isDefaultPrevented = (): boolean => this.defaultPrevented;
     const target = Object.freeze({ nodeId: transaction.target });

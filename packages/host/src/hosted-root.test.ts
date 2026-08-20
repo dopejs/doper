@@ -401,8 +401,8 @@ describe("createHostedCanvasRoot", () => {
       workerFactory: () => worker as unknown as Worker,
     });
     root.beginScroll(0x0010_0001);
-    const message = worker.posts.findLast((candidate) => hasKind(candidate, "doper:input"));
-    expect(message).toMatchObject({ kind: "doper:input" });
+    const message = worker.posts.findLast((candidate) => hasKind(candidate, "pingo:input"));
+    expect(message).toMatchObject({ kind: "pingo:input" });
     expect(decodeInputBatch((message as { bytes: Uint8Array }).bytes)).toEqual({
       frameSeq: 1,
       commands: [{ type: "scrollBegin", nodeId: 0x0010_0001 }],
@@ -419,15 +419,15 @@ describe("createHostedCanvasRoot", () => {
       transport: { preference: "sab", strict: true },
       workerFactory: () => worker as unknown as Worker,
     });
-    const activation = worker.posts.find((candidate) => hasKind(candidate, "doper:activate")) as {
+    const activation = worker.posts.find((candidate) => hasKind(candidate, "pingo:activate")) as {
       inputRingBuffer: SharedArrayBuffer;
     };
     const inputRing = SabMutationRing.attach(activation.inputRingBuffer);
 
     root.beginScroll(0x0010_0001);
 
-    expect(worker.posts.some((candidate) => hasKind(candidate, "doper:input"))).toBe(false);
-    expect(worker.posts.some((candidate) => hasKind(candidate, "doper:input-wake"))).toBe(true);
+    expect(worker.posts.some((candidate) => hasKind(candidate, "pingo:input"))).toBe(false);
+    expect(worker.posts.some((candidate) => hasKind(candidate, "pingo:input-wake"))).toBe(true);
     const frame = inputRing.take();
     expect(frame?.frameSeq).toBe(1);
     expect(decodeInputBatch(frame?.bytes ?? new Uint8Array())).toEqual({
@@ -463,8 +463,8 @@ describe("createHostedCanvasRoot", () => {
 
     root.dispatchInput(oversized);
 
-    const wakeIndex = worker.posts.findIndex((candidate) => hasKind(candidate, "doper:input-wake"));
-    const directIndex = worker.posts.findIndex((candidate) => hasKind(candidate, "doper:input"));
+    const wakeIndex = worker.posts.findIndex((candidate) => hasKind(candidate, "pingo:input-wake"));
+    const directIndex = worker.posts.findIndex((candidate) => hasKind(candidate, "pingo:input"));
     expect(wakeIndex).toBeGreaterThanOrEqual(0);
     expect(directIndex).toBeGreaterThan(wakeIndex);
     expect(root.inputTransportMetrics()).toMatchObject({
@@ -528,10 +528,10 @@ describe("createHostedCanvasRoot", () => {
     const canvas = new FakeCanvas();
     const worker = new FakeWorker();
     worker.onPost = (message) => {
-      if (hasKind(message, "doper:prepare")) {
+      if (hasKind(message, "pingo:prepare")) {
         worker.emitMessage({
           error: "WASM unavailable",
-          kind: "doper:fatal",
+          kind: "pingo:fatal",
           sessionId: sessionOf(message),
         });
       }
@@ -737,7 +737,7 @@ function editableElement(width = 80): RenderNode {
   // The descriptor is a plain object keyed by a globally registered symbol, so
   // this stays a test detail rather than a new edge in the package graph.
   return {
-    $$typeof: Symbol.for("dopejs.doper.element"),
+    $$typeof: Symbol.for("dopejs.pingo.element"),
     type: "editableText",
     key: null,
     props: { height: 40, revision: 1n, value: "ab cd", width },
@@ -822,27 +822,27 @@ function readyWorker(acknowledgeMutations = true): FakeWorker {
   const worker = new FakeWorker();
   let sessionId = 0;
   worker.onPost = (message) => {
-    if (hasKind(message, "doper:prepare")) {
+    if (hasKind(message, "pingo:prepare")) {
       sessionId = sessionOf(message);
       worker.emitMessage({
         capabilities: { offscreenCanvas: true, sharedArrayBuffer: true },
-        kind: "doper:prepared",
+        kind: "pingo:prepared",
         sessionId,
       });
-    } else if (hasKind(message, "doper:activate")) {
+    } else if (hasKind(message, "pingo:activate")) {
       worker.emitMessage({
-        kind: "doper:ready",
+        kind: "pingo:ready",
         mode: (message as { mode: "post-message" | "sab" }).mode,
         sessionId,
       });
-    } else if (hasKind(message, "doper:mutation")) {
+    } else if (hasKind(message, "pingo:mutation")) {
       if (!acknowledgeMutations) return;
       const frameSeq = (message as { frameSeq: number }).frameSeq;
       queueMicrotask(() => {
-        worker.emitMessage({ frameSeq, kind: "doper:mutation-ack", sessionId, version: 1 });
+        worker.emitMessage({ frameSeq, kind: "pingo:mutation-ack", sessionId, version: 1 });
       });
-    } else if (hasKind(message, "doper:shutdown")) {
-      worker.emitMessage({ kind: "doper:shutdown-complete", sessionId });
+    } else if (hasKind(message, "pingo:shutdown")) {
+      worker.emitMessage({ kind: "pingo:shutdown-complete", sessionId });
     }
   };
   return worker;
@@ -891,7 +891,7 @@ function hasKind(value: unknown, kind: string): boolean {
 
 function hostElement(type: "text" | "virtualList", props: Readonly<Record<string, unknown>>) {
   return {
-    $$typeof: Symbol.for("dopejs.doper.element"),
+    $$typeof: Symbol.for("dopejs.pingo.element"),
     key: null,
     props,
     type,

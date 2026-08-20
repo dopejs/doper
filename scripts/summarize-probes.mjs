@@ -148,7 +148,7 @@ export async function validateProbeReport(
   }
   if (!allowLocal && (report.build.id === "local-uncommitted" || report.deviceId === "local-dev")) {
     throw new Error(
-      `${label} is local-only; provide VITE_DOPER_BUILD_ID and VITE_DOPER_DEVICE_ID or allow local reports explicitly`,
+      `${label} is local-only; provide VITE_PINGO_BUILD_ID and VITE_PINGO_DEVICE_ID or allow local reports explicitly`,
     );
   }
   if (report.sabBackpressure !== undefined) {

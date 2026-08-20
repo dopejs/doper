@@ -11,8 +11,8 @@ import {
 import {
   createRoot,
   decodeMutationBatch,
-  type DoperRoot,
-  type CoreDrivenDoperRoot,
+  type PingoRoot,
+  type CoreDrivenPingoRoot,
   type MutationSink,
   type ResourceKind,
   type RootOptions,
@@ -1420,8 +1420,8 @@ export function createCanvasRoot(
   context: Canvas2DContext,
   core: CoreClient,
   options: CanvasRootOptions = {},
-): DoperRoot {
-  const coreRoot: { current: CoreDrivenDoperRoot | undefined } = { current: undefined };
+): PingoRoot {
+  const coreRoot: { current: CoreDrivenPingoRoot | undefined } = { current: undefined };
   const sink = new CanvasFrameSink(
     context,
     core,

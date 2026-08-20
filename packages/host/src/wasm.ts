@@ -1,4 +1,4 @@
-import initialize, { WasmCore } from "../wasm/doper_core";
+import initialize, { WasmCore } from "../wasm/pingo_core";
 
 import type { CoreClient } from "./main-thread";
 

@@ -14,21 +14,21 @@ interface MessageEndpoint {
 interface MutationMessage {
   readonly bytes: ArrayBuffer;
   readonly frameSeq: number;
-  readonly kind: "doper:mutation";
+  readonly kind: "pingo:mutation";
   readonly sessionId: number;
   readonly version: number;
 }
 
 interface AcknowledgementMessage {
   readonly frameSeq: number;
-  readonly kind: "doper:mutation-ack";
+  readonly kind: "pingo:mutation-ack";
   readonly sessionId: number;
   readonly version: number;
 }
 
 interface ErrorMessage {
   readonly error: string;
-  readonly kind: "doper:mutation-error";
+  readonly kind: "pingo:mutation-error";
   readonly sessionId: number;
   readonly version: number;
 }
@@ -198,11 +198,11 @@ export class PostMessageMutationTransport {
       this.fail(new Error("postMessage transport version mismatch"));
       return;
     }
-    if (message.kind === "doper:mutation-error") {
+    if (message.kind === "pingo:mutation-error") {
       this.fail(new Error(`render Worker rejected mutation: ${message.error}`));
       return;
     }
-    if (message.kind !== "doper:mutation-ack") return;
+    if (message.kind !== "pingo:mutation-ack") return;
     const expected = this.#inFlight[0];
     if (expected === undefined || message.frameSeq !== expected.frameSeq) {
       this.fail(new Error("postMessage acknowledgement is missing, duplicate, or out of order"));
@@ -229,7 +229,7 @@ export class PostMessageMutationTransport {
       const message: MutationMessage = {
         bytes: frame.bytes,
         frameSeq: frame.frameSeq,
-        kind: "doper:mutation",
+        kind: "pingo:mutation",
         sessionId: this.#sessionId,
         version: TRANSPORT_VERSION,
       };
@@ -381,7 +381,7 @@ export class PostMessageMutationReceiver {
     this.#lastSequence = sequence;
     const acknowledgement: AcknowledgementMessage = {
       frameSeq: sequence,
-      kind: "doper:mutation-ack",
+      kind: "pingo:mutation-ack",
       sessionId: this.#sessionId,
       version: TRANSPORT_VERSION,
     };
@@ -391,7 +391,7 @@ export class PostMessageMutationReceiver {
   private postError(error: Error): void {
     const message: ErrorMessage = {
       error: error.message,
-      kind: "doper:mutation-error",
+      kind: "pingo:mutation-error",
       sessionId: this.#sessionId,
       version: TRANSPORT_VERSION,
     };
@@ -414,24 +414,24 @@ export class PostMessageMutationReceiver {
 function isTransportMessage(value: unknown): value is AcknowledgementMessage | ErrorMessage {
   if (!isTransportEnvelope(value)) return false;
   if (!isPositiveU32(value.sessionId) || !Number.isInteger(value.version)) return false;
-  return value.kind === "doper:mutation-ack"
+  return value.kind === "pingo:mutation-ack"
     ? isPositiveU32(value.frameSeq)
     : typeof value.error === "string";
 }
 
 function isTransportEnvelope(value: unknown): value is Record<string, unknown> & {
-  readonly kind: "doper:mutation-ack" | "doper:mutation-error";
+  readonly kind: "pingo:mutation-ack" | "pingo:mutation-error";
 } {
   if (typeof value !== "object" || value === null) return false;
   const kind = (value as { kind?: unknown }).kind;
-  return kind === "doper:mutation-ack" || kind === "doper:mutation-error";
+  return kind === "pingo:mutation-ack" || kind === "pingo:mutation-error";
 }
 
 function isMutationMessage(value: unknown): value is MutationMessage {
   if (!isMutationEnvelope(value)) return false;
   const message = value as Partial<MutationMessage>;
   return (
-    message.kind === "doper:mutation" &&
+    message.kind === "pingo:mutation" &&
     isPositiveU32(message.sessionId) &&
     Number.isInteger(message.version) &&
     isPositiveU32(message.frameSeq) &&
@@ -441,11 +441,11 @@ function isMutationMessage(value: unknown): value is MutationMessage {
 
 function isMutationEnvelope(
   value: unknown,
-): value is Record<string, unknown> & { readonly kind: "doper:mutation" } {
+): value is Record<string, unknown> & { readonly kind: "pingo:mutation" } {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as { kind?: unknown }).kind === "doper:mutation"
+    (value as { kind?: unknown }).kind === "pingo:mutation"
   );
 }
 

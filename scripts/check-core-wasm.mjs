@@ -5,8 +5,8 @@ import { createServer } from "vite";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const wasmDirectory = path.join(repositoryRoot, "packages/host/wasm");
-const wasmModule = await import(pathToFileURL(path.join(wasmDirectory, "doper_core.js")));
-const wasmBytes = await readFile(path.join(wasmDirectory, "doper_core_bg.wasm"));
+const wasmModule = await import(pathToFileURL(path.join(wasmDirectory, "pingo_core.js")));
+const wasmBytes = await readFile(path.join(wasmDirectory, "pingo_core_bg.wasm"));
 await wasmModule.default({ module_or_path: wasmBytes });
 
 const bundler = await createServer({

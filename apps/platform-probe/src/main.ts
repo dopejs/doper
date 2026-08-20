@@ -56,9 +56,9 @@ interface ProbeReport {
 
 const runner = new PlatformProbeRunner();
 const searchParameters = new URLSearchParams(location.search);
-const configuredBuildId: unknown = Reflect.get(import.meta.env, "VITE_DOPER_BUILD_ID");
-const configuredDeviceId: unknown = Reflect.get(import.meta.env, "VITE_DOPER_DEVICE_ID");
-const configuredRoleId: unknown = Reflect.get(import.meta.env, "VITE_DOPER_ROLE_ID");
+const configuredBuildId: unknown = Reflect.get(import.meta.env, "VITE_PINGO_BUILD_ID");
+const configuredDeviceId: unknown = Reflect.get(import.meta.env, "VITE_PINGO_DEVICE_ID");
+const configuredRoleId: unknown = Reflect.get(import.meta.env, "VITE_PINGO_ROLE_ID");
 const requestedDeviceId = searchParameters.get("deviceId");
 const requestedRoleId = searchParameters.get("roleId");
 const deviceId =
@@ -81,7 +81,7 @@ const report: ProbeReport = {
   runId: crypto.randomUUID(),
   version: 1,
 };
-Reflect.set(window, "__DOPER_PLATFORM_PROBE_REPORT__", report);
+Reflect.set(window, "__PINGO_PLATFORM_PROBE_REPORT__", report);
 const runButton = element<HTMLButtonElement>("run-all");
 const exportButton = element<HTMLButtonElement>("export");
 const archiveButton = element<HTMLButtonElement>("archive");
@@ -545,7 +545,7 @@ function exportReport(): void {
   syncReportSnapshot();
   downloadJson(
     report,
-    `doper-platform-probe-${new Date().toISOString().replaceAll(":", "-")}.json`,
+    `pingo-platform-probe-${new Date().toISOString().replaceAll(":", "-")}.json`,
   );
 }
 
@@ -558,7 +558,7 @@ function exportImeRecording(): void {
   }
   const recording = buildImeRecording(snapshot);
   syncImeRecording(snapshot);
-  downloadJson(recording, `doper-ime-${recording.recordingId}.json`);
+  downloadJson(recording, `pingo-ime-${recording.recordingId}.json`);
   imeFinalized = true;
   editingProbe.setInputEnabled(false);
   updateImeControls(snapshot);

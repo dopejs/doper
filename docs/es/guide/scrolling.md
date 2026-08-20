@@ -6,7 +6,7 @@ La latencia de cola de las listas virtuales en DOM viene de la cadena: el evento
 hilo principal, dispara setState, hay diff y reflow. En cuanto el hilo principal se ocupa, se pierden
 fotogramas.
 
-doper mete el cálculo de la ventana en el Core: el scroll en régimen permanente **no llama nunca a la
+pingo mete el cálculo de la ventana en el Core: el scroll en régimen permanente **no llama nunca a la
 capa TypeScript**. Ésta sólo materializa el rango visible siguiendo la ventana de precarga que
 planifica el Core; si los datos aún no están, se dibuja un marcador y se completa en fotogramas
 posteriores.
