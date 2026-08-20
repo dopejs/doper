@@ -38,7 +38,7 @@ for (const [file, contents] of outputs) {
 if (stale) process.exitCode = 1;
 
 function validateSchema(value) {
-  if (value.schemaVersion !== 1 || value.abiVersion !== 11) {
+  if (value.schemaVersion !== 1 || value.abiVersion !== 12) {
     throw new Error("unsupported protocol schema or ABI version");
   }
   if (value.endianness !== "little" || value.alignment !== 4) {
@@ -175,7 +175,7 @@ function validateSchema(value) {
     throw new Error("editing geometry batch has an invalid packed-u32 layout");
   }
 
-  const domains = new Set(["layout", "paint", "paintSelf", "hit", "semantics"]);
+  const domains = new Set(["layout", "paint", "paintSelf", "hit", "semantics", "scroll"]);
   const valueTypes = new Set(["f32", "vec4", "ref"]);
   const resourceKinds = new Set(value.resourceKinds.map((kind) => kind.name));
   if (value.resourceLayouts.version !== 1 || !Array.isArray(value.resourceLayouts.layouts)) {
@@ -307,7 +307,7 @@ function renderRustBase(value) {
     .map((prop) => {
       const mask = prop.invalidation.reduce(
         (result, domain) =>
-          result | { layout: 1, paint: 2, paintSelf: 4, hit: 8, semantics: 16 }[domain],
+          result | { layout: 1, paint: 2, paintSelf: 4, hit: 8, semantics: 16, scroll: 32 }[domain],
         0,
       );
       return `            Self::${prop.name} => Invalidation::from_bits(${mask}),`;
@@ -468,7 +468,7 @@ function renderTypeScriptBase(value) {
   const streamHeaderBytes = wireSize(value.streamHeader.map((field) => field.type));
   const instructionHeaderBytes = wireSize(value.instructionHeader.map((field) => field.type));
   const recordHeaderBytes = wireSize(value.recordHeader.map((field) => field.type));
-  const domains = { layout: 1, paint: 2, paintSelf: 4, hit: 8, semantics: 16 };
+  const domains = { layout: 1, paint: 2, paintSelf: 4, hit: 8, semantics: 16, scroll: 32 };
   const props = value.props
     .map((prop) => {
       const mask = prop.invalidation.reduce((result, domain) => result | domains[domain], 0);

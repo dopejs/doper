@@ -3,6 +3,126 @@
 export const CSS_SUBSET_VERSION = "1.0.0" as const;
 export const STYLE_PROPERTY_MAX_ID = 58 as const;
 export const STYLE_RESERVED_PROPERTY_IDS = [17] as const;
+export const STYLE_INTERACTION_STATES = {
+  "hover": 1,
+  "active": 2,
+  "focus": 4,
+  "focus-visible": 8,
+} as const;
+export const STYLE_INTERACTION_STATE_MASK = 15 as const;
+export const STYLE_STATE_PROPERTIES = [
+  "backgroundColor",
+  "color",
+  "opacity",
+  "borderTopColor",
+  "borderRightColor",
+  "borderBottomColor",
+  "borderLeftColor",
+  "borderRadius",
+  "visibility",
+  "transform",
+  "transformOrigin",
+  "pointerEvents",
+  "cursor",
+] as const;
+export const STYLE_COMPUTED_ENCODING = {
+  version: 1,
+  variant: 1,
+  maximumBytes: 65536,
+  maximumEntries: 912,
+  valueTags: {
+    keyword: 1,
+    length: 2,
+    rgba8: 3,
+    f32: 4,
+    fontFamilyList: 5,
+    u16: 6,
+    lineHeight: 7,
+    transformList: 8,
+    position: 9,
+  },
+  lengthUnits: { px: 1, percent: 2, auto: 3, none: 4, normal: 5, number: 6 },
+  transformOperations: { matrix: 1, translate: 2, scale: 3, rotate: 4 },
+} as const;
+export const STYLE_KEYWORD_IDS = {
+  "anywhere": 1,
+  "auto": 2,
+  "baseline": 3,
+  "border-box": 4,
+  "break-word": 5,
+  "center": 6,
+  "clip": 7,
+  "column": 8,
+  "column-reverse": 9,
+  "contain": 10,
+  "content-box": 11,
+  "cover": 12,
+  "crosshair": 13,
+  "default": 14,
+  "ellipsis": 15,
+  "end": 16,
+  "fill": 17,
+  "flex": 18,
+  "flex-end": 19,
+  "flex-start": 20,
+  "grab": 21,
+  "grabbing": 22,
+  "hidden": 23,
+  "italic": 24,
+  "justify": 25,
+  "left": 26,
+  "manipulation": 27,
+  "none": 28,
+  "normal": 29,
+  "not-allowed": 30,
+  "nowrap": 31,
+  "pan-x": 32,
+  "pan-y": 33,
+  "pointer": 34,
+  "pre": 35,
+  "pre-line": 36,
+  "pre-wrap": 37,
+  "right": 38,
+  "row": 39,
+  "row-reverse": 40,
+  "scale-down": 41,
+  "scroll": 42,
+  "solid": 43,
+  "space-around": 44,
+  "space-between": 45,
+  "space-evenly": 46,
+  "start": 47,
+  "stretch": 48,
+  "text": 49,
+  "visible": 50,
+} as const;
+export const STYLE_GRAMMAR_KEYWORDS = {
+  "align-items": ["baseline", "center", "flex-end", "flex-start", "stretch"],
+  "border-style": ["none", "solid"],
+  "box-sizing": ["border-box", "content-box"],
+  "cursor": ["auto", "crosshair", "default", "grab", "grabbing", "not-allowed", "pointer", "text"],
+  "display": ["flex", "none"],
+  "flex-direction": ["column", "column-reverse", "row", "row-reverse"],
+  "font-style": ["italic", "normal"],
+  "justify-content": [
+    "center",
+    "flex-end",
+    "flex-start",
+    "space-around",
+    "space-between",
+    "space-evenly",
+  ],
+  "object-fit": ["contain", "cover", "fill", "none", "scale-down"],
+  "overflow": ["auto", "clip", "hidden", "scroll", "visible"],
+  "overflow-wrap": ["anywhere", "break-word", "normal"],
+  "overscroll-behavior": ["auto", "contain", "none"],
+  "pointer-events": ["auto", "none"],
+  "text-align": ["center", "end", "justify", "left", "right", "start"],
+  "text-overflow": ["clip", "ellipsis"],
+  "touch-action": ["auto", "manipulation", "none", "pan-x", "pan-y"],
+  "visibility": ["hidden", "visible"],
+  "white-space": ["normal", "nowrap", "pre", "pre-line", "pre-wrap"],
+} as const;
 export type PingoStyleNodeType = "view" | "text" | "image" | "input" | "textArea" | "video";
 export type PingoStyleLength = number | `${number}px` | `${number}%`;
 export type PingoStyleColor = `#${string}` | "transparent";
@@ -1096,3 +1216,6 @@ export type StyleShorthandName = keyof typeof STYLE_SHORTHANDS;
 export type StyleDeclarationName = keyof PingoStyle;
 export type StylePropertyMetadata = (typeof STYLE_PROPERTIES)[StylePropertyName];
 export type StyleInvalidationDomain = (typeof STYLE_INVALIDATION_DOMAINS)[number];
+export type StyleInteractionStateName = keyof typeof STYLE_INTERACTION_STATES;
+export type StyleStatePropertyName = (typeof STYLE_STATE_PROPERTIES)[number];
+export type StyleKeywordName = keyof typeof STYLE_KEYWORD_IDS;

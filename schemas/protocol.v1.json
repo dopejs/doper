@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 11,
+  "abiVersion": 12,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -971,6 +971,10 @@
     {
       "name": "Affine",
       "id": 8
+    },
+    {
+      "name": "ComputedStyle",
+      "id": 9
     }
   ],
   "resourceLayouts": {
@@ -1151,6 +1155,39 @@
           },
           "align4"
         ]
+      },
+      {
+        "name": "ComputedStyle",
+        "resourceKind": "ComputedStyle",
+        "variant": 1,
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "variant",
+            "type": "u8"
+          },
+          "pad16",
+          {
+            "name": "featureBits",
+            "type": "u32"
+          },
+          {
+            "name": "entryCount",
+            "type": "u32"
+          },
+          {
+            "name": "payloadBytes",
+            "type": "u32"
+          },
+          {
+            "name": "payload",
+            "type": "bytes"
+          },
+          "align4"
+        ]
       }
     ]
   },
@@ -1289,6 +1326,13 @@
       "valueType": "ref",
       "resourceKind": "Utf8String",
       "invalidation": ["semantics"]
+    },
+    {
+      "name": "ComputedStyle",
+      "id": 80,
+      "valueType": "ref",
+      "resourceKind": "ComputedStyle",
+      "invalidation": ["layout", "paint", "paintSelf", "hit", "semantics", "scroll"]
     }
   ],
   "instructionFlags": {

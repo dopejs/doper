@@ -12,6 +12,7 @@ export type StyleDiagnosticCode =
   | "invalid-class-name"
   | "invalid-css"
   | "property-not-applicable"
+  | "state-property-not-supported"
   | "unsupported-selector"
   | "unsupported-value"
   | "unknown-property";
@@ -68,6 +69,8 @@ export interface ResolveStyleOptions {
   readonly styleSheets?: readonly PingoStyleSheet[];
   readonly inlineStyle?: PingoStyle;
   readonly parentStyle?: ComputedStyle;
+  /** Core-compatible interaction-state bits used to select same-node pseudo rules. */
+  readonly interactionState?: number;
   /** Published 0.x direct props. They outrank inline style during migration. */
   readonly legacyStyle?: Readonly<Partial<Record<StylePropertyName, unknown>>>;
 }
@@ -76,6 +79,17 @@ export interface ResolveStyleOptions {
 export interface ResolveStyleResult {
   readonly style: ComputedStyle;
   readonly diagnostics: readonly StyleDiagnostic[];
+}
+
+/** One exact interaction-state result whose values differ from the base style. */
+export interface InteractionStyleVariant {
+  readonly stateMask: number;
+  readonly style: ComputedStyle;
+}
+
+/** Base computed style plus minimal exact-state overrides ready for Core encoding. */
+export interface ResolveInteractionStylesResult extends ResolveStyleResult {
+  readonly variants: readonly InteractionStyleVariant[];
 }
 
 /** One resolution from the memoizing Shell-side computed-style resolver. */
@@ -119,6 +133,8 @@ export interface StyleCapabilities {
   readonly featureBits: number;
   readonly resolverReady: true;
   readonly engineReady: false;
+  readonly interactionStateMask: number;
+  readonly stateProperties: readonly StylePropertyName[];
   readonly properties: readonly StyleCapability[];
 }
 

@@ -4,6 +4,7 @@ pub const CSS_SUBSET_VERSION: &str = "1.0.0";
 pub const STYLE_PROPERTY_COUNT: usize = 57;
 pub const STYLE_PROPERTY_MAX_ID: u16 = 58;
 pub const STYLE_RESERVED_PROPERTY_IDS: &[u16] = &[17];
+pub const STYLE_STATE_PROPERTY_IDS: &[u16] = &[26, 27, 28, 33, 34, 35, 36, 41, 42, 52, 53, 54, 55];
 pub const STYLE_ALL_FEATURE_BITS: u32 = 1;
 pub const STYLE_FEATURE_M6_FOUNDATION: u32 = 1;
 pub const STYLE_INVALIDATION_LAYOUT: u8 = 1;
@@ -12,6 +13,204 @@ pub const STYLE_INVALIDATION_PAINT_SELF: u8 = 4;
 pub const STYLE_INVALIDATION_HIT: u8 = 8;
 pub const STYLE_INVALIDATION_SEMANTICS: u8 = 16;
 pub const STYLE_INVALIDATION_SCROLL: u8 = 32;
+pub const STYLE_INTERACTION_HOVER: u8 = 1;
+pub const STYLE_INTERACTION_ACTIVE: u8 = 2;
+pub const STYLE_INTERACTION_FOCUS: u8 = 4;
+pub const STYLE_INTERACTION_FOCUS_VISIBLE: u8 = 8;
+pub const STYLE_INTERACTION_STATE_MASK: u8 = 15;
+pub const STYLE_COMPUTED_ENCODING_VERSION: u8 = 1;
+pub const STYLE_COMPUTED_ENCODING_VARIANT: u8 = 1;
+pub const STYLE_COMPUTED_MAX_BYTES: usize = 65536;
+pub const STYLE_COMPUTED_MAX_ENTRIES: usize = 912;
+pub const STYLE_VALUE_KEYWORD: u8 = 1;
+pub const STYLE_VALUE_LENGTH: u8 = 2;
+pub const STYLE_VALUE_RGBA8: u8 = 3;
+pub const STYLE_VALUE_F32: u8 = 4;
+pub const STYLE_VALUE_FONT_FAMILY_LIST: u8 = 5;
+pub const STYLE_VALUE_U16: u8 = 6;
+pub const STYLE_VALUE_LINE_HEIGHT: u8 = 7;
+pub const STYLE_VALUE_TRANSFORM_LIST: u8 = 8;
+pub const STYLE_VALUE_POSITION: u8 = 9;
+pub const STYLE_LENGTH_PX: u8 = 1;
+pub const STYLE_LENGTH_PERCENT: u8 = 2;
+pub const STYLE_LENGTH_AUTO: u8 = 3;
+pub const STYLE_LENGTH_NONE: u8 = 4;
+pub const STYLE_LENGTH_NORMAL: u8 = 5;
+pub const STYLE_LENGTH_NUMBER: u8 = 6;
+pub const STYLE_TRANSFORM_MATRIX: u8 = 1;
+pub const STYLE_TRANSFORM_TRANSLATE: u8 = 2;
+pub const STYLE_TRANSFORM_SCALE: u8 = 3;
+pub const STYLE_TRANSFORM_ROTATE: u8 = 4;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
+pub enum StyleKeyword {
+    Anywhere = 1,
+    Auto = 2,
+    Baseline = 3,
+    BorderBox = 4,
+    BreakWord = 5,
+    Center = 6,
+    Clip = 7,
+    Column = 8,
+    ColumnReverse = 9,
+    Contain = 10,
+    ContentBox = 11,
+    Cover = 12,
+    Crosshair = 13,
+    Default = 14,
+    Ellipsis = 15,
+    End = 16,
+    Fill = 17,
+    Flex = 18,
+    FlexEnd = 19,
+    FlexStart = 20,
+    Grab = 21,
+    Grabbing = 22,
+    Hidden = 23,
+    Italic = 24,
+    Justify = 25,
+    Left = 26,
+    Manipulation = 27,
+    None = 28,
+    Normal = 29,
+    NotAllowed = 30,
+    Nowrap = 31,
+    PanX = 32,
+    PanY = 33,
+    Pointer = 34,
+    Pre = 35,
+    PreLine = 36,
+    PreWrap = 37,
+    Right = 38,
+    Row = 39,
+    RowReverse = 40,
+    ScaleDown = 41,
+    Scroll = 42,
+    Solid = 43,
+    SpaceAround = 44,
+    SpaceBetween = 45,
+    SpaceEvenly = 46,
+    Start = 47,
+    Stretch = 48,
+    Text = 49,
+    Visible = 50,
+}
+
+impl StyleKeyword {
+    #[must_use]
+    pub const fn from_u16(value: u16) -> Option<Self> {
+        match value {
+            1 => Some(Self::Anywhere),
+            2 => Some(Self::Auto),
+            3 => Some(Self::Baseline),
+            4 => Some(Self::BorderBox),
+            5 => Some(Self::BreakWord),
+            6 => Some(Self::Center),
+            7 => Some(Self::Clip),
+            8 => Some(Self::Column),
+            9 => Some(Self::ColumnReverse),
+            10 => Some(Self::Contain),
+            11 => Some(Self::ContentBox),
+            12 => Some(Self::Cover),
+            13 => Some(Self::Crosshair),
+            14 => Some(Self::Default),
+            15 => Some(Self::Ellipsis),
+            16 => Some(Self::End),
+            17 => Some(Self::Fill),
+            18 => Some(Self::Flex),
+            19 => Some(Self::FlexEnd),
+            20 => Some(Self::FlexStart),
+            21 => Some(Self::Grab),
+            22 => Some(Self::Grabbing),
+            23 => Some(Self::Hidden),
+            24 => Some(Self::Italic),
+            25 => Some(Self::Justify),
+            26 => Some(Self::Left),
+            27 => Some(Self::Manipulation),
+            28 => Some(Self::None),
+            29 => Some(Self::Normal),
+            30 => Some(Self::NotAllowed),
+            31 => Some(Self::Nowrap),
+            32 => Some(Self::PanX),
+            33 => Some(Self::PanY),
+            34 => Some(Self::Pointer),
+            35 => Some(Self::Pre),
+            36 => Some(Self::PreLine),
+            37 => Some(Self::PreWrap),
+            38 => Some(Self::Right),
+            39 => Some(Self::Row),
+            40 => Some(Self::RowReverse),
+            41 => Some(Self::ScaleDown),
+            42 => Some(Self::Scroll),
+            43 => Some(Self::Solid),
+            44 => Some(Self::SpaceAround),
+            45 => Some(Self::SpaceBetween),
+            46 => Some(Self::SpaceEvenly),
+            47 => Some(Self::Start),
+            48 => Some(Self::Stretch),
+            49 => Some(Self::Text),
+            50 => Some(Self::Visible),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Anywhere => "anywhere",
+            Self::Auto => "auto",
+            Self::Baseline => "baseline",
+            Self::BorderBox => "border-box",
+            Self::BreakWord => "break-word",
+            Self::Center => "center",
+            Self::Clip => "clip",
+            Self::Column => "column",
+            Self::ColumnReverse => "column-reverse",
+            Self::Contain => "contain",
+            Self::ContentBox => "content-box",
+            Self::Cover => "cover",
+            Self::Crosshair => "crosshair",
+            Self::Default => "default",
+            Self::Ellipsis => "ellipsis",
+            Self::End => "end",
+            Self::Fill => "fill",
+            Self::Flex => "flex",
+            Self::FlexEnd => "flex-end",
+            Self::FlexStart => "flex-start",
+            Self::Grab => "grab",
+            Self::Grabbing => "grabbing",
+            Self::Hidden => "hidden",
+            Self::Italic => "italic",
+            Self::Justify => "justify",
+            Self::Left => "left",
+            Self::Manipulation => "manipulation",
+            Self::None => "none",
+            Self::Normal => "normal",
+            Self::NotAllowed => "not-allowed",
+            Self::Nowrap => "nowrap",
+            Self::PanX => "pan-x",
+            Self::PanY => "pan-y",
+            Self::Pointer => "pointer",
+            Self::Pre => "pre",
+            Self::PreLine => "pre-line",
+            Self::PreWrap => "pre-wrap",
+            Self::Right => "right",
+            Self::Row => "row",
+            Self::RowReverse => "row-reverse",
+            Self::ScaleDown => "scale-down",
+            Self::Scroll => "scroll",
+            Self::Solid => "solid",
+            Self::SpaceAround => "space-around",
+            Self::SpaceBetween => "space-between",
+            Self::SpaceEvenly => "space-evenly",
+            Self::Start => "start",
+            Self::Stretch => "stretch",
+            Self::Text => "text",
+            Self::Visible => "visible",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StyleNodeType {
@@ -768,6 +967,69 @@ impl StyleProperty {
             Self::TouchAction => "\"auto\"",
             Self::ObjectFit => "\"fill\"",
             Self::ObjectPosition => "\"50% 50%\"",
+        }
+    }
+
+    #[must_use]
+    pub const fn accepts_keyword(self, keyword: StyleKeyword) -> bool {
+        match self {
+            Self::Display => matches!(keyword, StyleKeyword::Flex | StyleKeyword::None),
+            Self::BoxSizing => matches!(keyword, StyleKeyword::BorderBox | StyleKeyword::ContentBox),
+            Self::FlexDirection => matches!(keyword, StyleKeyword::Column | StyleKeyword::ColumnReverse | StyleKeyword::Row | StyleKeyword::RowReverse),
+            Self::JustifyContent => matches!(keyword, StyleKeyword::Center | StyleKeyword::FlexEnd | StyleKeyword::FlexStart | StyleKeyword::SpaceAround | StyleKeyword::SpaceBetween | StyleKeyword::SpaceEvenly),
+            Self::AlignItems => matches!(keyword, StyleKeyword::Baseline | StyleKeyword::Center | StyleKeyword::FlexEnd | StyleKeyword::FlexStart | StyleKeyword::Stretch),
+            Self::OverflowX => matches!(keyword, StyleKeyword::Auto | StyleKeyword::Clip | StyleKeyword::Hidden | StyleKeyword::Scroll | StyleKeyword::Visible),
+            Self::OverflowY => matches!(keyword, StyleKeyword::Auto | StyleKeyword::Clip | StyleKeyword::Hidden | StyleKeyword::Scroll | StyleKeyword::Visible),
+            Self::OverscrollBehavior => matches!(keyword, StyleKeyword::Auto | StyleKeyword::Contain | StyleKeyword::None),
+            Self::BorderTopStyle => matches!(keyword, StyleKeyword::None | StyleKeyword::Solid),
+            Self::BorderRightStyle => matches!(keyword, StyleKeyword::None | StyleKeyword::Solid),
+            Self::BorderBottomStyle => matches!(keyword, StyleKeyword::None | StyleKeyword::Solid),
+            Self::BorderLeftStyle => matches!(keyword, StyleKeyword::None | StyleKeyword::Solid),
+            Self::Visibility => matches!(keyword, StyleKeyword::Hidden | StyleKeyword::Visible),
+            Self::FontStyle => matches!(keyword, StyleKeyword::Italic | StyleKeyword::Normal),
+            Self::TextAlign => matches!(keyword, StyleKeyword::Center | StyleKeyword::End | StyleKeyword::Justify | StyleKeyword::Left | StyleKeyword::Right | StyleKeyword::Start),
+            Self::WhiteSpace => matches!(keyword, StyleKeyword::Normal | StyleKeyword::Nowrap | StyleKeyword::Pre | StyleKeyword::PreLine | StyleKeyword::PreWrap),
+            Self::OverflowWrap => matches!(keyword, StyleKeyword::Anywhere | StyleKeyword::BreakWord | StyleKeyword::Normal),
+            Self::TextOverflow => matches!(keyword, StyleKeyword::Clip | StyleKeyword::Ellipsis),
+            Self::PointerEvents => matches!(keyword, StyleKeyword::Auto | StyleKeyword::None),
+            Self::Cursor => matches!(keyword, StyleKeyword::Auto | StyleKeyword::Crosshair | StyleKeyword::Default | StyleKeyword::Grab | StyleKeyword::Grabbing | StyleKeyword::NotAllowed | StyleKeyword::Pointer | StyleKeyword::Text),
+            Self::TouchAction => matches!(keyword, StyleKeyword::Auto | StyleKeyword::Manipulation | StyleKeyword::None | StyleKeyword::PanX | StyleKeyword::PanY),
+            Self::ObjectFit => matches!(keyword, StyleKeyword::Contain | StyleKeyword::Cover | StyleKeyword::Fill | StyleKeyword::None | StyleKeyword::ScaleDown),
+            Self::Width => false,
+            Self::Height => false,
+            Self::MinWidth => false,
+            Self::MinHeight => false,
+            Self::MaxWidth => false,
+            Self::MaxHeight => false,
+            Self::MarginTop => false,
+            Self::MarginRight => false,
+            Self::MarginBottom => false,
+            Self::MarginLeft => false,
+            Self::PaddingTop => false,
+            Self::PaddingRight => false,
+            Self::PaddingBottom => false,
+            Self::PaddingLeft => false,
+            Self::RowGap => false,
+            Self::ColumnGap => false,
+            Self::BackgroundColor => false,
+            Self::Color => false,
+            Self::Opacity => false,
+            Self::BorderTopWidth => false,
+            Self::BorderRightWidth => false,
+            Self::BorderBottomWidth => false,
+            Self::BorderLeftWidth => false,
+            Self::BorderTopColor => false,
+            Self::BorderRightColor => false,
+            Self::BorderBottomColor => false,
+            Self::BorderLeftColor => false,
+            Self::BorderRadius => false,
+            Self::FontFamily => false,
+            Self::FontSize => false,
+            Self::FontWeight => false,
+            Self::LineHeight => false,
+            Self::Transform => false,
+            Self::TransformOrigin => false,
+            Self::ObjectPosition => false,
         }
     }
 }

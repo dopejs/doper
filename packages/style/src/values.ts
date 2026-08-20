@@ -1,5 +1,6 @@
 import {
   STYLE_PROPERTIES,
+  STYLE_GRAMMAR_KEYWORDS,
   STYLE_SHORTHANDS,
   type StyleDeclarationName,
   type StylePropertyMetadata,
@@ -229,36 +230,8 @@ function parsePropertyValue(grammar: string, rawValue: unknown): SpecifiedStyleV
   }
 }
 
-const enumValues: Readonly<Record<string, readonly string[]>> = {
-  "align-items": ["baseline", "center", "flex-end", "flex-start", "stretch"],
-  "border-style": ["none", "solid"],
-  "box-sizing": ["border-box", "content-box"],
-  "cursor": ["auto", "crosshair", "default", "grab", "grabbing", "not-allowed", "pointer", "text"],
-  "display": ["flex", "none"],
-  "flex-direction": ["column", "column-reverse", "row", "row-reverse"],
-  "font-style": ["italic", "normal"],
-  "justify-content": [
-    "center",
-    "flex-end",
-    "flex-start",
-    "space-around",
-    "space-between",
-    "space-evenly",
-  ],
-  "object-fit": ["contain", "cover", "fill", "none", "scale-down"],
-  "overflow": ["auto", "clip", "hidden", "scroll", "visible"],
-  "overflow-wrap": ["anywhere", "break-word", "normal"],
-  "overscroll-behavior": ["auto", "contain", "none"],
-  "pointer-events": ["auto", "none"],
-  "text-align": ["center", "end", "justify", "left", "right", "start"],
-  "text-overflow": ["clip", "ellipsis"],
-  "touch-action": ["auto", "manipulation", "none", "pan-x", "pan-y"],
-  "visibility": ["hidden", "visible"],
-  "white-space": ["normal", "nowrap", "pre", "pre-line", "pre-wrap"],
-};
-
 function parseEnum(grammar: string, rawValue: unknown): string | null {
-  const values = enumValues[grammar];
+  const values = (STYLE_GRAMMAR_KEYWORDS as Readonly<Record<string, readonly string[]>>)[grammar];
   if (typeof rawValue !== "string") return null;
   const normalized = rawValue.toLowerCase();
   return values?.includes(normalized) === true ? normalized : null;

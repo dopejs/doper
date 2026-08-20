@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   CSS_SUBSET_VERSION,
+  STYLE_INTERACTION_STATES,
   STYLE_PROPERTIES,
   type STYLE_SHORTHANDS,
   StyleSheetCompileError,
   compileStyleSheet,
   createStyleSheet,
+  resolveInteractionStyles,
   resolveStyle,
   styleCapabilities,
   supportsStyle,
@@ -99,7 +101,7 @@ describe("stylesheet compilation", () => {
 
   it("returns structured source diagnostics and the throwing API preserves them", () => {
     const result = compileStyleSheet(
-      ".ok { width: 10px; }\n.bad:hover { mystery: 1px !important; }",
+      ".ok { width: 10px; }\n.bad > .child { mystery: 1px !important; }",
       { sourceName: "bad.css" },
     );
     expect(result.styleSheet).toBeNull();
@@ -118,6 +120,22 @@ describe("stylesheet compilation", () => {
         "important-not-supported",
       );
     }
+  });
+
+  it("compiles same-node interaction pseudos and rejects feedback-loop declarations", () => {
+    const sheet = createStyleSheet(`
+      :focus-visible { color: #fff; }
+      .button:hover, .button.primary:active:focus { opacity: 0.5; cursor: pointer; }
+    `);
+    expect(sheet.ruleCount).toBe(3);
+
+    const invalid = compileStyleSheet(".button:hover { width: 10px; overflow: hidden; }");
+    expect(invalid.styleSheet).toBeNull();
+    expect(invalid.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      "state-property-not-supported",
+      "state-property-not-supported",
+      "state-property-not-supported",
+    ]);
   });
 
   it("rejects malformed CSS, unsupported values, and invalid object rules", () => {
@@ -215,6 +233,43 @@ describe("computed style resolver", () => {
         inlineStyle: { overflowX: "clip", overflowY: "scroll" },
       }).style,
     ).toMatchObject({ overflowX: "hidden", overflowY: "scroll" });
+  });
+
+  it("cascades interaction rules from a validated state bitset", () => {
+    const sheet = createStyleSheet(`
+      .button { color: #111; opacity: 1; }
+      .button:hover { color: #222; }
+      .button:hover:active { color: #333; opacity: 0.6; }
+      :focus-visible { cursor: text; }
+    `);
+    const base = { nodeType: "view" as const, className: "button", styleSheets: [sheet] };
+    expect(resolveStyle(base).style).toMatchObject({ color: "#111111ff", opacity: 1 });
+    expect(
+      resolveStyle({ ...base, interactionState: STYLE_INTERACTION_STATES.hover }).style,
+    ).toMatchObject({ color: "#222222ff", opacity: 1 });
+    expect(
+      resolveStyle({
+        ...base,
+        interactionState: STYLE_INTERACTION_STATES.hover | STYLE_INTERACTION_STATES.active,
+      }).style,
+    ).toMatchObject({ color: "#333333ff", opacity: 0.6 });
+    expect(
+      resolveStyle({
+        ...base,
+        interactionState: STYLE_INTERACTION_STATES["focus-visible"],
+      }).style.cursor,
+    ).toBe("text");
+    expect(() => resolveStyle({ ...base, interactionState: 1 << 7 })).toThrow(RangeError);
+
+    const compiled = resolveInteractionStyles(base);
+    expect(compiled.variants).toHaveLength(12);
+    expect(compiled.variants.find((variant) => variant.stateMask === 0b0011)?.style).toMatchObject({
+      color: "#333333ff",
+      opacity: 0.6,
+    });
+    expect(compiled.variants.find((variant) => variant.stateMask === 0b1000)?.style).toMatchObject({
+      cursor: "text",
+    });
   });
 
   it("normalizes keyword positions without swapping their axes", () => {

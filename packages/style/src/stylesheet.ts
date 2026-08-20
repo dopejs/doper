@@ -1,4 +1,9 @@
-import { CSS_SUBSET_VERSION, STYLE_FEATURE_BITS } from "./generated";
+import {
+  CSS_SUBSET_VERSION,
+  STYLE_FEATURE_BITS,
+  STYLE_INTERACTION_STATES,
+  STYLE_STATE_PROPERTIES,
+} from "./generated";
 import {
   INTERNAL_STYLE_SHEET,
   type CompiledDeclaration,
@@ -17,8 +22,9 @@ import type {
   StyleSourceLocation,
 } from "./types";
 
-const classNamePattern = /^[_a-zA-Z][_a-zA-Z0-9-]*$/u;
-const selectorPattern = /^(?:\.[_a-zA-Z][_a-zA-Z0-9-]*)+$/u;
+const selectorTokenPattern =
+  /(?:\.([_a-zA-Z][_a-zA-Z0-9-]*))|(?::(focus-visible|hover|active|focus))/gy;
+const stateProperties = new Set<string>(STYLE_STATE_PROPERTIES);
 const MAX_STYLESHEET_CODE_UNITS = 1_048_576;
 
 /** Compiles CSS text or a type-safe class map without throwing. */
@@ -141,10 +147,16 @@ function compileCssText(source: string, sourceName?: string): CompiledSource {
       diagnostics,
     );
     for (const selector of selectors) {
+      const acceptedDeclarations = validateStateDeclarations(
+        selector.stateMask,
+        declarations,
+        diagnostics,
+      );
       rules.push({
         classes: selector.classes,
-        specificity: selector.classes.length,
-        declarations,
+        stateMask: selector.stateMask,
+        specificity: selector.classes.length + selector.stateCount,
+        declarations: acceptedDeclarations,
       });
     }
     cursor = close + 1;
@@ -186,7 +198,8 @@ function compileObject(input: PingoStyleSheetObject, sourceName?: string): Compi
   const rules: CompiledRule[] = [];
   const diagnostics: StyleDiagnostic[] = [];
   for (const [rawSelector, style] of Object.entries(input)) {
-    const selectorText = rawSelector.startsWith(".") ? rawSelector : `.${rawSelector}`;
+    const selectorText =
+      rawSelector.startsWith(".") || rawSelector.startsWith(":") ? rawSelector : `.${rawSelector}`;
     const selectors = parseSelectorList(selectorText, selectorText, 0, sourceName, diagnostics);
     const declarations: CompiledDeclaration[] = [];
     if (!isRecord(style)) {
@@ -203,14 +216,42 @@ function compileObject(input: PingoStyleSheetObject, sourceName?: string): Compi
       diagnostics.push(...expanded.diagnostics);
     }
     for (const selector of selectors) {
+      const acceptedDeclarations = validateStateDeclarations(
+        selector.stateMask,
+        declarations,
+        diagnostics,
+      );
       rules.push({
         classes: selector.classes,
-        specificity: selector.classes.length,
-        declarations: [...declarations],
+        stateMask: selector.stateMask,
+        specificity: selector.classes.length + selector.stateCount,
+        declarations: [...acceptedDeclarations],
       });
     }
   }
   return { rules, diagnostics };
+}
+
+function validateStateDeclarations(
+  stateMask: number,
+  declarations: readonly CompiledDeclaration[],
+  diagnostics: StyleDiagnostic[],
+): readonly CompiledDeclaration[] {
+  if (stateMask === 0) return declarations;
+  const accepted: CompiledDeclaration[] = [];
+  for (const declaration of declarations) {
+    if (stateProperties.has(declaration.property)) accepted.push(declaration);
+    else {
+      diagnostics.push({
+        code: "state-property-not-supported",
+        severity: "error",
+        message: `${declaration.property} cannot change in an interaction pseudo rule`,
+        property: declaration.property,
+        ...(declaration.location === undefined ? {} : { location: declaration.location }),
+      });
+    }
+  }
+  return accepted;
 }
 
 function parseCssDeclarations(
@@ -260,6 +301,8 @@ function parseCssDeclarations(
 
 interface ParsedSelector {
   readonly classes: readonly string[];
+  readonly stateMask: number;
+  readonly stateCount: number;
 }
 
 function parseSelectorList(
@@ -274,11 +317,12 @@ function parseSelectorList(
     const selector = rawSelector.trim();
     const offset =
       selectorOffset + selectorText.indexOf(rawSelector) + rawSelector.indexOf(selector);
-    if (!selectorPattern.test(selector)) {
+    const parsed = parseSameNodeSelector(selector);
+    if (parsed === null) {
       diagnostics.push(
         sourceDiagnostic(
           "unsupported-selector",
-          `Only same-node class selectors are supported; received ${JSON.stringify(selector)}`,
+          `Only same-node class and interaction pseudo selectors are supported; received ${JSON.stringify(selector)}`,
           originalSource,
           Math.max(0, offset),
           sourceName,
@@ -286,10 +330,7 @@ function parseSelectorList(
       );
       continue;
     }
-    const classes = selector
-      .split(".")
-      .slice(1)
-      .filter((name) => classNamePattern.test(name));
+    const { classes, states } = parsed;
     if (new Set(classes).size !== classes.length) {
       diagnostics.push(
         sourceDiagnostic(
@@ -302,9 +343,46 @@ function parseSelectorList(
       );
       continue;
     }
-    selectors.push({ classes });
+    if (new Set(states).size !== states.length) {
+      diagnostics.push(
+        sourceDiagnostic(
+          "unsupported-selector",
+          `Duplicate pseudo state in selector ${JSON.stringify(selector)}`,
+          originalSource,
+          Math.max(0, offset),
+          sourceName,
+        ),
+      );
+      continue;
+    }
+    const stateMask = states.reduce((mask, state) => mask | STYLE_INTERACTION_STATES[state], 0);
+    selectors.push({ classes, stateMask, stateCount: states.length });
   }
   return selectors;
+}
+
+function parseSameNodeSelector(selector: string): {
+  readonly classes: string[];
+  readonly states: Array<keyof typeof STYLE_INTERACTION_STATES>;
+} | null {
+  if (selector === "") return null;
+  const classes: string[] = [];
+  const states: Array<keyof typeof STYLE_INTERACTION_STATES> = [];
+  selectorTokenPattern.lastIndex = 0;
+  let cursor = 0;
+  for (;;) {
+    const match = selectorTokenPattern.exec(selector);
+    if (match === null) break;
+    if (match.index !== cursor) return null;
+    cursor = selectorTokenPattern.lastIndex;
+    if (match[1] !== undefined) classes.push(match[1]);
+    else if (match[2] !== undefined) {
+      states.push(match[2] as keyof typeof STYLE_INTERACTION_STATES);
+    }
+  }
+  return cursor === selector.length && (classes.length > 0 || states.length > 0)
+    ? { classes, states }
+    : null;
 }
 
 function replaceComments(
@@ -410,6 +488,7 @@ function skipWhitespace(value: string, offset: number): number {
 function freezeRule(rule: CompiledRule): CompiledRule {
   return Object.freeze({
     classes: Object.freeze([...rule.classes]),
+    stateMask: rule.stateMask,
     specificity: rule.specificity,
     declarations: Object.freeze(rule.declarations.map((declaration) => Object.freeze(declaration))),
   });

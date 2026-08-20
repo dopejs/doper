@@ -83,6 +83,7 @@ function signatureForOptions(options: ResolveStyleOptions): string {
   const fields = [
     atom(options.nodeType),
     atom(options.className),
+    atom(options.interactionState),
     recordSignature(options.inlineStyle),
     recordSignature(options.parentStyle),
     recordSignature(options.legacyStyle),

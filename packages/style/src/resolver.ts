@@ -1,6 +1,8 @@
 import {
   CSS_SUBSET_VERSION,
   STYLE_FEATURE_BITS,
+  STYLE_INTERACTION_STATE_MASK,
+  STYLE_STATE_PROPERTIES,
   STYLE_PROPERTIES,
   type PingoStyle,
   type StylePropertyName,
@@ -10,6 +12,7 @@ import { expandDeclaration, metadataForProperty } from "./values";
 import type {
   ComputedStyleValue,
   ResolveStyleOptions,
+  ResolveInteractionStylesResult,
   ResolveStyleResult,
   StyleCapabilities,
   StyleCapability,
@@ -24,6 +27,8 @@ const capabilitySnapshot: StyleCapabilities = Object.freeze({
   featureBits,
   resolverReady: true,
   engineReady: false,
+  interactionStateMask: STYLE_INTERACTION_STATE_MASK,
+  stateProperties: Object.freeze([...STYLE_STATE_PROPERTIES]),
   properties: Object.freeze(
     properties.map((property) =>
       Object.freeze({
@@ -48,6 +53,7 @@ export function resolveStyle(options: ResolveStyleOptions): ResolveStyleResult {
   const classes = parseClassName(options.className, diagnostics);
   const candidates = new Map<StylePropertyName, CascadeCandidate>();
   let order = 0;
+  const interactionState = normalizeInteractionState(options.interactionState);
 
   for (const styleSheet of options.styleSheets ?? []) {
     if (!isInternalStyleSheet(styleSheet) || styleSheet.cssSubsetVersion !== CSS_SUBSET_VERSION) {
@@ -60,6 +66,7 @@ export function resolveStyle(options: ResolveStyleOptions): ResolveStyleResult {
     }
     for (const rule of styleSheet.rules) {
       if (!rule.classes.every((className) => classes.has(className))) continue;
+      if ((interactionState & rule.stateMask) !== rule.stateMask) continue;
       for (const declaration of rule.declarations) {
         order += 1;
         considerCandidate(
@@ -103,6 +110,38 @@ export function resolveStyle(options: ResolveStyleOptions): ResolveStyleResult {
     style: Object.freeze(computed),
     diagnostics: Object.freeze(diagnostics),
   });
+}
+
+/** Resolves every M6 interaction-state combination and retains only changed state properties. */
+export function resolveInteractionStyles(
+  options: Omit<ResolveStyleOptions, "interactionState">,
+): ResolveInteractionStylesResult {
+  const base = resolveStyle(options);
+  const variants = [];
+  for (let stateMask = 1; stateMask <= STYLE_INTERACTION_STATE_MASK; stateMask += 1) {
+    const resolved = resolveStyle({ ...options, interactionState: stateMask });
+    const changed: Partial<Record<StylePropertyName, ComputedStyleValue>> = {};
+    for (const property of STYLE_STATE_PROPERTIES) {
+      const value = resolved.style[property];
+      if (value !== undefined && !Object.is(value, base.style[property])) changed[property] = value;
+    }
+    if (Object.keys(changed).length > 0) {
+      variants.push(Object.freeze({ stateMask, style: Object.freeze(changed) }));
+    }
+  }
+  return Object.freeze({
+    style: base.style,
+    diagnostics: base.diagnostics,
+    variants: Object.freeze(variants),
+  });
+}
+
+function normalizeInteractionState(value: number | undefined): number {
+  if (value === undefined) return 0;
+  if (!Number.isInteger(value) || value < 0 || (value & ~STYLE_INTERACTION_STATE_MASK) !== 0) {
+    throw new RangeError("interactionState contains unsupported state bits");
+  }
+  return value;
 }
 
 /** Returns whether the M6-A Shell resolver accepts a property/value pair. */

@@ -1,11 +1,17 @@
 export { StyleSheetCompileError } from "./error";
 export {
   CSS_SUBSET_VERSION,
+  STYLE_COMPUTED_ENCODING,
   STYLE_FEATURE_BITS,
+  STYLE_GRAMMAR_KEYWORDS,
   STYLE_INVALIDATION_DOMAINS,
+  STYLE_INTERACTION_STATES,
+  STYLE_INTERACTION_STATE_MASK,
+  STYLE_KEYWORD_IDS,
   STYLE_PROPERTY_MAX_ID,
   STYLE_PROPERTIES,
   STYLE_RESERVED_PROPERTY_IDS,
+  STYLE_STATE_PROPERTIES,
   STYLE_SHORTHANDS,
   type PingoGlobalStyleKeyword,
   type PingoStyle,
@@ -14,12 +20,15 @@ export {
   type PingoStyleNodeType,
   type StyleDeclarationName,
   type StyleInvalidationDomain,
+  type StyleInteractionStateName,
+  type StyleKeywordName,
   type StylePropertyMetadata,
   type StylePropertyName,
+  type StyleStatePropertyName,
   type StyleShorthandName,
 } from "./generated";
 export { IncrementalStyleResolver } from "./incremental";
-export { resolveStyle, styleCapabilities, supportsStyle } from "./resolver";
+export { resolveInteractionStyles, resolveStyle, styleCapabilities, supportsStyle } from "./resolver";
 export { compileStyleSheet, createStyleSheet } from "./stylesheet";
 export type {
   CompileStyleSheetOptions,
@@ -29,6 +38,8 @@ export type {
   IncrementalStyleResolverMetrics,
   PingoStyleSheet,
   PingoStyleSheetObject,
+  InteractionStyleVariant,
+  ResolveInteractionStylesResult,
   ResolveStyleOptions,
   ResolveStyleResult,
   StyleCapabilities,

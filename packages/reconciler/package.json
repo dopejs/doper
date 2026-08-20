@@ -25,7 +25,8 @@
   "dependencies": {
     "@dopejs/pingo-editing": "workspace:*",
     "@dopejs/pingo-jsx": "workspace:*",
-    "@dopejs/pingo-runtime": "workspace:*"
+    "@dopejs/pingo-runtime": "workspace:*",
+    "@dopejs/pingo-style": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

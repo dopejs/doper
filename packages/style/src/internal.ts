@@ -12,6 +12,7 @@ export interface CompiledDeclaration {
 
 export interface CompiledRule {
   readonly classes: readonly string[];
+  readonly stateMask: number;
   readonly specificity: number;
   readonly declarations: readonly CompiledDeclaration[];
 }

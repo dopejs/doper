@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use pingo_abi::{
     AFFINE_A_OFFSET, AFFINE_RESOURCE_FIXED_BYTES, AFFINE_RESOURCE_VARIANT, AFFINE_VARIANT_OFFSET,
-    AFFINE_VERSION_OFFSET, IMAGE_BITMAP_HEIGHT_OFFSET, IMAGE_BITMAP_PIXEL_BYTES_OFFSET,
-    IMAGE_BITMAP_PIXELS_OFFSET, IMAGE_BITMAP_RESOURCE_MINIMUM_BYTES, IMAGE_BITMAP_RESOURCE_VARIANT,
+    AFFINE_VERSION_OFFSET, ComputedStyleResource, IMAGE_BITMAP_HEIGHT_OFFSET,
+    IMAGE_BITMAP_PIXEL_BYTES_OFFSET, IMAGE_BITMAP_PIXELS_OFFSET,
+    IMAGE_BITMAP_RESOURCE_MINIMUM_BYTES, IMAGE_BITMAP_RESOURCE_VARIANT,
     IMAGE_BITMAP_VARIANT_OFFSET, IMAGE_BITMAP_VERSION_OFFSET, IMAGE_BITMAP_WIDTH_OFFSET,
     Invalidation, MAX_RESOURCE_BYTES, MAX_VIRTUAL_ITEMS, Mutation, MutationBatch, NULL_NODE_ID,
     NodeKind, Prop, PropValueType, RESOURCE_ENCODING_VERSION, ResourceKind,
@@ -983,6 +984,10 @@ fn validate_resource(resource_id: u32, kind: ResourceKind, bytes: &[u8]) -> Resu
         ResourceKind::TextStyle => validate_text_style_resource(resource_id, bytes)?,
         ResourceKind::Font => validate_sfnt_font_resource(resource_id, bytes)?,
         ResourceKind::Image => validate_image_resource(resource_id, bytes)?,
+        ResourceKind::ComputedStyle => {
+            ComputedStyleResource::decode(bytes)
+                .map_err(|_| SceneError::InvalidResourceEncoding { resource_id })?;
+        }
         ResourceKind::Path | ResourceKind::GlyphSpan => {}
     }
     Ok(())

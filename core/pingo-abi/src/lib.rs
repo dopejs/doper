@@ -8,6 +8,7 @@
 //! mutate the Scene or reach a rendering backend.
 
 mod codec;
+mod computed_style;
 mod display_list;
 mod edit_transactions;
 mod error;
@@ -39,6 +40,10 @@ pub struct DecodeReport {
     pub producer_abi_version: u16,
 }
 
+pub use computed_style::{
+    ComputedStyleEntry, ComputedStyleResource, ComputedStyleValue, StyleLength, StyleLengthUnit,
+    StyleTransformOperation,
+};
 pub use display_list::{DisplayCommand, DisplayInstruction, DisplayList, EditorDecorationKind};
 pub use edit_transactions::{
     EditTransactionBatch, EditTransactionKind, EditTransactionRecord, WireAffinity, WireRange,
@@ -56,11 +61,20 @@ pub use input::{
 pub use mutation::{Mutation, MutationBatch, MutationInstruction};
 pub use recording::{ReplayRecord, ReplayRecording};
 pub use style_generated::{
-    CSS_SUBSET_VERSION, STYLE_ALL_FEATURE_BITS, STYLE_FEATURE_M6_FOUNDATION,
+    CSS_SUBSET_VERSION, STYLE_ALL_FEATURE_BITS, STYLE_COMPUTED_ENCODING_VARIANT,
+    STYLE_COMPUTED_ENCODING_VERSION, STYLE_COMPUTED_MAX_BYTES, STYLE_COMPUTED_MAX_ENTRIES,
+    STYLE_FEATURE_M6_FOUNDATION, STYLE_INTERACTION_ACTIVE, STYLE_INTERACTION_FOCUS,
+    STYLE_INTERACTION_FOCUS_VISIBLE, STYLE_INTERACTION_HOVER, STYLE_INTERACTION_STATE_MASK,
     STYLE_INVALIDATION_HIT, STYLE_INVALIDATION_LAYOUT, STYLE_INVALIDATION_PAINT,
     STYLE_INVALIDATION_PAINT_SELF, STYLE_INVALIDATION_SCROLL, STYLE_INVALIDATION_SEMANTICS,
-    STYLE_PROPERTY_COUNT, STYLE_PROPERTY_MAX_ID, STYLE_RESERVED_PROPERTY_IDS, StyleAnimationType,
-    StyleCanonicalValue, StyleNodeType, StyleProperty, StyleValueGrammar,
+    STYLE_LENGTH_AUTO, STYLE_LENGTH_NONE, STYLE_LENGTH_NORMAL, STYLE_LENGTH_NUMBER,
+    STYLE_LENGTH_PERCENT, STYLE_LENGTH_PX, STYLE_PROPERTY_COUNT, STYLE_PROPERTY_MAX_ID,
+    STYLE_RESERVED_PROPERTY_IDS, STYLE_STATE_PROPERTY_IDS, STYLE_TRANSFORM_MATRIX,
+    STYLE_TRANSFORM_ROTATE, STYLE_TRANSFORM_SCALE, STYLE_TRANSFORM_TRANSLATE, STYLE_VALUE_F32,
+    STYLE_VALUE_FONT_FAMILY_LIST, STYLE_VALUE_KEYWORD, STYLE_VALUE_LENGTH, STYLE_VALUE_LINE_HEIGHT,
+    STYLE_VALUE_POSITION, STYLE_VALUE_RGBA8, STYLE_VALUE_TRANSFORM_LIST, STYLE_VALUE_U16,
+    StyleAnimationType, StyleCanonicalValue, StyleKeyword, StyleNodeType, StyleProperty,
+    StyleValueGrammar,
 };
 pub use system_text_metrics::{
     SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand, SystemTextMetricInstruction,
