@@ -129,10 +129,7 @@ function SiteHeader({
     <>
       <header className="site-header">
         <a className="brand" href="/" aria-label="Pingo home">
-          <picture>
-            <source srcSet="/pingo-mark-dark.svg" media="(prefers-color-scheme: dark)" />
-            <img src="/pingo-mark.svg" width="30" height="30" alt="" />
-          </picture>
+          <PingoMark className="brand__mark" />
           <span>Pingo</span>
         </a>
         <nav className={menuOpen ? "top-nav top-nav--open" : "top-nav"} aria-label="Primary">
@@ -205,6 +202,15 @@ function SiteHeader({
       </header>
       <SearchDialog locale={locale} open={searchOpen} onClose={() => setSearchOpen(false)} />
     </>
+  );
+}
+
+function PingoMark({ className }: { readonly className: string }): ReactNode {
+  return (
+    <span className={`pingo-mark ${className}`} aria-hidden="true">
+      <img className="pingo-mark__light" src="/pingo-mark.svg" alt="" />
+      <img className="pingo-mark__dark" src="/pingo-mark-dark.svg" alt="" />
+    </span>
   );
 }
 
@@ -287,7 +293,7 @@ function HomePage({ page }: { page: SitePage }): ReactNode {
           </div>
         </div>
         <div className="home-hero__mark" aria-hidden="true">
-          <img src="/pingo-mark.svg" alt="" />
+          <PingoMark className="home-hero__logo" />
           <div className="orbit orbit--one" />
           <div className="orbit orbit--two" />
         </div>
