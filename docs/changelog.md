@@ -9,6 +9,12 @@ ABI 版本独立管理。
 
 ## Unreleased
 
+- 启动 M6-A：新增版本化单源 style schema、生成的 TS/Rust 元数据、独立 Shell CSS
+  subset resolver，以及 `createStyleSheet`、`supportsStyle`、`styleCapabilities` 等 facade API。
+  M6-A 还增加了独立 candidate-list reference resolver、seeded parser/cascade 差分、
+  无变化输入缓存、computed-style 变化与失效域指标；当前 capability 明确报告 resolver ready、
+  engine not ready，View/Core 样式集成仍属后续 M6-B。
+
 ## 0.2.1 - 2026-08-20
 
 - 公开幂等且可重试的 `initializeWasm`，业务可以自行编排 WASM loading；默认 Storybook

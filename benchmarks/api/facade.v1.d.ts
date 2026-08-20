@@ -78,6 +78,28 @@ export {
   WasmIntegrityError,
   type WasmIntegrityManifest,
 } from "@dopejs/pingo-host";
+export {
+  CSS_SUBSET_VERSION,
+  StyleSheetCompileError,
+  compileStyleSheet,
+  createStyleSheet,
+  styleCapabilities,
+  supportsStyle,
+  type CompileStyleSheetOptions,
+  type PingoGlobalStyleKeyword,
+  type PingoStyle,
+  type PingoStyleColor,
+  type PingoStyleLength,
+  type PingoStyleNodeType,
+  type PingoStyleSheet,
+  type PingoStyleSheetObject,
+  type StyleCapabilities,
+  type StyleCapability,
+  type StyleDiagnostic,
+  type StyleDiagnosticCode,
+  type StyleSheetCompilation,
+  type StyleSourceLocation,
+} from "@dopejs/pingo-style";
 export { ENGINE_ABI_VERSION, ENGINE_VERSION, engineIdentity } from "./version";
 export { useTextEditingController } from "./editing";
 export {

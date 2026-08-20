@@ -42,6 +42,7 @@
     "@dopejs/pingo-jsx": "workspace:*",
     "@dopejs/pingo-reconciler": "workspace:*",
     "@dopejs/pingo-runtime": "workspace:*",
+    "@dopejs/pingo-style": "workspace:*",
     "@dopejs/pingo-widgets": "workspace:*"
   },
   "scripts": {

@@ -584,8 +584,13 @@ Host 按手势分类，Core 对离散格做有界时长（120ms）的三次缓�
 
 ### M6：CSS 子集、基础组件与原生事件基础
 
-> 当前状态：**方案已接受，尚未实现**。架构边界见 `docs/design.md` §12.1、
-> `docs/css-events-plan.md` 与 ADR-0007。实现不得把计划 API 写成已交付能力。
+> 当前状态：**M6-A 已完成，M6-B 尚未开始（2026-08-20）**。单源 style schema、TS/Rust
+> 生成元数据、Shell stylesheet/compiler/cascade/computed resolver、结构化诊断和 capability
+> API 已落地；生成支持表明确标为 resolver-only。M6-A 门禁包含任意 parser 输入、独立
+> candidate-list reference oracle、级联随机差分，以及 memoized/no-change resolver 与全量重算
+> 的属性对照。输入变化时仍保留全量 resolver 作为正确性路径，尚未承诺 property-level
+> 增量 cascade。M6-B Core/facade 组件集成仍未完成，不能把任一 CSS 属性写成引擎已支持。
+> 架构边界见 `docs/design.md` §12.1、`docs/css-events-plan.md` 与 ADR-0007。
 
 目标：建立可逐项扩展而不反复改写 Core 边界的 style/event 基础，并把滚动、虚拟化和
 交互状态统一到 View。
@@ -594,9 +599,13 @@ Host 按手势分类，Core 对离散格做有界时长（120ms）的三次缓�
 
 #### M6-A style schema 与 Shell resolver
 
+状态：**已完成（2026-08-20）**。自动出口命令为 `pnpm m6:a:check`；它先完整运行
+`pnpm m5:check`，再校验生成文件、构建 style package，并运行 parser/cascade/computed-style
+的 fixture、随机差分和无变化缓存门禁。
+
 - `schemas/style.v1.json` 单源描述 property id、名称、initial/inherited、grammar、
   canonical value、invalidation、animation type、适用节点和 feature bit。
-- 生成 TS `PingoStyle`、Rust 元数据/ABI、解析表、支持文档与属性测试生成器。
+- 生成 TS `PingoStyle`、Rust 元数据/ABI、解析表与支持文档；schema metadata 驱动属性覆盖。
 - 独立 style package 完成 tokenize/parse、shorthand 展开、class selector、cascade、
   inheritance、computed style、structured diagnostics 和 capabilities。
 - 首期只支持同节点 class/compound class；不实现 combinator、伪元素和 CSSOM。
@@ -624,10 +633,11 @@ Host 按手势分类，Core 对离散格做有界时长（120ms）的三次缓�
 - devtools/帧报告增加 style recompute、状态变化和各失效域计数。
 - 更新 facade API 快照、迁移扫描器、文档与示例，不删除旧 API。
 
-自动出口命令预留为 `pnpm m6:check`，必须链入 `pnpm m5:check`，并增加：
+M6 总出口命令仍预留为 `pnpm m6:check`。已落地的 M6-A 出口为 `pnpm m6:a:check`，
+必须链入 `pnpm m5:check`；M6 完整出口还需增加：
 
-- parser/cascade/computed-style reference 与 fuzz；
-- incremental computed style ↔ full recompute 属性测试；
+- parser/cascade/computed-style reference 与 fuzz（M6-A 已交付）；
+- memoized/no-change computed style ↔ full recompute 属性测试（M6-A 已交付）；
 - incremental Core ↔ full layout/paint/hit/semantics 差分；
 - 三 transport 的 display/overflow/event/pseudo E2E；
 - 旧 intrinsic 与新 facade 的等价 fixture；

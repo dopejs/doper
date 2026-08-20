@@ -1,0 +1,489 @@
+import {
+  STYLE_PROPERTIES,
+  STYLE_SHORTHANDS,
+  type StyleDeclarationName,
+  type StylePropertyMetadata,
+  type StylePropertyName,
+} from "./generated";
+import type { CompiledDeclaration, GlobalStyleKeyword, SpecifiedStyleValue } from "./internal";
+import type { StyleDiagnostic, StyleSourceLocation } from "./types";
+
+const propertyMetadata = Object.values(STYLE_PROPERTIES) as readonly StylePropertyMetadata[];
+const propertyByCssName = new Map<string, StylePropertyMetadata>(
+  propertyMetadata.map((metadata) => [metadata.cssName, metadata]),
+);
+const propertyByJsName = new Map<string, StylePropertyMetadata>(
+  propertyMetadata.map((metadata) => [metadata.jsName, metadata]),
+);
+const shorthandMetadata = Object.values(STYLE_SHORTHANDS);
+type ShorthandMetadata = (typeof shorthandMetadata)[number];
+const shorthandByCssName = new Map<string, ShorthandMetadata>(
+  shorthandMetadata.map((metadata) => [metadata.cssName, metadata]),
+);
+const shorthandByJsName = new Map<string, ShorthandMetadata>(
+  shorthandMetadata.map((metadata) => [metadata.jsName, metadata]),
+);
+const globalKeywords = new Set<GlobalStyleKeyword>(["inherit", "initial", "unset"]);
+
+export interface DeclarationExpansion {
+  readonly declarations: readonly CompiledDeclaration[];
+  readonly diagnostics: readonly StyleDiagnostic[];
+}
+
+export function expandDeclaration(
+  rawName: string,
+  rawValue: unknown,
+  syntax: "css" | "js",
+  location?: StyleSourceLocation,
+): DeclarationExpansion {
+  const lookupName = syntax === "css" ? rawName.toLowerCase() : rawName;
+  const property =
+    syntax === "css" ? propertyByCssName.get(lookupName) : propertyByJsName.get(lookupName);
+  const shorthand =
+    syntax === "css" ? shorthandByCssName.get(lookupName) : shorthandByJsName.get(lookupName);
+  if (property === undefined && shorthand === undefined) {
+    return {
+      declarations: [],
+      diagnostics: [
+        diagnostic(
+          "unknown-property",
+          `Unsupported style property ${JSON.stringify(rawName)}`,
+          rawName,
+          location,
+        ),
+      ],
+    };
+  }
+
+  const global = parseGlobalKeyword(
+    syntax === "css" && typeof rawValue === "string" ? rawValue.toLowerCase() : rawValue,
+  );
+  if (global !== null) {
+    const names = property === undefined ? shorthand?.longhands : [property.jsName];
+    return {
+      declarations: (names ?? []).map((name) => declaration(name, { global }, location)),
+      diagnostics: [],
+    };
+  }
+
+  if (property !== undefined) {
+    const value = parsePropertyValue(property.grammar, rawValue);
+    if (value === null) return invalidValue(rawName, rawValue, location);
+    return { declarations: [declaration(property.jsName, value, location)], diagnostics: [] };
+  }
+  return expandShorthand(shorthand, rawName, rawValue, location);
+}
+
+export function metadataForProperty(name: StylePropertyName): StylePropertyMetadata {
+  return STYLE_PROPERTIES[name];
+}
+
+export function propertyNameFromUnknown(name: string): StyleDeclarationName | null {
+  if (propertyByCssName.has(name) || shorthandByCssName.has(name)) {
+    return propertyByCssName.get(name)?.jsName ?? shorthandByCssName.get(name)?.jsName ?? null;
+  }
+  if (propertyByJsName.has(name) || shorthandByJsName.has(name)) {
+    return name as StyleDeclarationName;
+  }
+  return null;
+}
+
+function expandShorthand(
+  shorthand: ShorthandMetadata | undefined,
+  rawName: string,
+  rawValue: unknown,
+  location?: StyleSourceLocation,
+): DeclarationExpansion {
+  if (shorthand === undefined) return invalidValue(rawName, rawValue, location);
+  const grammar = shorthand.grammar;
+  if (grammar === "border") return expandBorder(shorthand.longhands, rawName, rawValue, location);
+  const parts = splitWhitespace(rawValue);
+  if (parts === null) return invalidValue(rawName, rawValue, location);
+
+  if (grammar.startsWith("box-")) {
+    if (parts.length < 1 || parts.length > 4) return invalidValue(rawName, rawValue, location);
+    const itemGrammar = grammar === "box-length-auto" ? "length-auto" : grammar.slice(4);
+    const parsed = parts.map((part) => parsePropertyValue(itemGrammar, part));
+    if (parsed.some((value) => value === null)) return invalidValue(rawName, rawValue, location);
+    const [top, right = top, bottom = top, left = right] =
+      parsed.length === 3
+        ? [parsed[0], parsed[1], parsed[2], parsed[1]]
+        : parsed.length === 4
+          ? parsed
+          : parsed.length === 2
+            ? [parsed[0], parsed[1], parsed[0], parsed[1]]
+            : [parsed[0], parsed[0], parsed[0], parsed[0]];
+    const values = [top, right, bottom, left] as readonly SpecifiedStyleValue[];
+    return {
+      declarations: shorthand.longhands.map((name, index) =>
+        declaration(name, values[index] as SpecifiedStyleValue, location),
+      ),
+      diagnostics: [],
+    };
+  }
+
+  if (grammar === "pair-overflow" || grammar === "pair-non-negative-length-normal") {
+    if (parts.length < 1 || parts.length > 2) return invalidValue(rawName, rawValue, location);
+    const itemGrammar = grammar === "pair-overflow" ? "overflow" : "non-negative-length-normal";
+    const first = parsePropertyValue(itemGrammar, parts[0]);
+    const second = parsePropertyValue(itemGrammar, parts[1] ?? parts[0]);
+    if (first === null || second === null) return invalidValue(rawName, rawValue, location);
+    return {
+      declarations: [
+        declaration(shorthand.longhands[0], first, location),
+        declaration(shorthand.longhands[1], second, location),
+      ],
+      diagnostics: [],
+    };
+  }
+  return invalidValue(rawName, rawValue, location);
+}
+
+function expandBorder(
+  longhands: readonly string[],
+  rawName: string,
+  rawValue: unknown,
+  location?: StyleSourceLocation,
+): DeclarationExpansion {
+  const parts = splitWhitespace(rawValue);
+  if (parts === null || parts.length < 1 || parts.length > 3) {
+    return invalidValue(rawName, rawValue, location);
+  }
+  let width: SpecifiedStyleValue = "0px";
+  let style: SpecifiedStyleValue = "none";
+  let color: SpecifiedStyleValue = "currentColor";
+  let widthSeen = false;
+  let styleSeen = false;
+  let colorSeen = false;
+  for (const part of parts) {
+    const parsedWidth = parsePropertyValue("non-negative-length", part);
+    const parsedStyle = parsePropertyValue("border-style", part);
+    const parsedColor = parsePropertyValue("color-current", part);
+    if (parsedWidth !== null && !widthSeen) {
+      width = parsedWidth;
+      widthSeen = true;
+    } else if (parsedStyle !== null && !styleSeen) {
+      style = parsedStyle;
+      styleSeen = true;
+    } else if (parsedColor !== null && !colorSeen) {
+      color = parsedColor;
+      colorSeen = true;
+    } else {
+      return invalidValue(rawName, rawValue, location);
+    }
+  }
+  const values: SpecifiedStyleValue[] = [];
+  for (let index = 0; index < 4; index += 1) values.push(width);
+  for (let index = 0; index < 4; index += 1) values.push(color);
+  for (let index = 0; index < 4; index += 1) values.push(style);
+  return {
+    declarations: longhands.map((name, index) =>
+      declaration(name as StylePropertyName, values[index] as SpecifiedStyleValue, location),
+    ),
+    diagnostics: [],
+  };
+}
+
+function parsePropertyValue(grammar: string, rawValue: unknown): SpecifiedStyleValue | null {
+  switch (grammar) {
+    case "length-auto":
+      return rawValue === "auto" ? "auto" : parseLength(rawValue, false, false);
+    case "length-none":
+      return rawValue === "none" ? "none" : parseLength(rawValue, false, false);
+    case "non-negative-length":
+      return parseLength(rawValue, true, false);
+    case "non-negative-length-normal":
+      return rawValue === "normal" ? "normal" : parseLength(rawValue, true, false);
+    case "positive-length":
+      return parseLength(rawValue, true, true);
+    case "opacity": {
+      const number = parseFiniteNumber(rawValue);
+      return number === null ? null : Math.min(1, Math.max(0, number));
+    }
+    case "font-weight":
+      if (rawValue === "normal") return 400;
+      if (rawValue === "bold") return 700;
+      {
+        const number = parseFiniteNumber(rawValue);
+        return number !== null && number >= 1 && number <= 1000 ? number : null;
+      }
+    case "line-height":
+      if (rawValue === "normal") return "normal";
+      if (typeof rawValue === "number")
+        return rawValue >= 0 && Number.isFinite(rawValue) ? rawValue : null;
+      return parseLength(rawValue, true, false);
+    case "color":
+      return parseColor(rawValue, false);
+    case "color-current":
+      return parseColor(rawValue, true);
+    case "font-family":
+      return typeof rawValue === "string" && rawValue.trim().length > 0
+        ? rawValue.trim().replace(/\s+/gu, " ")
+        : null;
+    case "position":
+      return parsePosition(rawValue);
+    case "transform":
+      return parseTransform(rawValue);
+    default:
+      return parseEnum(grammar, rawValue);
+  }
+}
+
+const enumValues: Readonly<Record<string, readonly string[]>> = {
+  "align-items": ["baseline", "center", "flex-end", "flex-start", "stretch"],
+  "border-style": ["none", "solid"],
+  "box-sizing": ["border-box", "content-box"],
+  "cursor": ["auto", "crosshair", "default", "grab", "grabbing", "not-allowed", "pointer", "text"],
+  "display": ["flex", "none"],
+  "flex-direction": ["column", "column-reverse", "row", "row-reverse"],
+  "font-style": ["italic", "normal"],
+  "justify-content": [
+    "center",
+    "flex-end",
+    "flex-start",
+    "space-around",
+    "space-between",
+    "space-evenly",
+  ],
+  "object-fit": ["contain", "cover", "fill", "none", "scale-down"],
+  "overflow": ["auto", "clip", "hidden", "scroll", "visible"],
+  "overflow-wrap": ["anywhere", "break-word", "normal"],
+  "overscroll-behavior": ["auto", "contain", "none"],
+  "pointer-events": ["auto", "none"],
+  "text-align": ["center", "end", "justify", "left", "right", "start"],
+  "text-overflow": ["clip", "ellipsis"],
+  "touch-action": ["auto", "manipulation", "none", "pan-x", "pan-y"],
+  "visibility": ["hidden", "visible"],
+  "white-space": ["normal", "nowrap", "pre", "pre-line", "pre-wrap"],
+};
+
+function parseEnum(grammar: string, rawValue: unknown): string | null {
+  const values = enumValues[grammar];
+  if (typeof rawValue !== "string") return null;
+  const normalized = rawValue.toLowerCase();
+  return values?.includes(normalized) === true ? normalized : null;
+}
+
+function parseLength(rawValue: unknown, nonNegative: boolean, positive: boolean): string | null {
+  let number: number;
+  let unit: "px" | "%" = "px";
+  if (typeof rawValue === "number") {
+    number = rawValue;
+  } else if (typeof rawValue === "string") {
+    const match = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+))(px|%)?$/u.exec(rawValue.trim().toLowerCase());
+    if (match === null) return null;
+    number = Number(match[1]);
+    if (match[2] === undefined && number !== 0) return null;
+    unit = (match[2] ?? "px") as "px" | "%";
+  } else {
+    return null;
+  }
+  if (!Number.isFinite(number) || (nonNegative && number < 0) || (positive && number <= 0)) {
+    return null;
+  }
+  return `${canonicalNumber(number)}${unit}`;
+}
+
+function parseFiniteNumber(rawValue: unknown): number | null {
+  if (typeof rawValue === "number") return Number.isFinite(rawValue) ? rawValue : null;
+  if (typeof rawValue !== "string" || rawValue.trim() === "") return null;
+  const number = Number(rawValue);
+  return Number.isFinite(number) ? number : null;
+}
+
+function parseColor(rawValue: unknown, allowCurrent: boolean): string | null {
+  if (typeof rawValue !== "string") return null;
+  const value = rawValue.toLowerCase();
+  if (value === "transparent") return "#00000000";
+  if (allowCurrent && value === "currentcolor") return "currentColor";
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/u.exec(value);
+  if (match === null) return null;
+  const digits = match[1];
+  if (digits === undefined) return null;
+  if (digits.length === 3 || digits.length === 4) {
+    const expanded = [...digits].map((digit) => `${digit}${digit}`).join("");
+    return `#${expanded}${digits.length === 3 ? "ff" : ""}`;
+  }
+  return `#${digits}${digits.length === 6 ? "ff" : ""}`;
+}
+
+function parsePosition(rawValue: unknown): string | null {
+  const parts = splitWhitespace(rawValue);
+  if (parts === null || parts.length < 1 || parts.length > 2) return null;
+  const first = (parts[0] ?? "center").toLowerCase();
+  if (parts.length === 1) {
+    if (first === "left") return "0% 50%";
+    if (first === "right") return "100% 50%";
+    if (first === "top") return "50% 0%";
+    if (first === "bottom") return "50% 100%";
+    if (first === "center") return "50% 50%";
+    const x = parseLength(first, false, false);
+    return x === null ? null : `${x} 50%`;
+  }
+  const second = (parts[1] ?? "center").toLowerCase();
+  const firstAxis = positionKeywordAxis(first);
+  const secondAxis = positionKeywordAxis(second);
+  if (firstAxis === "y" && secondAxis !== "y") {
+    const x = parsePositionAxis(second, "x");
+    const y = parsePositionAxis(first, "y");
+    return x === null || y === null ? null : `${x} ${y}`;
+  }
+  if ((firstAxis === "x" && secondAxis === "x") || (firstAxis === "y" && secondAxis === "y")) {
+    return null;
+  }
+  const x = parsePositionAxis(first, "x");
+  const y = parsePositionAxis(second, "y");
+  return x === null || y === null ? null : `${x} ${y}`;
+}
+
+function parseTransform(rawValue: unknown): string | null {
+  if (rawValue === "none") return "none";
+  if (typeof rawValue !== "string" || rawValue.length > 1024) return null;
+  const value = rawValue.trim().replace(/\s+/gu, " ");
+  const functions = [...value.matchAll(/([a-zA-Z][a-zA-Z0-9]*)\(([^()]*)\)/gu)];
+  if (functions.length === 0 || functions.map((match) => match[0]).join(" ") !== value) return null;
+  return functions.every((match) => validateTransformFunction(match[1] ?? "", match[2] ?? ""))
+    ? value
+    : null;
+}
+
+function validateTransformFunction(name: string, rawArguments: string): boolean {
+  const arguments_ = rawArguments
+    .trim()
+    .split(/\s*,\s*|\s+/u)
+    .filter((argument) => argument !== "");
+  if (name === "matrix") return arguments_.length === 6 && arguments_.every(isFiniteNumberToken);
+  if (name === "scale") {
+    return (
+      arguments_.length >= 1 && arguments_.length <= 2 && arguments_.every(isFiniteNumberToken)
+    );
+  }
+  if (name === "scaleX" || name === "scaleY") {
+    return arguments_.length === 1 && arguments_.every(isFiniteNumberToken);
+  }
+  if (name === "translate") {
+    return arguments_.length >= 1 && arguments_.length <= 2 && arguments_.every(isLengthToken);
+  }
+  if (name === "translateX" || name === "translateY") {
+    return arguments_.length === 1 && arguments_.every(isLengthToken);
+  }
+  if (name === "rotate") {
+    return (
+      arguments_.length === 1 &&
+      /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:deg|rad|turn)$/u.test(arguments_[0] ?? "")
+    );
+  }
+  return false;
+}
+
+function isFiniteNumberToken(value: string): boolean {
+  return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/u.test(value) && Number.isFinite(Number(value));
+}
+
+function isLengthToken(value: string): boolean {
+  return parseLength(value, false, false) !== null;
+}
+
+function positionKeywordAxis(value: string): "x" | "y" | "both" | null {
+  if (value === "left" || value === "right") return "x";
+  if (value === "top" || value === "bottom") return "y";
+  if (value === "center") return "both";
+  return null;
+}
+
+function parsePositionAxis(value: string, axis: "x" | "y"): string | null {
+  if (value === "center") return "50%";
+  if (axis === "x" && value === "left") return "0%";
+  if (axis === "x" && value === "right") return "100%";
+  if (axis === "y" && value === "top") return "0%";
+  if (axis === "y" && value === "bottom") return "100%";
+  if (positionKeywordAxis(value) !== null) return null;
+  return parseLength(value, false, false);
+}
+
+function splitWhitespace(rawValue: unknown): string[] | null {
+  if (typeof rawValue === "number") {
+    return Number.isFinite(rawValue) ? [`${String(rawValue)}px`] : null;
+  }
+  if (typeof rawValue !== "string") return null;
+  const value = rawValue.trim();
+  if (value === "") return null;
+  const parts: string[] = [];
+  let start = 0;
+  let depth = 0;
+  for (let index = 0; index <= value.length; index += 1) {
+    const character = value[index];
+    if (character === "(") depth += 1;
+    if (character === ")") depth -= 1;
+    if (depth < 0) return null;
+    if ((character === undefined || /\s/u.test(character)) && depth === 0) {
+      if (index > start) parts.push(value.slice(start, index));
+      start = index + 1;
+    }
+  }
+  return depth === 0 ? parts : null;
+}
+
+function parseGlobalKeyword(rawValue: unknown): GlobalStyleKeyword | null {
+  return typeof rawValue === "string" && globalKeywords.has(rawValue as GlobalStyleKeyword)
+    ? (rawValue as GlobalStyleKeyword)
+    : null;
+}
+
+function declaration(
+  property: string,
+  value: SpecifiedStyleValue,
+  location?: StyleSourceLocation,
+): CompiledDeclaration {
+  return {
+    property: property as StylePropertyName,
+    value,
+    ...(location === undefined ? {} : { location }),
+  };
+}
+
+function invalidValue(
+  rawName: string,
+  rawValue: unknown,
+  location?: StyleSourceLocation,
+): DeclarationExpansion {
+  return {
+    declarations: [],
+    diagnostics: [
+      diagnostic(
+        "unsupported-value",
+        `Unsupported value ${describeValue(rawValue)} for ${rawName}`,
+        rawName,
+        location,
+      ),
+    ],
+  };
+}
+
+function describeValue(value: unknown): string {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized ?? String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+function diagnostic(
+  code: StyleDiagnostic["code"],
+  message: string,
+  property?: string,
+  location?: StyleSourceLocation,
+): StyleDiagnostic {
+  return {
+    code,
+    severity: "error",
+    message,
+    ...(property === undefined ? {} : { property }),
+    ...(location === undefined ? {} : { location }),
+  };
+}
+
+function canonicalNumber(value: number): string {
+  return Object.is(value, -0) ? "0" : String(value);
+}

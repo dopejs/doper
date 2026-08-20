@@ -18,6 +18,11 @@ mod mutation;
 mod recording;
 mod system_text_metrics;
 
+#[allow(missing_docs)]
+mod style_generated {
+    include!("style_generated.rs");
+}
+
 use core::fmt;
 
 /// What a decoder had to tolerate to read a stream.
@@ -50,6 +55,13 @@ pub use input::{
 };
 pub use mutation::{Mutation, MutationBatch, MutationInstruction};
 pub use recording::{ReplayRecord, ReplayRecording};
+pub use style_generated::{
+    CSS_SUBSET_VERSION, STYLE_ALL_FEATURE_BITS, STYLE_FEATURE_M6_FOUNDATION,
+    STYLE_INVALIDATION_HIT, STYLE_INVALIDATION_LAYOUT, STYLE_INVALIDATION_PAINT,
+    STYLE_INVALIDATION_PAINT_SELF, STYLE_INVALIDATION_SCROLL, STYLE_INVALIDATION_SEMANTICS,
+    STYLE_PROPERTY_COUNT, STYLE_PROPERTY_MAX_ID, STYLE_RESERVED_PROPERTY_IDS, StyleAnimationType,
+    StyleCanonicalValue, StyleNodeType, StyleProperty, StyleValueGrammar,
+};
 pub use system_text_metrics::{
     SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand, SystemTextMetricInstruction,
     TextContraction,
@@ -72,6 +84,8 @@ impl Invalidation {
     pub const HIT: Self = Self(1 << 3);
     /// Accessibility semantics must be refreshed.
     pub const SEMANTICS: Self = Self(1 << 4);
+    /// Scroll extents or derived scroll state must be refreshed.
+    pub const SCROLL: Self = Self(1 << 5);
 
     /// Constructs a generated invalidation mask.
     #[must_use]
@@ -171,6 +185,42 @@ mod tests {
         assert!(mask.contains(Invalidation::PAINT));
         assert!(!mask.contains(Invalidation::HIT));
         assert_eq!(format!("{mask:?}"), "Invalidation(3)");
+    }
+
+    #[test]
+    fn generated_style_metadata_reserves_ids_and_stays_queryable() {
+        let mut count = 0;
+        for id in 1..=STYLE_PROPERTY_MAX_ID {
+            if STYLE_RESERVED_PROPERTY_IDS.contains(&id) {
+                assert_eq!(StyleProperty::from_u16(id), None);
+                continue;
+            }
+            let property = StyleProperty::from_u16(id).expect("declared style property id");
+            assert!(!property.css_name().is_empty());
+            let _ = (
+                property.inherited(),
+                property.invalidation_bits(),
+                property.grammar(),
+                property.canonical_value(),
+                property.animation_type(),
+                property.applies_to_bits(),
+                property.feature_bits(),
+            );
+            assert!(!property.initial_json().is_empty());
+            count += 1;
+        }
+        assert_eq!(count, STYLE_PROPERTY_COUNT);
+        assert_eq!(CSS_SUBSET_VERSION, "1.0.0");
+        assert_eq!(STYLE_ALL_FEATURE_BITS, STYLE_FEATURE_M6_FOUNDATION);
+        assert_eq!(STYLE_INVALIDATION_LAYOUT, Invalidation::LAYOUT.bits());
+        assert_eq!(STYLE_INVALIDATION_PAINT, Invalidation::PAINT.bits());
+        assert_eq!(
+            STYLE_INVALIDATION_PAINT_SELF,
+            Invalidation::PAINT_SELF.bits()
+        );
+        assert_eq!(STYLE_INVALIDATION_HIT, Invalidation::HIT.bits());
+        assert_eq!(STYLE_INVALIDATION_SEMANTICS, Invalidation::SEMANTICS.bits());
+        assert_eq!(STYLE_INVALIDATION_SCROLL, Invalidation::SCROLL.bits());
     }
 
     #[test]

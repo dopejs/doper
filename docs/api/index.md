@@ -53,6 +53,28 @@ Fragment
 
 JSX 运行时通过 `@dopejs/pingo/jsx-runtime` 与 `@dopejs/pingo/jsx-dev-runtime` 提供。
 
+## 样式能力（M6-A）
+
+```ts
+createStyleSheet(cssOrObject, options?): PingoStyleSheet
+compileStyleSheet(cssOrObject, options?): StyleSheetCompilation
+supportsStyle(property, value): boolean
+styleCapabilities(): StyleCapabilities
+CSS_SUBSET_VERSION: string
+```
+
+`createStyleSheet` 编译同节点 class/compound-class selector、shorthand、cascade 与
+computed-value 元数据；失败时抛出带结构化 diagnostics 的 `StyleSheetCompileError`。
+`compileStyleSheet` 是不抛异常的对应入口。完整支持矩阵见[生成的 CSS subset 表](/style-support)。
+内部 style package 另提供无变化输入缓存与 recompute/invalidation 计数，供后续 reconciler 和
+devtools 接入；它未从 facade 暴露，输入变化时仍使用完整 resolver 保证结果可差分验证。
+
+::: warning 当前仅完成 resolver
+M6-A 当前只交付 Shell 编译/查询能力，`styleCapabilities().engineReady` 固定为 `false`。
+JSX `style`/`className`、View、display/overflow 的 Core 行为要到 M6-B 才交付，当前不得把
+成功编译理解为引擎已经应用该样式。
+:::
+
 ## 响应式与 hooks
 
 ```ts

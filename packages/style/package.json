@@ -1,0 +1,29 @@
+{
+  "name": "@dopejs/pingo-style",
+  "version": "0.2.1",
+  "description": "pingo internal: versioned CSS subset parser, cascade, and computed-style resolver (use @dopejs/pingo)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dopejs/pingo.git",
+    "directory": "packages/style"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit"
+  }
+}

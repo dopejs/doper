@@ -1,6 +1,6 @@
 # CSS 子集、原生事件与基础组件演进方案
 
-> 状态：方向已接受，尚未实现
+> 状态：M6-A Shell resolver 已完成；M6-B Core 集成仍未开始
 > 日期：2026-08-20
 > 关联决策：[`ADR-0007`](./adr/0007-css-events-and-foundation-components.md)
 
@@ -273,6 +273,10 @@ muted、loop、poster、object-fit 明确能力检测。没有 Worker/WebCodecs 
 ## 10. 交付顺序
 
 ### M6：样式、组件与交互状态基础
+
+M6-A 已于 2026-08-20 完成 resolver-only 工程门禁：schema/生成物、结构化诊断、
+独立 reference resolver、随机 parser/cascade 差分和无变化输入缓存均已落地。它不表示
+Core 已消费 computed style；以下第 2–7 项仍待后续子里程碑交付。
 
 1. style schema、生成器、diagnostics、capabilities 与 reference resolver。
 2. 新组件 facade 与旧 intrinsic 兼容包装；不改变现有行为。
