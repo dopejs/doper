@@ -79,7 +79,7 @@ jobs:
       - name: Pack release artifacts
         run: |
           mkdir -p release-artifacts
-          for package in runtime editing jsx backend-canvas2d a11y reconciler host widgets facade compat; do
+          for package in runtime editing style jsx backend-canvas2d a11y reconciler host widgets facade compat; do
             (cd "packages/$package" && pnpm pack --pack-destination ../../release-artifacts)
           done
           cp packages/host/wasm/manifest.json release-artifacts/wasm-manifest.json

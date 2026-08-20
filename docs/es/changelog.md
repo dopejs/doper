@@ -4,11 +4,13 @@ title: Registro de cambios
 
 # Changelog
 
-El criterio de versionado está en `docs/release.md`: los 10 paquetes se publican de forma atómica con
+El criterio de versionado está en `docs/release.md`: los 11 paquetes se publican de forma atómica con
 la misma versión, y el semver de npm y la versión del ABI binario se gestionan por separado.
 
 ## Unreleased
 
+- La licencia del proyecto cambia de MIT a Apache-2.0 a partir de la próxima versión de npm;
+  las versiones publicadas hasta v0.2.1 siguen bajo MIT.
 - La curva de transferencia de la rueda se alinea con el navegador: los saltos discretos de rueda se
   animan y los deltas de alta precisión (trackpad) se siguen aplicando 1:1 al instante. `DispatchEvent`
   del Input Stream gana un campo de flags y la versión del ABI pasa de 1 a 2.

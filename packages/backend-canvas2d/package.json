@@ -2,7 +2,7 @@
   "name": "@dopejs/pingo-backend-canvas2d",
   "version": "0.2.1",
   "description": "pingo internal: Canvas2D DisplayList replayer (use @dopejs/pingo)",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dopejs/pingo.git",
@@ -14,6 +14,8 @@
   "type": "module",
   "sideEffects": false,
   "files": [
+    "LICENSE",
+    "NOTICE",
     "dist"
   ],
   "exports": {

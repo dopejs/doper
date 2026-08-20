@@ -4,11 +4,13 @@ title: 變更紀錄
 
 # Changelog
 
-版本口徑見 `docs/release.md`：10 個套件同版本原子發佈，npm semver 與二進位
+版本口徑見 `docs/release.md`：11 個套件同版本原子發佈，npm semver 與二進位
 ABI 版本獨立管理。
 
 ## Unreleased
 
+- 專案授權自下一個 npm 版本起由 MIT 改為 Apache-2.0；v0.2.1 及更早的已發佈
+  版本仍維持 MIT。
 - 滾輪傳遞曲線對齊瀏覽器原生：離散滾輪格改為動畫捲動，高精度（觸控板）差量
   維持即時 1:1；Input Stream 的 `DispatchEvent` 新增 flags 欄位，ABI 版本
   1 → 2。

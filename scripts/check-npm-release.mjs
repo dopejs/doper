@@ -8,11 +8,13 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const PROJECT_LICENSE = "Apache-2.0";
 
 /** Publish set: the facade, the migration shim, and their dependency closure. */
 export const RELEASE_PACKAGES = [
   "runtime",
   "editing",
+  "style",
   "jsx",
   "backend-canvas2d",
   "a11y",
@@ -25,12 +27,17 @@ export const RELEASE_PACKAGES = [
 
 /**
  * Packs every publishable package and validates the actual tarballs: required
- * artifacts present, no sources or tests leaked, workspace ranges rewritten,
- * versions aligned with ENGINE_VERSION, and the dependency closure closed.
+ * artifacts and legal files present, no sources or tests leaked, workspace
+ * ranges rewritten, versions aligned with ENGINE_VERSION, and the dependency
+ * closure closed.
  */
 export async function checkNpmRelease() {
   const problems = [];
   const manifests = new Map();
+  const legalFiles = new Map([
+    ["package/LICENSE", await readFile(path.join(repositoryRoot, "LICENSE"), "utf8")],
+    ["package/NOTICE", await readFile(path.join(repositoryRoot, "NOTICE"), "utf8")],
+  ]);
   for (const directory of RELEASE_PACKAGES) {
     const manifest = JSON.parse(
       await readFile(path.join(repositoryRoot, "packages", directory, "package.json"), "utf8"),
@@ -51,6 +58,9 @@ export async function checkNpmRelease() {
     if (manifest.publishConfig?.access !== "public") {
       problems.push(`${name} must declare publishConfig.access public`);
     }
+    if (manifest.license !== PROJECT_LICENSE) {
+      problems.push(`${name} must declare license ${PROJECT_LICENSE}`);
+    }
     for (const [dependency, range] of Object.entries(manifest.dependencies ?? {})) {
       if (dependency.startsWith("@dopejs/") && !manifests.has(dependency)) {
         problems.push(`${name} depends on ${dependency} which is outside the publish set`);
@@ -64,7 +74,7 @@ export async function checkNpmRelease() {
   const staging = await mkdtemp(path.join(tmpdir(), "pingo-release-"));
   try {
     for (const [name, { directory }] of manifests) {
-      problems.push(...(await checkTarball(name, directory, staging)));
+      problems.push(...(await checkTarball(name, directory, staging, legalFiles)));
     }
   } finally {
     await rm(staging, { recursive: true, force: true });
@@ -72,7 +82,7 @@ export async function checkNpmRelease() {
   return problems;
 }
 
-async function checkTarball(name, directory, staging) {
+async function checkTarball(name, directory, staging, legalFiles) {
   const problems = [];
   const packageRoot = path.join(repositoryRoot, "packages", directory);
   let tarball;
@@ -86,7 +96,13 @@ async function checkTarball(name, directory, staging) {
   }
   const { stdout: listing } = await run("tar", ["-tf", tarball]);
   const files = listing.trim().split("\n");
-  const required = ["package/package.json", "package/dist/index.js", "package/dist/index.d.ts"];
+  const required = [
+    "package/package.json",
+    "package/LICENSE",
+    "package/NOTICE",
+    "package/dist/index.js",
+    "package/dist/index.d.ts",
+  ];
   if (directory === "host") {
     required.push("package/wasm/pingo_core_bg.wasm", "package/wasm/manifest.json");
   }
@@ -98,6 +114,13 @@ async function checkTarball(name, directory, staging) {
   }
   for (const file of required) {
     if (!files.includes(file)) problems.push(`${name}: tarball is missing ${file}`);
+  }
+  for (const [file, expected] of legalFiles) {
+    if (!files.includes(file)) continue;
+    const { stdout: actual } = await run("tar", ["-xOf", tarball, file]);
+    if (actual !== expected) {
+      problems.push(`${name}: tarball ${file} differs from the repository root`);
+    }
   }
   for (const file of files) {
     if (/\.test\.|\.browser\.|^package\/src\//u.test(file)) {

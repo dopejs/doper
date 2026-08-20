@@ -4,11 +4,13 @@ title: Journal des modifications
 
 # Changelog
 
-La politique de versions figure dans `docs/release.md` : les 10 paquets sont publiés atomiquement dans
+La politique de versions figure dans `docs/release.md` : les 11 paquets sont publiés atomiquement dans
 la même version, et le semver npm et la version de l'ABI binaire sont gérés séparément.
 
 ## Unreleased
 
+- La licence du projet passe de MIT à Apache-2.0 à partir de la prochaine version npm ;
+  les versions publiées jusqu'à la v0.2.1 restent sous licence MIT.
 - La courbe de transfert de la molette s'aligne sur le navigateur : les crans discrets défilent en
   animation, tandis que les deltas haute précision (pavé tactile) restent appliqués 1:1 immédiatement.
   `DispatchEvent` du flux d'entrée gagne un champ de drapeaux et la version de l'ABI passe de 1 à 2.

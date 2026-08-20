@@ -1,14 +1,14 @@
 # pingo npm 发布流程
 
-> 状态：初版（2026-08-17）。发布集共 10 个包：公开入口 `@dopejs/pingo`、
-> 迁移边界 `@dopejs/pingo-compat`，以及它们的依赖闭包（runtime/jsx/
-> editing/reconciler/host/backend-canvas2d/widgets/a11y）。内部包的
+> 状态：初版（2026-08-17）。发布集共 11 个包：公开入口 `@dopejs/pingo`、
+> 迁移边界 `@dopejs/pingo-compat`，以及它们的依赖闭包（runtime/editing/style/
+> jsx/reconciler/host/backend-canvas2d/widgets/a11y）。内部包的
 > description 均标注 "internal"，公开契约只有 facade 与 compat 的导出面
 > （迁移扫描器阻止业务 import 内部包）。
 
 ## 1. 版本策略
 
-- 全部 10 个包**同版本**发布；`ENGINE_VERSION`（facade 导出）与包版本
+- 全部 11 个包**同版本**发布；`ENGINE_VERSION`（facade 导出）与包版本
   必须一致，`pnpm npm:release:verify` 强制校验。
 - npm semver 与 ABI 版本独立：ABI（`ENGINE_ABI_VERSION`）只在二进制协议
   不兼容时递增，并伴随 golden fixture 显式更新；npm 版本按 semver 管理
@@ -16,6 +16,8 @@
 - 0.x 阶段 minor 允许 breaking，需在 CHANGELOG 与 API 快照 diff 中明示。
 - 内部包（`@dopejs/pingo-*`，compat 除外）不承诺任何稳定性；pnpm 发布时
   facade 对它们的依赖被固定为精确版本，同版本原子发布避免内部漂移。
+- 许可证边界：v0.2.1 及以前版本保持 MIT；自本次变更后的首个 npm 版本起使用
+  Apache-2.0。历史版本的 MIT 授权不撤回。
 
 ## 2. GitHub 发版（推荐路径）
 
@@ -25,7 +27,7 @@
 2. 在发布提交上跑完整 `pnpm m5:check`（M0→M5 全链；CI 无 GPU 时后端差分
    如实输出 SKIPPED）。
 3. `pnpm npm:release:verify` 校验全部 tarball。
-4. 创建 GitHub Release：自动生成 release notes，附上 10 个包的 tarball 与
+4. 创建 GitHub Release：自动生成 release notes，附上 11 个包的 tarball 与
    `wasm-manifest.json`（事故时用于 CDN 资产 digest 对照）。
 5. 配置了 `NPM_TOKEN` secret 时以 npm provenance 发布全部包；未配置则在
    Release 上注明跳过，可后续本地补发。
@@ -42,7 +44,7 @@ git tag v0.2.0 && git push origin main v0.2.0
 ## 3. 本地手动发布（备用路径）
 
 ```sh
-# 1. 设定版本（同步 10 个包 + ENGINE_VERSION）
+# 1. 设定版本（同步 11 个包 + ENGINE_VERSION）
 node scripts/set-release-version.mjs 0.2.0
 pnpm install   # 刷新 lockfile 中的 workspace 版本
 
@@ -70,6 +72,7 @@ pnpm 在打包时自动把 `workspace:*` 重写为当前精确版本，
 - `dist/` 产物、类型与 source map 齐备；host 包含 `wasm/pingo_core_bg.wasm`
   与 SHA-256 `manifest.json`（与 `pnpm release:check` 的完整性口径一致）。
 - 不泄漏 `src/`、`*.test.*`、`*.browser.*`。
+- 每个 tarball 携带与仓库根目录逐字一致的 Apache-2.0 `LICENSE` 和 `NOTICE`。
 - 无残留 `workspace:` 依赖区间；`@dopejs/*` 依赖闭包全部在发布集内。
 - 版本与 `ENGINE_VERSION` 一致、`publishConfig.access` 为 public。
 

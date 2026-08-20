@@ -4,11 +4,13 @@ title: Änderungsprotokoll
 
 # Changelog
 
-Die Versionspolitik steht in `docs/release.md`: Alle 10 Pakete werden atomar in derselben Version
+Die Versionspolitik steht in `docs/release.md`: Alle 11 Pakete werden atomar in derselben Version
 veröffentlicht, npm-Semver und die Version des binären ABI werden getrennt verwaltet.
 
 ## Unreleased
 
+- Die Projektlizenz wechselt ab der nächsten npm-Version von MIT zu Apache-2.0;
+  die bis einschließlich v0.2.1 veröffentlichten Versionen bleiben unter MIT.
 - Die Übertragungskurve des Mausrads folgt jetzt dem Browser: diskrete Rastschritte scrollen animiert,
   während hochpräzise Deltas (Trackpad) weiterhin sofort 1:1 angewendet werden. `DispatchEvent` des
   Input Stream erhält ein Flags-Feld, und die ABI-Version steigt von 1 auf 2.

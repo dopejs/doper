@@ -1,9 +1,12 @@
 # Changelog
 
-版本口径见 `docs/release.md`：10 个包同版本原子发布，npm semver 与二进制
+版本口径见 `docs/release.md`：11 个包同版本原子发布，npm semver 与二进制
 ABI 版本独立管理。
 
 ## Unreleased
+
+- 项目许可证从下一次 npm 发布起由 MIT 切换为 Apache-2.0；v0.2.1 及以前
+  的已发布版本仍保持 MIT。
 
 ## 0.2.0
 
