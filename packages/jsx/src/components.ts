@@ -8,6 +8,8 @@ import type {
   VirtualViewProps,
 } from "./types";
 
+const FOUNDATION_COMPONENT = Symbol.for("dopejs.pingo.foundation-component");
+
 /** Public general-purpose box, currently mapped to the compatible container intrinsic. */
 export type ViewProps = ContainerProps & {
   /** Explicit vertical virtualization contract; never inferred from overflow. */
@@ -55,5 +57,9 @@ function compatibleHostElement(
   type: "container" | "editableText" | "image" | "text",
   props: ContainerProps | EditableTextProps | ImageProps | TextProps,
 ): AnyPingoElement {
-  return createElement(type, props as unknown as Record<string, unknown>);
+  const compatibleProps: Record<string, unknown> = {
+    ...props,
+    [FOUNDATION_COMPONENT]: true,
+  };
+  return createElement(type, compatibleProps);
 }

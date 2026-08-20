@@ -37,6 +37,20 @@ import {
   TEXT_STYLE_VARIANT_OFFSET,
   TEXT_STYLE_VERSION_OFFSET,
   TEXT_STYLE_WEIGHT_OFFSET,
+  TEXT_STYLE_V2_FAMILY_BYTES_OFFSET,
+  TEXT_STYLE_V2_FAMILY_OFFSET,
+  TEXT_STYLE_V2_FONT_SIZE_OFFSET,
+  TEXT_STYLE_V2_FONT_STYLE_OFFSET,
+  TEXT_STYLE_V2_LINE_HEIGHT_OFFSET,
+  TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET,
+  TEXT_STYLE_V2_PAINT_ID_OFFSET,
+  TEXT_STYLE_V2_RESOURCE_VARIANT,
+  TEXT_STYLE_V2_TEXT_ALIGN_OFFSET,
+  TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET,
+  TEXT_STYLE_V2_VARIANT_OFFSET,
+  TEXT_STYLE_V2_VERSION_OFFSET,
+  TEXT_STYLE_V2_WEIGHT_OFFSET,
+  TEXT_STYLE_V2_WHITE_SPACE_OFFSET,
   IMAGE_BITMAP_HEIGHT_OFFSET,
   IMAGE_BITMAP_PIXEL_BYTES_OFFSET,
   IMAGE_BITMAP_PIXELS_OFFSET,
@@ -191,6 +205,19 @@ export function encodeTextStyle(
   lineHeight: number,
   weight: number,
   family: string,
+  options: {
+    readonly fontStyle: number;
+    readonly textAlign: number;
+    readonly whiteSpace: number;
+    readonly overflowWrap: number;
+    readonly textOverflow: number;
+  } = {
+    fontStyle: 29,
+    textAlign: 47,
+    whiteSpace: 29,
+    overflowWrap: 29,
+    textOverflow: 7,
+  },
 ): Uint8Array {
   assertU32(paintId, "paintId");
   assertPositiveFinite(fontSize, "fontSize");
@@ -200,7 +227,19 @@ export function encodeTextStyle(
   }
   const encodedFamily = new TextEncoder().encode(family);
   if (encodedFamily.length === 0) throw new RangeError("fontFamily must not be empty");
-  const unalignedLength = TEXT_STYLE_FAMILY_OFFSET + encodedFamily.length;
+  for (const [name, value] of Object.entries(options)) {
+    if (!Number.isInteger(value) || value < 1 || value > 0xff) {
+      throw new RangeError(`${name} must be a known one-byte style keyword`);
+    }
+  }
+  const legacy =
+    options.fontStyle === 29 &&
+    options.textAlign === 47 &&
+    options.whiteSpace === 29 &&
+    options.overflowWrap === 29 &&
+    options.textOverflow === 7;
+  const familyOffset = legacy ? TEXT_STYLE_FAMILY_OFFSET : TEXT_STYLE_V2_FAMILY_OFFSET;
+  const unalignedLength = familyOffset + encodedFamily.length;
   if (unalignedLength > MAX_RESOURCE_BYTES) {
     throw new RangeError("text style resource is too large");
   }
@@ -208,14 +247,29 @@ export function encodeTextStyle(
   if (byteLength > MAX_RESOURCE_BYTES) throw new RangeError("text style resource is too large");
   const bytes = new Uint8Array(byteLength);
   const view = new DataView(bytes.buffer);
-  bytes[TEXT_STYLE_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
-  bytes[TEXT_STYLE_VARIANT_OFFSET] = TEXT_STYLE_RESOURCE_VARIANT;
-  view.setUint32(TEXT_STYLE_PAINT_ID_OFFSET, paintId, true);
-  view.setFloat32(TEXT_STYLE_FONT_SIZE_OFFSET, fontSize, true);
-  view.setFloat32(TEXT_STYLE_LINE_HEIGHT_OFFSET, lineHeight, true);
-  view.setUint16(TEXT_STYLE_WEIGHT_OFFSET, weight, true);
-  view.setUint32(TEXT_STYLE_FAMILY_BYTES_OFFSET, encodedFamily.length, true);
-  bytes.set(encodedFamily, TEXT_STYLE_FAMILY_OFFSET);
+  if (legacy) {
+    bytes[TEXT_STYLE_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
+    bytes[TEXT_STYLE_VARIANT_OFFSET] = TEXT_STYLE_RESOURCE_VARIANT;
+    view.setUint32(TEXT_STYLE_PAINT_ID_OFFSET, paintId, true);
+    view.setFloat32(TEXT_STYLE_FONT_SIZE_OFFSET, fontSize, true);
+    view.setFloat32(TEXT_STYLE_LINE_HEIGHT_OFFSET, lineHeight, true);
+    view.setUint16(TEXT_STYLE_WEIGHT_OFFSET, weight, true);
+    view.setUint32(TEXT_STYLE_FAMILY_BYTES_OFFSET, encodedFamily.length, true);
+  } else {
+    bytes[TEXT_STYLE_V2_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
+    bytes[TEXT_STYLE_V2_VARIANT_OFFSET] = TEXT_STYLE_V2_RESOURCE_VARIANT;
+    bytes[TEXT_STYLE_V2_FONT_STYLE_OFFSET] = options.fontStyle;
+    bytes[TEXT_STYLE_V2_TEXT_ALIGN_OFFSET] = options.textAlign;
+    view.setUint32(TEXT_STYLE_V2_PAINT_ID_OFFSET, paintId, true);
+    view.setFloat32(TEXT_STYLE_V2_FONT_SIZE_OFFSET, fontSize, true);
+    view.setFloat32(TEXT_STYLE_V2_LINE_HEIGHT_OFFSET, lineHeight, true);
+    view.setUint16(TEXT_STYLE_V2_WEIGHT_OFFSET, weight, true);
+    bytes[TEXT_STYLE_V2_WHITE_SPACE_OFFSET] = options.whiteSpace;
+    bytes[TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET] = options.overflowWrap;
+    bytes[TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET] = options.textOverflow;
+    view.setUint32(TEXT_STYLE_V2_FAMILY_BYTES_OFFSET, encodedFamily.length, true);
+  }
+  bytes.set(encodedFamily, familyOffset);
   return bytes;
 }
 

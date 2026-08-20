@@ -13,10 +13,17 @@ use pingo_abi::{
     SFNT_FONT_RESOURCE_MINIMUM_BYTES, SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET,
     SFNT_FONT_VERSION_OFFSET, SOLID_PAINT_RED_OFFSET, SOLID_PAINT_RESOURCE_FIXED_BYTES,
     SOLID_PAINT_RESOURCE_VARIANT, SOLID_PAINT_VARIANT_OFFSET, SOLID_PAINT_VERSION_OFFSET,
-    StyleKeyword, StyleLength, StyleProperty, StyleTransformOperation,
-    TEXT_STYLE_FAMILY_BYTES_OFFSET, TEXT_STYLE_FAMILY_OFFSET, TEXT_STYLE_FONT_SIZE_OFFSET,
-    TEXT_STYLE_LINE_HEIGHT_OFFSET, TEXT_STYLE_PAINT_ID_OFFSET, TEXT_STYLE_RESOURCE_MINIMUM_BYTES,
-    TEXT_STYLE_RESOURCE_VARIANT, TEXT_STYLE_VARIANT_OFFSET, TEXT_STYLE_VERSION_OFFSET,
+    STYLE_INTERACTION_STATE_MASK, STYLE_STATE_PROPERTY_IDS, StyleKeyword, StyleLength,
+    StyleProperty, StyleTransformOperation, TEXT_STYLE_FAMILY_BYTES_OFFSET,
+    TEXT_STYLE_FAMILY_OFFSET, TEXT_STYLE_FONT_SIZE_OFFSET, TEXT_STYLE_LINE_HEIGHT_OFFSET,
+    TEXT_STYLE_PAINT_ID_OFFSET, TEXT_STYLE_RESOURCE_MINIMUM_BYTES, TEXT_STYLE_RESOURCE_VARIANT,
+    TEXT_STYLE_V2_FAMILY_BYTES_OFFSET, TEXT_STYLE_V2_FAMILY_OFFSET, TEXT_STYLE_V2_FONT_SIZE_OFFSET,
+    TEXT_STYLE_V2_FONT_STYLE_OFFSET, TEXT_STYLE_V2_LINE_HEIGHT_OFFSET,
+    TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET, TEXT_STYLE_V2_RESERVED_OFFSET,
+    TEXT_STYLE_V2_RESOURCE_MINIMUM_BYTES, TEXT_STYLE_V2_RESOURCE_VARIANT,
+    TEXT_STYLE_V2_TEXT_ALIGN_OFFSET, TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET,
+    TEXT_STYLE_V2_VARIANT_OFFSET, TEXT_STYLE_V2_VERSION_OFFSET, TEXT_STYLE_V2_WEIGHT_OFFSET,
+    TEXT_STYLE_V2_WHITE_SPACE_OFFSET, TEXT_STYLE_VARIANT_OFFSET, TEXT_STYLE_VERSION_OFFSET,
     TEXT_STYLE_WEIGHT_OFFSET,
 };
 
@@ -114,6 +121,7 @@ pub struct Scene {
     props: PropertyLanes,
     slots: Vec<Slot>,
     resources: BTreeMap<u32, Resource>,
+    interaction_states: BTreeMap<NodeId, u8>,
     dirty_layout: BitSet,
     dirty_paint: BitSet,
     dirty_paint_self: BitSet,
@@ -148,6 +156,7 @@ impl Scene {
             props: PropertyLanes::default(),
             slots: Vec::new(),
             resources: BTreeMap::new(),
+            interaction_states: BTreeMap::new(),
             dirty_layout: BitSet::default(),
             dirty_paint: BitSet::default(),
             dirty_paint_self: BitSet::default(),
@@ -475,6 +484,152 @@ impl Scene {
         }
     }
 
+    /// Selects one style value using the node's Core-owned interaction mask.
+    #[must_use]
+    pub fn presented_style_value(
+        &self,
+        node: NodeId,
+        property: StyleProperty,
+    ) -> Option<&ComputedStyleValue> {
+        self.style_value(node, property, self.interaction_state(node))
+    }
+
+    /// Returns a presented keyword using the node's interaction mask.
+    #[must_use]
+    pub fn presented_style_keyword(
+        &self,
+        node: NodeId,
+        property: StyleProperty,
+    ) -> Option<StyleKeyword> {
+        match self.presented_style_value(node, property)? {
+            ComputedStyleValue::Keyword(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns a presented length using the node's interaction mask.
+    #[must_use]
+    pub fn presented_style_length(
+        &self,
+        node: NodeId,
+        property: StyleProperty,
+    ) -> Option<StyleLength> {
+        match self.presented_style_value(node, property)? {
+            ComputedStyleValue::Length(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns a presented RGBA color using the node's interaction mask.
+    #[must_use]
+    pub fn presented_style_rgba(&self, node: NodeId, property: StyleProperty) -> Option<u32> {
+        match self.presented_style_value(node, property)? {
+            ComputedStyleValue::Rgba8(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns a presented scalar using the node's interaction mask.
+    #[must_use]
+    pub fn presented_style_f32(&self, node: NodeId, property: StyleProperty) -> Option<f32> {
+        match self.presented_style_value(node, property)? {
+            ComputedStyleValue::F32(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns presented transform operations using the node's interaction mask.
+    #[must_use]
+    pub fn presented_style_transform(&self, node: NodeId) -> Option<&[StyleTransformOperation]> {
+        match self.presented_style_value(node, StyleProperty::Transform)? {
+            ComputedStyleValue::TransformList(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    /// Returns a presented two-axis position using the node's interaction mask.
+    #[must_use]
+    pub fn presented_style_position(
+        &self,
+        node: NodeId,
+        property: StyleProperty,
+    ) -> Option<[StyleLength; 2]> {
+        match self.presented_style_value(node, property)? {
+            ComputedStyleValue::Position(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns Core-owned transient interaction bits for one live node.
+    #[must_use]
+    pub fn interaction_state(&self, node: NodeId) -> u8 {
+        self.interaction_states.get(&node).copied().unwrap_or(0)
+    }
+
+    /// Iterates nodes currently carrying non-zero transient interaction bits.
+    pub fn interaction_states(&self) -> impl Iterator<Item = (NodeId, u8)> + '_ {
+        self.interaction_states
+            .iter()
+            .map(|(node, state)| (*node, *state))
+    }
+
+    /// Builds a live root-to-node ancestry path for event routing.
+    #[must_use]
+    pub fn path_to_root(&self, node: NodeId) -> Option<Vec<NodeId>> {
+        self.resolve(node)?;
+        let mut path = Vec::new();
+        let mut cursor = Some(node);
+        while let Some(current) = cursor {
+            path.push(current);
+            cursor = self.parent(current);
+        }
+        path.reverse();
+        Some(path)
+    }
+
+    /// Replaces transient interaction bits and marks only changed state-style domains.
+    ///
+    /// Returns `None` for a stale node or unsupported bits, otherwise whether
+    /// the state actually changed.
+    pub fn set_interaction_state(&mut self, node: NodeId, state: u8) -> Option<bool> {
+        let index = self.resolve(node)?;
+        if state & !STYLE_INTERACTION_STATE_MASK != 0 {
+            return None;
+        }
+        let previous = self.interaction_state(node);
+        if previous == state {
+            return Some(false);
+        }
+        let invalidation_bits = self.computed_style(node).map_or(0, |style| {
+            STYLE_STATE_PROPERTY_IDS.iter().fold(0, |bits, id| {
+                let Some(property) = StyleProperty::from_u16(*id) else {
+                    return bits;
+                };
+                if style.value(property, previous) == style.value(property, state) {
+                    bits
+                } else {
+                    bits | property.invalidation_bits()
+                }
+            })
+        });
+        if state == 0 {
+            self.interaction_states.remove(&node);
+        } else {
+            self.interaction_states.insert(node, state);
+        }
+        self.mark(index, Invalidation::from_bits(invalidation_bits));
+        Some(true)
+    }
+
+    /// Clears all transient interaction bits, returning the number of changed nodes.
+    pub fn clear_interaction_states(&mut self) -> usize {
+        let nodes = self.interaction_states.keys().copied().collect::<Vec<_>>();
+        nodes
+            .into_iter()
+            .filter(|node| self.set_interaction_state(*node, 0) == Some(true))
+            .count()
+    }
+
     /// Returns whether a node's durable computed display value is `none`.
     #[must_use]
     pub fn display_none(&self, node: NodeId) -> bool {
@@ -499,7 +654,7 @@ impl Scene {
     /// Shell in each computed-style resource.
     #[must_use]
     pub fn visible(&self, node: NodeId) -> bool {
-        self.style_keyword(node, StyleProperty::Visibility, 0) != Some(StyleKeyword::Hidden)
+        self.presented_style_keyword(node, StyleProperty::Visibility) != Some(StyleKeyword::Hidden)
     }
 
     /// Returns whether an axis establishes a programmatically scrollable mechanism.
@@ -1193,6 +1348,9 @@ fn validate_portable_header(
 }
 
 fn validate_text_style_resource(resource_id: u32, bytes: &[u8]) -> Result<(), SceneError> {
+    if bytes.get(TEXT_STYLE_VARIANT_OFFSET) == Some(&TEXT_STYLE_V2_RESOURCE_VARIANT) {
+        return validate_text_style_v2(resource_id, bytes);
+    }
     validate_portable_header(
         resource_id,
         bytes,
@@ -1232,6 +1390,74 @@ fn validate_text_style_resource(resource_id: u32, bytes: &[u8]) -> Result<(), Sc
             .map_or(true, str::is_empty)
     {
         return Err(SceneError::InvalidResourceEncoding { resource_id });
+    }
+    Ok(())
+}
+
+fn validate_text_style_v2(resource_id: u32, bytes: &[u8]) -> Result<(), SceneError> {
+    let invalid = || SceneError::InvalidResourceEncoding { resource_id };
+    if bytes.len() < TEXT_STYLE_V2_RESOURCE_MINIMUM_BYTES
+        || !bytes.len().is_multiple_of(4)
+        || bytes[TEXT_STYLE_V2_VERSION_OFFSET] != RESOURCE_ENCODING_VERSION
+        || bytes[TEXT_STYLE_V2_VARIANT_OFFSET] != TEXT_STYLE_V2_RESOURCE_VARIANT
+        || bytes[TEXT_STYLE_V2_RESERVED_OFFSET..TEXT_STYLE_V2_FAMILY_BYTES_OFFSET]
+            .iter()
+            .any(|reserved| *reserved != 0)
+    {
+        return Err(invalid());
+    }
+    let keyword =
+        |offset: usize| StyleKeyword::from_u16(u16::from(bytes[offset])).ok_or_else(invalid);
+    let font_style = keyword(TEXT_STYLE_V2_FONT_STYLE_OFFSET)?;
+    let text_align = keyword(TEXT_STYLE_V2_TEXT_ALIGN_OFFSET)?;
+    let white_space = keyword(TEXT_STYLE_V2_WHITE_SPACE_OFFSET)?;
+    let overflow_wrap = keyword(TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET)?;
+    let text_overflow = keyword(TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET)?;
+    let font_size = read_resource_f32(bytes, TEXT_STYLE_V2_FONT_SIZE_OFFSET);
+    let line_height = read_resource_f32(bytes, TEXT_STYLE_V2_LINE_HEIGHT_OFFSET);
+    let weight = u16::from_le_bytes([
+        bytes[TEXT_STYLE_V2_WEIGHT_OFFSET],
+        bytes[TEXT_STYLE_V2_WEIGHT_OFFSET + 1],
+    ]);
+    let family_len = usize::try_from(read_resource_u32(bytes, TEXT_STYLE_V2_FAMILY_BYTES_OFFSET))
+        .map_err(|_| invalid())?;
+    let family_end = TEXT_STYLE_V2_FAMILY_OFFSET
+        .checked_add(family_len)
+        .ok_or_else(invalid)?;
+    if !matches!(font_style, StyleKeyword::Normal | StyleKeyword::Italic)
+        || !matches!(
+            text_align,
+            StyleKeyword::Start
+                | StyleKeyword::End
+                | StyleKeyword::Left
+                | StyleKeyword::Right
+                | StyleKeyword::Center
+                | StyleKeyword::Justify
+        )
+        || !matches!(
+            white_space,
+            StyleKeyword::Normal
+                | StyleKeyword::Nowrap
+                | StyleKeyword::Pre
+                | StyleKeyword::PreLine
+                | StyleKeyword::PreWrap
+        )
+        || !matches!(
+            overflow_wrap,
+            StyleKeyword::Normal | StyleKeyword::BreakWord | StyleKeyword::Anywhere
+        )
+        || !matches!(text_overflow, StyleKeyword::Clip | StyleKeyword::Ellipsis)
+        || !font_size.is_finite()
+        || font_size <= 0.0
+        || !line_height.is_finite()
+        || line_height <= 0.0
+        || !(1..=1000).contains(&weight)
+        || family_end > bytes.len()
+        || bytes[family_end..].iter().any(|padding| *padding != 0)
+        || std::str::from_utf8(&bytes[TEXT_STYLE_V2_FAMILY_OFFSET..family_end])
+            .map_or(true, str::is_empty)
+    {
+        return Err(invalid());
     }
     Ok(())
 }
@@ -1525,6 +1751,11 @@ impl Scene {
         next.carry_paint_dirty_from(self, &touched);
         next.resources = self.resources.clone();
         next.resources.extend(staged_resources);
+        next.interaction_states = self
+            .interaction_states
+            .iter()
+            .filter_map(|(node, state)| next.resolve(*node).map(|_| (*node, *state)))
+            .collect();
         validate_resource_graph(&next.resources, &BTreeMap::new())?;
         next.last_frame_seq = Some(batch.frame_seq);
         next.metrics = self.metrics;
@@ -2323,6 +2554,29 @@ mod tests {
         bytes
     }
 
+    fn computed_style(entries: &[(StyleProperty, u8, u8, Vec<u8>)]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        for (property, state, tag, value) in entries {
+            payload.extend_from_slice(&(*property as u16).to_le_bytes());
+            payload.push(*state);
+            payload.push(*tag);
+            payload.extend_from_slice(&(value.len() as u16).to_le_bytes());
+            payload.extend_from_slice(&0_u16.to_le_bytes());
+            payload.extend_from_slice(value);
+            while payload.len() % 4 != 0 {
+                payload.push(0);
+            }
+        }
+        let mut bytes = vec![0; 16];
+        bytes[0] = pingo_abi::STYLE_COMPUTED_ENCODING_VERSION;
+        bytes[1] = pingo_abi::STYLE_COMPUTED_ENCODING_VARIANT;
+        bytes[4..8].copy_from_slice(&pingo_abi::STYLE_ALL_FEATURE_BITS.to_le_bytes());
+        bytes[8..12].copy_from_slice(&(entries.len() as u32).to_le_bytes());
+        bytes[12..16].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        bytes
+    }
+
     fn text_style(paint_id: u32, family: &[u8]) -> Vec<u8> {
         let padded_len = TEXT_STYLE_FAMILY_OFFSET + family.len().next_multiple_of(4);
         let mut bytes = vec![0; padded_len];
@@ -2339,6 +2593,32 @@ mod tests {
         bytes[TEXT_STYLE_FAMILY_BYTES_OFFSET..TEXT_STYLE_FAMILY_BYTES_OFFSET + 4]
             .copy_from_slice(&(family.len() as u32).to_le_bytes());
         bytes[TEXT_STYLE_FAMILY_OFFSET..TEXT_STYLE_FAMILY_OFFSET + family.len()]
+            .copy_from_slice(family);
+        bytes
+    }
+
+    fn text_style_v2(paint_id: u32, family: &[u8]) -> Vec<u8> {
+        let padded_len = TEXT_STYLE_V2_FAMILY_OFFSET + family.len().next_multiple_of(4);
+        let mut bytes = vec![0; padded_len];
+        bytes[TEXT_STYLE_V2_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
+        bytes[TEXT_STYLE_V2_VARIANT_OFFSET] = TEXT_STYLE_V2_RESOURCE_VARIANT;
+        bytes[TEXT_STYLE_V2_FONT_STYLE_OFFSET] = StyleKeyword::Italic as u8;
+        bytes[TEXT_STYLE_V2_TEXT_ALIGN_OFFSET] = StyleKeyword::Center as u8;
+        bytes[pingo_abi::TEXT_STYLE_V2_PAINT_ID_OFFSET
+            ..pingo_abi::TEXT_STYLE_V2_PAINT_ID_OFFSET + 4]
+            .copy_from_slice(&paint_id.to_le_bytes());
+        bytes[TEXT_STYLE_V2_FONT_SIZE_OFFSET..TEXT_STYLE_V2_FONT_SIZE_OFFSET + 4]
+            .copy_from_slice(&16.0_f32.to_le_bytes());
+        bytes[TEXT_STYLE_V2_LINE_HEIGHT_OFFSET..TEXT_STYLE_V2_LINE_HEIGHT_OFFSET + 4]
+            .copy_from_slice(&20.0_f32.to_le_bytes());
+        bytes[TEXT_STYLE_V2_WEIGHT_OFFSET..TEXT_STYLE_V2_WEIGHT_OFFSET + 2]
+            .copy_from_slice(&400_u16.to_le_bytes());
+        bytes[TEXT_STYLE_V2_WHITE_SPACE_OFFSET] = StyleKeyword::Nowrap as u8;
+        bytes[TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET] = StyleKeyword::Anywhere as u8;
+        bytes[TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET] = StyleKeyword::Ellipsis as u8;
+        bytes[TEXT_STYLE_V2_FAMILY_BYTES_OFFSET..TEXT_STYLE_V2_FAMILY_BYTES_OFFSET + 4]
+            .copy_from_slice(&(family.len() as u32).to_le_bytes());
+        bytes[TEXT_STYLE_V2_FAMILY_OFFSET..TEXT_STYLE_V2_FAMILY_OFFSET + family.len()]
             .copy_from_slice(family);
         bytes
     }
@@ -2393,6 +2673,248 @@ mod tests {
             scene
                 .resource(7)
                 .is_some_and(|resource| resource.computed_style.is_some())
+        );
+    }
+
+    #[test]
+    fn typed_style_queries_cover_values_fallbacks_and_interaction_cleanup() {
+        let root = id(0, 1);
+        let child = id(1, 1);
+        let mut width = vec![pingo_abi::STYLE_LENGTH_PX, 0, 0, 0];
+        width.extend_from_slice(&42.0_f32.to_le_bytes());
+        let mut position = vec![pingo_abi::STYLE_LENGTH_PERCENT, 0, 0, 0];
+        position.extend_from_slice(&50.0_f32.to_le_bytes());
+        position.extend_from_slice(&[pingo_abi::STYLE_LENGTH_PX, 0, 0, 0]);
+        position.extend_from_slice(&8.0_f32.to_le_bytes());
+        let style = computed_style(&[
+            (
+                StyleProperty::Display,
+                0,
+                pingo_abi::STYLE_VALUE_KEYWORD,
+                vec![StyleKeyword::Flex as u8, 0, 0, 0],
+            ),
+            (
+                StyleProperty::Width,
+                0,
+                pingo_abi::STYLE_VALUE_LENGTH,
+                width,
+            ),
+            (
+                StyleProperty::BackgroundColor,
+                0,
+                pingo_abi::STYLE_VALUE_RGBA8,
+                0x11_22_33_44_u32.to_le_bytes().to_vec(),
+            ),
+            (
+                StyleProperty::Opacity,
+                0,
+                pingo_abi::STYLE_VALUE_F32,
+                0.75_f32.to_le_bytes().to_vec(),
+            ),
+            (
+                StyleProperty::Transform,
+                0,
+                pingo_abi::STYLE_VALUE_TRANSFORM_LIST,
+                0_u32.to_le_bytes().to_vec(),
+            ),
+            (
+                StyleProperty::TransformOrigin,
+                0,
+                pingo_abi::STYLE_VALUE_POSITION,
+                position,
+            ),
+        ]);
+        let mut scene = Scene::default();
+        scene
+            .commit(batch(
+                1,
+                vec![
+                    define(7, ResourceKind::ComputedStyle, style),
+                    create(root, NodeKind::Root, None),
+                    create(child, NodeKind::Container, Some(root)),
+                    Mutation::SetRef {
+                        node_id: child.raw(),
+                        prop: Prop::ComputedStyle,
+                        resource_id: 7,
+                    },
+                ],
+            ))
+            .expect("computed style commit");
+
+        assert_eq!(
+            scene.style_keyword(child, StyleProperty::Display, 0),
+            Some(StyleKeyword::Flex)
+        );
+        assert_eq!(scene.style_keyword(child, StyleProperty::Width, 0), None);
+        assert!(scene.style_length(child, StyleProperty::Width, 0).is_some());
+        assert_eq!(scene.style_length(child, StyleProperty::Display, 0), None);
+        assert_eq!(
+            scene.style_rgba(child, StyleProperty::BackgroundColor, 0),
+            Some(0x11_22_33_44)
+        );
+        assert_eq!(scene.style_rgba(child, StyleProperty::Opacity, 0), None);
+        assert_eq!(
+            scene.style_f32(child, StyleProperty::Opacity, 0),
+            Some(0.75)
+        );
+        assert_eq!(scene.style_f32(child, StyleProperty::Display, 0), None);
+        assert_eq!(scene.style_transform(child, 0), Some([].as_slice()));
+        assert!(
+            scene
+                .style_position(child, StyleProperty::TransformOrigin, 0)
+                .is_some()
+        );
+        assert_eq!(scene.style_position(child, StyleProperty::Display, 0), None);
+
+        assert_eq!(
+            scene.presented_style_keyword(child, StyleProperty::Display),
+            Some(StyleKeyword::Flex)
+        );
+        assert!(
+            scene
+                .presented_style_length(child, StyleProperty::Width)
+                .is_some()
+        );
+        assert_eq!(
+            scene.presented_style_rgba(child, StyleProperty::BackgroundColor),
+            Some(0x11_22_33_44)
+        );
+        assert_eq!(
+            scene.presented_style_f32(child, StyleProperty::Opacity),
+            Some(0.75)
+        );
+        assert_eq!(scene.presented_style_transform(child), Some([].as_slice()));
+        assert!(
+            scene
+                .presented_style_position(child, StyleProperty::TransformOrigin)
+                .is_some()
+        );
+
+        assert_eq!(scene.path_to_root(child), Some(vec![root, child]));
+        assert_eq!(scene.path_to_root(id(9, 1)), None);
+        assert_eq!(scene.set_interaction_state(child, u8::MAX), None);
+        assert_eq!(
+            scene.set_interaction_state(child, pingo_abi::STYLE_INTERACTION_ACTIVE),
+            Some(true)
+        );
+        assert_eq!(
+            scene.interaction_states().collect::<Vec<_>>(),
+            vec![(child, pingo_abi::STYLE_INTERACTION_ACTIVE)]
+        );
+        assert_eq!(scene.clear_interaction_states(), 1);
+        assert_eq!(scene.interaction_state(child), 0);
+        assert!(!scene.display_none(child));
+        assert!(!scene.excluded_by_display(child));
+        assert!(scene.visible(child));
+        assert!(!scene.is_scroll_container(child));
+        assert!(!scene.clips_axis(child, true));
+    }
+
+    #[test]
+    fn interaction_styles_switch_exact_variants_and_dirty_only_owned_domains() {
+        let root = id(0, 1);
+        let child = id(1, 1);
+        let style = computed_style(&[
+            (
+                StyleProperty::BackgroundColor,
+                0,
+                pingo_abi::STYLE_VALUE_RGBA8,
+                0xff_00_00_ff_u32.to_le_bytes().to_vec(),
+            ),
+            (
+                StyleProperty::BackgroundColor,
+                pingo_abi::STYLE_INTERACTION_HOVER,
+                pingo_abi::STYLE_VALUE_RGBA8,
+                0x00_ff_00_ff_u32.to_le_bytes().to_vec(),
+            ),
+            (
+                StyleProperty::Opacity,
+                pingo_abi::STYLE_INTERACTION_HOVER,
+                pingo_abi::STYLE_VALUE_F32,
+                0.5_f32.to_le_bytes().to_vec(),
+            ),
+        ]);
+        let mut scene = Scene::default();
+        scene
+            .commit(batch(
+                1,
+                vec![
+                    define(7, ResourceKind::ComputedStyle, style),
+                    create(root, NodeKind::Root, None),
+                    create(child, NodeKind::Container, Some(root)),
+                    Mutation::SetRef {
+                        node_id: child.raw(),
+                        prop: Prop::ComputedStyle,
+                        resource_id: 7,
+                    },
+                ],
+            ))
+            .expect("computed style commit");
+        scene.clear_dirty();
+
+        assert_eq!(
+            scene.set_interaction_state(child, pingo_abi::STYLE_INTERACTION_HOVER),
+            Some(true)
+        );
+        assert_eq!(
+            scene.presented_style_rgba(child, StyleProperty::BackgroundColor),
+            Some(0x00_ff_00_ff)
+        );
+        assert_eq!(
+            scene.presented_style_f32(child, StyleProperty::Opacity),
+            Some(0.5)
+        );
+        assert!(
+            scene
+                .dirty(DirtyDomain::Layout)
+                .iter_ones()
+                .next()
+                .is_none()
+        );
+        assert_eq!(
+            scene
+                .dirty(DirtyDomain::Paint)
+                .iter_ones()
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            scene
+                .dirty(DirtyDomain::PaintSelf)
+                .iter_ones()
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert_eq!(
+            scene
+                .dirty(DirtyDomain::Hit)
+                .iter_ones()
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+        assert!(
+            scene
+                .dirty(DirtyDomain::Semantics)
+                .iter_ones()
+                .next()
+                .is_none()
+        );
+
+        scene.clear_dirty();
+        assert_eq!(
+            scene.set_interaction_state(child, pingo_abi::STYLE_INTERACTION_HOVER),
+            Some(false)
+        );
+        assert!(
+            [
+                DirtyDomain::Layout,
+                DirtyDomain::Paint,
+                DirtyDomain::PaintSelf,
+                DirtyDomain::Hit,
+                DirtyDomain::Semantics,
+            ]
+            .into_iter()
+            .all(|domain| scene.dirty(domain).iter_ones().next().is_none())
         );
     }
 
@@ -3339,6 +3861,23 @@ mod tests {
                 SceneError::InvalidResourceEncoding { resource_id: 10 },
             );
         }
+        let mut v2_scene = Scene::new();
+        v2_scene
+            .commit(batch(
+                1,
+                vec![
+                    define(1, ResourceKind::Paint, paint(1, 2, 3, 4)),
+                    define(2, ResourceKind::TextStyle, text_style_v2(1, b"Inter")),
+                ],
+            ))
+            .expect("TextStyle v2 is valid");
+        let mut invalid_v2 = text_style_v2(1, b"Inter");
+        invalid_v2[TEXT_STYLE_V2_WHITE_SPACE_OFFSET] = u8::MAX;
+        reject(
+            ResourceKind::TextStyle,
+            invalid_v2,
+            SceneError::InvalidResourceEncoding { resource_id: 10 },
+        );
 
         let mut scene = Scene::new();
         assert_eq!(

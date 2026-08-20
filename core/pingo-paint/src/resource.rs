@@ -5,9 +5,16 @@ use pingo_abi::{
     RESOURCE_ENCODING_VERSION, SOLID_PAINT_ALPHA_OFFSET, SOLID_PAINT_BLUE_OFFSET,
     SOLID_PAINT_GREEN_OFFSET, SOLID_PAINT_RED_OFFSET, SOLID_PAINT_RESOURCE_FIXED_BYTES,
     SOLID_PAINT_RESOURCE_MINIMUM_BYTES, SOLID_PAINT_RESOURCE_VARIANT, SOLID_PAINT_VARIANT_OFFSET,
-    SOLID_PAINT_VERSION_OFFSET, TEXT_STYLE_FAMILY_BYTES_OFFSET, TEXT_STYLE_FAMILY_OFFSET,
-    TEXT_STYLE_FONT_SIZE_OFFSET, TEXT_STYLE_LINE_HEIGHT_OFFSET, TEXT_STYLE_PAINT_ID_OFFSET,
-    TEXT_STYLE_RESOURCE_MINIMUM_BYTES, TEXT_STYLE_RESOURCE_VARIANT, TEXT_STYLE_VARIANT_OFFSET,
+    SOLID_PAINT_VERSION_OFFSET, StyleKeyword, TEXT_STYLE_FAMILY_BYTES_OFFSET,
+    TEXT_STYLE_FAMILY_OFFSET, TEXT_STYLE_FONT_SIZE_OFFSET, TEXT_STYLE_LINE_HEIGHT_OFFSET,
+    TEXT_STYLE_PAINT_ID_OFFSET, TEXT_STYLE_RESOURCE_MINIMUM_BYTES, TEXT_STYLE_RESOURCE_VARIANT,
+    TEXT_STYLE_V2_FAMILY_BYTES_OFFSET, TEXT_STYLE_V2_FAMILY_OFFSET, TEXT_STYLE_V2_FONT_SIZE_OFFSET,
+    TEXT_STYLE_V2_FONT_STYLE_OFFSET, TEXT_STYLE_V2_LINE_HEIGHT_OFFSET,
+    TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET, TEXT_STYLE_V2_PAINT_ID_OFFSET,
+    TEXT_STYLE_V2_RESERVED_OFFSET, TEXT_STYLE_V2_RESOURCE_MINIMUM_BYTES,
+    TEXT_STYLE_V2_RESOURCE_VARIANT, TEXT_STYLE_V2_TEXT_ALIGN_OFFSET,
+    TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET, TEXT_STYLE_V2_VARIANT_OFFSET, TEXT_STYLE_V2_VERSION_OFFSET,
+    TEXT_STYLE_V2_WEIGHT_OFFSET, TEXT_STYLE_V2_WHITE_SPACE_OFFSET, TEXT_STYLE_VARIANT_OFFSET,
     TEXT_STYLE_VERSION_OFFSET, TEXT_STYLE_WEIGHT_OFFSET,
 };
 use pingo_scene::Resource;
@@ -141,10 +148,20 @@ pub struct TextStyleResource {
     pub weight: u16,
     /// UTF-8 font family.
     pub family: String,
+    /// Font face posture.
+    pub font_style: StyleKeyword,
+    /// Inline-axis line alignment.
+    pub text_align: StyleKeyword,
+    /// Whitespace collapsing and wrapping mode.
+    pub white_space: StyleKeyword,
+    /// Emergency word breaking mode.
+    pub overflow_wrap: StyleKeyword,
+    /// Inline overflow marker behavior.
+    pub text_overflow: StyleKeyword,
 }
 
 impl TextStyleResource {
-    /// Encodes the aligned v1 payload.
+    /// Encodes v1 for the legacy defaults and v2 when M6 text semantics are used.
     pub fn encode(&self) -> Result<Vec<u8>, PaintError> {
         if !self.font_size.is_finite()
             || self.font_size <= 0.0
@@ -154,42 +171,74 @@ impl TextStyleResource {
         {
             return Err(invalid(0, "invalid text style numeric field"));
         }
+        validate_text_keywords(self).map_err(|reason| invalid(0, reason))?;
         let family_len =
             u32::try_from(self.family.len()).map_err(|_| invalid(0, "font family is too large"))?;
-        let aligned_len = TEXT_STYLE_RESOURCE_MINIMUM_BYTES
+        let legacy = self.font_style == StyleKeyword::Normal
+            && self.text_align == StyleKeyword::Start
+            && self.white_space == StyleKeyword::Normal
+            && self.overflow_wrap == StyleKeyword::Normal
+            && self.text_overflow == StyleKeyword::Clip;
+        let (minimum_bytes, family_offset) = if legacy {
+            (TEXT_STYLE_RESOURCE_MINIMUM_BYTES, TEXT_STYLE_FAMILY_OFFSET)
+        } else {
+            (
+                TEXT_STYLE_V2_RESOURCE_MINIMUM_BYTES,
+                TEXT_STYLE_V2_FAMILY_OFFSET,
+            )
+        };
+        let aligned_len = minimum_bytes
             .checked_add(self.family.len())
             .and_then(|length| length.checked_add(3))
             .map(|length| length & !3)
             .ok_or_else(|| invalid(0, "text style length overflow"))?;
         let mut bytes = vec![0_u8; aligned_len];
-        bytes[TEXT_STYLE_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
-        bytes[TEXT_STYLE_VARIANT_OFFSET] = TEXT_STYLE_RESOURCE_VARIANT;
-        write_bytes(
-            &mut bytes,
-            TEXT_STYLE_PAINT_ID_OFFSET,
-            &self.paint_id.to_le_bytes(),
-        );
-        write_bytes(
-            &mut bytes,
-            TEXT_STYLE_FONT_SIZE_OFFSET,
-            &self.font_size.to_le_bytes(),
-        );
-        write_bytes(
-            &mut bytes,
-            TEXT_STYLE_LINE_HEIGHT_OFFSET,
-            &self.line_height.to_le_bytes(),
-        );
-        write_bytes(
-            &mut bytes,
-            TEXT_STYLE_WEIGHT_OFFSET,
-            &self.weight.to_le_bytes(),
-        );
-        write_bytes(
-            &mut bytes,
-            TEXT_STYLE_FAMILY_BYTES_OFFSET,
-            &family_len.to_le_bytes(),
-        );
-        bytes[TEXT_STYLE_FAMILY_OFFSET..TEXT_STYLE_FAMILY_OFFSET + self.family.len()]
+        let (
+            version_offset,
+            variant_offset,
+            paint_offset,
+            size_offset,
+            line_offset,
+            weight_offset,
+            family_bytes_offset,
+        ) = if legacy {
+            (
+                TEXT_STYLE_VERSION_OFFSET,
+                TEXT_STYLE_VARIANT_OFFSET,
+                TEXT_STYLE_PAINT_ID_OFFSET,
+                TEXT_STYLE_FONT_SIZE_OFFSET,
+                TEXT_STYLE_LINE_HEIGHT_OFFSET,
+                TEXT_STYLE_WEIGHT_OFFSET,
+                TEXT_STYLE_FAMILY_BYTES_OFFSET,
+            )
+        } else {
+            bytes[TEXT_STYLE_V2_FONT_STYLE_OFFSET] = self.font_style as u8;
+            bytes[TEXT_STYLE_V2_TEXT_ALIGN_OFFSET] = self.text_align as u8;
+            bytes[TEXT_STYLE_V2_WHITE_SPACE_OFFSET] = self.white_space as u8;
+            bytes[TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET] = self.overflow_wrap as u8;
+            bytes[TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET] = self.text_overflow as u8;
+            (
+                TEXT_STYLE_V2_VERSION_OFFSET,
+                TEXT_STYLE_V2_VARIANT_OFFSET,
+                TEXT_STYLE_V2_PAINT_ID_OFFSET,
+                TEXT_STYLE_V2_FONT_SIZE_OFFSET,
+                TEXT_STYLE_V2_LINE_HEIGHT_OFFSET,
+                TEXT_STYLE_V2_WEIGHT_OFFSET,
+                TEXT_STYLE_V2_FAMILY_BYTES_OFFSET,
+            )
+        };
+        bytes[version_offset] = RESOURCE_ENCODING_VERSION;
+        bytes[variant_offset] = if legacy {
+            TEXT_STYLE_RESOURCE_VARIANT
+        } else {
+            TEXT_STYLE_V2_RESOURCE_VARIANT
+        };
+        write_bytes(&mut bytes, paint_offset, &self.paint_id.to_le_bytes());
+        write_bytes(&mut bytes, size_offset, &self.font_size.to_le_bytes());
+        write_bytes(&mut bytes, line_offset, &self.line_height.to_le_bytes());
+        write_bytes(&mut bytes, weight_offset, &self.weight.to_le_bytes());
+        write_bytes(&mut bytes, family_bytes_offset, &family_len.to_le_bytes());
+        bytes[family_offset..family_offset + self.family.len()]
             .copy_from_slice(self.family.as_bytes());
         Ok(bytes)
     }
@@ -201,6 +250,9 @@ impl TextStyleResource {
     /// Returns [`PaintError::InvalidResource`] for malformed or unsupported payloads.
     pub fn decode(resource_id: u32, resource: &Resource) -> Result<Self, PaintError> {
         let bytes = resource.bytes.as_ref();
+        if bytes.get(TEXT_STYLE_VARIANT_OFFSET) == Some(&TEXT_STYLE_V2_RESOURCE_VARIANT) {
+            return Self::decode_v2(resource_id, bytes);
+        }
         validate_header(
             resource_id,
             bytes,
@@ -210,7 +262,7 @@ impl TextStyleResource {
             TEXT_STYLE_PAINT_ID_OFFSET,
         )?;
         if bytes.len() < TEXT_STYLE_RESOURCE_MINIMUM_BYTES
-            || bytes.len() % 4 != 0
+            || !bytes.len().is_multiple_of(4)
             || bytes[TEXT_STYLE_WEIGHT_OFFSET + 2..TEXT_STYLE_FAMILY_BYTES_OFFSET] != [0, 0]
         {
             return Err(invalid(
@@ -252,8 +304,119 @@ impl TextStyleResource {
             line_height,
             weight,
             family,
+            font_style: StyleKeyword::Normal,
+            text_align: StyleKeyword::Start,
+            white_space: StyleKeyword::Normal,
+            overflow_wrap: StyleKeyword::Normal,
+            text_overflow: StyleKeyword::Clip,
         })
     }
+
+    fn decode_v2(resource_id: u32, bytes: &[u8]) -> Result<Self, PaintError> {
+        if bytes.len() < TEXT_STYLE_V2_RESOURCE_MINIMUM_BYTES
+            || !bytes.len().is_multiple_of(4)
+            || bytes[TEXT_STYLE_V2_VERSION_OFFSET] != RESOURCE_ENCODING_VERSION
+            || bytes[TEXT_STYLE_V2_VARIANT_OFFSET] != TEXT_STYLE_V2_RESOURCE_VARIANT
+            || bytes[TEXT_STYLE_V2_RESERVED_OFFSET..TEXT_STYLE_V2_FAMILY_BYTES_OFFSET]
+                .iter()
+                .any(|reserved| *reserved != 0)
+        {
+            return Err(invalid(
+                resource_id,
+                "invalid text style v2 header or alignment",
+            ));
+        }
+        let keyword = |offset: usize| {
+            StyleKeyword::from_u16(u16::from(bytes[offset]))
+                .ok_or_else(|| invalid(resource_id, "unknown text style keyword"))
+        };
+        let paint_id = read_u32(bytes, TEXT_STYLE_V2_PAINT_ID_OFFSET);
+        let font_size = read_f32(bytes, TEXT_STYLE_V2_FONT_SIZE_OFFSET);
+        let line_height = read_f32(bytes, TEXT_STYLE_V2_LINE_HEIGHT_OFFSET);
+        let weight = u16::from_le_bytes([
+            bytes[TEXT_STYLE_V2_WEIGHT_OFFSET],
+            bytes[TEXT_STYLE_V2_WEIGHT_OFFSET + 1],
+        ]);
+        let family_len = usize::try_from(read_u32(bytes, TEXT_STYLE_V2_FAMILY_BYTES_OFFSET))
+            .map_err(|_| invalid(resource_id, "font family length overflow"))?;
+        let family_end = TEXT_STYLE_V2_FAMILY_OFFSET
+            .checked_add(family_len)
+            .ok_or_else(|| invalid(resource_id, "font family length overflow"))?;
+        let result = Self {
+            paint_id,
+            font_size,
+            line_height,
+            weight,
+            family: if family_end <= bytes.len() {
+                std::str::from_utf8(&bytes[TEXT_STYLE_V2_FAMILY_OFFSET..family_end])
+                    .map_err(|_| invalid(resource_id, "font family is not UTF-8"))?
+                    .to_owned()
+            } else {
+                return Err(invalid(resource_id, "font family length overflow"));
+            },
+            font_style: keyword(TEXT_STYLE_V2_FONT_STYLE_OFFSET)?,
+            text_align: keyword(TEXT_STYLE_V2_TEXT_ALIGN_OFFSET)?,
+            white_space: keyword(TEXT_STYLE_V2_WHITE_SPACE_OFFSET)?,
+            overflow_wrap: keyword(TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET)?,
+            text_overflow: keyword(TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET)?,
+        };
+        if family_end > bytes.len()
+            || bytes[family_end..].iter().any(|padding| *padding != 0)
+            || !result.font_size.is_finite()
+            || result.font_size <= 0.0
+            || !result.line_height.is_finite()
+            || result.line_height <= 0.0
+            || !(1..=1000).contains(&result.weight)
+            || result.family.is_empty()
+        {
+            return Err(invalid(resource_id, "invalid text style v2 payload"));
+        }
+        validate_text_keywords(&result).map_err(|reason| invalid(resource_id, reason))?;
+        Ok(result)
+    }
+}
+
+fn validate_text_keywords(style: &TextStyleResource) -> Result<(), &'static str> {
+    if !matches!(
+        style.font_style,
+        StyleKeyword::Normal | StyleKeyword::Italic
+    ) {
+        return Err("invalid font-style keyword");
+    }
+    if !matches!(
+        style.text_align,
+        StyleKeyword::Start
+            | StyleKeyword::End
+            | StyleKeyword::Left
+            | StyleKeyword::Right
+            | StyleKeyword::Center
+            | StyleKeyword::Justify
+    ) {
+        return Err("invalid text-align keyword");
+    }
+    if !matches!(
+        style.white_space,
+        StyleKeyword::Normal
+            | StyleKeyword::Nowrap
+            | StyleKeyword::Pre
+            | StyleKeyword::PreLine
+            | StyleKeyword::PreWrap
+    ) {
+        return Err("invalid white-space keyword");
+    }
+    if !matches!(
+        style.overflow_wrap,
+        StyleKeyword::Normal | StyleKeyword::BreakWord | StyleKeyword::Anywhere
+    ) {
+        return Err("invalid overflow-wrap keyword");
+    }
+    if !matches!(
+        style.text_overflow,
+        StyleKeyword::Clip | StyleKeyword::Ellipsis
+    ) {
+        return Err("invalid text-overflow keyword");
+    }
+    Ok(())
 }
 
 fn validate_header(
@@ -357,6 +520,11 @@ mod tests {
             line_height: 20.0,
             weight: 400,
             family: "Inter".to_owned(),
+            font_style: StyleKeyword::Normal,
+            text_align: StyleKeyword::Start,
+            white_space: StyleKeyword::Normal,
+            overflow_wrap: StyleKeyword::Normal,
+            text_overflow: StyleKeyword::Clip,
         };
         let encoded = style.encode().expect("style encodes");
         assert_eq!(
@@ -366,6 +534,40 @@ mod tests {
         assert_eq!(
             TextStyleResource::decode(9, &resource(ResourceKind::TextStyle, encoded),),
             Ok(style)
+        );
+    }
+
+    #[test]
+    fn text_style_v2_round_trips_m6_semantics_and_rejects_unknown_keywords() {
+        let style = TextStyleResource {
+            paint_id: 1,
+            font_size: 16.0,
+            line_height: 20.0,
+            weight: 400,
+            family: "Inter".to_owned(),
+            font_style: StyleKeyword::Italic,
+            text_align: StyleKeyword::Center,
+            white_space: StyleKeyword::Nowrap,
+            overflow_wrap: StyleKeyword::Anywhere,
+            text_overflow: StyleKeyword::Ellipsis,
+        };
+        let encoded = style.encode().expect("v2 style encodes");
+        assert_eq!(
+            encoded[TEXT_STYLE_V2_VARIANT_OFFSET],
+            TEXT_STYLE_V2_RESOURCE_VARIANT
+        );
+        assert_eq!(
+            to_hex(&encoded),
+            "0102180601000000000080410000a04190011f010f00000005000000496e746572000000"
+        );
+        assert_eq!(
+            TextStyleResource::decode(10, &resource(ResourceKind::TextStyle, encoded.clone())),
+            Ok(style)
+        );
+        let mut malformed = encoded;
+        malformed[TEXT_STYLE_V2_WHITE_SPACE_OFFSET] = u8::MAX;
+        assert!(
+            TextStyleResource::decode(10, &resource(ResourceKind::TextStyle, malformed)).is_err()
         );
     }
 

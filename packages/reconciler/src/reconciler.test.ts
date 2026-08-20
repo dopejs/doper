@@ -12,6 +12,7 @@ import {
 } from "@dopejs/pingo-jsx";
 import { signal, useEffect } from "@dopejs/pingo-runtime";
 import { createStyleSheet } from "@dopejs/pingo-style";
+import type { EventTransaction } from "@dopejs/pingo-editing";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -23,6 +24,13 @@ import {
   TEXT_STYLE_LINE_HEIGHT_OFFSET,
   TEXT_STYLE_PAINT_ID_OFFSET,
   TEXT_STYLE_WEIGHT_OFFSET,
+  TEXT_STYLE_V2_FONT_STYLE_OFFSET,
+  TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET,
+  TEXT_STYLE_V2_RESOURCE_VARIANT,
+  TEXT_STYLE_V2_TEXT_ALIGN_OFFSET,
+  TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET,
+  TEXT_STYLE_V2_VARIANT_OFFSET,
+  TEXT_STYLE_V2_WHITE_SPACE_OFFSET,
 } from "./generated";
 import { decodeMutationBatch, type Mutation, type MutationBatch } from "./mutation-stream";
 import { createRoot, type MutationSink } from "./reconciler";
@@ -151,6 +159,33 @@ describe("reconciler", () => {
     expect(paint?.bytes[SOLID_PAINT_RED_OFFSET]).toBe(0x12);
   });
 
+  it("encodes M6 text semantics into the validated TextStyle v2 resource", () => {
+    const sink = new RecordingSink();
+    createRoot(sink).render(
+      createElement(Text, {
+        value: "styled",
+        style: {
+          fontStyle: "italic",
+          overflowWrap: "anywhere",
+          textAlign: "center",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        },
+      }),
+    );
+    const batch = sink.batches[0];
+    const textRun = mutationsOfType(batch, "setTextRun")[0];
+    const bytes = mutationsOfType(batch, "defineResource").find(
+      (mutation) => mutation.resourceId === textRun?.styleId,
+    )?.bytes;
+    expect(bytes?.[TEXT_STYLE_V2_VARIANT_OFFSET]).toBe(TEXT_STYLE_V2_RESOURCE_VARIANT);
+    expect(bytes?.[TEXT_STYLE_V2_FONT_STYLE_OFFSET]).toBe(24);
+    expect(bytes?.[TEXT_STYLE_V2_TEXT_ALIGN_OFFSET]).toBe(6);
+    expect(bytes?.[TEXT_STYLE_V2_WHITE_SPACE_OFFSET]).toBe(31);
+    expect(bytes?.[TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET]).toBe(1);
+    expect(bytes?.[TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET]).toBe(15);
+  });
+
   it("keeps the direct-prop path byte-for-byte free of styles when rollback is enabled", () => {
     const sink = new RecordingSink();
     createRoot(sink, { styleResolverEnabled: false }).render(
@@ -160,6 +195,46 @@ describe("reconciler", () => {
     expect(mutationsOfType(sink.batches[0], "setF32")).toContainEqual(
       expect.objectContaining({ prop: Prop.Width, value: 40 }),
     );
+  });
+
+  it("rolls back the foundation facade without disabling legacy intrinsics", () => {
+    const disabled = createRoot(new RecordingSink(), { foundationComponentsEnabled: false });
+    expect(() => disabled.render(createElement(View, { width: 40 }))).toThrow(
+      /foundation components are disabled/u,
+    );
+
+    const legacySink = new RecordingSink();
+    createRoot(legacySink, { foundationComponentsEnabled: false }).render(
+      createElement("container", { width: 40 }),
+    );
+    expect(mutationsOfType(legacySink.batches[0], "createNode")).toHaveLength(2);
+  });
+
+  it("rolls back interaction variants independently while retaining base CSS", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink, {
+      interactionStylesEnabled: false,
+      styleSheets: [createStyleSheet(`.button { opacity: 0.8 } .button:hover { opacity: 0.5 }`)],
+    });
+    root.render(createElement("container", { className: "button" }));
+    expect(resourceForProp(sink.batches[0], Prop.ComputedStyle)).toBeDefined();
+    expect(root.styleMetrics()).toMatchObject({ interactionVariants: 0, resolutions: 1 });
+  });
+
+  it("reports cumulative style resolution work and no-change cache hits", () => {
+    const sheet = createStyleSheet(`.button:hover { opacity: 0.5; }`);
+    const root = createRoot(new RecordingSink(), { styleSheets: [sheet] });
+    const element = createElement(View, { className: "button", width: 40 });
+
+    root.render(element);
+    expect(root.styleMetrics()).toMatchObject({
+      cacheHits: 0,
+      diagnostics: 0,
+      interactionVariants: 8,
+      resolutions: 1,
+    });
+    root.render(element);
+    expect(root.styleMetrics()).toMatchObject({ cacheHits: 1, resolutions: 1 });
   });
 
   it("mounts a deterministic host tree and removes cleared resources", () => {
@@ -379,20 +454,20 @@ describe("reconciler", () => {
     const outerId = nodes[1]?.nodeId ?? 0;
     const targetId = nodes[2]?.nodeId ?? 0;
 
-    root.applyEventTransaction({
-      eventId: 7,
-      kind: "click",
-      target: targetId,
-      x: 12,
-      y: 8,
-      deltaX: 0,
-      deltaY: 0,
-      buttons: 0,
-      modifiers: 5,
-      pointerId: 1,
-      elapsedMicros: 16_667,
-      path: [rootId, outerId, targetId],
-    });
+    root.applyEventTransaction(
+      eventTransaction({
+        eventId: 7,
+        kind: "click",
+        target: targetId,
+        x: 12,
+        y: 8,
+        deltaX: 0,
+        deltaY: 0,
+        buttons: 0,
+        modifiers: 5,
+        path: [rootId, outerId, targetId],
+      }),
+    );
 
     expect(calls).toEqual([
       `outer:1:${String(outerId)}`,
@@ -402,21 +477,91 @@ describe("reconciler", () => {
     expect(errors).toHaveLength(1);
     expect(root.failed).toBe(false);
 
-    root.applyEventTransaction({
-      eventId: 8,
-      kind: "click",
-      target: 0xffff_fffe,
-      x: 0,
-      y: 0,
-      deltaX: 0,
-      deltaY: 0,
-      buttons: 0,
-      modifiers: 0,
-      pointerId: 0,
-      elapsedMicros: 16_667,
-      path: [rootId, 0xffff_fffe],
-    });
+    root.applyEventTransaction(
+      eventTransaction({
+        eventId: 8,
+        kind: "click",
+        target: 0xffff_fffe,
+        x: 0,
+        y: 0,
+        deltaX: 0,
+        deltaY: 0,
+        buttons: 0,
+        modifiers: 0,
+        path: [rootId, 0xffff_fffe],
+      }),
+    );
     expect(calls).toHaveLength(3);
+  });
+
+  it("delivers non-bubbling lifecycle events at target and bridges imperative capture and focus", () => {
+    const sink = new RecordingSink();
+    const calls: string[] = [];
+    const requests: unknown[] = [];
+    const targetRef: { current: NodeHandle | null } = { current: null };
+    const root = createRoot(sink, { onInteractionRequest: (request) => requests.push(request) });
+    root.render(
+      createElement("container", {
+        onPointerEnterCapture: () => calls.push("outer-capture"),
+        onPointerEnter: () => calls.push("outer-bubble"),
+        children: createElement("text", {
+          ref: targetRef,
+          value: "target",
+          onPointerEnterCapture: () => calls.push("target-capture"),
+          onPointerEnter: (event: PingoEvent) => {
+            calls.push("target");
+            event.currentTarget.setPointerCapture(event.pointerId);
+          },
+        }),
+      }),
+    );
+    const nodes = mutationsOfType(sink.batches[0], "createNode");
+    const [rootNode, outer, target] = nodes.map((mutation) => mutation.nodeId);
+    root.applyEventTransaction(
+      eventTransaction({
+        kind: "pointerenter",
+        target: target ?? 0,
+        pointerId: 7,
+        pointerType: "mouse",
+        isPrimary: true,
+        relatedTarget: outer ?? null,
+        cursor: "auto",
+        path: [rootNode ?? 0, outer ?? 0, target ?? 0],
+      }),
+    );
+
+    expect(calls).toEqual(["outer-capture", "target-capture", "target"]);
+    expect(requests).toEqual([{ type: "setPointerCapture", nodeId: target, pointerId: 7 }]);
+
+    root.applyEventTransaction(
+      eventTransaction({
+        kind: "gotpointercapture",
+        target: target ?? 0,
+        pointerId: 7,
+        pointerType: "mouse",
+        path: [rootNode ?? 0, outer ?? 0, target ?? 0],
+      }),
+    );
+    expect(targetRef.current?.hasPointerCapture(7)).toBe(true);
+    targetRef.current?.releasePointerCapture(7);
+    targetRef.current?.focus();
+    targetRef.current?.blur();
+    expect(requests.slice(1)).toEqual([
+      { type: "releasePointerCapture", nodeId: target, pointerId: 7 },
+      { type: "focus", nodeId: target },
+      { type: "blur", nodeId: target },
+    ]);
+
+    root.applyEventTransaction(
+      eventTransaction({
+        kind: "lostpointercapture",
+        target: target ?? 0,
+        pointerId: 7,
+        pointerType: "mouse",
+        path: [rootNode ?? 0, outer ?? 0, target ?? 0],
+      }),
+    );
+    expect(targetRef.current?.hasPointerCapture(7)).toBe(false);
   });
 
   it("materializes only Core-requested virtual-list windows and reuses overlapping items", () => {
@@ -669,6 +814,32 @@ describe("reconciler", () => {
 interface StyleDiagnosticRecord {
   readonly items: readonly { readonly code: string }[];
   readonly context: { readonly nodeId: number; readonly hostType: string };
+}
+
+function eventTransaction(
+  overrides: Pick<EventTransaction, "kind" | "path" | "target"> & Partial<EventTransaction>,
+): EventTransaction {
+  return {
+    eventId: 1,
+    x: 0,
+    y: 0,
+    deltaX: 0,
+    deltaY: 0,
+    buttons: 0,
+    modifiers: 0,
+    pointerId: 0,
+    elapsedMicros: 16_667,
+    relatedTarget: null,
+    cursor: "auto",
+    pointerType: "none",
+    isPrimary: false,
+    pressure: 0,
+    tiltX: 0,
+    tiltY: 0,
+    width: 0,
+    height: 0,
+    ...overrides,
+  };
 }
 
 function createdKinds(batch: MutationBatch | undefined): NodeKind[] {

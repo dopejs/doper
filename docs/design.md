@@ -1855,8 +1855,9 @@ style 与逐帧 presentation style 分离；第一批只开放 opacity/transform
 
 完整属性矩阵、API 草案、M6–M8 顺序、兼容与回滚见
 [`css-events-plan.md`](./css-events-plan.md)，架构决策见
-[`ADR-0007`](./adr/0007-css-events-and-foundation-components.md)。计划能力在实现和自动
-验证前不得写成已交付 API。
+[`ADR-0007`](./adr/0007-css-events-and-foundation-components.md)。M6 能力已由
+`pnpm m6:check` 自动验证并通过 `styleCapabilities()` 发布；M7/M8 计划能力在实现和自动
+验证前仍不得写成已交付 API。
 
 ---
 

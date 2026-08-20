@@ -25,6 +25,60 @@ export async function scanMigrationSources(directories) {
   return findings;
 }
 
+/** Reports M6-compatible replacements without making legacy usage a rollout blocker. */
+export async function scanM6MigrationHints(directories) {
+  const hints = [];
+  for (const directory of directories) {
+    for (const file of await collectSources(directory)) {
+      const source = await readFile(file, "utf8");
+      hints.push(...scanM6Source(path.relative(repositoryRoot, file), source));
+    }
+  }
+  return hints;
+}
+
+/** Pure M6 legacy-surface scanner used by reports and codemod qualification. */
+export function scanM6Source(file, source) {
+  const hints = [];
+  const intrinsicReplacements = {
+    container: "View",
+    editableText: "Input or UnstyledTextArea",
+    image: "Image",
+    scroll: "View with overflow",
+    text: "Text",
+    virtualList: "View with overflow and virtual",
+  };
+  for (const [index, line] of source.split("\n").entries()) {
+    for (const match of line.matchAll(
+      /createElement\(\s*["'](container|editableText|image|scroll|text|virtualList)["']/gu,
+    )) {
+      const intrinsic = match[1];
+      hints.push({
+        detail: `legacy ${intrinsic} can migrate to ${intrinsicReplacements[intrinsic]}`,
+        file,
+        line: index + 1,
+        rule: "m6-legacy-intrinsic",
+        severity: "warning",
+      });
+    }
+    if (
+      /\b(?:backgroundColor|direction|fontFamily|fontSize|fontWeight|gap|height|lineHeight|maxHeight|maxWidth|minHeight|minWidth|opacity|padding|width)\s*:/u.test(
+        line,
+      )
+    ) {
+      hints.push({
+        detail:
+          "legacy direct style props can migrate into style/className; direct props remain compatible",
+        file,
+        line: index + 1,
+        rule: "m6-legacy-direct-prop",
+        severity: "warning",
+      });
+    }
+  }
+  return hints;
+}
+
 /** Pure single-file rule engine, exported for tests. */
 export function scanSource(file, source) {
   const findings = [];
@@ -105,8 +159,15 @@ if (isMain) {
     path.resolve(repositoryRoot, target),
   );
   const findings = await scanMigrationSources(directories);
+  const migrationHints = await scanM6MigrationHints(directories);
   const direction = await checkShimDependencyDirection();
-  const report = { version: 1, directories, findings, shimDependencyProblems: direction };
+  const report = {
+    version: 2,
+    directories,
+    findings,
+    migrationHints,
+    shimDependencyProblems: direction,
+  };
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (findings.length > 0 || direction.length > 0) {
     process.exitCode = 1;

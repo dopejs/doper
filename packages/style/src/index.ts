@@ -28,7 +28,12 @@ export {
   type StyleShorthandName,
 } from "./generated";
 export { IncrementalStyleResolver } from "./incremental";
-export { resolveInteractionStyles, resolveStyle, styleCapabilities, supportsStyle } from "./resolver";
+export {
+  resolveInteractionStyles,
+  resolveStyle,
+  styleCapabilities,
+  supportsStyle,
+} from "./resolver";
 export { compileStyleSheet, createStyleSheet } from "./stylesheet";
 export type {
   CompileStyleSheetOptions,

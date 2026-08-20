@@ -4,7 +4,7 @@ use std::time::Instant;
 use pingo_abi::{
     CaretDirection, CaretGranularity, EditTransactionBatch, InputBatch, InputCommand,
     InputInstruction, Mutation, MutationBatch, MutationInstruction, NULL_NODE_ID, NodeKind, Prop,
-    ResourceKind,
+    ResourceKind, StyleKeyword,
 };
 use pingo_core::CoreEngine;
 use pingo_paint::{SolidPaint, TextStyleResource};
@@ -165,6 +165,11 @@ fn initial_frame() -> Vec<u8> {
                 line_height: 22.0,
                 weight: 400,
                 family: "sans-serif".to_owned(),
+                font_style: StyleKeyword::Normal,
+                text_align: StyleKeyword::Start,
+                white_space: StyleKeyword::Normal,
+                overflow_wrap: StyleKeyword::Normal,
+                text_overflow: StyleKeyword::Clip,
             }
             .encode()
             .expect("text style"),

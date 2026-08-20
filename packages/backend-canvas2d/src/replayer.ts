@@ -14,6 +14,8 @@ export interface CanvasTextStyle {
   readonly direction?: CanvasDirection;
   readonly textAlign?: CanvasTextAlign;
   readonly textBaseline?: CanvasTextBaseline;
+  /** Internal fallback path marker for distributing inter-word space. */
+  readonly justify?: boolean;
 }
 
 /** Resource table consulted by the allocation-conscious replay loop. */
@@ -664,6 +666,18 @@ function drawFallbackText(
   if (style.direction !== undefined) context.direction = style.direction;
   if (style.textAlign !== undefined) context.textAlign = style.textAlign;
   if (style.textBaseline !== undefined) context.textBaseline = style.textBaseline;
+  if (style.justify === true && style.lineHeight !== undefined) {
+    const lines = text.split("\n");
+    for (let line = 0; line < lines.length; line += 1) {
+      const value = lines[line] ?? "";
+      if (line === lines.length - 1) {
+        context.fillText(value, 0, y + line * style.lineHeight);
+      } else {
+        drawJustifiedLine(context, value, x, y + line * style.lineHeight);
+      }
+    }
+    return;
+  }
   if (style.lineHeight === undefined || !text.includes("\n")) {
     context.fillText(text, x, y);
     return;
@@ -675,6 +689,21 @@ function drawFallbackText(
     context.fillText(text.slice(start, index), x, y + line * style.lineHeight);
     line += 1;
     start = index + 1;
+  }
+}
+
+function drawJustifiedLine(context: Canvas2DContext, text: string, width: number, y: number): void {
+  const words = text.trim().split(/\s+/u).filter(Boolean);
+  if (words.length < 2) {
+    context.fillText(text, 0, y);
+    return;
+  }
+  const wordsWidth = words.reduce((total, word) => total + context.measureText(word).width, 0);
+  const gap = Math.max(0, (width - wordsWidth) / (words.length - 1));
+  let cursor = 0;
+  for (const word of words) {
+    context.fillText(word, cursor, y);
+    cursor += context.measureText(word).width + gap;
   }
 }
 

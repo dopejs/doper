@@ -41,6 +41,7 @@ async function checkAbiRoundtrip() {
   const glyphGolden = await readGolden("glyph-resources.v1.json");
   const textMetricsGolden = await readGolden("system-text-metrics.v1.json");
   const recordingGolden = await readGolden("replay-recording.v1.json");
+  const eventGolden = await readGolden("event-transactions.v1.json");
   const resourceGolden = JSON.parse(
     await readFile(path.join(root, "benchmarks/abi/resources.v1.json"), "utf8"),
   );
@@ -108,6 +109,24 @@ async function checkAbiRoundtrip() {
   assertEqual(inputHex, inputGolden, "TypeScript input encoder vs golden");
   assertEqual(roundTripInRust("input", inputHex), inputHex, "TypeScript to Rust input round trip");
 
+  const [event] = editing.decodeEventTransactionBatch(decodeHex(eventGolden));
+  if (
+    event?.kind !== "pointerdown" ||
+    event.target !== 3 ||
+    event.relatedTarget !== null ||
+    event.pointerType !== "mouse" ||
+    event.pressure !== 0.5 ||
+    event.cursor !== "pointer" ||
+    event.path.join(",") !== "1,2,3"
+  ) {
+    throw new Error("TypeScript event-transaction decoder did not accept the golden contract");
+  }
+  assertEqual(
+    roundTripInRust("events", eventGolden),
+    eventGolden,
+    "Rust event-transaction round trip",
+  );
+
   const velocityInputHex = encodeHex(
     editing.encodeInputBatch({
       frameSeq: 78,
@@ -172,7 +191,8 @@ async function checkAbiRoundtrip() {
   if (
     resourceGolden.schemaVersion !== 1 ||
     typeof resourceGolden.solidPaint !== "string" ||
-    typeof resourceGolden.textStyle !== "string"
+    typeof resourceGolden.textStyle !== "string" ||
+    typeof resourceGolden.textStyleV2 !== "string"
   ) {
     throw new Error("resource fixture is malformed");
   }
@@ -191,6 +211,17 @@ async function checkAbiRoundtrip() {
   // Unquoted: a bare CSS identifier needs no quotes, and quoting a generic
   // keyword would name a family no font has.
   assertEqual(resources.getTextStyle(2)?.font, "400 16px Inter", "portable text-style fixture");
+  resources.defineEncodedResource(
+    3,
+    backend.ResourceKind.TextStyle,
+    decodeHex(resourceGolden.textStyleV2),
+  );
+  assertEqual(
+    resources.getTextStyle(3)?.font,
+    "italic 400 16px Inter",
+    "portable M6 text-style fixture",
+  );
+  assertEqual(resources.getTextStyle(3)?.textAlign, "center", "portable M6 text alignment fixture");
 
   const display = backend.decodeDisplayList(decodeHex(displayGolden));
   if (display.commands.length !== 4 || display.commands[0]?.type !== "save") {

@@ -13,7 +13,10 @@ import {
   PROTOCOL_ALIGNMENT,
   STREAM_HEADER_BYTES,
 } from "./generated";
-import type { InputEventKind } from "./input-stream";
+import type { InputEventKind, InputPointerType } from "./input-stream";
+
+export type EventCursor =
+  "auto" | "crosshair" | "default" | "grab" | "grabbing" | "not-allowed" | "pointer" | "text";
 
 export interface EventTransaction {
   readonly eventId: number;
@@ -27,6 +30,15 @@ export interface EventTransaction {
   readonly modifiers: number;
   readonly pointerId: number;
   readonly elapsedMicros: number;
+  readonly relatedTarget: number | null;
+  readonly pointerType: InputPointerType;
+  readonly isPrimary: boolean;
+  readonly pressure: number;
+  readonly tiltX: number;
+  readonly tiltY: number;
+  readonly width: number;
+  readonly height: number;
+  readonly cursor: EventCursor;
   readonly path: readonly number[];
 }
 
@@ -95,6 +107,17 @@ function decodeEvent(reader: Reader): EventTransaction {
   const modifiers = reader.u32();
   const pointerId = reader.u32();
   const elapsedMicros = reader.u32();
+  const relatedTargetRaw = reader.u32();
+  const pointerType = pointerTypeName(reader.u8());
+  const isPrimary = booleanByte(reader.u8(), "primary pointer flag");
+  reader.zeroes(2);
+  const pressure = reader.f32();
+  const tiltX = reader.f32();
+  const tiltY = reader.f32();
+  const width = reader.f32();
+  const height = reader.f32();
+  const cursor = cursorName(reader.u16());
+  reader.zeroes(2);
   const pathCount = reader.u32();
   if (
     pathCount > Math.floor(MAX_RESOURCE_BYTES / 4) ||
@@ -113,6 +136,17 @@ function decodeEvent(reader: Reader): EventTransaction {
   if (elapsedMicros < 1 || elapsedMicros > 1_000_000) {
     fail("event transaction elapsed time is invalid");
   }
+  const pointerEvent = isPointerEventKind(kind);
+  if (pointerEvent !== (pointerId !== 0 && pointerType !== "none")) {
+    fail("event transaction pointer identity and type are inconsistent");
+  }
+  if (pressure < 0 || pressure > 1) fail("event transaction pressure is outside 0..=1");
+  if (tiltX < -90 || tiltX > 90 || tiltY < -90 || tiltY > 90) {
+    fail("event transaction tilt is outside -90..=90");
+  }
+  if (width < 0 || width > 1_000_000 || height < 0 || height > 1_000_000) {
+    fail("event transaction contact size is invalid");
+  }
   return {
     eventId,
     kind,
@@ -125,6 +159,15 @@ function decodeEvent(reader: Reader): EventTransaction {
     modifiers,
     pointerId,
     elapsedMicros,
+    relatedTarget: relatedTargetRaw === 0xffff_ffff ? null : relatedTargetRaw,
+    pointerType,
+    isPrimary,
+    pressure,
+    tiltX,
+    tiltY,
+    width,
+    height,
+    cursor,
     path,
   };
 }
@@ -143,9 +186,88 @@ function eventKind(value: number): InputEventKind {
       return "click";
     case 6:
       return "wheel";
+    case 7:
+      return "pointerover";
+    case 8:
+      return "pointerout";
+    case 9:
+      return "pointerenter";
+    case 10:
+      return "pointerleave";
+    case 11:
+      return "gotpointercapture";
+    case 12:
+      return "lostpointercapture";
+    case 13:
+      return "focus";
+    case 14:
+      return "blur";
+    case 15:
+      return "focusin";
+    case 16:
+      return "focusout";
     default:
       return fail("unknown event transaction kind");
   }
+}
+
+function pointerTypeName(value: number): InputPointerType {
+  switch (value) {
+    case 0:
+      return "none";
+    case 1:
+      return "mouse";
+    case 2:
+      return "pen";
+    case 3:
+      return "touch";
+    default:
+      return fail("unknown event transaction pointer type");
+  }
+}
+
+function cursorName(value: number): EventCursor {
+  switch (value) {
+    case 2:
+      return "auto";
+    case 13:
+      return "crosshair";
+    case 14:
+      return "default";
+    case 21:
+      return "grab";
+    case 22:
+      return "grabbing";
+    case 30:
+      return "not-allowed";
+    case 34:
+      return "pointer";
+    case 49:
+      return "text";
+    default:
+      return fail("unknown event transaction cursor");
+  }
+}
+
+function booleanByte(value: number, label: string): boolean {
+  if (value === 0) return false;
+  if (value === 1) return true;
+  return fail(`${label} is invalid`);
+}
+
+function isPointerEventKind(kind: InputEventKind): boolean {
+  return (
+    kind === "pointerdown" ||
+    kind === "pointerup" ||
+    kind === "pointermove" ||
+    kind === "pointercancel" ||
+    kind === "pointerover" ||
+    kind === "pointerout" ||
+    kind === "pointerenter" ||
+    kind === "pointerleave" ||
+    kind === "gotpointercapture" ||
+    kind === "lostpointercapture"
+  );
 }
 
 class Reader {

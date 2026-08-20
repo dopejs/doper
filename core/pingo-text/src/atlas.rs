@@ -254,7 +254,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::{
-        FontFace, GlyphAtlas, GlyphAtlasMetrics, GlyphContent, TextEngine, TextError, TextOptions,
+        FontFace, GlyphAtlas, GlyphAtlasMetrics, GlyphContent, OverflowWrap, TextAlign, TextEngine,
+        TextError, TextOptions, TextOverflow, WhiteSpace,
     };
 
     fn font() -> FontFace {
@@ -270,6 +271,10 @@ mod tests {
                 font_size: 18.0,
                 line_height: 24.0,
                 max_width: f32::INFINITY,
+                white_space: WhiteSpace::PreWrap,
+                overflow_wrap: OverflowWrap::Anywhere,
+                text_align: TextAlign::Start,
+                text_overflow: TextOverflow::Clip,
             },
         )
         .expect("shape icon")

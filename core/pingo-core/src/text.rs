@@ -7,14 +7,15 @@ use pingo_abi::{
     AbiError, EditorDecorationKind, GlyphBitmapResource, GlyphPlacementResource,
     GlyphResourceBatch, GlyphResourceCommand, GlyphResourceInstruction, GlyphSpanResource,
     MAX_GLYPH_RESOURCES_BYTES, MAX_SYSTEM_TEXT_METRIC_INSTRUCTIONS, ResourceKind,
-    SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
+    SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET, StyleKeyword,
     SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand,
 };
 use pingo_layout::{BoxConstraints, IntrinsicMeasurer, Size};
 use pingo_paint::{EditorDecoration, ShapedGlyphRun, TextPaintResolver, TextStyleResource};
 use pingo_scene::{NodeId, Scene, TextRun};
 use pingo_text::{
-    CaretStop, FontFace, GlyphAtlas, TextEngine, TextLayout, TextOptions, soft_break_offsets,
+    CaretStop, FontFace, GlyphAtlas, GlyphBitmap, OverflowWrap, TextAlign, TextEngine, TextLayout,
+    TextOptions, TextOverflow, WhiteSpace, soft_break_offsets_with_mode,
 };
 
 use crate::editing::ActiveEditorVisual;
@@ -48,6 +49,7 @@ struct PreparedRun {
     font_size: f32,
     max_width_bits: u32,
     paint_id: u32,
+    font_style: StyleKeyword,
     layout: Arc<TextLayout>,
     span_id: u32,
     device_pixel_ratio_bits: u32,
@@ -73,6 +75,8 @@ struct WrappedRun {
     breaks: Vec<usize>,
     /// The value with those breaks materialized, for the whole-run draw.
     display: Arc<str>,
+    /// Whether paint must use `display` instead of the immutable Scene string.
+    requires_inline: bool,
 }
 
 /// Transactional text layout, raster, and derived-resource owner.
@@ -428,14 +432,18 @@ impl CoreTextSystem {
             } else {
                 let index = u32::try_from(bitmaps.len()).map_err(|_| ())?;
                 bitmap_indices.insert(glyph.id, index);
-                bitmaps.push(GlyphBitmapResource {
-                    glyph_id: bitmap.glyph_id,
-                    left: bitmap.left as f32,
-                    top: bitmap.top as f32,
-                    width: bitmap.width,
-                    height: bitmap.height,
-                    device_pixel_ratio: bitmap.device_pixel_ratio(),
-                    data: Arc::clone(&bitmap.data),
+                bitmaps.push(if run.font_style == StyleKeyword::Italic {
+                    synthesize_italic_bitmap(&bitmap)?
+                } else {
+                    GlyphBitmapResource {
+                        glyph_id: bitmap.glyph_id,
+                        left: bitmap.left as f32,
+                        top: bitmap.top as f32,
+                        width: bitmap.width,
+                        height: bitmap.height,
+                        device_pixel_ratio: bitmap.device_pixel_ratio(),
+                        data: Arc::clone(&bitmap.data),
+                    }
                 });
                 index
             };
@@ -501,6 +509,14 @@ impl IntrinsicMeasurer for CoreTextSystem {
             font_size: style.font_size,
             line_height: style.line_height,
             max_width,
+            white_space: white_space(style.white_space),
+            overflow_wrap: overflow_wrap(style.overflow_wrap),
+            text_align: text_align(style.text_align),
+            text_overflow: if style.text_overflow == StyleKeyword::Ellipsis {
+                TextOverflow::Ellipsis
+            } else {
+                TextOverflow::Clip
+            },
         };
         let Ok(layout) = self.engine.layout(&font, &string, options) else {
             self.candidate_mut().remove(&node);
@@ -531,6 +547,7 @@ impl IntrinsicMeasurer for CoreTextSystem {
                 font_size: style.font_size,
                 max_width_bits: max_width.to_bits(),
                 paint_id: style.paint_id,
+                font_style: style.font_style,
                 layout: Arc::clone(&layout),
                 span_id: previous_span,
                 device_pixel_ratio_bits,
@@ -558,16 +575,11 @@ impl TextPaintResolver for CoreTextSystem {
         // The wrapped form when measurement produced one: the backend draws a
         // whole-run fallback line per `\n`, so materializing the soft breaks is
         // what makes it wrap without a second draw command.
-        self.edit_overrides.get(&node)?;
-        Some(
-            self.wrapped_fallback
-                .get(&node)
-                .map_or_else(
-                    || self.edit_overrides.get(&node).map(Arc::as_ref),
-                    |wrapped| Some(wrapped.display.as_ref()),
-                )
-                .unwrap_or(""),
-        )
+        self.wrapped_fallback
+            .get(&node)
+            .filter(|wrapped| wrapped.requires_inline)
+            .map(|wrapped| wrapped.display.as_ref())
+            .or_else(|| self.edit_overrides.get(&node).map(Arc::as_ref))
     }
 
     fn editor_decorations(&self, node: NodeId) -> &[EditorDecoration] {
@@ -691,19 +703,187 @@ fn advance_for(advances: Option<&HashMap<char, f32>>, estimate: f32, character: 
 /// this is what makes a wrapped run paint as several lines without a second
 /// display command. Offsets into this string do not match the value's, which is
 /// why it is only ever handed to paint.
-fn materialize_breaks(text: &str, breaks: &[usize]) -> Arc<str> {
-    if breaks.is_empty() {
-        return Arc::from(text);
-    }
+fn materialize_fallback(text: &str, breaks: &[usize], suppressed: &HashSet<usize>) -> Arc<str> {
     let mut output = String::with_capacity(text.len() + breaks.len());
-    let mut previous = 0;
-    for offset in breaks {
-        output.push_str(&text[previous..*offset]);
-        output.push('\n');
-        previous = *offset;
+    for (offset, character) in text.char_indices() {
+        if breaks.contains(&offset) {
+            output.push('\n');
+        }
+        if !suppressed.contains(&offset) {
+            output.push(character);
+        }
     }
-    output.push_str(&text[previous..]);
     Arc::from(output)
+}
+
+fn materialize_ellipsis(
+    text: &str,
+    suppressed: &HashSet<usize>,
+    advances: &[f32],
+    max_width: f32,
+    ellipsis_width: f32,
+) -> Arc<str> {
+    let characters = text.char_indices().collect::<Vec<_>>();
+    let mut output = String::with_capacity(text.len());
+    let mut start = 0_usize;
+    while start < characters.len() {
+        let end = characters[start..]
+            .iter()
+            .position(|(_, character)| *character == '\n')
+            .map_or(characters.len(), |relative| start + relative);
+        let width = (start..end)
+            .map(|index| advances.get(index).copied().unwrap_or(0.0))
+            .sum::<f32>();
+        if width <= max_width {
+            for &(offset, character) in &characters[start..end] {
+                if !suppressed.contains(&offset) {
+                    output.push(character);
+                }
+            }
+        } else {
+            let mut used = 0.0_f32;
+            for (relative, &(offset, character)) in characters[start..end].iter().enumerate() {
+                let advance = advances.get(start + relative).copied().unwrap_or(0.0);
+                if used + advance + ellipsis_width > max_width {
+                    break;
+                }
+                if !suppressed.contains(&offset) {
+                    output.push(character);
+                }
+                used += advance;
+            }
+            output.push('…');
+        }
+        if end < characters.len() {
+            output.push('\n');
+            start = end + 1;
+        } else {
+            break;
+        }
+    }
+    Arc::from(output)
+}
+
+fn fallback_whitespace(text: &str, keyword: StyleKeyword) -> (String, HashSet<usize>) {
+    if !matches!(
+        keyword,
+        StyleKeyword::Normal | StyleKeyword::Nowrap | StyleKeyword::PreLine
+    ) {
+        return (text.to_owned(), HashSet::new());
+    }
+    let preserve_newlines = keyword == StyleKeyword::PreLine;
+    let mut bytes = text.as_bytes().to_vec();
+    let mut suppressed = HashSet::new();
+    let mut in_run = false;
+    for (offset, character) in text.char_indices() {
+        let collapsible =
+            matches!(character, ' ' | '\t' | '\r') || (character == '\n' && !preserve_newlines);
+        if !collapsible {
+            in_run = false;
+            continue;
+        }
+        bytes[offset] = b' ';
+        if in_run {
+            suppressed.insert(offset);
+        }
+        in_run = true;
+    }
+    (
+        String::from_utf8(bytes).expect("ASCII whitespace replacement is UTF-8"),
+        suppressed,
+    )
+}
+
+fn suppress_fallback_line_edges(text: &str, breaks: &[usize], suppressed: &mut HashSet<usize>) {
+    let suppress_range = |range: std::ops::Range<usize>, suppressed: &mut HashSet<usize>| {
+        let value = &text[range.clone()];
+        for (relative, character) in value.char_indices() {
+            if character != ' ' {
+                break;
+            }
+            suppressed.insert(range.start + relative);
+        }
+        for (relative, character) in value.char_indices().rev() {
+            if character != ' ' {
+                break;
+            }
+            suppressed.insert(range.start + relative);
+        }
+    };
+    let mut start = 0_usize;
+    for (offset, character) in text.char_indices() {
+        if breaks.contains(&offset) {
+            suppress_range(start..offset, suppressed);
+            start = offset;
+        }
+        if character == '\n' {
+            suppress_range(start..offset, suppressed);
+            start = offset + character.len_utf8();
+        }
+    }
+    suppress_range(start..text.len(), suppressed);
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn synthesize_italic_bitmap(bitmap: &GlyphBitmap) -> Result<GlyphBitmapResource, ()> {
+    let extra = bitmap.height.saturating_add(3) / 4;
+    let width = bitmap.width.checked_add(extra).ok_or(())?;
+    let source_width = usize::try_from(bitmap.width).map_err(|_| ())?;
+    let target_width = usize::try_from(width).map_err(|_| ())?;
+    let height = usize::try_from(bitmap.height).map_err(|_| ())?;
+    let length = target_width.checked_mul(height).ok_or(())?;
+    let mut data = vec![0_u8; length];
+    for row in 0..height {
+        let shift = (height.saturating_sub(1).saturating_sub(row)) / 4;
+        let source = row.checked_mul(source_width).ok_or(())?;
+        let target = row
+            .checked_mul(target_width)
+            .and_then(|offset| offset.checked_add(shift))
+            .ok_or(())?;
+        let source_end = source.checked_add(source_width).ok_or(())?;
+        let target_end = target.checked_add(source_width).ok_or(())?;
+        data.get_mut(target..target_end)
+            .ok_or(())?
+            .copy_from_slice(bitmap.data.get(source..source_end).ok_or(())?);
+    }
+    Ok(GlyphBitmapResource {
+        glyph_id: bitmap.glyph_id,
+        left: bitmap.left as f32,
+        top: bitmap.top as f32,
+        width,
+        height: bitmap.height,
+        device_pixel_ratio: bitmap.device_pixel_ratio(),
+        data: Arc::from(data),
+    })
+}
+
+const fn white_space(keyword: StyleKeyword) -> WhiteSpace {
+    match keyword {
+        StyleKeyword::Nowrap => WhiteSpace::Nowrap,
+        StyleKeyword::Pre => WhiteSpace::Pre,
+        StyleKeyword::PreLine => WhiteSpace::PreLine,
+        StyleKeyword::PreWrap => WhiteSpace::PreWrap,
+        _ => WhiteSpace::Normal,
+    }
+}
+
+const fn overflow_wrap(keyword: StyleKeyword) -> OverflowWrap {
+    match keyword {
+        StyleKeyword::Anywhere => OverflowWrap::Anywhere,
+        StyleKeyword::BreakWord => OverflowWrap::BreakWord,
+        _ => OverflowWrap::Normal,
+    }
+}
+
+const fn text_align(keyword: StyleKeyword) -> TextAlign {
+    match keyword {
+        StyleKeyword::End => TextAlign::End,
+        StyleKeyword::Left => TextAlign::Left,
+        StyleKeyword::Right => TextAlign::Right,
+        StyleKeyword::Center => TextAlign::Center,
+        StyleKeyword::Justify => TextAlign::Justify,
+        _ => TextAlign::Start,
+    }
 }
 
 /// Builds fallback caret stops from measured per-code-point advances.
@@ -909,35 +1089,82 @@ impl CoreTextSystem {
         // font_size * 0.6 here would shrink a full-width run to 60% of its real
         // width for as long as it is being edited, which reads as the text
         // jumping the moment the field is typed into.
-        let advances = self.value_advances(scene, run, &text, style.font_size);
+        let mut advances = self.value_advances(scene, run, &text, style.font_size);
+        let (layout_text, mut suppressed) = fallback_whitespace(&text, style.white_space);
+        for (index, (offset, character)) in text.char_indices().enumerate() {
+            if suppressed.contains(&offset) {
+                if let Some(advance) = advances.get_mut(index) {
+                    *advance = 0.0;
+                }
+            } else if layout_text.as_bytes().get(offset) == Some(&b' ')
+                && character != ' '
+                && let Some(advance) = advances.get_mut(index)
+            {
+                *advance = style.font_size * ESTIMATED_ADVANCE_RATIO;
+            }
+        }
         // A single-line field scrolls its value instead; wrapping one would turn
         // a long value into a paragraph inside a one-line box.
-        let wrap_width = if self.non_wrapping.contains(&node) {
+        let wrap_width = if self.non_wrapping.contains(&node)
+            || matches!(style.white_space, StyleKeyword::Nowrap | StyleKeyword::Pre)
+        {
             f32::INFINITY
         } else {
             constraints.max_width
         };
-        let breaks = soft_break_offsets(
-            &text,
+        let breaks = soft_break_offsets_with_mode(
+            &layout_text,
             |index| advances.get(index).copied().unwrap_or(0.0),
             wrap_width,
+            style.overflow_wrap != StyleKeyword::Normal,
         );
+        if matches!(
+            style.white_space,
+            StyleKeyword::Normal | StyleKeyword::Nowrap | StyleKeyword::PreLine
+        ) {
+            suppress_fallback_line_edges(&layout_text, &breaks, &mut suppressed);
+            for (index, (offset, _)) in text.char_indices().enumerate() {
+                if suppressed.contains(&offset)
+                    && let Some(advance) = advances.get_mut(index)
+                {
+                    *advance = 0.0;
+                }
+            }
+        }
         // The wrapped display is refreshed on EVERY measurement path before any
         // early return: paint serves it in place of the live value, so leaving
         // it behind shows the previous text. Undoing back to the exact Scene
         // string used to take the metric branch below without updating it, and
         // the undone edit stayed on screen while the caret moved through the
         // restored value.
+        let display = if style.text_overflow == StyleKeyword::Ellipsis
+            && !wrap_width.is_finite()
+            && constraints.max_width.is_finite()
+        {
+            materialize_ellipsis(
+                &layout_text,
+                &suppressed,
+                &advances,
+                constraints.max_width,
+                style.font_size * ESTIMATED_ADVANCE_RATIO,
+            )
+        } else {
+            materialize_fallback(&layout_text, &breaks, &suppressed)
+        };
+        let requires_inline = self.edit_overrides.contains_key(&node)
+            || scene_string(scene, run.string_id) != Some(display.as_ref());
         self.wrapped_fallback.insert(
             node,
             WrappedRun {
-                display: materialize_breaks(&text, &breaks),
+                display,
+                requires_inline,
                 breaks: breaks.clone(),
             },
         );
         if let Some(metric) = metric
             && metric_fresh
             && breaks.is_empty()
+            && !requires_inline
         {
             self.metrics.system_metric_hits = self.metrics.system_metric_hits.saturating_add(1);
             return constraints.constrain(Size::new(

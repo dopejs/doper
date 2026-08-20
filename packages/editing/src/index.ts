@@ -10,8 +10,11 @@ export {
   type InputBatch,
   type InputCommand,
   type InputEventKind,
+  type InputFocusOrigin,
+  type InputPointerType,
   type InputPosition,
   type InputSelection,
+  type InteractionResetReason,
 } from "./input-stream";
 export {
   EditTransactionDecodingError,
@@ -33,5 +36,6 @@ export { TextEditingController, type TextEditingControllerOptions } from "./cont
 export {
   EventTransactionDecodingError,
   decodeEventTransactionBatch,
+  type EventCursor,
   type EventTransaction,
 } from "./event-transactions";

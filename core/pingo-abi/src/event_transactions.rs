@@ -5,9 +5,9 @@ use crate::codec::{
     validate_encode_instruction_count,
 };
 use crate::{
-    AbiError, EVENT_TRANSACTIONS_MAGIC, EventTransactionOpcode, InputEventKind,
+    AbiError, EVENT_TRANSACTIONS_MAGIC, EventTransactionOpcode, InputEventKind, InputPointerType,
     MAX_EVENT_TRANSACTION_INSTRUCTIONS, MAX_EVENT_TRANSACTIONS_BYTES, MAX_RESOURCE_BYTES,
-    NULL_NODE_ID, StreamKind,
+    NULL_NODE_ID, StreamKind, StyleKeyword,
 };
 
 /// One Core-hit-tested event and its stable propagation path.
@@ -31,6 +31,20 @@ pub struct EventTransactionRecord {
     pub pointer_id: u32,
     /// Time since the previous related sample in microseconds.
     pub elapsed_micros: u32,
+    /// Opposite endpoint for boundary/focus transitions, or the null node id.
+    pub related_target: u32,
+    /// Normalized browser pointer source.
+    pub pointer_type: InputPointerType,
+    /// Whether this is the primary pointer of its type.
+    pub is_primary: bool,
+    /// Normalized pressure in the inclusive 0..=1 range.
+    pub pressure: f32,
+    /// Pen tilt in degrees for the X and Y planes.
+    pub tilt: [f32; 2],
+    /// Contact geometry in logical pixels.
+    pub contact_size: [f32; 2],
+    /// Core-resolved CSS cursor for the current physical pointer target.
+    pub cursor: StyleKeyword,
     /// Root-to-target generation-bearing path.
     pub path: Vec<u32>,
 }
@@ -150,6 +164,17 @@ impl EventTransactionBatch {
             writer.u32(record.modifiers);
             writer.u32(record.pointer_id);
             writer.u32(record.elapsed_micros);
+            writer.u32(record.related_target);
+            writer.u8(record.pointer_type as u8);
+            writer.u8(u8::from(record.is_primary));
+            writer.u16(0);
+            writer.f32(record.pressure)?;
+            writer.f32(record.tilt[0])?;
+            writer.f32(record.tilt[1])?;
+            writer.f32(record.contact_size[0])?;
+            writer.f32(record.contact_size[1])?;
+            writer.u16(record.cursor as u16);
+            writer.u16(0);
             writer.u32(u32::try_from(record.path.len()).map_err(|_| AbiError::ArithmeticOverflow)?);
             for node in &record.path {
                 writer.u32(*node);
@@ -171,6 +196,26 @@ fn decode_record(reader: &mut Reader<'_>) -> Result<EventTransactionRecord, AbiE
     let modifiers = reader.read_u32()?;
     let pointer_id = reader.read_u32()?;
     let elapsed_micros = reader.read_u32()?;
+    let related_target = reader.read_u32()?;
+    let pointer_type = InputPointerType::decode(reader.read_u8()?)?;
+    let is_primary = match reader.read_u8()? {
+        0 => false,
+        1 => true,
+        value => {
+            return Err(AbiError::UnknownIdentifier {
+                category: "primary pointer flag",
+                value: u32::from(value),
+            });
+        }
+    };
+    reader.read_zeroes(2)?;
+    let pressure = reader.read_f32()?;
+    let tilt = [reader.read_f32()?, reader.read_f32()?];
+    let contact_size = [reader.read_f32()?, reader.read_f32()?];
+    let cursor = StyleKeyword::from_u16(reader.read_u16()?).ok_or(AbiError::InvalidValue(
+        "event transaction cursor is unknown",
+    ))?;
+    reader.read_zeroes(2)?;
     let path_count =
         usize::try_from(reader.read_u32()?).map_err(|_| AbiError::ArithmeticOverflow)?;
     let path_bytes = path_count
@@ -196,6 +241,13 @@ fn decode_record(reader: &mut Reader<'_>) -> Result<EventTransactionRecord, AbiE
         modifiers,
         pointer_id,
         elapsed_micros,
+        related_target,
+        pointer_type,
+        is_primary,
+        pressure,
+        tilt,
+        contact_size,
+        cursor,
         path,
     };
     validate_record(&record)?;
@@ -235,6 +287,56 @@ fn validate_record(record: &EventTransactionRecord) -> Result<(), AbiError> {
     if record.elapsed_micros == 0 || record.elapsed_micros > 1_000_000 {
         return Err(AbiError::InvalidValue("event elapsed time is invalid"));
     }
+    if !matches!(
+        record.cursor,
+        StyleKeyword::Auto
+            | StyleKeyword::Crosshair
+            | StyleKeyword::Default
+            | StyleKeyword::Grab
+            | StyleKeyword::Grabbing
+            | StyleKeyword::NotAllowed
+            | StyleKeyword::Pointer
+            | StyleKeyword::Text
+    ) {
+        return Err(AbiError::InvalidValue(
+            "event transaction cursor is not a supported cursor keyword",
+        ));
+    }
+    let pointer_event = matches!(
+        record.kind,
+        InputEventKind::PointerDown
+            | InputEventKind::PointerUp
+            | InputEventKind::PointerMove
+            | InputEventKind::PointerCancel
+            | InputEventKind::PointerOver
+            | InputEventKind::PointerOut
+            | InputEventKind::PointerEnter
+            | InputEventKind::PointerLeave
+            | InputEventKind::GotPointerCapture
+            | InputEventKind::LostPointerCapture
+    );
+    if pointer_event != (record.pointer_id != 0 && record.pointer_type != InputPointerType::None) {
+        return Err(AbiError::InvalidValue(
+            "event pointer identity and type are inconsistent",
+        ));
+    }
+    if !record.pressure.is_finite() || !(0.0..=1.0).contains(&record.pressure) {
+        return Err(AbiError::InvalidValue("event pressure is outside 0..=1"));
+    }
+    if record
+        .tilt
+        .iter()
+        .any(|value| !value.is_finite() || !(-90.0..=90.0).contains(value))
+    {
+        return Err(AbiError::InvalidValue("event tilt is outside -90..=90"));
+    }
+    if record
+        .contact_size
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0 || *value > 1_000_000.0)
+    {
+        return Err(AbiError::InvalidValue("event contact size is invalid"));
+    }
     Ok(())
 }
 
@@ -273,6 +375,13 @@ mod tests {
             modifiers: 4,
             pointer_id: 1,
             elapsed_micros: 16_667,
+            related_target: NULL_NODE_ID,
+            pointer_type: InputPointerType::Mouse,
+            is_primary: true,
+            pressure: 0.5,
+            tilt: [0.0, 0.0],
+            contact_size: [1.0, 1.0],
+            cursor: StyleKeyword::Pointer,
             path: vec![1, 2, 3],
         };
         let batch = EventTransactionBatch {
@@ -294,6 +403,13 @@ mod tests {
                     modifiers: 0,
                     pointer_id: 0,
                     elapsed_micros: 1,
+                    related_target: NULL_NODE_ID,
+                    pointer_type: InputPointerType::None,
+                    is_primary: false,
+                    pressure: 0.0,
+                    tilt: [0.0, 0.0],
+                    contact_size: [0.0, 0.0],
+                    cursor: StyleKeyword::Auto,
                     path: vec![],
                 }
             }],
@@ -313,6 +429,13 @@ mod tests {
             modifiers: 4,
             pointer_id: 1,
             elapsed_micros: 16_667,
+            related_target: NULL_NODE_ID,
+            pointer_type: InputPointerType::Mouse,
+            is_primary: true,
+            pressure: 0.5,
+            tilt: [0.0, 0.0],
+            contact_size: [1.0, 1.0],
+            cursor: StyleKeyword::Pointer,
             path: vec![1, 2, 3],
         };
         let reject = |mutate: fn(&mut EventTransactionRecord)| {
@@ -334,6 +457,13 @@ mod tests {
         reject(|record| record.modifiers = 0x10);
         reject(|record| record.elapsed_micros = 0);
         reject(|record| record.elapsed_micros = 2_000_000);
+        reject(|record| record.pointer_id = 0);
+        reject(|record| record.pointer_type = InputPointerType::None);
+        reject(|record| record.pressure = 1.1);
+        reject(|record| record.pressure = f32::NAN);
+        reject(|record| record.tilt[0] = 91.0);
+        reject(|record| record.contact_size[1] = -1.0);
+        reject(|record| record.cursor = StyleKeyword::Normal);
 
         let bytes = EventTransactionBatch {
             records: vec![valid],

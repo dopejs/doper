@@ -24,9 +24,9 @@ import {
 import { ComponentScope } from "@dopejs/pingo-runtime/internal";
 import type { EditTransaction, EventTransaction, InputEventKind } from "@dopejs/pingo-editing";
 import {
+  STYLE_KEYWORD_IDS,
   resolveInteractionStyles,
   type ComputedStyle,
-  type PingoStyle,
   type PingoStyleNodeType,
   type PingoStyleSheet,
   type ResolveInteractionStylesResult,
@@ -64,12 +64,23 @@ export interface RootOptions {
   readonly styleResolverEnabled?: boolean;
   /** Independent rollback switch for pseudo-state variants. Defaults to enabled. */
   readonly interactionStylesEnabled?: boolean;
+  /** Independent rollback switch for the M6 foundation component facade. Defaults to enabled. */
+  readonly foundationComponentsEnabled?: boolean;
   /** Receives deterministic per-node style diagnostics before commit. */
   readonly onStyleDiagnostics?: (
     diagnostics: readonly StyleDiagnostic[],
     context: { readonly nodeId: number; readonly hostType: HostType },
   ) => void;
+  /** Host bridge for imperative capture/focus requests issued by node handles. */
+  readonly onInteractionRequest?: (request: InteractionRequest) => void;
 }
+
+/** Imperative interaction request forwarded to the active Host transport. */
+export type InteractionRequest =
+  | { readonly type: "setPointerCapture"; readonly nodeId: number; readonly pointerId: number }
+  | { readonly type: "releasePointerCapture"; readonly nodeId: number; readonly pointerId: number }
+  | { readonly type: "focus"; readonly nodeId: number }
+  | { readonly type: "blur"; readonly nodeId: number };
 
 /** Public lifecycle for a localized component/host tree. */
 export interface PingoRoot {
@@ -77,7 +88,16 @@ export interface PingoRoot {
   flushSync(): void;
   invokeCallback(callbackId: number): void;
   unmount(): void;
+  styleMetrics(): StyleRuntimeMetrics;
   readonly failed: boolean;
+}
+
+/** Cumulative Shell style work for rollout, hot-path, and migration diagnostics. */
+export interface StyleRuntimeMetrics {
+  readonly cacheHits: number;
+  readonly diagnostics: number;
+  readonly interactionVariants: number;
+  readonly resolutions: number;
 }
 
 /** Internal Host contract for applying asynchronous Core virtual windows. */
@@ -87,6 +107,7 @@ export interface CoreDrivenPingoRoot extends PingoRoot {
   applyEventTransaction(transaction: EventTransaction): void;
   editableState(nodeId: number): EditableStateSnapshot | undefined;
   submitEditable(nodeId: number): void;
+  resetInteractionState(): void;
 }
 
 /** Shell-owned durable state used to activate one native editing surface. */
@@ -185,6 +206,11 @@ interface NormalizedHostProps {
         readonly fontSize: number;
         readonly lineHeight: number;
         readonly fontWeight: number;
+        readonly fontStyle: "normal" | "italic";
+        readonly textAlign: "start" | "end" | "left" | "right" | "center" | "justify";
+        readonly whiteSpace: "normal" | "nowrap" | "pre" | "pre-line" | "pre-wrap";
+        readonly overflowWrap: "normal" | "break-word" | "anywhere";
+        readonly textOverflow: "clip" | "ellipsis";
       }
     | undefined;
   readonly image: Uint8Array | undefined;
@@ -247,6 +273,26 @@ const COMMON_KEYS = new Set([
   "onPointerMove",
   "onPointerCancelCapture",
   "onPointerCancel",
+  "onPointerOverCapture",
+  "onPointerOver",
+  "onPointerOutCapture",
+  "onPointerOut",
+  "onPointerEnterCapture",
+  "onPointerEnter",
+  "onPointerLeaveCapture",
+  "onPointerLeave",
+  "onGotPointerCaptureCapture",
+  "onGotPointerCapture",
+  "onLostPointerCaptureCapture",
+  "onLostPointerCapture",
+  "onFocusCapture",
+  "onFocus",
+  "onBlurCapture",
+  "onBlur",
+  "onFocusInCapture",
+  "onFocusIn",
+  "onFocusOutCapture",
+  "onFocusOut",
   "onClickCapture",
   "onClick",
   "onWheelCapture",
@@ -296,12 +342,15 @@ const VIRTUAL_LIST_KEYS = new Set([
   "velocityHorizonSeconds",
 ]);
 const VIRTUAL_ITEM_INDEX = Symbol("pingo.virtualItemIndex");
+const FOUNDATION_COMPONENT = Symbol.for("dopejs.pingo.foundation-component");
 
 interface StyleResolutionContext {
   readonly enabled: boolean;
+  readonly foundationComponentsEnabled: boolean;
   readonly interactionStylesEnabled: boolean;
   readonly parentStyle: ComputedStyle | undefined;
   readonly styleSheets: readonly PingoStyleSheet[];
+  readonly recordResolution: (result: ResolveInteractionStylesResult) => void;
 }
 
 /** Creates one deterministic component tree and Mutation Stream producer. */
@@ -317,12 +366,16 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
   readonly #styleSheets: readonly PingoStyleSheet[];
   readonly #styleResolverEnabled: boolean;
   readonly #interactionStylesEnabled: boolean;
+  readonly #foundationComponentsEnabled: boolean;
   readonly #onStyleDiagnostics:
     | ((
         diagnostics: readonly StyleDiagnostic[],
         context: { readonly nodeId: number; readonly hostType: HostType },
       ) => void)
     | undefined;
+  readonly #onInteractionRequest: ((request: InteractionRequest) => void) | undefined;
+  readonly #pointerCaptures = new Map<number, number>();
+  #focusedNodeId: number | undefined;
   readonly #allocator = new NodeIdAllocator();
   readonly #resources = new ResourcePool();
   readonly #callbacksByFunction = new Map<() => void, CallbackEntry>();
@@ -343,6 +396,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
   #performing = false;
   #unmounted = false;
   #failed = false;
+  #styleCacheHits = 0;
+  #styleDiagnostics = 0;
+  #styleInteractionVariants = 0;
+  #styleResolutions = 0;
 
   public constructor(sink: MutationSink, options: RootOptions) {
     this.#sink = sink;
@@ -352,11 +409,22 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     this.#styleSheets = Object.freeze([...(options.styleSheets ?? [])]);
     this.#styleResolverEnabled = options.styleResolverEnabled ?? true;
     this.#interactionStylesEnabled = options.interactionStylesEnabled ?? true;
+    this.#foundationComponentsEnabled = options.foundationComponentsEnabled ?? true;
     this.#onStyleDiagnostics = options.onStyleDiagnostics;
+    this.#onInteractionRequest = options.onInteractionRequest;
   }
 
   public get failed(): boolean {
     return this.#failed;
+  }
+
+  public styleMetrics(): StyleRuntimeMetrics {
+    return Object.freeze({
+      cacheHits: this.#styleCacheHits,
+      diagnostics: this.#styleDiagnostics,
+      interactionVariants: this.#styleInteractionVariants,
+      resolutions: this.#styleResolutions,
+    });
   }
 
   public render(node: PingoNode): void {
@@ -479,7 +547,20 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       return;
     }
 
-    const state = new PropagationState(transaction);
+    if (transaction.kind === "gotpointercapture") {
+      this.#pointerCaptures.set(transaction.pointerId, transaction.target);
+    } else if (
+      transaction.kind === "lostpointercapture" &&
+      this.#pointerCaptures.get(transaction.pointerId) === transaction.target
+    ) {
+      this.#pointerCaptures.delete(transaction.pointerId);
+    } else if (transaction.kind === "focus") {
+      this.#focusedNodeId = transaction.target;
+    } else if (transaction.kind === "blur" && this.#focusedNodeId === transaction.target) {
+      this.#focusedNodeId = undefined;
+    }
+
+    const state = new PropagationState(transaction, (nodeId) => this.nodeHandle(nodeId));
     const errors: Error[] = [];
     const target = path.at(-1);
     if (target === undefined) return;
@@ -494,7 +575,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
         this.invokeEventHandler(target, transaction.kind, "bubble", state, errors);
       }
     }
-    if (!state.propagationStopped) {
+    if (!state.propagationStopped && eventBubbles(transaction.kind)) {
       for (const instance of [...ancestors].reverse()) {
         this.invokeEventHandler(instance, transaction.kind, "bubble", state, errors);
         if (state.propagationStopped) break;
@@ -530,6 +611,11 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       selection: Object.freeze({ ...selection }),
       value: editable.value,
     });
+  }
+
+  public resetInteractionState(): void {
+    this.#pointerCaptures.clear();
+    this.#focusedNodeId = undefined;
   }
 
   public submitEditable(nodeId: number): void {
@@ -752,6 +838,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
         used.add(candidate);
         if (candidate.descriptor === descriptor) {
           // Same element object as last time: nothing below it can differ.
+          this.#styleCacheHits += 1;
           next.push(candidate);
         } else {
           next.push(this.updateInstance(candidate, descriptor, coreParent));
@@ -816,8 +903,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     const nodeId = this.#allocator.allocate();
     const normalized = normalizeHostProps(type, props, {
       enabled: this.#styleResolverEnabled,
+      foundationComponentsEnabled: this.#foundationComponentsEnabled,
       interactionStylesEnabled: this.#interactionStylesEnabled,
       parentStyle: nearestComputedStyle(owner),
+      recordResolution: (result) => this.recordStyleResolution(result),
       styleSheets: this.#styleSheets,
     });
     const instance: HostInstance = {
@@ -890,8 +979,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       typeof descriptor === "string" ? ({ value: descriptor } as const) : descriptor.props;
     const normalized = normalizeHostProps(instance.type, props, {
       enabled: this.#styleResolverEnabled,
+      foundationComponentsEnabled: this.#foundationComponentsEnabled,
       interactionStylesEnabled: this.#interactionStylesEnabled,
       parentStyle: nearestComputedStyle(instance.parent),
+      recordResolution: (result) => this.recordStyleResolution(result),
       styleSheets: this.#styleSheets,
     });
     const previousVirtualList = instance.virtualList;
@@ -1084,8 +1175,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       }
       const normalized = normalizeHostProps(instance.type, instance.props, {
         enabled: this.#styleResolverEnabled,
+        foundationComponentsEnabled: this.#foundationComponentsEnabled,
         interactionStylesEnabled: this.#interactionStylesEnabled,
         parentStyle: nearestComputedStyle(instance.parent),
+        recordResolution: (result) => this.recordStyleResolution(result),
         styleSheets: this.#styleSheets,
       });
       this.reportStyleDiagnostics(instance, normalized.styleDiagnostics);
@@ -1116,6 +1209,12 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       nodeId: instance.nodeId,
       hostType: instance.type,
     });
+  }
+
+  private recordStyleResolution(result: ResolveInteractionStylesResult): void {
+    this.#styleResolutions += 1;
+    this.#styleDiagnostics += result.diagnostics.length;
+    this.#styleInteractionVariants += result.variants.length;
   }
 
   private materializeVirtualWindow(instance: HostInstance, start: number, end: number): void {
@@ -1253,7 +1352,13 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     const styleId = this.#resources.replace(
       previousStyle,
       ResourceKind.TextStyle,
-      encodeTextStyle(paintId, text.fontSize, text.lineHeight, text.fontWeight, text.fontFamily),
+      encodeTextStyle(paintId, text.fontSize, text.lineHeight, text.fontWeight, text.fontFamily, {
+        fontStyle: STYLE_KEYWORD_IDS[text.fontStyle],
+        textAlign: STYLE_KEYWORD_IDS[text.textAlign],
+        whiteSpace: STYLE_KEYWORD_IDS[text.whiteSpace],
+        overflowWrap: STYLE_KEYWORD_IDS[text.overflowWrap],
+        textOverflow: STYLE_KEYWORD_IDS[text.textOverflow],
+      }),
       this.mutations(),
     );
     instance.resources.set("text:style", styleId);
@@ -1324,9 +1429,51 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     }
     instance.ref = next;
     if (next !== undefined) {
-      const handle: NodeHandle = Object.freeze({ nodeId: instance.nodeId });
+      const handle = this.nodeHandle(instance.nodeId);
       this.#postCommitAttachments.push(() => assignRef(next, handle));
     }
+  }
+
+  private nodeHandle(nodeId: number): NodeHandle {
+    const requireMounted = (): void => {
+      if (this.#hostsByNodeId.get(nodeId)?.mounted !== true) {
+        throw new Error(`node handle ${String(nodeId)} is no longer mounted`);
+      }
+    };
+    const pointer = (pointerId: number): number => {
+      assertU32(pointerId, "pointerId");
+      if (pointerId === 0) throw new RangeError("pointerId must be non-zero");
+      return pointerId;
+    };
+    return Object.freeze({
+      nodeId,
+      setPointerCapture: (pointerId: number) => {
+        requireMounted();
+        this.#onInteractionRequest?.({
+          type: "setPointerCapture",
+          nodeId,
+          pointerId: pointer(pointerId),
+        });
+      },
+      releasePointerCapture: (pointerId: number) => {
+        requireMounted();
+        this.#onInteractionRequest?.({
+          type: "releasePointerCapture",
+          nodeId,
+          pointerId: pointer(pointerId),
+        });
+      },
+      hasPointerCapture: (pointerId: number) =>
+        this.#pointerCaptures.get(pointer(pointerId)) === nodeId,
+      focus: () => {
+        requireMounted();
+        this.#onInteractionRequest?.({ type: "focus", nodeId });
+      },
+      blur: () => {
+        requireMounted();
+        this.#onInteractionRequest?.({ type: "blur", nodeId });
+      },
+    });
   }
 
   private disposeInstance(instance: Instance, emitHostRemove: boolean): void {
@@ -1339,6 +1486,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       this.#scopesPendingDisposal.add(instance.scope);
       return;
     }
+    for (const [pointerId, owner] of this.#pointerCaptures) {
+      if (owner === instance.nodeId) this.#pointerCaptures.delete(pointerId);
+    }
+    if (this.#focusedNodeId === instance.nodeId) this.#focusedNodeId = undefined;
     for (const child of instance.children) this.disposeInstance(child, false);
     instance.children = [];
     instance.virtualItems.clear();
@@ -1469,9 +1620,12 @@ function normalizeHostProps(
   props: Readonly<Record<string, unknown>>,
   styleContext: StyleResolutionContext,
 ): NormalizedHostProps {
+  const propertyBag = props as Readonly<Record<PropertyKey, unknown>>;
+  if (propertyBag[FOUNDATION_COMPONENT] === true && !styleContext.foundationComponentsEnabled) {
+    throw new Error("M6 foundation components are disabled for this root");
+  }
   assertAllowedProps(type, props);
   const common = props as CommonProps;
-  const propertyBag = props as Readonly<Record<PropertyKey, unknown>>;
   const scalars = new Map<Prop, number>();
   addOptionalDimension(scalars, Prop.Width, common.width, "width");
   addOptionalDimension(scalars, Prop.Height, common.height, "height");
@@ -1543,6 +1697,14 @@ function normalizeHostProps(
       fontSize,
       lineHeight,
       fontWeight,
+      fontStyle: "normal",
+      textAlign: "start",
+      // The published direct-prop path preserved hard breaks and split long
+      // tokens. Keep that behavior unless CSS resolution explicitly supplies
+      // its `normal` initial values.
+      whiteSpace: "pre-wrap",
+      overflowWrap: "anywhere",
+      textOverflow: "clip",
     };
   }
 
@@ -1760,6 +1922,11 @@ function applyComputedTextStyle(
     fontSize,
     lineHeight,
     fontWeight,
+    fontStyle: style.fontStyle as NonNullable<typeof text.fontStyle>,
+    textAlign: style.textAlign as NonNullable<typeof text.textAlign>,
+    whiteSpace: style.whiteSpace as NonNullable<typeof text.whiteSpace>,
+    overflowWrap: style.overflowWrap as NonNullable<typeof text.overflowWrap>,
+    textOverflow: style.textOverflow as NonNullable<typeof text.textOverflow>,
   };
 }
 
@@ -1794,20 +1961,23 @@ function resolveHostStyle(
     context.parentStyle !== undefined;
   if (!hasStyleInput) return;
 
-  const result = resolveInteractionStyles({
+  const resolved = resolveInteractionStyles({
     nodeType: styleNodeType(type, editable),
     styleSheets: context.styleSheets,
     legacyStyle: legacyStyleForHost(type, props, common),
     ...(className === undefined ? {} : { className }),
-    ...(inlineStyle === undefined ? {} : { inlineStyle: inlineStyle as PingoStyle }),
+    ...(inlineStyle === undefined ? {} : { inlineStyle }),
     ...(context.parentStyle === undefined ? {} : { parentStyle: context.parentStyle }),
   });
-  if (context.interactionStylesEnabled) return result;
-  return Object.freeze({
-    style: result.style,
-    diagnostics: result.diagnostics,
-    variants: Object.freeze([]),
-  });
+  const result = context.interactionStylesEnabled
+    ? resolved
+    : Object.freeze({
+        style: resolved.style,
+        diagnostics: resolved.diagnostics,
+        variants: Object.freeze([]),
+      });
+  context.recordResolution(result);
+  return result;
 }
 
 function styleNodeType(
@@ -1872,7 +2042,7 @@ function assignDefined(
 
 function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
+  const prototype: unknown = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
 
@@ -2072,6 +2242,26 @@ function normalizeEventHandlers(
     ["pointermove:bubble", "onPointerMove"],
     ["pointercancel:capture", "onPointerCancelCapture"],
     ["pointercancel:bubble", "onPointerCancel"],
+    ["pointerover:capture", "onPointerOverCapture"],
+    ["pointerover:bubble", "onPointerOver"],
+    ["pointerout:capture", "onPointerOutCapture"],
+    ["pointerout:bubble", "onPointerOut"],
+    ["pointerenter:capture", "onPointerEnterCapture"],
+    ["pointerenter:bubble", "onPointerEnter"],
+    ["pointerleave:capture", "onPointerLeaveCapture"],
+    ["pointerleave:bubble", "onPointerLeave"],
+    ["gotpointercapture:capture", "onGotPointerCaptureCapture"],
+    ["gotpointercapture:bubble", "onGotPointerCapture"],
+    ["lostpointercapture:capture", "onLostPointerCaptureCapture"],
+    ["lostpointercapture:bubble", "onLostPointerCapture"],
+    ["focus:capture", "onFocusCapture"],
+    ["focus:bubble", "onFocus"],
+    ["blur:capture", "onBlurCapture"],
+    ["blur:bubble", "onBlur"],
+    ["focusin:capture", "onFocusInCapture"],
+    ["focusin:bubble", "onFocusIn"],
+    ["focusout:capture", "onFocusOutCapture"],
+    ["focusout:bubble", "onFocusOut"],
     ["click:capture", "onClickCapture"],
     ["click:bubble", "onClick"],
     ["wheel:capture", "onWheelCapture"],
@@ -2092,21 +2282,26 @@ class PropagationState {
   public propagationStopped = false;
   public immediatePropagationStopped = false;
   readonly #transaction: EventTransaction;
+  readonly #handle: (nodeId: number) => NodeHandle;
 
-  public constructor(transaction: EventTransaction) {
+  public constructor(transaction: EventTransaction, handle: (nodeId: number) => NodeHandle) {
     this.#transaction = transaction;
+    this.#handle = handle;
   }
 
   public eventFor(nodeId: number, phase: "bubble" | "capture"): PingoEvent {
     const transaction = this.#transaction;
     const isDefaultPrevented = (): boolean => this.defaultPrevented;
-    const target = Object.freeze({ nodeId: transaction.target });
-    const currentTarget = Object.freeze({ nodeId });
+    const target = this.#handle(transaction.target);
+    const currentTarget = this.#handle(nodeId);
+    const relatedTarget =
+      transaction.relatedTarget === null ? null : this.#handle(transaction.relatedTarget);
     return Object.freeze({
       type: transaction.kind,
       eventId: transaction.eventId,
       target,
       currentTarget,
+      relatedTarget,
       eventPhase: nodeId === transaction.target ? 2 : phase === "capture" ? 1 : 3,
       x: transaction.x,
       y: transaction.y,
@@ -2114,6 +2309,13 @@ class PropagationState {
       deltaY: transaction.deltaY,
       buttons: transaction.buttons,
       pointerId: transaction.pointerId,
+      pointerType: transaction.pointerType,
+      isPrimary: transaction.isPrimary,
+      pressure: transaction.pressure,
+      tiltX: transaction.tiltX,
+      tiltY: transaction.tiltY,
+      width: transaction.width,
+      height: transaction.height,
       elapsedMicros: transaction.elapsedMicros,
       shiftKey: (transaction.modifiers & 1) !== 0,
       ctrlKey: (transaction.modifiers & 2) !== 0,
@@ -2134,6 +2336,10 @@ class PropagationState {
       },
     });
   }
+}
+
+function eventBubbles(kind: InputEventKind): boolean {
+  return kind !== "pointerenter" && kind !== "pointerleave" && kind !== "focus" && kind !== "blur";
 }
 
 function validateEventTransaction(transaction: EventTransaction): void {

@@ -9,7 +9,7 @@ import {
 import { EventTransactionDecodingError, decodeEventTransactionBatch } from "./event-transactions";
 
 function eventBytes(path: readonly number[] = [1, 2, 3]): Uint8Array {
-  const bytes = new Uint8Array(16 + 52 + path.length * 4);
+  const bytes = new Uint8Array(100 + path.length * 4);
   const view = new DataView(bytes.buffer);
   view.setUint32(0, EVENT_TRANSACTIONS_MAGIC, true);
   view.setUint16(4, ABI_VERSION, true);
@@ -30,8 +30,17 @@ function eventBytes(path: readonly number[] = [1, 2, 3]): Uint8Array {
   view.setUint32(52, 4, true);
   view.setUint32(56, 1, true);
   view.setUint32(60, 16_667, true);
-  view.setUint32(64, path.length, true);
-  path.forEach((nodeId, index) => view.setUint32(68 + index * 4, nodeId, true));
+  view.setUint32(64, 0xffff_ffff, true);
+  view.setUint8(68, 1);
+  view.setUint8(69, 1);
+  view.setFloat32(72, 0.5, true);
+  view.setFloat32(76, 10, true);
+  view.setFloat32(80, -5, true);
+  view.setFloat32(84, 2, true);
+  view.setFloat32(88, 3, true);
+  view.setUint16(92, 34, true);
+  view.setUint32(96, path.length, true);
+  path.forEach((nodeId, index) => view.setUint32(100 + index * 4, nodeId, true));
   return bytes;
 }
 
@@ -50,6 +59,15 @@ describe("event transactions", () => {
         modifiers: 4,
         pointerId: 1,
         elapsedMicros: 16_667,
+        relatedTarget: null,
+        pointerType: "mouse",
+        isPrimary: true,
+        pressure: 0.5,
+        tiltX: 10,
+        tiltY: -5,
+        width: 2,
+        height: 3,
+        cursor: "pointer",
         path: [1, 2, 3],
       },
     ]);
@@ -74,7 +92,7 @@ describe("event transactions", () => {
   });
 
   it("fails closed on arbitrary bytes", () => {
-    for (let length = 0; length < 96; length += 1) {
+    for (let length = 0; length < 100; length += 1) {
       const bytes = new Uint8Array(length);
       bytes.fill(length);
       try {

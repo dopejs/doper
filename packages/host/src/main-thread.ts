@@ -16,6 +16,7 @@ import {
   type MutationSink,
   type ResourceKind,
   type RootOptions,
+  type StyleRuntimeMetrics,
 } from "@dopejs/pingo-reconciler";
 import {
   decodeEditTransactionBatch,
@@ -35,6 +36,7 @@ import {
   FRAME_DIAGNOSTICS_DIRTY_SEMANTICS_NODES_INDEX,
   FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX,
   FRAME_DIAGNOSTICS_FRAME_SEQ_INDEX,
+  FRAME_DIAGNOSTICS_INTERACTION_STATE_CHANGES_INDEX,
   FRAME_DIAGNOSTICS_LAYOUT_CHANGED_NODES_INDEX,
   FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX,
   FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX,
@@ -231,6 +233,8 @@ export interface CoreFrameDiagnostics {
   readonly skippedInstructions: number;
   /** Highest ABI version Core has observed on an accepted stream. */
   readonly producerAbiVersion: number;
+  /** Cumulative Core-owned hover/active/focus mask changes. */
+  readonly interactionStateChanges: number;
 }
 
 /** Diagnostics emitted after one Core frame and Canvas replay both succeed. */
@@ -252,6 +256,7 @@ export interface FrameReport extends ReplayStats {
   readonly core?: CoreFrameDiagnostics;
   readonly rasterCache?: RasterTileCacheMetrics;
   readonly rasterFrame?: Pick<RasterFrameResult<ReplayStats>, "bypassed" | "hits" | "misses">;
+  readonly style?: StyleRuntimeMetrics;
 }
 
 /** Main-thread M1 root configuration and observability callbacks. */
@@ -1220,6 +1225,7 @@ function parseCoreFrameDiagnostics(
     virtualMaterializedEnd: requiredWord(words, FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX),
     skippedInstructions: requiredWord(words, FRAME_DIAGNOSTICS_SKIPPED_INSTRUCTIONS_INDEX),
     producerAbiVersion: requiredWord(words, FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX),
+    interactionStateChanges: requiredWord(words, FRAME_DIAGNOSTICS_INTERACTION_STATE_CHANGES_INDEX),
   };
 }
 
@@ -1425,7 +1431,13 @@ export function createCanvasRoot(
   const sink = new CanvasFrameSink(
     context,
     core,
-    options.onFrame,
+    options.onFrame === undefined
+      ? undefined
+      : (report) =>
+          options.onFrame?.({
+            ...report,
+            ...(coreRoot.current === undefined ? {} : { style: coreRoot.current.styleMetrics() }),
+          }),
     undefined,
     undefined,
     options.onPostCommitError,
@@ -1447,6 +1459,7 @@ export function createCanvasRoot(
     render: (node) => root.render(node),
     flushSync: () => root.flushSync(),
     invokeCallback: (callbackId) => root.invokeCallback(callbackId),
+    styleMetrics: () => root.styleMetrics(),
     unmount: () => {
       try {
         root.unmount();

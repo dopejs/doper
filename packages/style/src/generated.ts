@@ -234,7 +234,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit", "semantics", "scroll"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   width: {
     id: 2,
@@ -250,7 +250,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   height: {
     id: 3,
@@ -266,7 +266,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-block-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   minWidth: {
     id: 4,
@@ -282,7 +282,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   minHeight: {
     id: 5,
@@ -298,7 +298,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-block-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   maxWidth: {
     id: 6,
@@ -314,7 +314,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   maxHeight: {
     id: 7,
@@ -330,7 +330,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-block-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   boxSizing: {
     id: 8,
@@ -346,7 +346,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   marginTop: {
     id: 9,
@@ -362,7 +362,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   marginRight: {
     id: 10,
@@ -378,7 +378,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   marginBottom: {
     id: 11,
@@ -394,7 +394,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   marginLeft: {
     id: 12,
@@ -410,7 +410,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   paddingTop: {
     id: 13,
@@ -426,7 +426,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   paddingRight: {
     id: 14,
@@ -442,7 +442,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   paddingBottom: {
     id: 15,
@@ -458,7 +458,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   paddingLeft: {
     id: 16,
@@ -474,7 +474,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "containing-inline-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   rowGap: {
     id: 18,
@@ -490,7 +490,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "content-box",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   columnGap: {
     id: 19,
@@ -506,7 +506,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "content-box",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   flexDirection: {
     id: 20,
@@ -522,7 +522,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   justifyContent: {
     id: 21,
@@ -538,7 +538,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   alignItems: {
     id: 22,
@@ -554,7 +554,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "hit", "scroll"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   overflowX: {
     id: 23,
@@ -570,7 +570,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit", "semantics", "scroll"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   overflowY: {
     id: 24,
@@ -586,7 +586,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit", "semantics", "scroll"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   overscrollBehavior: {
     id: 25,
@@ -602,7 +602,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["scroll"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   backgroundColor: {
     id: 26,
@@ -618,7 +618,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   color: {
     id: 27,
@@ -634,7 +634,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   opacity: {
     id: 28,
@@ -650,7 +650,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint", "hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderTopWidth: {
     id: 29,
@@ -666,7 +666,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderRightWidth: {
     id: 30,
@@ -682,7 +682,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderBottomWidth: {
     id: 31,
@@ -698,7 +698,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderLeftWidth: {
     id: 32,
@@ -714,7 +714,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderTopColor: {
     id: 33,
@@ -730,7 +730,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderRightColor: {
     id: 34,
@@ -746,7 +746,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderBottomColor: {
     id: 35,
@@ -762,7 +762,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderLeftColor: {
     id: 36,
@@ -778,7 +778,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderTopStyle: {
     id: 37,
@@ -794,7 +794,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderRightStyle: {
     id: 38,
@@ -810,7 +810,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderBottomStyle: {
     id: 39,
@@ -826,7 +826,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderLeftStyle: {
     id: 40,
@@ -842,7 +842,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   borderRadius: {
     id: 41,
@@ -858,7 +858,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint", "hit"],
     percentageReference: "border-box",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   visibility: {
     id: 42,
@@ -874,7 +874,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint", "hit", "semantics"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   fontFamily: {
     id: 43,
@@ -890,7 +890,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   fontSize: {
     id: 44,
@@ -906,7 +906,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint"],
     percentageReference: "parent-font-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   fontWeight: {
     id: 45,
@@ -922,7 +922,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   fontStyle: {
     id: 46,
@@ -938,7 +938,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   lineHeight: {
     id: 47,
@@ -954,7 +954,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint"],
     percentageReference: "font-size",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   textAlign: {
     id: 48,
@@ -970,7 +970,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   whiteSpace: {
     id: 49,
@@ -986,7 +986,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   overflowWrap: {
     id: 50,
@@ -1002,7 +1002,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   textOverflow: {
     id: 51,
@@ -1018,7 +1018,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   transform: {
     id: 52,
@@ -1034,7 +1034,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint", "hit"],
     percentageReference: "border-box",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   transformOrigin: {
     id: 53,
@@ -1050,7 +1050,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint", "hit"],
     percentageReference: "border-box",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   pointerEvents: {
     id: 54,
@@ -1066,7 +1066,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   cursor: {
     id: 55,
@@ -1082,7 +1082,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   touchAction: {
     id: 56,
@@ -1098,7 +1098,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["hit", "scroll"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   objectFit: {
     id: 57,
@@ -1114,7 +1114,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["layout", "paint", "hit"],
     percentageReference: "none",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
   objectPosition: {
     id: 58,
@@ -1130,7 +1130,7 @@ export const STYLE_PROPERTIES = {
     feature: "m6-foundation",
     affects: ["paint", "hit"],
     percentageReference: "content-box",
-    engineSupport: "planned-m6-b",
+    engineSupport: "m6-core",
   },
 } as const;
 

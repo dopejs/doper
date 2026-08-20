@@ -548,6 +548,7 @@ impl ScrollController {
         delta: [f32; 2],
         elapsed_micros: u32,
         precise: bool,
+        allow_overscroll: bool,
     ) -> Result<ScrollAdvance, CoreError> {
         if !scene.is_scroll_container(node) || scene.excluded_by_display(node) {
             return Err(CoreError::InvalidScrollTarget { node });
@@ -557,11 +558,16 @@ impl ScrollController {
             .get(&node)
             .ok_or(CoreError::InvalidScrollTarget { node })?
             .clone();
+        let previous = state.position()?;
         let changed = if precise {
             state.begin();
-            let moved = state.delta(delta[0], delta[1], elapsed_micros)?;
+            state.delta(delta[0], delta[1], elapsed_micros)?;
             state.end(false)?;
-            moved
+            if !allow_overscroll {
+                let position = state.position()?;
+                state.jump_to(position)?;
+            }
+            position_changed(state.position()?, previous)
         } else {
             state.wheel_notch(delta[0], delta[1])?
         };
@@ -570,6 +576,28 @@ impl ScrollController {
         self.states.insert(node, state);
         self.metrics.input_commands = self.metrics.input_commands.saturating_add(1);
         Ok(ScrollAdvance { active, changed })
+    }
+
+    pub(crate) fn can_scroll_delta(
+        &self,
+        node: NodeId,
+        delta: [f32; 2],
+    ) -> Result<bool, CoreError> {
+        let state = self
+            .states
+            .get(&node)
+            .ok_or(CoreError::InvalidScrollTarget { node })?;
+        let can_axis = |position: f64, maximum: f64, incoming: f32| {
+            (incoming < 0.0 && position > 0.0) || (incoming > 0.0 && position < maximum)
+        };
+        Ok(
+            can_axis(state.x.position(), state.x.maximum_position(), delta[0])
+                || can_axis(
+                    state.y.physics().position(),
+                    state.y.physics().maximum_position(),
+                    delta[1],
+                ),
+        )
     }
 
     pub(crate) fn begin_direct(&mut self, node: NodeId) -> Result<(), CoreError> {
@@ -588,12 +616,19 @@ impl ScrollController {
         node: NodeId,
         delta: [f32; 2],
         elapsed_micros: u32,
+        allow_overscroll: bool,
     ) -> Result<ScrollAdvance, CoreError> {
         let state = self
             .states
             .get_mut(&node)
             .ok_or(CoreError::InvalidScrollTarget { node })?;
-        let changed = state.delta(delta[0], delta[1], elapsed_micros)?;
+        let previous = state.position()?;
+        state.delta(delta[0], delta[1], elapsed_micros)?;
+        if !allow_overscroll {
+            let position = state.position()?;
+            state.jump_to(position)?;
+        }
+        let changed = position_changed(state.position()?, previous);
         scene.apply_scroll_position(node, state.position()?)?;
         self.metrics.input_commands = self.metrics.input_commands.saturating_add(1);
         Ok(ScrollAdvance {
@@ -827,6 +862,10 @@ impl ScrollController {
         }
         Ok(())
     }
+}
+
+fn position_changed(left: [f32; 2], right: [f32; 2]) -> bool {
+    left[0].to_bits() != right[0].to_bits() || left[1].to_bits() != right[1].to_bits()
 }
 
 impl VirtualLayoutProvider for ScrollController {

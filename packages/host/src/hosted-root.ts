@@ -4,7 +4,9 @@ import {
   type CoreDrivenPingoRoot,
   type PingoRoot,
   type MutationSink,
+  type InteractionRequest,
   type RootOptions,
+  type StyleRuntimeMetrics,
 } from "@dopejs/pingo-reconciler";
 import { SemanticTreeMirror } from "@dopejs/pingo-a11y";
 import {
@@ -215,7 +217,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       this.#semanticMirror = new SemanticTreeMirror(canvas, {
         onFocusRequest: (nodeId) => {
           try {
-            this.focusEditable(nodeId);
+            this.focusEditableWithOrigin(nodeId, "accessibility");
           } catch (cause) {
             this.#options.onHostError?.(toError(cause, "semantic focus request failed"));
           }
@@ -237,6 +239,10 @@ class HostedCanvasRootController implements HostedCanvasRoot {
 
   public get failed(): boolean {
     return this.requireRoot().failed;
+  }
+
+  public styleMetrics(): StyleRuntimeMetrics {
+    return this.requireRoot().styleMetrics();
   }
 
   public get mode(): HostTransportMode {
@@ -341,9 +347,19 @@ class HostedCanvasRootController implements HostedCanvasRoot {
 
   /** Activates native text services for one mounted EditableText node. */
   public focusEditable(target: ScrollTarget): void {
+    this.focusEditableWithOrigin(target, "programmatic");
+  }
+
+  private focusEditableWithOrigin(
+    target: ScrollTarget,
+    origin: "accessibility" | "programmatic",
+  ): void {
     const nodeId = scrollNodeId(target);
     const state = this.requireCoreRoot().editableState(nodeId);
     if (state === undefined) throw new Error(`node ${String(nodeId)} is not an editable target`);
+    const eventId = this.#eventSequence;
+    this.#eventSequence = nextSequence(eventId);
+    this.sendInputCommands([{ type: "focusNode", eventId, nodeId, origin }]);
     this.sendInputCommands([{ type: "focusEditable", nodeId }]);
     this.#inputBridge.activate(state);
   }
@@ -351,7 +367,12 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   /** Ends the active native editing surface without creating per-widget DOM. */
   public blurEditable(): void {
     const nodeId = this.#inputBridge.activeNodeId;
-    if (nodeId !== undefined) this.sendInputCommands([{ type: "blurEditable", nodeId }]);
+    if (nodeId !== undefined) {
+      const eventId = this.#eventSequence;
+      this.#eventSequence = nextSequence(eventId);
+      this.sendInputCommands([{ type: "blurNode", eventId, nodeId }]);
+      this.sendInputCommands([{ type: "blurEditable", nodeId }]);
+    }
     this.#inputBridge.deactivate();
   }
 
@@ -419,7 +440,9 @@ class HostedCanvasRootController implements HostedCanvasRoot {
         ? {}
         : { onClockMetrics: this.#options.onClockMetrics }),
       onFatal: (error) => this.handleWorkerFatal(error),
-      ...(this.#options.onFrame === undefined ? {} : { onFrame: this.#options.onFrame }),
+      ...(this.#options.onFrame === undefined
+        ? {}
+        : { onFrame: (report: FrameReport) => this.handleFrameReport(report) }),
       onVirtualRefills: (requests) => this.deferVirtualRefills(requests),
       onEditTransaction: (transaction) => this.handleEditTransaction(transaction),
       onEventTransaction: (transaction) => this.handleEventTransaction(transaction),
@@ -499,7 +522,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#recoverableSink.install(
       new TransportMutationSink(transport, (error) => this.handleWorkerFatal(error)),
     );
-    this.#root = createRoot(this.#recoverableSink, this.#options);
+    this.#root = createRoot(this.#recoverableSink, this.reconcilerOptions());
     this.#mode = selectedMode;
     this.startClockAnchors(client);
     this.#options.onModeChange?.(this.#mode, this.#decision);
@@ -514,6 +537,60 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.dispatchInput(encodeInputBatch({ frameSeq, commands }));
   }
 
+  private reconcilerOptions(): RootOptions {
+    return {
+      ...this.#options,
+      onInteractionRequest: (request) => {
+        this.handleInteractionRequest(request);
+        this.#options.onInteractionRequest?.(request);
+      },
+    };
+  }
+
+  private handleInteractionRequest(request: InteractionRequest): void {
+    const eventId = this.#eventSequence;
+    this.#eventSequence = nextSequence(eventId);
+    switch (request.type) {
+      case "setPointerCapture":
+        if (typeof this.#canvas.setPointerCapture === "function") {
+          this.#canvas.setPointerCapture(request.pointerId);
+        }
+        this.sendInputCommands([
+          {
+            type: "setPointerCapture",
+            eventId,
+            pointerId: request.pointerId,
+            nodeId: request.nodeId,
+          },
+        ]);
+        return;
+      case "releasePointerCapture":
+        if (
+          typeof this.#canvas.hasPointerCapture === "function" &&
+          this.#canvas.hasPointerCapture(request.pointerId) &&
+          typeof this.#canvas.releasePointerCapture === "function"
+        ) {
+          this.#canvas.releasePointerCapture(request.pointerId);
+        }
+        this.sendInputCommands([
+          {
+            type: "releasePointerCapture",
+            eventId,
+            pointerId: request.pointerId,
+            nodeId: request.nodeId,
+          },
+        ]);
+        return;
+      case "focus":
+        this.sendInputCommands([
+          { type: "focusNode", eventId, nodeId: request.nodeId, origin: "programmatic" },
+        ]);
+        return;
+      case "blur":
+        this.sendInputCommands([{ type: "blurNode", eventId, nodeId: request.nodeId }]);
+    }
+  }
+
   private readonly handleCanvasPointerEvent = (event: PointerEvent): void => {
     // A new press supersedes a held gesture. The browser reports the double
     // click after both presses, so this never discards the one just recorded.
@@ -523,6 +600,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       case "pointerup":
       case "pointermove":
       case "pointercancel":
+      case "pointerleave":
         this.dispatchCanvasEvent(event.type, event, 0, 0);
     }
   };
@@ -634,7 +712,14 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   }
 
   private dispatchCanvasEvent(
-    kind: "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel",
+    kind:
+      | "click"
+      | "pointercancel"
+      | "pointerdown"
+      | "pointerleave"
+      | "pointermove"
+      | "pointerup"
+      | "wheel",
     event: MouseEvent,
     deltaX: number,
     deltaY: number,
@@ -646,6 +731,15 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     const x = ((event.clientX - rect.left) * this.logicalWidth()) / rect.width;
     const y = ((event.clientY - rect.top) * this.logicalHeight()) / rect.height;
     const pointerId = kind.startsWith("pointer") ? (event as PointerEvent).pointerId >>> 0 : 0;
+    const pointer = kind.startsWith("pointer") ? (event as PointerEvent) : undefined;
+    const pointerType =
+      pointer?.pointerType === "mouse" ||
+      pointer?.pointerType === "pen" ||
+      pointer?.pointerType === "touch"
+        ? pointer.pointerType
+        : pointerId === 0
+          ? "none"
+          : "mouse";
     // Wheel suppression runs on the listener instead, because this dispatch is
     // deferred to the coalescing frame and `preventDefault` is only honoured
     // while the event is being dispatched.
@@ -715,6 +809,13 @@ class HostedCanvasRootController implements HostedCanvasRoot {
           modifiers,
           pointerId,
           elapsedMicros: Math.max(1, Math.min(1_000_000, Math.round(elapsedMs * 1000))),
+          pointerType,
+          isPrimary: pointer?.isPrimary === true,
+          pressure: Math.max(0, Math.min(1, pointer?.pressure ?? 0)),
+          tiltX: Math.max(-90, Math.min(90, pointer?.tiltX ?? 0)),
+          tiltY: Math.max(-90, Math.min(90, pointer?.tiltY ?? 0)),
+          width: Math.max(0, pointer?.width ?? 0),
+          height: Math.max(0, pointer?.height ?? 0),
         },
       ]);
     } catch (cause) {
@@ -731,7 +832,14 @@ class HostedCanvasRootController implements HostedCanvasRoot {
    * here and synchronously, the way a native input loses focus.
    */
   private blurEditableOutsideActiveEditor(
-    kind: "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel",
+    kind:
+      | "click"
+      | "pointercancel"
+      | "pointerdown"
+      | "pointerleave"
+      | "pointermove"
+      | "pointerup"
+      | "wheel",
     x: number,
     y: number,
   ): void {
@@ -780,9 +888,40 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     }
   };
 
+  private readonly handleWindowBlur = (): void => {
+    this.sendInteractionReset("windowBlur");
+  };
+
+  private readonly handleVisibilityChange = (): void => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      this.sendInteractionReset("documentHidden");
+    }
+  };
+
+  private sendInteractionReset(reason: "documentHidden" | "windowBlur"): void {
+    if (this.#closing || this.#unmounted || this.#recovering) return;
+    this.#eventTimestamps.clear();
+    this.#textDragPointer = undefined;
+    const eventId = this.#eventSequence;
+    this.#eventSequence = nextSequence(eventId);
+    try {
+      this.sendInputCommands([{ type: "resetInteraction", eventId, reason }]);
+    } catch (cause) {
+      this.#root?.resetInteractionState();
+      this.#options.onHostError?.(toError(cause, "interaction reset failed"));
+    }
+  }
+
   /** Turns raw pointer input over the active editor into caret placement. */
   private synthesizeTextSelection(
-    kind: "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel",
+    kind:
+      | "click"
+      | "pointercancel"
+      | "pointerdown"
+      | "pointerleave"
+      | "pointermove"
+      | "pointerup"
+      | "wheel",
     x: number,
     y: number,
     pointerId: number,
@@ -820,6 +959,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
         return;
       case "pointerup":
       case "pointercancel":
+      case "pointerleave":
         if (this.#textDragPointer === pointerId) this.#textDragPointer = undefined;
         return;
       default:
@@ -925,6 +1065,9 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#canvas.addEventListener("pointercancel", this.handleCanvasPointerEvent, {
       passive: pointerPassive,
     });
+    this.#canvas.addEventListener("pointerleave", this.handleCanvasPointerEvent, {
+      passive: true,
+    });
     this.#canvas.addEventListener("click", this.handleCanvasClick, { passive: true });
     this.#canvas.addEventListener("dblclick", this.handleCanvasDoubleClick, { passive: true });
     this.#canvas.addEventListener("wheel", this.handleCanvasWheel, { passive: wheelPassive });
@@ -934,6 +1077,12 @@ class HostedCanvasRootController implements HostedCanvasRoot {
         capture: true,
         passive: true,
       });
+      document.addEventListener("visibilitychange", this.handleVisibilityChange, {
+        passive: true,
+      });
+    }
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("blur", this.handleWindowBlur, { passive: true });
     }
     this.#eventListenersAttached = true;
   }
@@ -955,11 +1104,16 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       document.removeEventListener("pointerdown", this.handleDocumentPointerDown, {
         capture: true,
       });
+      document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+    }
+    if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+      window.removeEventListener("blur", this.handleWindowBlur);
     }
     this.#canvas.removeEventListener("pointerdown", this.handleCanvasPointerEvent);
     this.#canvas.removeEventListener("pointerup", this.handleCanvasPointerEvent);
     this.#canvas.removeEventListener("pointermove", this.handleCanvasPointerEvent);
     this.#canvas.removeEventListener("pointercancel", this.handleCanvasPointerEvent);
+    this.#canvas.removeEventListener("pointerleave", this.handleCanvasPointerEvent);
     this.#canvas.removeEventListener("click", this.handleCanvasClick);
     this.#canvas.removeEventListener("dblclick", this.handleCanvasDoubleClick);
     this.#canvas.removeEventListener("wheel", this.handleCanvasWheel);
@@ -983,7 +1137,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     const sink = new CanvasFrameSink(
       context,
       core,
-      this.#options.onFrame,
+      this.#options.onFrame === undefined ? undefined : (report) => this.handleFrameReport(report),
       rasterCache,
       (requests) => this.deferVirtualRefills(requests),
       this.#options.onHostError,
@@ -995,7 +1149,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     );
     this.#frameSink = sink;
     this.#recoverableSink.install(sink);
-    this.#root ??= createRoot(this.#recoverableSink, this.#options);
+    this.#root ??= createRoot(this.#recoverableSink, this.reconcilerOptions());
     this.#mode = "main-thread";
     this.startMainThreadClock(sink);
     this.#options.onModeChange?.(this.#mode, this.#decision);
@@ -1022,7 +1176,15 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     for (const error of errors) this.#options.onHostError?.(error);
   }
 
+  private handleFrameReport(report: FrameReport): void {
+    this.#options.onFrame?.({
+      ...report,
+      ...(this.#root === undefined ? {} : { style: this.#root.styleMetrics() }),
+    });
+  }
+
   private handleEventTransaction(transaction: EventTransaction): void {
+    if (cursorEvent(transaction.kind)) this.#canvas.style.cursor = transaction.cursor;
     try {
       this.#root?.applyEventTransaction(transaction);
       this.#options.onEventTransaction?.(transaction);
@@ -1145,6 +1307,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     )
       return;
     this.#options.onHostError?.(error);
+    this.#root.resetInteractionState();
     this.#recovering = true;
     this.#recovery = this.recoverToMainThread(error).finally(() => {
       this.#recovering = false;
@@ -1388,6 +1551,21 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#inputBridge.dispose();
     this.#inputBridge = this.createInputBridge(canvas);
   }
+}
+
+function cursorEvent(kind: EventTransaction["kind"]): boolean {
+  return (
+    kind === "pointerdown" ||
+    kind === "pointerup" ||
+    kind === "pointermove" ||
+    kind === "pointercancel" ||
+    kind === "pointerover" ||
+    kind === "pointerout" ||
+    kind === "pointerenter" ||
+    kind === "pointerleave" ||
+    kind === "gotpointercapture" ||
+    kind === "lostpointercapture"
+  );
 }
 
 class TransportMutationSink implements MutationSink {

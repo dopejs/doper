@@ -484,7 +484,7 @@ fn build_node(
     }
     if let Some(opacity) = scene
         .f32_prop(node, Prop::Opacity)
-        .or_else(|| scene.style_f32(node, StyleProperty::Opacity, 0))
+        .or_else(|| scene.presented_style_f32(node, StyleProperty::Opacity))
     {
         if !(0.0..=1.0).contains(&opacity) {
             return Err(PaintError::InvalidOpacity { node });
@@ -552,7 +552,7 @@ fn build_node(
             );
         }
     } else if visible
-        && let Some(rgba) = scene.style_rgba(node, StyleProperty::BackgroundColor, 0)
+        && let Some(rgba) = scene.presented_style_rgba(node, StyleProperty::BackgroundColor)
         && rgba & 0xff != 0
     {
         if radius > 0.0 {
@@ -628,6 +628,11 @@ fn build_node(
         let style = TextStyleResource::decode(text_run.style_id, style_resource)?;
         let paint_resource = typed_resource(scene, style.paint_id, ResourceKind::Paint)?;
         SolidPaint::decode(style.paint_id, paint_resource)?;
+        let fallback_x = match style.text_align {
+            StyleKeyword::End | StyleKeyword::Right | StyleKeyword::Justify => size.width,
+            StyleKeyword::Center => size.width * 0.5,
+            _ => 0.0,
+        };
         if let Some(glyph_run) = text.glyph_run(node) {
             push(
                 &mut instructions,
@@ -643,7 +648,7 @@ fn build_node(
                 &mut instructions,
                 DisplayCommand::DrawTextInlineFallback {
                     font_description_id: text_run.style_id,
-                    origin: [0.0, style.font_size],
+                    origin: [fallback_x, style.font_size],
                     text: inline.to_owned(),
                 },
             );
@@ -653,7 +658,7 @@ fn build_node(
                 DisplayCommand::DrawTextFallback {
                     string_id: text_run.string_id,
                     font_description_id: text_run.style_id,
-                    origin: [0.0, style.font_size],
+                    origin: [fallback_x, style.font_size],
                 },
             );
         }
@@ -712,7 +717,7 @@ fn image_rects(
     image_height: f32,
 ) -> ([f32; 4], [f32; 4]) {
     let fit = scene
-        .style_keyword(node, StyleProperty::ObjectFit, 0)
+        .presented_style_keyword(node, StyleProperty::ObjectFit)
         .unwrap_or(StyleKeyword::Fill);
     if fit == StyleKeyword::Fill
         || image_width <= f32::EPSILON
@@ -736,7 +741,7 @@ fn image_rects(
     let rendered_width = image_width * scale;
     let rendered_height = image_height * scale;
     let position = scene
-        .style_position(node, StyleProperty::ObjectPosition, 0)
+        .presented_style_position(node, StyleProperty::ObjectPosition)
         .map_or([0.5, 0.5], |position| {
             [
                 resolve_object_position(position[0], box_size.width, rendered_width),
@@ -744,7 +749,7 @@ fn image_rects(
             ]
         });
     let offset_x = if scene
-        .style_position(node, StyleProperty::ObjectPosition, 0)
+        .presented_style_position(node, StyleProperty::ObjectPosition)
         .is_some()
     {
         position[0]
@@ -752,7 +757,7 @@ fn image_rects(
         (box_size.width - rendered_width) * 0.5
     };
     let offset_y = if scene
-        .style_position(node, StyleProperty::ObjectPosition, 0)
+        .presented_style_position(node, StyleProperty::ObjectPosition)
         .is_some()
     {
         position[1]
@@ -794,7 +799,7 @@ fn resolve_object_position(length: StyleLength, container: f32, object: f32) -> 
 }
 
 fn style_border_radius(scene: &Scene, node: NodeId, size: pingo_layout::Size) -> f32 {
-    let Some(length) = scene.style_length(node, StyleProperty::BorderRadius, 0) else {
+    let Some(length) = scene.presented_style_length(node, StyleProperty::BorderRadius) else {
         return 0.0;
     };
     resolve_box_length(length, size.width.min(size.height)).max(0.0)
@@ -826,13 +831,13 @@ fn style_border(scene: &Scene, node: NodeId) -> ([f32; 4], [u32; 4]) {
     let mut widths = [0.0; 4];
     let mut colors = [0; 4];
     for (index, (width, style, color)) in sides.into_iter().enumerate() {
-        if scene.style_keyword(node, style, 0) != Some(StyleKeyword::Solid) {
+        if scene.presented_style_keyword(node, style) != Some(StyleKeyword::Solid) {
             continue;
         }
         widths[index] = scene
-            .style_length(node, width, 0)
+            .presented_style_length(node, width)
             .map_or(0.0, |length| resolve_box_length(length, 0.0).max(0.0));
-        colors[index] = scene.style_rgba(node, color, 0).unwrap_or_default();
+        colors[index] = scene.presented_style_rgba(node, color).unwrap_or_default();
     }
     (widths, colors)
 }
@@ -844,13 +849,13 @@ fn push_style_transform(
     instructions: &mut Vec<DisplayInstruction>,
 ) {
     let Some(operations) = scene
-        .style_transform(node, 0)
+        .presented_style_transform(node)
         .filter(|value| !value.is_empty())
     else {
         return;
     };
     let origin = scene
-        .style_position(node, StyleProperty::TransformOrigin, 0)
+        .presented_style_position(node, StyleProperty::TransformOrigin)
         .map_or([size.width * 0.5, size.height * 0.5], |position| {
             [
                 resolve_box_length(position[0], size.width),

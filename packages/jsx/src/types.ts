@@ -13,6 +13,16 @@ export type HostType = "container" | "editableText" | "image" | "scroll" | "text
 export interface NodeHandle {
   /** Generation-bearing Core node identifier. */
   readonly nodeId: number;
+  /** Requests explicit Core pointer capture for this mounted node. */
+  setPointerCapture(pointerId: number): void;
+  /** Releases explicit Core pointer capture when this node owns it. */
+  releasePointerCapture(pointerId: number): void;
+  /** Returns whether Core most recently reported this node as capture owner. */
+  hasPointerCapture(pointerId: number): boolean;
+  /** Requests Core focus without inferring keyboard focus visibility. */
+  focus(): void;
+  /** Clears Core focus when this node owns it. */
+  blur(): void;
 }
 
 /** Object or callback ref. */
@@ -23,10 +33,27 @@ export type PingoEventPhase = 1 | 2 | 3;
 
 /** Stable Shell event object; coordinates are canvas-local logical pixels. */
 export interface PingoEvent {
-  readonly type: "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel";
+  readonly type:
+    | "blur"
+    | "click"
+    | "focus"
+    | "focusin"
+    | "focusout"
+    | "gotpointercapture"
+    | "lostpointercapture"
+    | "pointercancel"
+    | "pointerdown"
+    | "pointerenter"
+    | "pointerleave"
+    | "pointermove"
+    | "pointerout"
+    | "pointerover"
+    | "pointerup"
+    | "wheel";
   readonly eventId: number;
   readonly target: NodeHandle;
   readonly currentTarget: NodeHandle;
+  readonly relatedTarget: NodeHandle | null;
   readonly eventPhase: PingoEventPhase;
   readonly x: number;
   readonly y: number;
@@ -34,6 +61,13 @@ export interface PingoEvent {
   readonly deltaY: number;
   readonly buttons: number;
   readonly pointerId: number;
+  readonly pointerType: "mouse" | "none" | "pen" | "touch";
+  readonly isPrimary: boolean;
+  readonly pressure: number;
+  readonly tiltX: number;
+  readonly tiltY: number;
+  readonly width: number;
+  readonly height: number;
   readonly elapsedMicros: number;
   readonly shiftKey: boolean;
   readonly ctrlKey: boolean;
@@ -99,6 +133,26 @@ export interface CommonProps {
   readonly onPointerMove?: PingoEventHandler;
   readonly onPointerCancelCapture?: PingoEventHandler;
   readonly onPointerCancel?: PingoEventHandler;
+  readonly onPointerOverCapture?: PingoEventHandler;
+  readonly onPointerOver?: PingoEventHandler;
+  readonly onPointerOutCapture?: PingoEventHandler;
+  readonly onPointerOut?: PingoEventHandler;
+  readonly onPointerEnterCapture?: PingoEventHandler;
+  readonly onPointerEnter?: PingoEventHandler;
+  readonly onPointerLeaveCapture?: PingoEventHandler;
+  readonly onPointerLeave?: PingoEventHandler;
+  readonly onGotPointerCaptureCapture?: PingoEventHandler;
+  readonly onGotPointerCapture?: PingoEventHandler;
+  readonly onLostPointerCaptureCapture?: PingoEventHandler;
+  readonly onLostPointerCapture?: PingoEventHandler;
+  readonly onFocusCapture?: PingoEventHandler;
+  readonly onFocus?: PingoEventHandler;
+  readonly onBlurCapture?: PingoEventHandler;
+  readonly onBlur?: PingoEventHandler;
+  readonly onFocusInCapture?: PingoEventHandler;
+  readonly onFocusIn?: PingoEventHandler;
+  readonly onFocusOutCapture?: PingoEventHandler;
+  readonly onFocusOut?: PingoEventHandler;
   readonly onClickCapture?: PingoEventHandler;
   readonly onClick?: PingoEventHandler;
   readonly onWheelCapture?: PingoEventHandler;

@@ -24,6 +24,30 @@ describe("Canvas2DResourceRegistry", () => {
     });
   });
 
+  it("decodes TextStyle v2 posture, alignment, and justification metadata", () => {
+    const resources = new Canvas2DResourceRegistry();
+    resources.defineEncodedResource(1, ResourceKind.Paint, solidPaint());
+    resources.defineEncodedResource(
+      2,
+      ResourceKind.TextStyle,
+      textStyleV2(1, 18, 24, 650, "Inter", 24, 6, 31, 1, 15),
+    );
+    expect(resources.getTextStyle(2)).toEqual({
+      font: "italic 650 18px Inter",
+      fillStyle: "#000000ff",
+      lineHeight: 24,
+      textAlign: "center",
+      textBaseline: "alphabetic",
+    });
+
+    resources.defineEncodedResource(
+      3,
+      ResourceKind.TextStyle,
+      textStyleV2(1, 18, 24, 400, "Inter", 29, 25, 29, 29, 7),
+    );
+    expect(resources.getTextStyle(3)).toMatchObject({ justify: true });
+  });
+
   it("measures hard lines against a post-transaction preview without installing it", () => {
     const resources = new Canvas2DResourceRegistry();
     const actions = [
@@ -205,6 +229,38 @@ function textStyle(
   view.setUint16(16, weight, true);
   view.setUint32(20, encodedFamily.length, true);
   bytes.set(encodedFamily, 24);
+  return bytes;
+}
+
+function textStyleV2(
+  paintId: number,
+  fontSize: number,
+  lineHeight: number,
+  weight: number,
+  family: string,
+  fontStyle: number,
+  textAlign: number,
+  whiteSpace: number,
+  overflowWrap: number,
+  textOverflow: number,
+): Uint8Array {
+  const encodedFamily = new TextEncoder().encode(family);
+  const length = (28 + encodedFamily.length + 3) & ~3;
+  const bytes = new Uint8Array(length);
+  const view = new DataView(bytes.buffer);
+  bytes[0] = RESOURCE_ENCODING_VERSION;
+  bytes[1] = 2;
+  bytes[2] = fontStyle;
+  bytes[3] = textAlign;
+  view.setUint32(4, paintId, true);
+  view.setFloat32(8, fontSize, true);
+  view.setFloat32(12, lineHeight, true);
+  view.setUint16(16, weight, true);
+  bytes[18] = whiteSpace;
+  bytes[19] = overflowWrap;
+  bytes[20] = textOverflow;
+  view.setUint32(24, encodedFamily.length, true);
+  bytes.set(encodedFamily, 28);
   return bytes;
 }
 

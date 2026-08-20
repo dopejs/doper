@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, ops::Range};
+use std::{borrow::Cow, collections::BTreeSet, ops::Range};
 
 use swash::{
     shape::ShapeContext,
@@ -21,6 +21,80 @@ pub struct TextOptions {
     pub line_height: f32,
     /// Maximum line width. Positive infinity disables wrapping.
     pub max_width: f32,
+    /// CSS whitespace collapsing and wrapping behavior.
+    pub white_space: WhiteSpace,
+    /// Whether an otherwise-unbreakable token may be split.
+    pub overflow_wrap: OverflowWrap,
+    /// LTR inline-axis alignment inside a finite maximum width.
+    pub text_align: TextAlign,
+    /// Inline overflow marker behavior for non-wrapping finite lines.
+    pub text_overflow: TextOverflow,
+}
+
+/// Supported CSS `white-space` values.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum WhiteSpace {
+    /// Collapse runs and wrap at normal opportunities.
+    Normal,
+    /// Collapse runs without soft wrapping.
+    Nowrap,
+    /// Preserve runs and hard line breaks without soft wrapping.
+    Pre,
+    /// Collapse runs, preserve hard line breaks, and soft wrap.
+    PreLine,
+    /// Preserve runs and hard line breaks while soft wrapping.
+    PreWrap,
+}
+
+impl WhiteSpace {
+    const fn collapses(self) -> bool {
+        matches!(self, Self::Normal | Self::Nowrap | Self::PreLine)
+    }
+
+    const fn wraps(self) -> bool {
+        matches!(self, Self::Normal | Self::PreLine | Self::PreWrap)
+    }
+
+    const fn preserves_newlines(self) -> bool {
+        matches!(self, Self::Pre | Self::PreLine | Self::PreWrap)
+    }
+}
+
+/// Supported CSS `overflow-wrap` behavior.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum OverflowWrap {
+    /// Only use Unicode line-break opportunities.
+    Normal,
+    /// Split an otherwise-unbreakable word when necessary.
+    BreakWord,
+    /// Permit emergency grapheme-boundary breaks.
+    Anywhere,
+}
+
+/// Supported LTR CSS `text-align` behavior.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum TextAlign {
+    /// Align to the logical inline start.
+    Start,
+    /// Align to the logical inline end.
+    End,
+    /// Align to the physical left edge.
+    Left,
+    /// Align to the physical right edge.
+    Right,
+    /// Center each line.
+    Center,
+    /// Expand inter-word space on non-final lines.
+    Justify,
+}
+
+/// Supported CSS `text-overflow` values.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum TextOverflow {
+    /// Clip overflow at the box edge.
+    Clip,
+    /// Replace the clipped suffix with U+2026.
+    Ellipsis,
 }
 
 impl TextOptions {
@@ -196,8 +270,26 @@ pub(crate) fn layout_text(
         return Err(TextError::UnsupportedDirection);
     }
 
+    let mut transformed = transform_whitespace(text, options.white_space);
+    let max_width = if options.white_space.wraps() {
+        options.max_width
+    } else {
+        f32::INFINITY
+    };
     let graphemes = grapheme_table(text)?;
-    let ranges = line_ranges(context, font, text, options.max_width, options.font_size)?;
+    let ranges = line_ranges(
+        context,
+        font,
+        transformed.text.as_ref(),
+        WrapConfig {
+            max_width,
+            font_size: options.font_size,
+            emergency: options.overflow_wrap != OverflowWrap::Normal,
+        },
+    )?;
+    if options.white_space.collapses() {
+        suppress_line_edge_spaces(&mut transformed, &ranges);
+    }
     let mut layout = TextLayout {
         text: text.to_owned(),
         graphemes,
@@ -211,22 +303,90 @@ pub(crate) fn layout_text(
     };
 
     for (line_index, bytes) in ranges.into_iter().enumerate() {
-        append_line(context, font, &mut layout, line_index, bytes, options)?;
+        append_line(
+            context,
+            font,
+            &transformed,
+            &mut layout,
+            line_index,
+            bytes,
+            options,
+        )?;
     }
     if layout.lines.is_empty() {
-        append_line(context, font, &mut layout, 0, 0..0, options)?;
+        append_line(context, font, &transformed, &mut layout, 0, 0..0, options)?;
     }
     layout.height = usize_to_f32(layout.lines.len()) * options.line_height;
+    if options.text_overflow == TextOverflow::Ellipsis
+        && !options.white_space.wraps()
+        && options.max_width.is_finite()
+    {
+        apply_ellipsis(context, font, &mut layout, options)?;
+    }
     build_carets(&mut layout, options.line_height)?;
+    apply_alignment(&mut layout, transformed.text.as_ref(), options);
     Ok(layout)
+}
+
+fn suppress_line_edge_spaces(transformed: &mut WhitespaceTransform<'_>, ranges: &[Range<usize>]) {
+    for range in ranges {
+        let value = &transformed.text[range.clone()];
+        for (relative, character) in value.char_indices() {
+            if character != ' ' {
+                break;
+            }
+            transformed.suppressed.insert(range.start + relative);
+        }
+        for (relative, character) in value.char_indices().rev() {
+            if character != ' ' {
+                break;
+            }
+            transformed.suppressed.insert(range.start + relative);
+        }
+    }
+}
+
+struct WhitespaceTransform<'a> {
+    text: Cow<'a, str>,
+    suppressed: BTreeSet<usize>,
+}
+
+fn transform_whitespace(text: &str, mode: WhiteSpace) -> WhitespaceTransform<'_> {
+    if !mode.collapses() {
+        return WhitespaceTransform {
+            text: Cow::Borrowed(text),
+            suppressed: BTreeSet::new(),
+        };
+    }
+    let mut bytes = text.as_bytes().to_vec();
+    let mut suppressed = BTreeSet::new();
+    let mut in_collapsible_run = false;
+    for (offset, character) in text.char_indices() {
+        let collapsible = matches!(character, ' ' | '\t' | '\r')
+            || (character == '\n' && !mode.preserves_newlines());
+        if !collapsible {
+            in_collapsible_run = false;
+            continue;
+        }
+        // Every collapsed ASCII whitespace has one byte, so replacing it with
+        // U+0020 preserves all source byte/UTF-16 offsets used by editing.
+        bytes[offset] = b' ';
+        if in_collapsible_run {
+            suppressed.insert(offset);
+        }
+        in_collapsible_run = true;
+    }
+    WhitespaceTransform {
+        text: Cow::Owned(String::from_utf8(bytes).expect("ASCII whitespace replacement is UTF-8")),
+        suppressed,
+    }
 }
 
 fn line_ranges(
     context: &mut ShapeContext,
     font: &FontFace,
     text: &str,
-    max_width: f32,
-    font_size: f32,
+    config: WrapConfig,
 ) -> Result<Vec<Range<usize>>, TextError> {
     let mut result = Vec::new();
     let mut paragraph_start = 0_usize;
@@ -240,8 +400,7 @@ fn line_ranges(
             font,
             text,
             paragraph_start..paragraph_end,
-            max_width,
-            font_size,
+            config,
             &mut result,
         )?;
         paragraph_start = paragraph_start
@@ -259,12 +418,18 @@ fn line_ranges(
             font,
             text,
             paragraph_start..text.len(),
-            max_width,
-            font_size,
+            config,
             &mut result,
         )?;
     }
     Ok(result)
+}
+
+#[derive(Clone, Copy)]
+struct WrapConfig {
+    max_width: f32,
+    font_size: f32,
+    emergency: bool,
 }
 
 fn wrap_paragraph(
@@ -272,8 +437,7 @@ fn wrap_paragraph(
     font: &FontFace,
     text: &str,
     paragraph: Range<usize>,
-    max_width: f32,
-    font_size: f32,
+    config: WrapConfig,
     output: &mut Vec<Range<usize>>,
 ) -> Result<(), TextError> {
     let value = &text[paragraph.clone()];
@@ -281,11 +445,11 @@ fn wrap_paragraph(
         output.push(paragraph.start..paragraph.start);
         return Ok(());
     }
-    if !max_width.is_finite() {
+    if !config.max_width.is_finite() {
         output.push(paragraph);
         return Ok(());
     }
-    let shaped = shape(context, font, value, font_size)?;
+    let shaped = shape(context, font, value, config.font_size)?;
     let mut clusters = cluster_advances(&shaped);
     let allowed = linebreaks(value)
         .filter_map(|(offset, opportunity)| {
@@ -308,10 +472,14 @@ fn wrap_paragraph(
             if cluster.start < start {
                 continue;
             }
-            if width + cluster.advance > max_width && end > start {
-                end = last_allowed
-                    .filter(|candidate| *candidate > start)
-                    .unwrap_or(end);
+            if width + cluster.advance > config.max_width && end > start {
+                if let Some(candidate) = last_allowed.filter(|candidate| *candidate > start) {
+                    end = candidate;
+                } else if !config.emergency {
+                    // `overflow-wrap: normal` lets an unbreakable token exceed
+                    // the line box; consume through the next legal break/end.
+                    continue;
+                }
                 break;
             }
             width += cluster.advance;
@@ -319,7 +487,7 @@ fn wrap_paragraph(
             if cluster.break_allowed {
                 last_allowed = Some(cluster.end);
             }
-            if width > max_width {
+            if width > config.max_width {
                 break;
             }
         }
@@ -358,6 +526,7 @@ fn cluster_advances(shaped: &[RawCluster]) -> Vec<ClusterAdvance> {
 fn append_line(
     context: &mut ShapeContext,
     font: &FontFace,
+    transformed: &WhitespaceTransform<'_>,
     layout: &mut TextLayout,
     line_index: usize,
     bytes: Range<usize>,
@@ -366,7 +535,7 @@ fn append_line(
     let shaped = shape(
         context,
         font,
-        &layout.text[bytes.clone()],
+        &transformed.text[bytes.clone()],
         options.font_size,
     )?;
     let glyph_start = layout.glyphs.len();
@@ -384,7 +553,11 @@ fn append_line(
             .ok_or(TextError::ArithmeticOverflow)?;
         let cluster_index = layout.clusters.len();
         let cluster_glyph_start = layout.glyphs.len();
+        let suppressed_cluster = transformed.suppressed.contains(&global_start);
         for glyph in raw_cluster.glyphs {
+            if suppressed_cluster {
+                continue;
+            }
             layout.glyphs.push(PositionedGlyph {
                 id: glyph.id,
                 cluster: cluster_index,
@@ -422,6 +595,137 @@ fn append_line(
     };
     layout.width = layout.width.max(x);
     layout.lines.push(line);
+    Ok(())
+}
+
+fn apply_alignment(layout: &mut TextLayout, shaping_text: &str, options: TextOptions) {
+    if !options.max_width.is_finite() || options.max_width <= 0.0 {
+        return;
+    }
+    let last_line = layout.lines.len().saturating_sub(1);
+    for (line_index, line) in layout.lines.iter_mut().enumerate() {
+        let extra = (options.max_width - line.width).max(0.0);
+        if extra <= f32::EPSILON {
+            continue;
+        }
+        let offset = match options.text_align {
+            TextAlign::Start | TextAlign::Left | TextAlign::Justify => 0.0,
+            TextAlign::End | TextAlign::Right => extra,
+            TextAlign::Center => extra * 0.5,
+        };
+        if offset != 0.0 {
+            for glyph in &mut layout.glyphs[line.glyphs.clone()] {
+                glyph.x += offset;
+            }
+            for caret in layout
+                .carets
+                .iter_mut()
+                .filter(|caret| caret.line == line_index)
+            {
+                caret.x += offset;
+            }
+        } else if options.text_align == TextAlign::Justify && line_index != last_line {
+            let spaces = layout.clusters[line.clusters.clone()]
+                .iter()
+                .filter(|cluster| {
+                    shaping_text[cluster.bytes.clone()]
+                        .chars()
+                        .all(char::is_whitespace)
+                })
+                .map(|cluster| cluster.bytes.end)
+                .collect::<Vec<_>>();
+            if !spaces.is_empty() {
+                let gap = extra / usize_to_f32(spaces.len());
+                for glyph in &mut layout.glyphs[line.glyphs.clone()] {
+                    let byte = layout.clusters[glyph.cluster].bytes.start;
+                    glyph.x += usize_to_f32(spaces.partition_point(|end| *end <= byte)) * gap;
+                }
+                for caret in layout
+                    .carets
+                    .iter_mut()
+                    .filter(|caret| caret.line == line_index)
+                {
+                    caret.x +=
+                        usize_to_f32(spaces.partition_point(|end| *end <= caret.byte_offset)) * gap;
+                }
+                line.width = options.max_width;
+            }
+        }
+    }
+    layout.width = layout
+        .lines
+        .iter()
+        .map(|line| line.width)
+        .fold(0.0, f32::max);
+}
+
+fn apply_ellipsis(
+    context: &mut ShapeContext,
+    font: &FontFace,
+    layout: &mut TextLayout,
+    options: TextOptions,
+) -> Result<(), TextError> {
+    let ellipsis = shape(context, font, "…", options.font_size)?;
+    let ellipsis_glyphs = ellipsis
+        .first()
+        .map_or(&[][..], |cluster| cluster.glyphs.as_slice());
+    let ellipsis_width = ellipsis_glyphs
+        .iter()
+        .map(|glyph| glyph.advance)
+        .sum::<f32>();
+    if ellipsis_glyphs.is_empty() || ellipsis_width > options.max_width {
+        return Ok(());
+    }
+    let original = std::mem::take(&mut layout.glyphs);
+    let mut replacement = Vec::with_capacity(original.len());
+    layout.missing_glyphs = 0;
+    for (line_index, line) in layout.lines.iter_mut().enumerate() {
+        let line_start = replacement.len();
+        if line.width <= options.max_width {
+            for cluster_index in line.clusters.clone() {
+                let cluster = &mut layout.clusters[cluster_index];
+                let start = replacement.len();
+                replacement.extend_from_slice(&original[cluster.glyphs.clone()]);
+                cluster.glyphs = start..replacement.len();
+            }
+        } else {
+            let mut x = 0.0_f32;
+            let mut truncated = false;
+            for cluster_index in line.clusters.clone() {
+                let cluster = &mut layout.clusters[cluster_index];
+                let source = &original[cluster.glyphs.clone()];
+                let cluster_width = source.iter().map(|glyph| glyph.advance).sum::<f32>();
+                let start = replacement.len();
+                if !truncated && x + cluster_width + ellipsis_width <= options.max_width {
+                    replacement.extend_from_slice(source);
+                    x += cluster_width;
+                } else if !truncated {
+                    for glyph in ellipsis_glyphs {
+                        replacement.push(PositionedGlyph {
+                            id: glyph.id,
+                            cluster: cluster_index,
+                            line: line_index,
+                            x: x + glyph.x,
+                            y: line.baseline - glyph.y,
+                            advance: glyph.advance,
+                        });
+                        x += glyph.advance;
+                    }
+                    truncated = true;
+                }
+                cluster.glyphs = start..replacement.len();
+            }
+            line.width = x;
+        }
+        line.glyphs = line_start..replacement.len();
+    }
+    layout.glyphs = replacement;
+    layout.missing_glyphs = layout.glyphs.iter().filter(|glyph| glyph.id == 0).count();
+    layout.width = layout
+        .lines
+        .iter()
+        .map(|line| line.width)
+        .fold(0.0, f32::max);
     Ok(())
 }
 
@@ -552,7 +856,10 @@ fn usize_to_f32(value: usize) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{TextOptions, grapheme_table, layout_text, utf16_offset};
+    use super::{
+        OverflowWrap, TextAlign, TextOptions, TextOverflow, WhiteSpace, grapheme_table,
+        layout_text, utf16_offset,
+    };
     use crate::TextError;
     use swash::shape::ShapeContext;
 
@@ -592,6 +899,10 @@ mod tests {
                         font_size: 16.0,
                         line_height: 20.0,
                         max_width: 200.0,
+                        white_space: WhiteSpace::PreWrap,
+                        overflow_wrap: OverflowWrap::Anywhere,
+                        text_align: TextAlign::Start,
+                        text_overflow: TextOverflow::Clip,
                     },
                 ),
                 Err(TextError::UnsupportedDirection)
@@ -606,16 +917,28 @@ mod tests {
                 font_size: 0.0,
                 line_height: 16.0,
                 max_width: 10.0,
+                white_space: WhiteSpace::PreWrap,
+                overflow_wrap: OverflowWrap::Anywhere,
+                text_align: TextAlign::Start,
+                text_overflow: TextOverflow::Clip,
             },
             TextOptions {
                 font_size: 12.0,
                 line_height: f32::NAN,
                 max_width: 10.0,
+                white_space: WhiteSpace::PreWrap,
+                overflow_wrap: OverflowWrap::Anywhere,
+                text_align: TextAlign::Start,
+                text_overflow: TextOverflow::Clip,
             },
             TextOptions {
                 font_size: 12.0,
                 line_height: 16.0,
                 max_width: 0.0,
+                white_space: WhiteSpace::PreWrap,
+                overflow_wrap: OverflowWrap::Anywhere,
+                text_align: TextAlign::Start,
+                text_overflow: TextOverflow::Clip,
             },
         ] {
             assert_eq!(options.validate(), Err(TextError::InvalidOptions));
@@ -624,10 +947,101 @@ mod tests {
             TextOptions {
                 font_size: 12.0,
                 line_height: 16.0,
-                max_width: f32::INFINITY
+                max_width: f32::INFINITY,
+                white_space: WhiteSpace::PreWrap,
+                overflow_wrap: OverflowWrap::Anywhere,
+                text_align: TextAlign::Start,
+                text_overflow: TextOverflow::Clip,
             }
             .validate()
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn m6_whitespace_wrap_alignment_and_ellipsis_keep_source_carets() {
+        let font = crate::FontFace::from_bytes(1, 1, 0, crate::conformance_font())
+            .expect("conformance font");
+        let source = "\u{ea60}  \u{ea61}\n\u{ea62}";
+        let normal = layout_text(
+            &mut ShapeContext::new(),
+            &font,
+            source,
+            TextOptions {
+                font_size: 16.0,
+                line_height: 20.0,
+                max_width: 200.0,
+                white_space: WhiteSpace::Normal,
+                overflow_wrap: OverflowWrap::Normal,
+                text_align: TextAlign::Center,
+                text_overflow: TextOverflow::Clip,
+            },
+        )
+        .expect("normal layout");
+        assert_eq!(normal.lines.len(), 1, "normal collapses the hard break");
+        assert!(normal.glyphs.first().is_some_and(|glyph| glyph.x > 0.0));
+        assert_eq!(
+            normal.carets.last().map(|caret| caret.byte_offset),
+            Some(source.len())
+        );
+        assert!(normal.carets.iter().any(|caret| caret.byte_offset == 4));
+
+        let edge_spaces = layout_text(
+            &mut ShapeContext::new(),
+            &font,
+            "  \u{ea60}  ",
+            TextOptions {
+                font_size: 16.0,
+                line_height: 20.0,
+                max_width: 200.0,
+                white_space: WhiteSpace::Normal,
+                overflow_wrap: OverflowWrap::Normal,
+                text_align: TextAlign::Start,
+                text_overflow: TextOverflow::Clip,
+            },
+        )
+        .expect("edge-space layout");
+        let icon = layout_text(
+            &mut ShapeContext::new(),
+            &font,
+            "\u{ea60}",
+            TextOptions {
+                font_size: 16.0,
+                line_height: 20.0,
+                max_width: 200.0,
+                white_space: WhiteSpace::Normal,
+                overflow_wrap: OverflowWrap::Normal,
+                text_align: TextAlign::Start,
+                text_overflow: TextOverflow::Clip,
+            },
+        )
+        .expect("icon layout");
+        assert!((edge_spaces.width - icon.width).abs() <= f32::EPSILON);
+        assert_eq!(
+            edge_spaces.carets.last().map(|caret| caret.byte_offset),
+            Some("  \u{ea60}  ".len())
+        );
+
+        let ellipsis = layout_text(
+            &mut ShapeContext::new(),
+            &font,
+            "\u{ea60}\u{ea61}\u{ea62}\u{ea63}",
+            TextOptions {
+                font_size: 16.0,
+                line_height: 20.0,
+                max_width: 24.0,
+                white_space: WhiteSpace::Nowrap,
+                overflow_wrap: OverflowWrap::Normal,
+                text_align: TextAlign::Start,
+                text_overflow: TextOverflow::Ellipsis,
+            },
+        )
+        .expect("ellipsis layout");
+        assert_eq!(ellipsis.lines.len(), 1);
+        assert!(ellipsis.width <= 24.0);
+        assert_eq!(
+            ellipsis.carets.last().map(|caret| caret.utf16_offset),
+            Some(4)
         );
     }
 }
@@ -649,6 +1063,16 @@ pub fn soft_break_offsets(
     text: &str,
     advance_of: impl Fn(usize) -> f32,
     max_width: f32,
+) -> Vec<usize> {
+    soft_break_offsets_with_mode(text, advance_of, max_width, true)
+}
+
+/// Equivalent to [`soft_break_offsets`] with explicit emergency-wrap policy.
+pub fn soft_break_offsets_with_mode(
+    text: &str,
+    advance_of: impl Fn(usize) -> f32,
+    max_width: f32,
+    emergency_wrap: bool,
 ) -> Vec<usize> {
     let mut breaks = Vec::new();
     if !max_width.is_finite() || max_width <= 0.0 || text.is_empty() {
@@ -674,9 +1098,14 @@ pub fn soft_break_offsets(
         if width + advance > max_width && offset > line_start {
             // Prefer the last opportunity on this line; with none, break right
             // here so a single long word is split instead of overflowing.
-            let (split, split_index) = last_allowed
-                .filter(|(candidate, _)| *candidate > line_start && *candidate <= offset)
-                .unwrap_or((offset, index));
+            let candidate = last_allowed
+                .filter(|(candidate, _)| *candidate > line_start && *candidate <= offset);
+            let Some((split, split_index)) =
+                candidate.or_else(|| emergency_wrap.then_some((offset, index)))
+            else {
+                width += advance;
+                continue;
+            };
             breaks.push(split);
             line_start = split;
             width = (split_index..index).map(&advance_of).sum::<f32>();

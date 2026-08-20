@@ -24,11 +24,11 @@ describe("style schema capabilities", () => {
     const capabilities = styleCapabilities();
     expect(capabilities.cssSubsetVersion).toBe(CSS_SUBSET_VERSION);
     expect(capabilities.resolverReady).toBe(true);
-    expect(capabilities.engineReady).toBe(false);
+    expect(capabilities.engineReady).toBe(true);
     expect(capabilities.properties).toHaveLength(Object.keys(STYLE_PROPERTIES).length);
-    expect(
-      capabilities.properties.every((property) => property.engineSupport === "planned-m6-b"),
-    ).toBe(true);
+    expect(capabilities.properties.every((property) => property.engineSupport === "m6-core")).toBe(
+      true,
+    );
     expect(Object.isFrozen(capabilities)).toBe(true);
     expect(Object.isFrozen(capabilities.properties)).toBe(true);
   });

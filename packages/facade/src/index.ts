@@ -59,7 +59,7 @@ export {
   type ViewProps,
   type Woff2Decoder,
 } from "@dopejs/pingo-jsx";
-export { type PingoRoot } from "@dopejs/pingo-reconciler";
+export { type PingoRoot, type StyleRuntimeMetrics } from "@dopejs/pingo-reconciler";
 export type {
   EditTransaction,
   EventTransaction,

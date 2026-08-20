@@ -584,12 +584,10 @@ Host 按手势分类，Core 对离散格做有界时长（120ms）的三次缓�
 
 ### M6：CSS 子集、基础组件与原生事件基础
 
-> 当前状态：**M6-A 已完成，M6-B facade 适配进行中（2026-08-20）**。单源 style schema、TS/Rust
-> 生成元数据、Shell stylesheet/compiler/cascade/computed resolver、结构化诊断和 capability
-> API 已落地；生成支持表明确标为 resolver-only。M6-A 门禁包含任意 parser 输入、独立
-> candidate-list reference oracle、级联随机差分，以及 memoized/no-change resolver 与全量重算
-> 的属性对照。输入变化时仍保留全量 resolver 作为正确性路径，尚未承诺 property-level
-> 增量 cascade。M6-B Core/facade 组件集成仍未完成，不能把任一 CSS 属性写成引擎已支持。
+> 当前状态：**已完成（2026-08-20）**。单源 style schema、Shell resolver、foundation facade、
+> typed computed-style resource、Core layout/paint/hit/scroll/semantics、pointer/focus/capture 状态、
+> 三 transport 事件契约、迁移报告和独立回滚开关均已落地。`styleCapabilities()` 只在完整
+> M6 门禁通过后声明 `engineReady: true`；输入变化仍保留全量 resolver 作为正确性路径。
 > 架构边界见 `docs/design.md` §12.1、`docs/css-events-plan.md` 与 ADR-0007。
 
 目标：建立可逐项扩展而不反复改写 Core 边界的 style/event 基础，并把滚动、虚拟化和
@@ -612,11 +610,9 @@ Host 按手势分类，Core 对离散格做有界时长（120ms）的三次缓�
 
 #### M6-B 基础组件、display 与 overflow
 
-状态：**进行中（2026-08-20）**。已交付 `View`、`Text`、`Image`、`Input` 和无装饰
-`UnstyledTextArea` facade compatibility adapter；它们严格映射现有 intrinsic/Core node，
-旧 intrinsic 与装饰型 `TextArea` widget 行为不变。由于已发布同名冲突，最终基础
-`TextArea` 名称需按 `docs/design.md` §12.1 的 breaking-release 迁移执行。当前 adapter
-只接受既有 direct props；`style`/`className`、display/overflow 和 View.virtual 尚未接入。
+状态：**已完成（2026-08-20）**。`View`、`Text`、`Image`、`Input` 和
+`UnstyledTextArea` 已接入 `style`/`className`、display/overflow 与纵向 `View.virtual`，
+并保留旧 intrinsic/direct prop 和装饰型 `TextArea` widget。
 
 - 新增 View、Text、Image、Input、TextArea facade；0.x 同名冲突期间使用
   `UnstyledTextArea` 兼容别名；Fragment 不产 Scene 节点。
@@ -627,6 +623,8 @@ Host 按手势分类，Core 对离散格做有界时长（120ms）的三次缓�
 
 #### M6-C 原生事件状态与伪类
 
+状态：**已完成（2026-08-20）**。
+
 - Input/Event 协议补齐 pointerType、over/out、enter/leave、got/lost capture 与 focus 生命周期。
 - Core 持有 hover/active/focus/focus-visible/capture 状态，处理所有取消和恢复路径。
 - Shell 预编译状态 declarations；Core 只按状态位选择目标值，不匹配 selector。
@@ -635,13 +633,14 @@ Host 按手势分类，Core 对离散格做有界时长（120ms）的三次缓�
 
 #### M6-D 兼容、诊断与出口
 
+状态：**已完成（2026-08-20）**。
+
 - 旧 intrinsic/direct prop 与新 computed style 的优先级、重复声明诊断和迁移报告。
 - CSS resolver、新 facade、interaction styles 独立 rollout flag 和页面回退演练。
 - devtools/帧报告增加 style recompute、状态变化和各失效域计数。
 - 更新 facade API 快照、迁移扫描器、文档与示例，不删除旧 API。
 
-M6 总出口命令仍预留为 `pnpm m6:check`。已落地的 M6-A 出口为 `pnpm m6:a:check`，
-必须链入 `pnpm m5:check`；M6 完整出口还需增加：
+M6 总出口命令为 `pnpm m6:check`，并继续链入 `pnpm m5:check`。门禁包含：
 
 - parser/cascade/computed-style reference 与 fuzz（M6-A 已交付）；
 - memoized/no-change computed style ↔ full recompute 属性测试（M6-A 已交付）；

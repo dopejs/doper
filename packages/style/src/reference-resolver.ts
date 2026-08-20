@@ -69,8 +69,17 @@ export function resolveStyleReference(options: ResolveStyleOptions): ResolveStyl
     options,
     candidates,
     diagnostics,
+    false,
   );
-  appendObjectCandidates(options.legacyStyle, 2_000_000, order, options, candidates, diagnostics);
+  appendObjectCandidates(
+    options.legacyStyle,
+    2_000_000,
+    order,
+    options,
+    candidates,
+    diagnostics,
+    true,
+  );
 
   const computed: Partial<Record<StylePropertyName, ComputedStyleValue>> = {};
   for (const metadata of properties) {
@@ -110,6 +119,7 @@ function appendObjectCandidates(
   options: ResolveStyleOptions,
   candidates: ReferenceCandidate[],
   diagnostics: StyleDiagnostic[],
+  legacy: boolean,
 ): number {
   let order = startOrder;
   if (style === undefined) return order;
@@ -118,6 +128,15 @@ function appendObjectCandidates(
     diagnostics.push(...expanded.diagnostics);
     for (const declaration of expanded.declarations) {
       order += 1;
+      if (legacy && candidates.some((candidate) => candidate.property === declaration.property)) {
+        const metadata = metadataForProperty(declaration.property);
+        diagnostics.push({
+          code: "legacy-direct-prop-conflict",
+          severity: "warning",
+          message: `Legacy direct prop ${metadata.jsName} overrides a CSS declaration`,
+          property: metadata.cssName,
+        });
+      }
       appendReferenceCandidate(
         declaration.property,
         declaration.value,

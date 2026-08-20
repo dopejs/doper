@@ -171,7 +171,12 @@ pub fn edit_command_from_input(
         | InputCommand::ScrollEnd { .. }
         | InputCommand::ScrollCancel { .. }
         | InputCommand::SetScrollVelocity { .. }
-        | InputCommand::DispatchEvent { .. } => {
+        | InputCommand::DispatchEvent { .. }
+        | InputCommand::SetPointerCapture { .. }
+        | InputCommand::ReleasePointerCapture { .. }
+        | InputCommand::FocusNode { .. }
+        | InputCommand::BlurNode { .. }
+        | InputCommand::ResetInteraction { .. } => {
             return Err(InputReplayError::UnsupportedCommand);
         }
     };

@@ -26,7 +26,7 @@ const capabilitySnapshot: StyleCapabilities = Object.freeze({
   cssSubsetVersion: CSS_SUBSET_VERSION,
   featureBits,
   resolverReady: true,
-  engineReady: false,
+  engineReady: true,
   interactionStateMask: STYLE_INTERACTION_STATE_MASK,
   stateProperties: Object.freeze([...STYLE_STATE_PROPERTIES]),
   properties: Object.freeze(
@@ -160,7 +160,7 @@ export function supportsStyle(property: string, value: unknown): boolean {
   return result.diagnostics.length === 0 && result.declarations.length > 0;
 }
 
-/** Returns an immutable capability snapshot without claiming M6-B Core support. */
+/** Returns the immutable delivered M6 Shell/Core capability snapshot. */
 export function styleCapabilities(): StyleCapabilities {
   return capabilitySnapshot;
 }

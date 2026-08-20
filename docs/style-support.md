@@ -4,65 +4,65 @@
 
 Subset version: **1.0.0**
 
-M6-A parses and computes the declarations below. This table does not claim that the current
-Core consumes them yet; engine integration is an M6-B exit condition.
+The Shell parses and computes the declarations below and the M6 Core consumes their canonical
+typed values. CSS text and selector matching remain outside Core.
 
-| CSS property          | TypeScript name      | grammar                      | inherited | invalidation                          | animation | engine status                        |
-| --------------------- | -------------------- | ---------------------------- | --------- | ------------------------------------- | --------- | ------------------------------------ |
-| `display`             | `display`            | `display`                    | no        | layout, paint, hit, semantics, scroll | discrete  | Resolver only; Core planned for M6-B |
-| `width`               | `width`              | `length-auto`                | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `height`              | `height`             | `length-auto`                | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `min-width`           | `minWidth`           | `length-auto`                | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `min-height`          | `minHeight`          | `length-auto`                | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `max-width`           | `maxWidth`           | `length-none`                | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `max-height`          | `maxHeight`          | `length-none`                | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `box-sizing`          | `boxSizing`          | `box-sizing`                 | no        | layout, paint, hit, scroll            | discrete  | Resolver only; Core planned for M6-B |
-| `margin-top`          | `marginTop`          | `length-auto`                | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `margin-right`        | `marginRight`        | `length-auto`                | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `margin-bottom`       | `marginBottom`       | `length-auto`                | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `margin-left`         | `marginLeft`         | `length-auto`                | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `padding-top`         | `paddingTop`         | `non-negative-length`        | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `padding-right`       | `paddingRight`       | `non-negative-length`        | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `padding-bottom`      | `paddingBottom`      | `non-negative-length`        | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `padding-left`        | `paddingLeft`        | `non-negative-length`        | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `row-gap`             | `rowGap`             | `non-negative-length-normal` | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `column-gap`          | `columnGap`          | `non-negative-length-normal` | no        | layout, paint, hit, scroll            | number    | Resolver only; Core planned for M6-B |
-| `flex-direction`      | `flexDirection`      | `flex-direction`             | no        | layout, paint, hit, scroll            | discrete  | Resolver only; Core planned for M6-B |
-| `justify-content`     | `justifyContent`     | `justify-content`            | no        | layout, paint, hit, scroll            | discrete  | Resolver only; Core planned for M6-B |
-| `align-items`         | `alignItems`         | `align-items`                | no        | layout, paint, hit, scroll            | discrete  | Resolver only; Core planned for M6-B |
-| `overflow-x`          | `overflowX`          | `overflow`                   | no        | layout, paint, hit, semantics, scroll | discrete  | Resolver only; Core planned for M6-B |
-| `overflow-y`          | `overflowY`          | `overflow`                   | no        | layout, paint, hit, semantics, scroll | discrete  | Resolver only; Core planned for M6-B |
-| `overscroll-behavior` | `overscrollBehavior` | `overscroll-behavior`        | no        | scroll                                | discrete  | Resolver only; Core planned for M6-B |
-| `background-color`    | `backgroundColor`    | `color`                      | no        | paint                                 | color     | Resolver only; Core planned for M6-B |
-| `color`               | `color`              | `color`                      | yes       | paint                                 | color     | Resolver only; Core planned for M6-B |
-| `opacity`             | `opacity`            | `opacity`                    | no        | paintSelf, hit                        | number    | Resolver only; Core planned for M6-B |
-| `border-top-width`    | `borderTopWidth`     | `non-negative-length`        | no        | layout, paint, hit                    | number    | Resolver only; Core planned for M6-B |
-| `border-right-width`  | `borderRightWidth`   | `non-negative-length`        | no        | layout, paint, hit                    | number    | Resolver only; Core planned for M6-B |
-| `border-bottom-width` | `borderBottomWidth`  | `non-negative-length`        | no        | layout, paint, hit                    | number    | Resolver only; Core planned for M6-B |
-| `border-left-width`   | `borderLeftWidth`    | `non-negative-length`        | no        | layout, paint, hit                    | number    | Resolver only; Core planned for M6-B |
-| `border-top-color`    | `borderTopColor`     | `color-current`              | no        | paint                                 | color     | Resolver only; Core planned for M6-B |
-| `border-right-color`  | `borderRightColor`   | `color-current`              | no        | paint                                 | color     | Resolver only; Core planned for M6-B |
-| `border-bottom-color` | `borderBottomColor`  | `color-current`              | no        | paint                                 | color     | Resolver only; Core planned for M6-B |
-| `border-left-color`   | `borderLeftColor`    | `color-current`              | no        | paint                                 | color     | Resolver only; Core planned for M6-B |
-| `border-top-style`    | `borderTopStyle`     | `border-style`               | no        | layout, paint, hit                    | discrete  | Resolver only; Core planned for M6-B |
-| `border-right-style`  | `borderRightStyle`   | `border-style`               | no        | layout, paint, hit                    | discrete  | Resolver only; Core planned for M6-B |
-| `border-bottom-style` | `borderBottomStyle`  | `border-style`               | no        | layout, paint, hit                    | discrete  | Resolver only; Core planned for M6-B |
-| `border-left-style`   | `borderLeftStyle`    | `border-style`               | no        | layout, paint, hit                    | discrete  | Resolver only; Core planned for M6-B |
-| `border-radius`       | `borderRadius`       | `non-negative-length`        | no        | paint, hit                            | number    | Resolver only; Core planned for M6-B |
-| `visibility`          | `visibility`         | `visibility`                 | yes       | paint, hit, semantics                 | discrete  | Resolver only; Core planned for M6-B |
-| `font-family`         | `fontFamily`         | `font-family`                | yes       | layout, paint                         | discrete  | Resolver only; Core planned for M6-B |
-| `font-size`           | `fontSize`           | `positive-length`            | yes       | layout, paint                         | number    | Resolver only; Core planned for M6-B |
-| `font-weight`         | `fontWeight`         | `font-weight`                | yes       | layout, paint                         | number    | Resolver only; Core planned for M6-B |
-| `font-style`          | `fontStyle`          | `font-style`                 | yes       | layout, paint                         | discrete  | Resolver only; Core planned for M6-B |
-| `line-height`         | `lineHeight`         | `line-height`                | yes       | layout, paint                         | number    | Resolver only; Core planned for M6-B |
-| `text-align`          | `textAlign`          | `text-align`                 | yes       | layout, paint                         | discrete  | Resolver only; Core planned for M6-B |
-| `white-space`         | `whiteSpace`         | `white-space`                | yes       | layout, paint                         | discrete  | Resolver only; Core planned for M6-B |
-| `overflow-wrap`       | `overflowWrap`       | `overflow-wrap`              | yes       | layout, paint                         | discrete  | Resolver only; Core planned for M6-B |
-| `text-overflow`       | `textOverflow`       | `text-overflow`              | no        | layout, paint                         | discrete  | Resolver only; Core planned for M6-B |
-| `transform`           | `transform`          | `transform`                  | no        | paint, hit                            | transform | Resolver only; Core planned for M6-B |
-| `transform-origin`    | `transformOrigin`    | `position`                   | no        | paint, hit                            | number    | Resolver only; Core planned for M6-B |
-| `pointer-events`      | `pointerEvents`      | `pointer-events`             | yes       | hit                                   | discrete  | Resolver only; Core planned for M6-B |
-| `cursor`              | `cursor`             | `cursor`                     | yes       | hit                                   | discrete  | Resolver only; Core planned for M6-B |
-| `touch-action`        | `touchAction`        | `touch-action`               | no        | hit, scroll                           | discrete  | Resolver only; Core planned for M6-B |
-| `object-fit`          | `objectFit`          | `object-fit`                 | no        | layout, paint, hit                    | discrete  | Resolver only; Core planned for M6-B |
-| `object-position`     | `objectPosition`     | `position`                   | no        | paint, hit                            | number    | Resolver only; Core planned for M6-B |
+| CSS property          | TypeScript name      | grammar                      | inherited | invalidation                          | animation | engine status |
+| --------------------- | -------------------- | ---------------------------- | --------- | ------------------------------------- | --------- | ------------- |
+| `display`             | `display`            | `display`                    | no        | layout, paint, hit, semantics, scroll | discrete  | M6 Core       |
+| `width`               | `width`              | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `height`              | `height`             | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `min-width`           | `minWidth`           | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `min-height`          | `minHeight`          | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `max-width`           | `maxWidth`           | `length-none`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `max-height`          | `maxHeight`          | `length-none`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `box-sizing`          | `boxSizing`          | `box-sizing`                 | no        | layout, paint, hit, scroll            | discrete  | M6 Core       |
+| `margin-top`          | `marginTop`          | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `margin-right`        | `marginRight`        | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `margin-bottom`       | `marginBottom`       | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `margin-left`         | `marginLeft`         | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `padding-top`         | `paddingTop`         | `non-negative-length`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `padding-right`       | `paddingRight`       | `non-negative-length`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `padding-bottom`      | `paddingBottom`      | `non-negative-length`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `padding-left`        | `paddingLeft`        | `non-negative-length`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `row-gap`             | `rowGap`             | `non-negative-length-normal` | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `column-gap`          | `columnGap`          | `non-negative-length-normal` | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `flex-direction`      | `flexDirection`      | `flex-direction`             | no        | layout, paint, hit, scroll            | discrete  | M6 Core       |
+| `justify-content`     | `justifyContent`     | `justify-content`            | no        | layout, paint, hit, scroll            | discrete  | M6 Core       |
+| `align-items`         | `alignItems`         | `align-items`                | no        | layout, paint, hit, scroll            | discrete  | M6 Core       |
+| `overflow-x`          | `overflowX`          | `overflow`                   | no        | layout, paint, hit, semantics, scroll | discrete  | M6 Core       |
+| `overflow-y`          | `overflowY`          | `overflow`                   | no        | layout, paint, hit, semantics, scroll | discrete  | M6 Core       |
+| `overscroll-behavior` | `overscrollBehavior` | `overscroll-behavior`        | no        | scroll                                | discrete  | M6 Core       |
+| `background-color`    | `backgroundColor`    | `color`                      | no        | paint                                 | color     | M6 Core       |
+| `color`               | `color`              | `color`                      | yes       | paint                                 | color     | M6 Core       |
+| `opacity`             | `opacity`            | `opacity`                    | no        | paintSelf, hit                        | number    | M6 Core       |
+| `border-top-width`    | `borderTopWidth`     | `non-negative-length`        | no        | layout, paint, hit                    | number    | M6 Core       |
+| `border-right-width`  | `borderRightWidth`   | `non-negative-length`        | no        | layout, paint, hit                    | number    | M6 Core       |
+| `border-bottom-width` | `borderBottomWidth`  | `non-negative-length`        | no        | layout, paint, hit                    | number    | M6 Core       |
+| `border-left-width`   | `borderLeftWidth`    | `non-negative-length`        | no        | layout, paint, hit                    | number    | M6 Core       |
+| `border-top-color`    | `borderTopColor`     | `color-current`              | no        | paint                                 | color     | M6 Core       |
+| `border-right-color`  | `borderRightColor`   | `color-current`              | no        | paint                                 | color     | M6 Core       |
+| `border-bottom-color` | `borderBottomColor`  | `color-current`              | no        | paint                                 | color     | M6 Core       |
+| `border-left-color`   | `borderLeftColor`    | `color-current`              | no        | paint                                 | color     | M6 Core       |
+| `border-top-style`    | `borderTopStyle`     | `border-style`               | no        | layout, paint, hit                    | discrete  | M6 Core       |
+| `border-right-style`  | `borderRightStyle`   | `border-style`               | no        | layout, paint, hit                    | discrete  | M6 Core       |
+| `border-bottom-style` | `borderBottomStyle`  | `border-style`               | no        | layout, paint, hit                    | discrete  | M6 Core       |
+| `border-left-style`   | `borderLeftStyle`    | `border-style`               | no        | layout, paint, hit                    | discrete  | M6 Core       |
+| `border-radius`       | `borderRadius`       | `non-negative-length`        | no        | paint, hit                            | number    | M6 Core       |
+| `visibility`          | `visibility`         | `visibility`                 | yes       | paint, hit, semantics                 | discrete  | M6 Core       |
+| `font-family`         | `fontFamily`         | `font-family`                | yes       | layout, paint                         | discrete  | M6 Core       |
+| `font-size`           | `fontSize`           | `positive-length`            | yes       | layout, paint                         | number    | M6 Core       |
+| `font-weight`         | `fontWeight`         | `font-weight`                | yes       | layout, paint                         | number    | M6 Core       |
+| `font-style`          | `fontStyle`          | `font-style`                 | yes       | layout, paint                         | discrete  | M6 Core       |
+| `line-height`         | `lineHeight`         | `line-height`                | yes       | layout, paint                         | number    | M6 Core       |
+| `text-align`          | `textAlign`          | `text-align`                 | yes       | layout, paint                         | discrete  | M6 Core       |
+| `white-space`         | `whiteSpace`         | `white-space`                | yes       | layout, paint                         | discrete  | M6 Core       |
+| `overflow-wrap`       | `overflowWrap`       | `overflow-wrap`              | yes       | layout, paint                         | discrete  | M6 Core       |
+| `text-overflow`       | `textOverflow`       | `text-overflow`              | no        | layout, paint                         | discrete  | M6 Core       |
+| `transform`           | `transform`          | `transform`                  | no        | paint, hit                            | transform | M6 Core       |
+| `transform-origin`    | `transformOrigin`    | `position`                   | no        | paint, hit                            | number    | M6 Core       |
+| `pointer-events`      | `pointerEvents`      | `pointer-events`             | yes       | hit                                   | discrete  | M6 Core       |
+| `cursor`              | `cursor`             | `cursor`                     | yes       | hit                                   | discrete  | M6 Core       |
+| `touch-action`        | `touchAction`        | `touch-action`               | no        | hit, scroll                           | discrete  | M6 Core       |
+| `object-fit`          | `objectFit`          | `object-fit`                 | no        | layout, paint, hit                    | discrete  | M6 Core       |
+| `object-position`     | `objectPosition`     | `position`                   | no        | paint, hit                            | number    | M6 Core       |

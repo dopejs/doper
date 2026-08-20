@@ -177,7 +177,7 @@ impl HitIndex {
             .map(|node| {
                 !scene.excluded_by_display(node)
                     && scene.visible(node)
-                    && scene.style_keyword(node, StyleProperty::PointerEvents, 0)
+                    && scene.presented_style_keyword(node, StyleProperty::PointerEvents)
                         != Some(StyleKeyword::None)
             })
             .collect::<Vec<_>>();
@@ -327,7 +327,7 @@ fn build_world_geometry(
             width: size.width,
             height: size.height,
             radius: scene
-                .style_length(node, StyleProperty::BorderRadius, 0)
+                .presented_style_length(node, StyleProperty::BorderRadius)
                 .map_or(0.0, |length| {
                     resolve_box_length(length, size.width.min(size.height)).max(0.0)
                 }),
@@ -405,10 +405,10 @@ fn axis_clip(
 
 fn style_affine(scene: &Scene, node: NodeId, width: f32, height: f32) -> Option<Affine> {
     let operations = scene
-        .style_transform(node, 0)
+        .presented_style_transform(node)
         .filter(|value| !value.is_empty())?;
     let origin = scene
-        .style_position(node, StyleProperty::TransformOrigin, 0)
+        .presented_style_position(node, StyleProperty::TransformOrigin)
         .map_or([width * 0.5, height * 0.5], |position| {
             [
                 resolve_box_length(position[0], width),

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 12,
+  "abiVersion": 13,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -98,7 +98,7 @@
     ]
   },
   "frameDiagnostics": {
-    "version": 5,
+    "version": 6,
     "fields": [
       {
         "name": "version",
@@ -202,6 +202,10 @@
       },
       {
         "name": "producerAbiVersion",
+        "type": "u32"
+      },
+      {
+        "name": "interactionStateChanges",
         "type": "u32"
       }
     ]
@@ -599,7 +603,52 @@
         {
           "name": "DispatchEvent",
           "opcode": 48,
-          "fields": ["u32", "u16", "u16", "f32", "f32", "f32", "f32", "u32", "u32", "u32", "u32"]
+          "fields": [
+            "u32",
+            "u16",
+            "u16",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "u32",
+            "u32",
+            "u32",
+            "u32",
+            "u8",
+            "u8",
+            "pad16",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32"
+          ]
+        },
+        {
+          "name": "SetPointerCapture",
+          "opcode": 49,
+          "fields": ["u32", "u32", "u32"]
+        },
+        {
+          "name": "ReleasePointerCapture",
+          "opcode": 50,
+          "fields": ["u32", "u32", "u32"]
+        },
+        {
+          "name": "FocusNode",
+          "opcode": 51,
+          "fields": ["u32", "u32", "u8", "u8", "pad16"]
+        },
+        {
+          "name": "BlurNode",
+          "opcode": 52,
+          "fields": ["u32", "u32"]
+        },
+        {
+          "name": "ResetInteraction",
+          "opcode": 53,
+          "fields": ["u32", "u8", "u8", "pad16"]
         },
         {
           "name": "Commit",
@@ -886,6 +935,17 @@
             "u32",
             "u32",
             "u32",
+            "u8",
+            "u8",
+            "pad16",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            { "name": "cursor", "type": "u16" },
+            "pad16",
+            "u32",
             "bytes",
             "align4"
           ]
@@ -1073,6 +1133,71 @@
           {
             "name": "weight",
             "type": "u16"
+          },
+          "pad16",
+          {
+            "name": "familyBytes",
+            "type": "u32"
+          },
+          {
+            "name": "family",
+            "type": "bytes"
+          },
+          "align4"
+        ]
+      },
+      {
+        "name": "TextStyleV2",
+        "resourceKind": "TextStyle",
+        "variant": 2,
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "variant",
+            "type": "u8"
+          },
+          {
+            "name": "fontStyle",
+            "type": "u8"
+          },
+          {
+            "name": "textAlign",
+            "type": "u8"
+          },
+          {
+            "name": "paintId",
+            "type": "u32"
+          },
+          {
+            "name": "fontSize",
+            "type": "f32"
+          },
+          {
+            "name": "lineHeight",
+            "type": "f32"
+          },
+          {
+            "name": "weight",
+            "type": "u16"
+          },
+          {
+            "name": "whiteSpace",
+            "type": "u8"
+          },
+          {
+            "name": "overflowWrap",
+            "type": "u8"
+          },
+          {
+            "name": "textOverflow",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": "u8"
           },
           "pad16",
           {

@@ -1,6 +1,6 @@
 # pingo 错误诊断与事故上报
 
-> 状态：M5-B 初版。面向线上事故排查与灰度看板接入。
+> 状态：M6。面向线上事故排查与灰度看板接入。
 
 ## 1. 身份信息
 
@@ -40,7 +40,13 @@ await verifyWasmIntegrity(await response.arrayBuffer(), manifest);
 ## 4. 可观测面
 
 - `onFrame`：帧阶段耗时、脏域计数、cache 命中率、picture hash。
+- `onFrame.style` / `root.styleMetrics()`：Shell style resolution、无变化 cache hit、diagnostic
+  与预编译 interaction variant 累计数。
+- `onFrame.core.interactionStateChanges`：Core hover/active/focus/focus-visible 状态变化累计数。
 - `transportMetrics()` / `inputTransportMetrics()`：传输模式与背压。
 - `onSemantics` / `dirtySemanticsNodes`：语义树状态。
 - `DOPR` 录制：Mutation/Input 原序录制，可脱离浏览器确定性回放
   （敏感编辑流显式跳过，密码永不入档）。
+
+样式事故可分别关闭 `styleResolverEnabled`、`foundationComponentsEnabled` 或
+`interactionStylesEnabled`。这些开关不改变 ABI，也不删除旧 intrinsic/direct prop 路径。

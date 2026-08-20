@@ -1,8 +1,8 @@
 use std::io::{self, Read};
 
 use pingo_abi::{
-    DisplayList, GlyphResourceBatch, InputBatch, MutationBatch, ReplayRecording,
-    SystemTextMetricBatch,
+    DisplayList, EventTransactionBatch, GlyphResourceBatch, InputBatch, MutationBatch,
+    ReplayRecording, SystemTextMetricBatch,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "display" => DisplayList::decode(&bytes)?.encode()?,
         "glyph" => GlyphResourceBatch::decode(&bytes)?.encode()?,
         "text-metrics" => SystemTextMetricBatch::decode(&bytes)?.encode()?,
+        "events" => EventTransactionBatch::decode(&bytes)?.encode()?,
         _ => return Err(format!("unknown stream kind {stream}").into()),
     };
     println!("{}", encode_hex(&output));

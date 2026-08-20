@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   checkShimDependencyDirection,
+  scanM6MigrationHints,
+  scanM6Source,
   scanMigrationSources,
   scanSource,
 } from "./check-migration.mjs";
@@ -22,6 +24,19 @@ describe("migration scanner", () => {
       "force-update",
     ]);
     expect(findings[0]).toMatchObject({ file: "app/page.ts", line: 1 });
+  });
+
+  it("reports M6 facade and style migration hints without blocking legacy pages", async () => {
+    expect(
+      scanM6Source(
+        "app/page.ts",
+        `createElement("virtualList", { width: 320, itemCount: 100 })`,
+      ).map((hint) => hint.rule),
+    ).toEqual(["m6-legacy-intrinsic", "m6-legacy-direct-prop"]);
+    const hints = await scanM6MigrationHints([
+      new URL("../fixtures/migration", import.meta.url).pathname,
+    ]);
+    expect(hints.some((hint) => hint.detail.includes("View with overflow and virtual"))).toBe(true);
   });
 
   it("accepts the representative migration fixture and the shim dependency direction", async () => {

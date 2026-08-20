@@ -22,5 +22,7 @@ export {
   type EditableStateSnapshot,
   type MutationSink,
   type RootOptions,
+  type StyleRuntimeMetrics,
+  type InteractionRequest,
   type VirtualRangeRequest,
 } from "./reconciler";

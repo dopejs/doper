@@ -11,7 +11,7 @@ import {
 export const PINGO_ELEMENT_TYPE: symbol = Symbol.for("dopejs.pingo.element");
 
 /** Creates an immutable-shape element descriptor for the automatic JSX transform. */
-export function createElement<Props extends Record<string, unknown>>(
+export function createElement<const Props extends Record<string, unknown>>(
   type: ElementType<Props>,
   inputProps: Props | null,
   explicitKey?: Key,

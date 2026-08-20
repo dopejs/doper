@@ -51,7 +51,7 @@ Fragment
 `EditableTextProps`、`EditableInputMode`、`Color`、`EdgeInsets`、`NodeHandle`、`Ref`、
 `PingoNode`、`FunctionComponent`。
 
-M6-B 新增保持 Core 行为不变的组件适配层：
+M6 新增保持旧 intrinsic 兼容的基础组件：
 
 ```ts
 View(props: ViewProps)
@@ -61,14 +61,15 @@ Input(props: InputProps)
 UnstyledTextArea(props: UnstyledTextAreaProps)
 ```
 
-它们当前只接受既有 direct props，分别映射到 `container`、`text`、`image` 和共享的
-`editableText` 原语；尚未开放 `style`/`className`。已发布的 `TextArea` 仍是带边框、padding
+它们接受既有 direct props 与 `style`/`className`，分别映射到 `container`、`text`、`image`
+和共享的 `editableText` 原语。`View.virtual` 提供 M6 纵向兼容窗口；x/y 轴泛化属于 M7。
+已发布的 `TextArea` 仍是带边框、padding
 与 rows 布局的 widget，为避免 0.x 静默破坏暂不改名；无装饰基础组件因此使用
 `UnstyledTextArea` 兼容别名。
 
 JSX 运行时通过 `@dopejs/pingo/jsx-runtime` 与 `@dopejs/pingo/jsx-dev-runtime` 提供。
 
-## 样式能力（M6-A）
+## 样式能力（M6）
 
 ```ts
 createStyleSheet(cssOrObject, options?): PingoStyleSheet
@@ -81,14 +82,12 @@ CSS_SUBSET_VERSION: string
 `createStyleSheet` 编译同节点 class/compound-class selector、shorthand、cascade 与
 computed-value 元数据；失败时抛出带结构化 diagnostics 的 `StyleSheetCompileError`。
 `compileStyleSheet` 是不抛异常的对应入口。完整支持矩阵见[生成的 CSS subset 表](/style-support)。
-内部 style package 另提供无变化输入缓存与 recompute/invalidation 计数，供后续 reconciler 和
-devtools 接入；它未从 facade 暴露，输入变化时仍使用完整 resolver 保证结果可差分验证。
+`styleCapabilities().engineReady` 为 `true`，每个属性的 `engineSupport` 为 `m6-core`。
+`root.styleMetrics()` 暴露累计 resolution/cache hit/diagnostic/interaction variant 计数；
+滚动热路径不进入 Shell resolver。输入变化时仍使用完整 resolver 保证结果可差分验证。
 
-::: warning 当前仅完成 resolver
-M6-A 当前只交付 Shell 编译/查询能力，`styleCapabilities().engineReady` 固定为 `false`。
-JSX `style`/`className`、View、display/overflow 的 Core 行为要到 M6-B 才交付，当前不得把
-成功编译理解为引擎已经应用该样式。
-:::
+三个独立回滚选项为 `styleResolverEnabled`、`foundationComponentsEnabled` 与
+`interactionStylesEnabled`；关闭后旧 direct props、intrinsic、事件与 virtualList 仍可工作。
 
 ## 响应式与 hooks
 

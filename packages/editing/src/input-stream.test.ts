@@ -77,7 +77,19 @@ function sampleBatch(): InputBatch {
         modifiers: 9,
         pointerId: 0,
         elapsedMicros: 16_667,
+        pointerType: "none",
+        isPrimary: false,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
+        width: 0,
+        height: 0,
       },
+      { type: "setPointerCapture", eventId: 20, pointerId: 7, nodeId: 2 },
+      { type: "releasePointerCapture", eventId: 21, pointerId: 7, nodeId: 2 },
+      { type: "focusNode", eventId: 22, nodeId: 2, origin: "keyboard" },
+      { type: "blurNode", eventId: 23, nodeId: 2 },
+      { type: "resetInteraction", eventId: 24, reason: "windowBlur" },
     ],
   };
 }
@@ -162,6 +174,13 @@ describe("Input Stream", () => {
       modifiers: 0,
       pointerId: 1,
       elapsedMicros: 16_667,
+      pointerType: "mouse" as const,
+      isPrimary: true,
+      pressure: 0.5,
+      tiltX: 0,
+      tiltY: 0,
+      width: 1,
+      height: 1,
     };
     for (const command of [
       { ...valid, x: Number.NaN },
@@ -174,6 +193,18 @@ describe("Input Stream", () => {
         InputStreamError,
       );
     }
+    expect(() =>
+      encodeInputBatch({
+        frameSeq: 1,
+        commands: [{ ...valid, kind: "pointerover" }],
+      }),
+    ).toThrow(/synthetic event kind/u);
+    expect(() =>
+      encodeInputBatch({
+        frameSeq: 1,
+        commands: [{ type: "setPointerCapture", eventId: 2, pointerId: 0, nodeId: 1 }],
+      }),
+    ).toThrow(/non-zero/u);
   });
 
   it("fails closed on unknown affinities, non-zero padding, and invalid UTF-8", () => {

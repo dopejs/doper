@@ -1,6 +1,9 @@
 use std::{env, fs, sync::Arc};
 
-use pingo_text::{FontFace, GlyphAtlas, GlyphContent, TextEngine, TextOptions};
+use pingo_text::{
+    FontFace, GlyphAtlas, GlyphContent, OverflowWrap, TextAlign, TextEngine, TextOptions,
+    TextOverflow, WhiteSpace,
+};
 
 fn main() {
     let path = env::args()
@@ -12,6 +15,10 @@ fn main() {
         font_size: 18.0,
         line_height: 24.0,
         max_width: 42.0,
+        white_space: WhiteSpace::PreWrap,
+        overflow_wrap: OverflowWrap::Anywhere,
+        text_align: TextAlign::Start,
+        text_overflow: TextOverflow::Clip,
     };
     let mut engine = TextEngine::new(128 * 1024);
     let supported = engine

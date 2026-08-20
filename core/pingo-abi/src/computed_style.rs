@@ -595,6 +595,27 @@ mod tests {
         bytes
     }
 
+    fn length(unit: u8, value: f32) -> [u8; 8] {
+        let mut bytes = [0; 8];
+        bytes[0] = unit;
+        bytes[4..].copy_from_slice(&value.to_le_bytes());
+        bytes
+    }
+
+    fn transform_record(opcode: u8, x_unit: u8, y_unit: u8, values: [f32; 6]) -> Vec<u8> {
+        let mut bytes = vec![opcode, x_unit, y_unit, 0];
+        for value in values {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn transform_list(records: &[Vec<u8>]) -> Vec<u8> {
+        let mut bytes = (records.len() as u32).to_le_bytes().to_vec();
+        bytes.extend(records.concat());
+        bytes
+    }
+
     #[test]
     fn decodes_base_and_exact_state_values() {
         let base = entry(
@@ -619,6 +640,287 @@ mod tests {
             Some(&ComputedStyleValue::F32(0.5))
         );
         assert_eq!(decoded.feature_bits(), STYLE_ALL_FEATURE_BITS);
+    }
+
+    #[test]
+    fn decodes_every_canonical_value_and_transform_operation() {
+        let mut family = 11_u32.to_le_bytes().to_vec();
+        family.extend_from_slice(b"Inter,serif");
+        let transforms = transform_list(&[
+            transform_record(STYLE_TRANSFORM_MATRIX, 0, 0, [1.0, 0.0, 0.0, 1.0, 4.0, 5.0]),
+            transform_record(
+                STYLE_TRANSFORM_TRANSLATE,
+                STYLE_LENGTH_PX,
+                STYLE_LENGTH_PERCENT,
+                [6.0, 50.0, 0.0, 0.0, 0.0, 0.0],
+            ),
+            transform_record(STYLE_TRANSFORM_SCALE, 0, 0, [2.0, 3.0, 0.0, 0.0, 0.0, 0.0]),
+            transform_record(STYLE_TRANSFORM_ROTATE, 0, 0, [0.5, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        ]);
+        let mut position = length(STYLE_LENGTH_PERCENT, 25.0).to_vec();
+        position.extend_from_slice(&length(STYLE_LENGTH_PX, 8.0));
+        let entries = vec![
+            entry(
+                StyleProperty::Display,
+                0,
+                STYLE_VALUE_KEYWORD,
+                &[StyleKeyword::Flex as u8, 0, 0, 0],
+            ),
+            entry(
+                StyleProperty::Width,
+                0,
+                STYLE_VALUE_LENGTH,
+                &length(STYLE_LENGTH_AUTO, 0.0),
+            ),
+            entry(
+                StyleProperty::Height,
+                0,
+                STYLE_VALUE_LENGTH,
+                &length(STYLE_LENGTH_PERCENT, 75.0),
+            ),
+            entry(
+                StyleProperty::MaxWidth,
+                0,
+                STYLE_VALUE_LENGTH,
+                &length(STYLE_LENGTH_NONE, 0.0),
+            ),
+            entry(
+                StyleProperty::PaddingTop,
+                0,
+                STYLE_VALUE_LENGTH,
+                &length(STYLE_LENGTH_PX, 4.0),
+            ),
+            entry(
+                StyleProperty::RowGap,
+                0,
+                STYLE_VALUE_LENGTH,
+                &length(STYLE_LENGTH_NORMAL, 0.0),
+            ),
+            entry(
+                StyleProperty::BackgroundColor,
+                0,
+                STYLE_VALUE_RGBA8,
+                &0x11_22_33_44_u32.to_le_bytes(),
+            ),
+            entry(
+                StyleProperty::Opacity,
+                0,
+                STYLE_VALUE_F32,
+                &0.75_f32.to_le_bytes(),
+            ),
+            entry(
+                StyleProperty::FontFamily,
+                0,
+                STYLE_VALUE_FONT_FAMILY_LIST,
+                &family,
+            ),
+            entry(
+                StyleProperty::FontSize,
+                0,
+                STYLE_VALUE_LENGTH,
+                &length(STYLE_LENGTH_PX, 16.0),
+            ),
+            entry(
+                StyleProperty::FontWeight,
+                0,
+                STYLE_VALUE_U16,
+                &[0x90, 0x01, 0, 0],
+            ),
+            entry(
+                StyleProperty::LineHeight,
+                0,
+                STYLE_VALUE_LINE_HEIGHT,
+                &length(STYLE_LENGTH_NUMBER, 1.5),
+            ),
+            entry(
+                StyleProperty::Transform,
+                0,
+                STYLE_VALUE_TRANSFORM_LIST,
+                &transforms,
+            ),
+            entry(
+                StyleProperty::TransformOrigin,
+                0,
+                STYLE_VALUE_POSITION,
+                &position,
+            ),
+        ];
+        let decoded = ComputedStyleResource::decode(&resource(&entries)).expect("complete style");
+        assert_eq!(decoded.entries().len(), entries.len());
+        assert_eq!(
+            decoded.value(StyleProperty::Height, 0),
+            Some(&ComputedStyleValue::Length(StyleLength {
+                unit: StyleLengthUnit::Percent,
+                value: 75.0,
+            }))
+        );
+        let Some(ComputedStyleValue::TransformList(operations)) =
+            decoded.value(StyleProperty::Transform, 0)
+        else {
+            panic!("transform list");
+        };
+        assert_eq!(operations.len(), 4);
+
+        let normal_line_height = entry(
+            StyleProperty::LineHeight,
+            0,
+            STYLE_VALUE_LINE_HEIGHT,
+            &length(STYLE_LENGTH_NORMAL, 0.0),
+        );
+        assert!(ComputedStyleResource::decode(&resource(&[normal_line_height])).is_ok());
+    }
+
+    #[test]
+    fn canonical_value_boundaries_fail_closed() {
+        assert!(
+            decode_value(
+                StyleProperty::Display,
+                STYLE_VALUE_KEYWORD,
+                &[StyleKeyword::Flex as u8, 0, 1, 0],
+            )
+            .is_err()
+        );
+        assert!(decode_value(StyleProperty::Display, STYLE_VALUE_KEYWORD, &[0, 0, 0, 0]).is_err());
+        assert!(
+            decode_value(
+                StyleProperty::Display,
+                STYLE_VALUE_KEYWORD,
+                &[StyleKeyword::Italic as u8, 0, 0, 0],
+            )
+            .is_err()
+        );
+        assert!(
+            decode_value(
+                StyleProperty::Opacity,
+                STYLE_VALUE_F32,
+                &1.1_f32.to_le_bytes(),
+            )
+            .is_err()
+        );
+        assert!(
+            decode_value(
+                StyleProperty::FontFamily,
+                STYLE_VALUE_FONT_FAMILY_LIST,
+                &0_u32.to_le_bytes(),
+            )
+            .is_err()
+        );
+        assert!(
+            decode_value(
+                StyleProperty::FontWeight,
+                STYLE_VALUE_U16,
+                &[0x90, 0x01, 1, 0],
+            )
+            .is_err()
+        );
+        assert!(
+            decode_value(
+                StyleProperty::Opacity,
+                STYLE_VALUE_RGBA8,
+                &0_u32.to_le_bytes(),
+            )
+            .is_err()
+        );
+
+        let mut reserved_length = length(STYLE_LENGTH_PX, 1.0);
+        reserved_length[1] = 1;
+        assert!(decode_length(StyleProperty::Width, &reserved_length, false).is_err());
+        assert!(
+            decode_length(StyleProperty::Width, &length(STYLE_LENGTH_AUTO, 1.0), false,).is_err()
+        );
+        assert!(
+            decode_length(
+                StyleProperty::PaddingTop,
+                &length(STYLE_LENGTH_PX, -1.0),
+                false,
+            )
+            .is_err()
+        );
+        assert!(
+            decode_length(
+                StyleProperty::FontSize,
+                &length(STYLE_LENGTH_PX, 0.0),
+                false,
+            )
+            .is_err()
+        );
+        assert!(decode_length(StyleProperty::Width, &length(0xff, 0.0), false).is_err());
+
+        assert!(decode_transform_list(&[]).is_err());
+        assert!(decode_transform_list(&[1, 0, 0, 0]).is_err());
+        let bad_record = |opcode, x_unit, y_unit, values| {
+            transform_list(&[transform_record(opcode, x_unit, y_unit, values)])
+        };
+        let mut reserved = bad_record(STYLE_TRANSFORM_MATRIX, 0, 0, [0.0; 6]);
+        reserved[7] = 1;
+        assert!(decode_transform_list(&reserved).is_err());
+        assert!(
+            decode_transform_list(&bad_record(
+                STYLE_TRANSFORM_MATRIX,
+                STYLE_LENGTH_PX,
+                0,
+                [0.0; 6],
+            ))
+            .is_err()
+        );
+        assert!(
+            decode_transform_list(&bad_record(
+                STYLE_TRANSFORM_TRANSLATE,
+                0xff,
+                STYLE_LENGTH_PX,
+                [0.0; 6],
+            ))
+            .is_err()
+        );
+        assert!(
+            decode_transform_list(&bad_record(
+                STYLE_TRANSFORM_SCALE,
+                0,
+                0,
+                [1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+            ))
+            .is_err()
+        );
+        assert!(
+            decode_transform_list(&bad_record(
+                STYLE_TRANSFORM_ROTATE,
+                0,
+                0,
+                [1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            ))
+            .is_err()
+        );
+        assert!(decode_transform_list(&bad_record(0xff, 0, 0, [0.0; 6])).is_err());
+
+        assert!(decode_string(&[]).is_err());
+        assert!(decode_string(&[1, 0, 0, 0]).is_err());
+        assert!(decode_string(&[1, 0, 0, 0, 0xff]).is_err());
+    }
+
+    #[test]
+    fn resource_envelope_bounds_fail_closed() {
+        assert!(ComputedStyleResource::decode(&vec![0; STYLE_COMPUTED_MAX_BYTES + 4]).is_err());
+
+        let mut reserved = resource(&[]);
+        reserved[2] = 1;
+        assert!(ComputedStyleResource::decode(&reserved).is_err());
+
+        let mut unsupported_feature = resource(&[]);
+        unsupported_feature[4..8].copy_from_slice(&2_u32.to_le_bytes());
+        assert!(ComputedStyleResource::decode(&unsupported_feature).is_err());
+
+        let mut too_many_entries = resource(&[]);
+        too_many_entries[8..12]
+            .copy_from_slice(&(STYLE_COMPUTED_MAX_ENTRIES as u32 + 1).to_le_bytes());
+        assert!(ComputedStyleResource::decode(&too_many_entries).is_err());
+
+        let mut wrong_payload_length = resource(&[]);
+        wrong_payload_length[12..16].copy_from_slice(&4_u32.to_le_bytes());
+        assert!(ComputedStyleResource::decode(&wrong_payload_length).is_err());
+
+        let mut impossible_entry_count = resource(&[]);
+        impossible_entry_count[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        assert!(ComputedStyleResource::decode(&impossible_entry_count).is_err());
     }
 
     #[test]

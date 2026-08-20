@@ -61,7 +61,27 @@ export type CaretMoveDirection = "backward" | "down" | "forward" | "lineEnd" | "
 export type CaretMoveGranularity = "grapheme" | "word";
 
 export type InputEventKind =
-  "click" | "pointercancel" | "pointerdown" | "pointermove" | "pointerup" | "wheel";
+  | "blur"
+  | "click"
+  | "focus"
+  | "focusin"
+  | "focusout"
+  | "gotpointercapture"
+  | "lostpointercapture"
+  | "pointercancel"
+  | "pointerdown"
+  | "pointerenter"
+  | "pointerleave"
+  | "pointermove"
+  | "pointerout"
+  | "pointerover"
+  | "pointerup"
+  | "wheel";
+
+export type InputPointerType = "mouse" | "none" | "pen" | "touch";
+export type InputFocusOrigin = "accessibility" | "keyboard" | "pointer" | "programmatic";
+export type InteractionResetReason =
+  "documentHidden" | "hostUnmount" | "transportRecovery" | "windowBlur";
 
 interface InputTarget {
   readonly nodeId: number;
@@ -154,6 +174,31 @@ export type InputCommand =
       readonly modifiers: number;
       readonly pointerId: number;
       readonly elapsedMicros: number;
+      readonly pointerType: InputPointerType;
+      readonly isPrimary: boolean;
+      readonly pressure: number;
+      readonly tiltX: number;
+      readonly tiltY: number;
+      readonly width: number;
+      readonly height: number;
+    }
+  | {
+      readonly type: "setPointerCapture" | "releasePointerCapture";
+      readonly eventId: number;
+      readonly pointerId: number;
+      readonly nodeId: number;
+    }
+  | {
+      readonly type: "focusNode";
+      readonly eventId: number;
+      readonly nodeId: number;
+      readonly origin: InputFocusOrigin;
+    }
+  | { readonly type: "blurNode"; readonly eventId: number; readonly nodeId: number }
+  | {
+      readonly type: "resetInteraction";
+      readonly eventId: number;
+      readonly reason: InteractionResetReason;
     };
 
 /** Complete ordered transaction; Commit is encoded automatically. */
@@ -333,6 +378,46 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
       writer.u32(command.modifiers);
       writer.u32(command.pointerId);
       writer.u32(command.elapsedMicros);
+      writer.u8(pointerTypeCode(command.pointerType));
+      writer.u8(command.isPrimary ? 1 : 0);
+      writer.u16(0);
+      writer.f32(command.pressure);
+      writer.f32(command.tiltX);
+      writer.f32(command.tiltY);
+      writer.f32(command.width);
+      writer.f32(command.height);
+      return;
+    case "setPointerCapture":
+    case "releasePointerCapture":
+      assertU32(command.eventId, "eventId");
+      assertU32(command.pointerId, "pointerId");
+      assertU32(command.nodeId, "capture nodeId");
+      if (command.pointerId === 0) fail("pointer capture id must be non-zero");
+      writer.u32(command.eventId);
+      writer.u32(command.pointerId);
+      writer.u32(command.nodeId);
+      return;
+    case "focusNode":
+      assertU32(command.eventId, "eventId");
+      assertU32(command.nodeId, "focus nodeId");
+      writer.u32(command.eventId);
+      writer.u32(command.nodeId);
+      writer.u8(focusOriginCode(command.origin));
+      writer.u8(0);
+      writer.u16(0);
+      return;
+    case "blurNode":
+      assertU32(command.eventId, "eventId");
+      assertU32(command.nodeId, "focus nodeId");
+      writer.u32(command.eventId);
+      writer.u32(command.nodeId);
+      return;
+    case "resetInteraction":
+      assertU32(command.eventId, "eventId");
+      writer.u32(command.eventId);
+      writer.u8(resetReasonCode(command.reason));
+      writer.u8(0);
+      writer.u16(0);
       return;
   }
   writer.target(command);
@@ -527,9 +612,41 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
         modifiers: reader.u32(),
         pointerId: reader.u32(),
         elapsedMicros: reader.u32(),
+        pointerType: pointerType(reader.u8()),
+        isPrimary: booleanByte(reader.u8(), "primary pointer flag"),
+        ...readPointerGeometry(reader),
       };
       validateEventFields(command);
       return command;
+    }
+    case InputOpcode.SetPointerCapture:
+    case InputOpcode.ReleasePointerCapture: {
+      const eventId = reader.u32();
+      const pointerId = reader.u32();
+      const nodeId = reader.u32();
+      if (pointerId === 0) return fail("pointer capture id must be non-zero");
+      return {
+        type:
+          opcode === InputOpcode.SetPointerCapture ? "setPointerCapture" : "releasePointerCapture",
+        eventId,
+        pointerId,
+        nodeId,
+      };
+    }
+    case InputOpcode.FocusNode: {
+      const eventId = reader.u32();
+      const nodeId = reader.u32();
+      const origin = focusOrigin(reader.u8());
+      reader.zeroes(3);
+      return { type: "focusNode", eventId, nodeId, origin };
+    }
+    case InputOpcode.BlurNode:
+      return { type: "blurNode", eventId: reader.u32(), nodeId: reader.u32() };
+    case InputOpcode.ResetInteraction: {
+      const eventId = reader.u32();
+      const reason = resetReason(reader.u8());
+      reader.zeroes(3);
+      return { type: "resetInteraction", eventId, reason };
     }
     default:
       return fail(`unexpected input opcode ${String(opcode)}`);
@@ -584,6 +701,16 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.SetScrollVelocity;
     case "dispatchEvent":
       return InputOpcode.DispatchEvent;
+    case "setPointerCapture":
+      return InputOpcode.SetPointerCapture;
+    case "releasePointerCapture":
+      return InputOpcode.ReleasePointerCapture;
+    case "focusNode":
+      return InputOpcode.FocusNode;
+    case "blurNode":
+      return InputOpcode.BlurNode;
+    case "resetInteraction":
+      return InputOpcode.ResetInteraction;
   }
 }
 
@@ -637,6 +764,26 @@ function eventKindCode(kind: InputEventKind): number {
       return 5;
     case "wheel":
       return 6;
+    case "pointerover":
+      return 7;
+    case "pointerout":
+      return 8;
+    case "pointerenter":
+      return 9;
+    case "pointerleave":
+      return 10;
+    case "gotpointercapture":
+      return 11;
+    case "lostpointercapture":
+      return 12;
+    case "focus":
+      return 13;
+    case "blur":
+      return 14;
+    case "focusin":
+      return 15;
+    case "focusout":
+      return 16;
   }
 }
 
@@ -654,6 +801,26 @@ function eventKind(value: number): InputEventKind {
       return "click";
     case 6:
       return "wheel";
+    case 7:
+      return "pointerover";
+    case 8:
+      return "pointerout";
+    case 9:
+      return "pointerenter";
+    case 10:
+      return "pointerleave";
+    case 11:
+      return "gotpointercapture";
+    case 12:
+      return "lostpointercapture";
+    case 13:
+      return "focus";
+    case 14:
+      return "blur";
+    case 15:
+      return "focusin";
+    case 16:
+      return "focusout";
     default:
       return fail("unknown input event kind");
   }
@@ -667,12 +834,33 @@ function validateEventFields(
     | "deltaY"
     | "elapsedMicros"
     | "flags"
+    | "height"
+    | "isPrimary"
+    | "kind"
     | "modifiers"
     | "pointerId"
+    | "pointerType"
+    | "pressure"
+    | "tiltX"
+    | "tiltY"
+    | "width"
     | "x"
     | "y"
   >,
 ): void {
+  if (
+    command.kind === "pointerover" ||
+    command.kind === "pointerout" ||
+    command.kind === "pointerenter" ||
+    command.kind === "gotpointercapture" ||
+    command.kind === "lostpointercapture" ||
+    command.kind === "focus" ||
+    command.kind === "blur" ||
+    command.kind === "focusin" ||
+    command.kind === "focusout"
+  ) {
+    fail("synthetic event kind cannot be dispatched by the host");
+  }
   if (!Number.isInteger(command.flags) || command.flags < 0 || command.flags > EVENT_FLAG_MASK) {
     fail("event flags are invalid");
   }
@@ -691,6 +879,27 @@ function validateEventFields(
     fail("event modifiers are invalid");
   }
   assertU32(command.pointerId, "event pointerId");
+  const pointerEvent =
+    command.kind === "pointerdown" ||
+    command.kind === "pointerup" ||
+    command.kind === "pointermove" ||
+    command.kind === "pointercancel" ||
+    command.kind === "pointerleave";
+  if (pointerEvent !== (command.pointerId !== 0 && command.pointerType !== "none")) {
+    fail("pointer event identity and type are inconsistent");
+  }
+  if (typeof command.isPrimary !== "boolean") fail("event isPrimary must be boolean");
+  if (!Number.isFinite(command.pressure) || command.pressure < 0 || command.pressure > 1) {
+    fail("event pressure is outside 0..=1");
+  }
+  for (const tilt of [command.tiltX, command.tiltY]) {
+    if (!Number.isFinite(tilt) || tilt < -90 || tilt > 90) fail("event tilt is outside -90..=90");
+  }
+  for (const size of [command.width, command.height]) {
+    if (!Number.isFinite(size) || size < 0 || size > 1_000_000) {
+      fail("event contact size is invalid");
+    }
+  }
   if (
     !Number.isInteger(command.elapsedMicros) ||
     command.elapsedMicros < 1 ||
@@ -698,6 +907,95 @@ function validateEventFields(
   ) {
     fail("event elapsed time is invalid");
   }
+}
+
+function pointerTypeCode(value: InputPointerType): number {
+  switch (value) {
+    case "none":
+      return 0;
+    case "mouse":
+      return 1;
+    case "pen":
+      return 2;
+    case "touch":
+      return 3;
+  }
+}
+
+function pointerType(value: number): InputPointerType {
+  switch (value) {
+    case 0:
+      return "none";
+    case 1:
+      return "mouse";
+    case 2:
+      return "pen";
+    case 3:
+      return "touch";
+    default:
+      return fail("unknown input pointer type");
+  }
+}
+
+function focusOriginCode(value: InputFocusOrigin): number {
+  return { pointer: 1, keyboard: 2, programmatic: 3, accessibility: 4 }[value];
+}
+
+function focusOrigin(value: number): InputFocusOrigin {
+  switch (value) {
+    case 1:
+      return "pointer";
+    case 2:
+      return "keyboard";
+    case 3:
+      return "programmatic";
+    case 4:
+      return "accessibility";
+    default:
+      return fail("unknown input focus origin");
+  }
+}
+
+function resetReasonCode(value: InteractionResetReason): number {
+  return { windowBlur: 1, documentHidden: 2, transportRecovery: 3, hostUnmount: 4 }[value];
+}
+
+function resetReason(value: number): InteractionResetReason {
+  switch (value) {
+    case 1:
+      return "windowBlur";
+    case 2:
+      return "documentHidden";
+    case 3:
+      return "transportRecovery";
+    case 4:
+      return "hostUnmount";
+    default:
+      return fail("unknown interaction reset reason");
+  }
+}
+
+function booleanByte(value: number, label: string): boolean {
+  if (value === 0) return false;
+  if (value === 1) return true;
+  return fail(`${label} is invalid`);
+}
+
+function readPointerGeometry(reader: ByteReader): {
+  readonly pressure: number;
+  readonly tiltX: number;
+  readonly tiltY: number;
+  readonly width: number;
+  readonly height: number;
+} {
+  reader.zeroes(2);
+  return {
+    pressure: reader.f32(),
+    tiltX: reader.f32(),
+    tiltY: reader.f32(),
+    width: reader.f32(),
+    height: reader.f32(),
+  };
 }
 
 class ByteWriter {

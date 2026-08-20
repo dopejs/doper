@@ -1,6 +1,6 @@
 # CSS 子集、原生事件与基础组件演进方案
 
-> 状态：M6-A Shell resolver 已完成；M6-B facade 适配进行中，Core 集成仍未开始
+> 状态：M6 已完成（2026-08-20）；M7 animation/virtual axis 与 M8 media/keyboard 仍按计划延后
 > 日期：2026-08-20
 > 关联决策：[`ADR-0007`](./adr/0007-css-events-and-foundation-components.md)
 
@@ -278,13 +278,11 @@ muted、loop、poster、object-fit 明确能力检测。没有 Worker/WebCodecs 
 
 ### M6：样式、组件与交互状态基础
 
-M6-A 已于 2026-08-20 完成 resolver-only 工程门禁：schema/生成物、结构化诊断、
-独立 reference resolver、随机 parser/cascade 差分和无变化输入缓存均已落地。它不表示
-Core 已消费 computed style；以下第 2–7 项仍待后续子里程碑交付。
+M6 已于 2026-08-20 完成工程门禁：schema/生成物、reference resolver、随机差分、
+foundation facade、Core computed style、overflow/virtual、事件生命周期与伪类均已落地。
 
 1. style schema、生成器、diagnostics、capabilities 与 reference resolver。
-2. 新组件 facade 与旧 intrinsic 兼容包装；不改变现有行为。（已交付 direct-prop 适配层；
-   `style`/`className` 随后续 Core style 接入开放。）
+2. 新组件 facade 与旧 intrinsic 兼容包装；direct props、`style` 与 `className` 已接入。
 3. `style` / `className` / stylesheet 的解析、层叠、继承和 direct-prop adapter。
 4. `display:none`、第一批 box/flex/paint/text 属性。
 5. overflow 统一 View 滚动；现有 virtualList 迁到 `View.virtual` 的纵向等价路径。

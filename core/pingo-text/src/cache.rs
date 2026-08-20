@@ -30,6 +30,10 @@ struct CacheKey {
     font_size: u32,
     line_height: u32,
     max_width: u32,
+    white_space: crate::WhiteSpace,
+    overflow_wrap: crate::OverflowWrap,
+    text_align: crate::TextAlign,
+    text_overflow: crate::TextOverflow,
     text: Arc<str>,
 }
 
@@ -87,6 +91,10 @@ impl TextEngine {
             font_size: options.font_size.to_bits(),
             line_height: options.line_height.to_bits(),
             max_width: options.max_width.to_bits(),
+            white_space: options.white_space,
+            overflow_wrap: options.overflow_wrap,
+            text_align: options.text_align,
+            text_overflow: options.text_overflow,
             text: Arc::from(text),
         };
         if let Some(entry) = self.entries.get_mut(&key) {
@@ -160,7 +168,10 @@ impl TextEngine {
 mod tests {
     use std::sync::Arc;
 
-    use crate::{FontFace, MAX_TEXT_BYTES, TextEngine, TextError, TextOptions};
+    use crate::{
+        FontFace, MAX_TEXT_BYTES, OverflowWrap, TextAlign, TextEngine, TextError, TextOptions,
+        TextOverflow, WhiteSpace,
+    };
 
     fn font(revision: u32) -> FontFace {
         FontFace::from_bytes(9, revision, 0, crate::conformance_font()).expect("valid fixture")
@@ -171,6 +182,10 @@ mod tests {
             font_size: 18.0,
             line_height: 24.0,
             max_width,
+            white_space: WhiteSpace::PreWrap,
+            overflow_wrap: OverflowWrap::Anywhere,
+            text_align: TextAlign::Start,
+            text_overflow: TextOverflow::Clip,
         }
     }
 

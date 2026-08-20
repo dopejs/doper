@@ -1,6 +1,6 @@
 # pingo 迁移指南
 
-> 状态：M5-A 初版。面向按页面粒度从存量渲染引擎迁移到 pingo 的业务团队。
+> 状态：M6。面向按页面粒度从存量渲染引擎迁移到 pingo 的业务团队。
 > 存量引擎代码不在本仓库；本指南约定的是边界契约与回退操作。
 
 ## 1. 迁移模型
@@ -37,11 +37,15 @@ const page = await mountCompatPage({
 | `embed-dom-input`         | 禁止 per-widget HTML `input`/`textarea`；caret、selection、IME、剪贴板由引擎输入桥统一托管                                      |
 | `force-update`            | 不存在 `forceUpdate` 逃生口；失效由 prop 语义驱动                                                                               |
 
+报告中的 `migrationHints` 是非阻断建议：旧 `container/text/image/editableText/scroll/virtualList`
+可逐页迁到 `View/Text/Image/Input/UnstyledTextArea`，direct style props 可迁到
+`style`/`className`。旧路径在 M6 保持兼容，因此 warning 不改变命令退出码。
+
 ## 3. 能力矩阵与已知限制
 
 - 支持：TSX function component、hooks/signals、原生虚拟滚动、
   `EditableText`/`TextField`/`TextArea`、语义树 E2E 选择器、
-  SAB → postMessage → 主线程 Canvas2D 降级链。
+  M6 CSS 子集与同节点交互伪类、SAB → postMessage → 主线程 Canvas2D 降级链。
 - 显式延后：bidi 视觉导航（随 bidi 文本能力）、widgets placeholder
   （待 overlay 布局能力）、WebGPU 后端（默认关闭，见 ADR）。
 - 不做：SSR/HTML 首屏、通用 CSS 兼容、业务级富文本语义。

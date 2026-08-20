@@ -41,6 +41,22 @@ import {
   TEXT_STYLE_VARIANT_OFFSET,
   TEXT_STYLE_VERSION_OFFSET,
   TEXT_STYLE_WEIGHT_OFFSET,
+  TEXT_STYLE_V2_FAMILY_BYTES_OFFSET,
+  TEXT_STYLE_V2_FAMILY_OFFSET,
+  TEXT_STYLE_V2_FONT_SIZE_OFFSET,
+  TEXT_STYLE_V2_FONT_STYLE_OFFSET,
+  TEXT_STYLE_V2_LINE_HEIGHT_OFFSET,
+  TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET,
+  TEXT_STYLE_V2_PAINT_ID_OFFSET,
+  TEXT_STYLE_V2_RESOURCE_MINIMUM_BYTES,
+  TEXT_STYLE_V2_RESOURCE_VARIANT,
+  TEXT_STYLE_V2_RESERVED_OFFSET,
+  TEXT_STYLE_V2_TEXT_ALIGN_OFFSET,
+  TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET,
+  TEXT_STYLE_V2_VARIANT_OFFSET,
+  TEXT_STYLE_V2_VERSION_OFFSET,
+  TEXT_STYLE_V2_WEIGHT_OFFSET,
+  TEXT_STYLE_V2_WHITE_SPACE_OFFSET,
   MAX_SYSTEM_TEXT_LINES,
 } from "./generated";
 
@@ -279,9 +295,11 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
               textStyles,
               action.id,
               Object.freeze({
-                font: cssFont(decoded.weight, decoded.fontSize, decoded.family),
+                font: cssFont(decoded.weight, decoded.fontSize, decoded.family, decoded.fontStyle),
                 fillStyle,
                 lineHeight: decoded.lineHeight,
+                ...(decoded.textAlign === "start" ? {} : { textAlign: decoded.textAlign }),
+                ...(decoded.justify ? { justify: true } : {}),
                 textBaseline: "alphabetic" as const,
               }),
               "text style",
@@ -289,7 +307,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
             textMeasurementStyles.set(
               action.id,
               Object.freeze({
-                font: cssFont(decoded.weight, decoded.fontSize, decoded.family),
+                font: cssFont(decoded.weight, decoded.fontSize, decoded.family, decoded.fontStyle),
                 lineHeight: decoded.lineHeight,
               }),
             );
@@ -303,6 +321,12 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
             break;
           case ResourceKind.Affine:
             validateAffine(action.bytes);
+            break;
+          case ResourceKind.ComputedStyle:
+            // Core validated and consumed this immutable resource before the
+            // Host transaction is installed. Canvas never reads its payload,
+            // but the registry must retain its kind so a later release stays
+            // atomic with the rest of the frame.
             break;
           default:
             throw new Error(
@@ -333,6 +357,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
             case ResourceKind.Image:
               return images.delete(action.id);
             case ResourceKind.Affine:
+            case ResourceKind.ComputedStyle:
               return true;
             default:
               return false;
@@ -646,7 +671,13 @@ function decodeTextStyle(bytes: Uint8Array): {
   readonly lineHeight: number;
   readonly weight: number;
   readonly family: string;
+  readonly fontStyle: "normal" | "italic";
+  readonly textAlign: CanvasTextAlign;
+  readonly justify: boolean;
 } {
+  if (bytes[TEXT_STYLE_VARIANT_OFFSET] === TEXT_STYLE_V2_RESOURCE_VARIANT) {
+    return decodeTextStyleV2(bytes);
+  }
   validateHeader(
     bytes,
     TEXT_STYLE_RESOURCE_VARIANT,
@@ -686,7 +717,92 @@ function decodeTextStyle(bytes: Uint8Array): {
   }
   const family = decodeUtf8(bytes.subarray(TEXT_STYLE_FAMILY_OFFSET, familyEnd), "font family");
   if (family.length === 0) throw new Error("font family must not be empty");
-  return { paintId, fontSize, lineHeight, weight, family };
+  return {
+    paintId,
+    fontSize,
+    lineHeight,
+    weight,
+    family,
+    fontStyle: "normal",
+    textAlign: "start",
+    justify: false,
+  };
+}
+
+function decodeTextStyleV2(bytes: Uint8Array): ReturnType<typeof decodeTextStyle> {
+  if (
+    bytes.byteLength < TEXT_STYLE_V2_RESOURCE_MINIMUM_BYTES ||
+    bytes.byteLength % 4 !== 0 ||
+    bytes[TEXT_STYLE_V2_VERSION_OFFSET] !== RESOURCE_ENCODING_VERSION ||
+    bytes[TEXT_STYLE_V2_VARIANT_OFFSET] !== TEXT_STYLE_V2_RESOURCE_VARIANT ||
+    bytes[TEXT_STYLE_V2_RESERVED_OFFSET] !== 0 ||
+    bytes[TEXT_STYLE_V2_RESERVED_OFFSET + 1] !== 0 ||
+    bytes[TEXT_STYLE_V2_RESERVED_OFFSET + 2] !== 0
+  ) {
+    throw new Error("text style v2 has invalid version, alignment, or reserved bytes");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const paintId = view.getUint32(TEXT_STYLE_V2_PAINT_ID_OFFSET, true);
+  const fontSize = view.getFloat32(TEXT_STYLE_V2_FONT_SIZE_OFFSET, true);
+  const lineHeight = view.getFloat32(TEXT_STYLE_V2_LINE_HEIGHT_OFFSET, true);
+  const weight = view.getUint16(TEXT_STYLE_V2_WEIGHT_OFFSET, true);
+  const familyLength = view.getUint32(TEXT_STYLE_V2_FAMILY_BYTES_OFFSET, true);
+  const familyEnd = TEXT_STYLE_V2_FAMILY_OFFSET + familyLength;
+  const fontStyle = bytes[TEXT_STYLE_V2_FONT_STYLE_OFFSET] === 24 ? "italic" : "normal";
+  if (![24, 29].includes(bytes[TEXT_STYLE_V2_FONT_STYLE_OFFSET] ?? 0)) {
+    throw new Error("text style v2 has an invalid font-style keyword");
+  }
+  const textAlignKeyword = bytes[TEXT_STYLE_V2_TEXT_ALIGN_OFFSET] ?? 0;
+  const textAlign = textAlignFromKeyword(textAlignKeyword);
+  const whiteSpace = bytes[TEXT_STYLE_V2_WHITE_SPACE_OFFSET] ?? 0;
+  const overflowWrap = bytes[TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET] ?? 0;
+  const textOverflow = bytes[TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET] ?? 0;
+  if (
+    ![29, 31, 35, 36, 37].includes(whiteSpace) ||
+    ![1, 5, 29].includes(overflowWrap) ||
+    ![7, 15].includes(textOverflow) ||
+    !Number.isFinite(fontSize) ||
+    fontSize <= 0 ||
+    !Number.isFinite(lineHeight) ||
+    lineHeight <= 0 ||
+    weight < 1 ||
+    weight > 1000 ||
+    familyEnd > bytes.byteLength
+  ) {
+    throw new Error("text style v2 has invalid fields or family length");
+  }
+  for (let index = familyEnd; index < bytes.byteLength; index += 1) {
+    if (bytes[index] !== 0) throw new Error("text style v2 padding must be zero");
+  }
+  const family = decodeUtf8(bytes.subarray(TEXT_STYLE_V2_FAMILY_OFFSET, familyEnd), "font family");
+  if (family.length === 0) throw new Error("font family must not be empty");
+  return {
+    paintId,
+    fontSize,
+    lineHeight,
+    weight,
+    family,
+    fontStyle,
+    textAlign,
+    justify: textAlignKeyword === 25,
+  };
+}
+
+function textAlignFromKeyword(keyword: number): CanvasTextAlign {
+  switch (keyword) {
+    case 6:
+      return "center";
+    case 16:
+    case 38:
+      return "end";
+    case 26:
+      return "left";
+    case 47:
+    case 25:
+      return "start";
+    default:
+      throw new Error("text style v2 has an invalid text-align keyword");
+  }
 }
 
 /**
@@ -755,7 +871,12 @@ const UNQUOTED_FAMILY =
  * like `serif`, not like `sans-serif`. Quoting the whole list would likewise
  * make `Inter, sans-serif` one nonexistent name.
  */
-export function cssFont(weight: number, fontSize: number, family: string): string {
+export function cssFont(
+  weight: number,
+  fontSize: number,
+  family: string,
+  fontStyle: "normal" | "italic" = "normal",
+): string {
   const families = family
     .split(",")
     .map((entry) => entry.trim())
@@ -769,7 +890,7 @@ export function cssFont(weight: number, fontSize: number, family: string): strin
   // An empty list would leave the previous font in place, which is worse than a
   // visible default, so fall back to the generic every browser has.
   const list = families.length === 0 ? "sans-serif" : families.join(", ");
-  return `${String(weight)} ${String(fontSize)}px ${list}`;
+  return `${fontStyle === "italic" ? "italic " : ""}${String(weight)} ${String(fontSize)}px ${list}`;
 }
 
 /**

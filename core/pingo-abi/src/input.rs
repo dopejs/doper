@@ -122,6 +122,26 @@ pub enum InputEventKind {
     Click = 5,
     /// Wheel or trackpad delta.
     Wheel = 6,
+    /// Pointer entered a target's hit region and bubbles.
+    PointerOver = 7,
+    /// Pointer left a target's hit region and bubbles.
+    PointerOut = 8,
+    /// Pointer entered one target or ancestor; does not bubble.
+    PointerEnter = 9,
+    /// Pointer left one target or ancestor; does not bubble.
+    PointerLeave = 10,
+    /// A node acquired explicit pointer capture.
+    GotPointerCapture = 11,
+    /// A node released or lost pointer capture.
+    LostPointerCapture = 12,
+    /// A node acquired focus; does not bubble.
+    Focus = 13,
+    /// A node lost focus; does not bubble.
+    Blur = 14,
+    /// Bubbling focus acquisition companion.
+    FocusIn = 15,
+    /// Bubbling focus loss companion.
+    FocusOut = 16,
 }
 
 impl InputEventKind {
@@ -133,8 +153,105 @@ impl InputEventKind {
             4 => Ok(Self::PointerCancel),
             5 => Ok(Self::Click),
             6 => Ok(Self::Wheel),
+            7 => Ok(Self::PointerOver),
+            8 => Ok(Self::PointerOut),
+            9 => Ok(Self::PointerEnter),
+            10 => Ok(Self::PointerLeave),
+            11 => Ok(Self::GotPointerCapture),
+            12 => Ok(Self::LostPointerCapture),
+            13 => Ok(Self::Focus),
+            14 => Ok(Self::Blur),
+            15 => Ok(Self::FocusIn),
+            16 => Ok(Self::FocusOut),
             _ => Err(AbiError::UnknownIdentifier {
                 category: "input event kind",
+                value: u32::from(value),
+            }),
+        }
+    }
+}
+
+/// Browser pointer source normalized at the Host boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum InputPointerType {
+    /// Event has no pointer source, for example a wheel sample.
+    None = 0,
+    /// Mouse or mouse-compatible pointing device.
+    Mouse = 1,
+    /// Pen or stylus.
+    Pen = 2,
+    /// Direct touch contact.
+    Touch = 3,
+}
+
+impl InputPointerType {
+    pub(crate) fn decode(value: u8) -> Result<Self, AbiError> {
+        match value {
+            0 => Ok(Self::None),
+            1 => Ok(Self::Mouse),
+            2 => Ok(Self::Pen),
+            3 => Ok(Self::Touch),
+            _ => Err(AbiError::UnknownIdentifier {
+                category: "input pointer type",
+                value: u32::from(value),
+            }),
+        }
+    }
+}
+
+/// How a Core-owned focus transition was requested.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum InputFocusOrigin {
+    /// Pointer or touch activation; does not establish `:focus-visible`.
+    Pointer = 1,
+    /// Keyboard navigation; establishes `:focus-visible`.
+    Keyboard = 2,
+    /// Application code; does not infer a visible focus ring.
+    Programmatic = 3,
+    /// Accessibility mirror or assistive technology.
+    Accessibility = 4,
+}
+
+impl InputFocusOrigin {
+    fn decode(value: u8) -> Result<Self, AbiError> {
+        match value {
+            1 => Ok(Self::Pointer),
+            2 => Ok(Self::Keyboard),
+            3 => Ok(Self::Programmatic),
+            4 => Ok(Self::Accessibility),
+            _ => Err(AbiError::UnknownIdentifier {
+                category: "input focus origin",
+                value: u32::from(value),
+            }),
+        }
+    }
+}
+
+/// External lifecycle reason for clearing transient interaction state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum InteractionResetReason {
+    /// The browser window lost activation.
+    WindowBlur = 1,
+    /// The owning document became hidden.
+    DocumentHidden = 2,
+    /// Worker or transport state was replaced after failure.
+    TransportRecovery = 3,
+    /// The host root is being permanently detached.
+    HostUnmount = 4,
+}
+
+impl InteractionResetReason {
+    fn decode(value: u8) -> Result<Self, AbiError> {
+        match value {
+            1 => Ok(Self::WindowBlur),
+            2 => Ok(Self::DocumentHidden),
+            3 => Ok(Self::TransportRecovery),
+            4 => Ok(Self::HostUnmount),
+            _ => Err(AbiError::UnknownIdentifier {
+                category: "interaction reset reason",
                 value: u32::from(value),
             }),
         }
@@ -357,6 +474,57 @@ pub enum InputCommand {
         pointer_id: u32,
         /// Time since the previous related sample in microseconds.
         elapsed_micros: u32,
+        /// Normalized pointer source, or [`InputPointerType::None`].
+        pointer_type: InputPointerType,
+        /// Whether this is the primary pointer of its type.
+        is_primary: bool,
+        /// Normalized contact pressure in the inclusive 0..=1 range.
+        pressure: f32,
+        /// Pen tilt in degrees for the X and Y planes.
+        tilt: [f32; 2],
+        /// Contact geometry in positive logical pixels.
+        contact_size: [f32; 2],
+    },
+    /// Assigns explicit pointer capture to one live Scene node.
+    SetPointerCapture {
+        /// Host-monotonic identifier for the resulting lifecycle event.
+        event_id: u32,
+        /// Live pointer to capture.
+        pointer_id: u32,
+        /// Generation-bearing capture owner.
+        node_id: u32,
+    },
+    /// Releases explicit pointer capture when owned by the supplied node.
+    ReleasePointerCapture {
+        /// Host-monotonic identifier for the resulting lifecycle event.
+        event_id: u32,
+        /// Captured pointer to release.
+        pointer_id: u32,
+        /// Expected generation-bearing capture owner.
+        node_id: u32,
+    },
+    /// Moves Core focus to one live Scene node.
+    FocusNode {
+        /// Host-monotonic identifier for the resulting lifecycle events.
+        event_id: u32,
+        /// Generation-bearing focus target.
+        node_id: u32,
+        /// Input modality that requested focus.
+        origin: InputFocusOrigin,
+    },
+    /// Clears Core focus when owned by the supplied node.
+    BlurNode {
+        /// Host-monotonic identifier for the resulting lifecycle events.
+        event_id: u32,
+        /// Expected generation-bearing focus owner.
+        node_id: u32,
+    },
+    /// Clears pointer, capture, active, hover, and focus state after host loss.
+    ResetInteraction {
+        /// Host-monotonic identifier for generated cancellation events.
+        event_id: u32,
+        /// External lifecycle boundary that forced the reset.
+        reason: InteractionResetReason,
     },
 }
 
@@ -743,7 +911,34 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
             let modifiers = reader.read_u32()?;
             let pointer_id = reader.read_u32()?;
             let elapsed_micros = reader.read_u32()?;
-            validate_event_fields(position, delta, buttons, modifiers, elapsed_micros)?;
+            let pointer_type = InputPointerType::decode(reader.read_u8()?)?;
+            let is_primary = match reader.read_u8()? {
+                0 => false,
+                1 => true,
+                value => {
+                    return Err(AbiError::UnknownIdentifier {
+                        category: "primary pointer flag",
+                        value: u32::from(value),
+                    });
+                }
+            };
+            reader.read_zeroes(2)?;
+            let pressure = reader.read_f32()?;
+            let tilt = [reader.read_f32()?, reader.read_f32()?];
+            let contact_size = [reader.read_f32()?, reader.read_f32()?];
+            validate_event_fields(&EventFields {
+                kind,
+                position,
+                delta,
+                buttons,
+                modifiers,
+                pointer_id,
+                elapsed_micros,
+                pointer_type,
+                pressure,
+                tilt,
+                contact_size,
+            })?;
             validate_event_flags(flags)?;
             InputCommand::DispatchEvent {
                 event_id,
@@ -755,7 +950,56 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
                 modifiers,
                 pointer_id,
                 elapsed_micros,
+                pointer_type,
+                is_primary,
+                pressure,
+                tilt,
+                contact_size,
             }
+        }
+        InputOpcode::SetPointerCapture | InputOpcode::ReleasePointerCapture => {
+            let event_id = reader.read_u32()?;
+            let pointer_id = reader.read_u32()?;
+            let node_id = reader.read_u32()?;
+            if pointer_id == 0 {
+                return Err(AbiError::InvalidValue(
+                    "pointer capture id must be non-zero",
+                ));
+            }
+            if opcode == InputOpcode::SetPointerCapture {
+                InputCommand::SetPointerCapture {
+                    event_id,
+                    pointer_id,
+                    node_id,
+                }
+            } else {
+                InputCommand::ReleasePointerCapture {
+                    event_id,
+                    pointer_id,
+                    node_id,
+                }
+            }
+        }
+        InputOpcode::FocusNode => {
+            let event_id = reader.read_u32()?;
+            let node_id = reader.read_u32()?;
+            let origin = InputFocusOrigin::decode(reader.read_u8()?)?;
+            reader.read_zeroes(3)?;
+            InputCommand::FocusNode {
+                event_id,
+                node_id,
+                origin,
+            }
+        }
+        InputOpcode::BlurNode => InputCommand::BlurNode {
+            event_id: reader.read_u32()?,
+            node_id: reader.read_u32()?,
+        },
+        InputOpcode::ResetInteraction => {
+            let event_id = reader.read_u32()?;
+            let reason = InteractionResetReason::decode(reader.read_u8()?)?;
+            reader.read_zeroes(3)?;
+            InputCommand::ResetInteraction { event_id, reason }
         }
         InputOpcode::Commit => return Err(AbiError::InvalidValue("nested input commit")),
     })
@@ -926,8 +1170,25 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             modifiers,
             pointer_id,
             elapsed_micros,
+            pointer_type,
+            is_primary,
+            pressure,
+            tilt,
+            contact_size,
         } => {
-            validate_event_fields(*position, *delta, *buttons, *modifiers, *elapsed_micros)?;
+            validate_event_fields(&EventFields {
+                kind: *kind,
+                position: *position,
+                delta: *delta,
+                buttons: *buttons,
+                modifiers: *modifiers,
+                pointer_id: *pointer_id,
+                elapsed_micros: *elapsed_micros,
+                pointer_type: *pointer_type,
+                pressure: *pressure,
+                tilt: *tilt,
+                contact_size: *contact_size,
+            })?;
             validate_event_flags(*flags)?;
             writer.u32(*event_id);
             writer.u16(*kind as u16);
@@ -940,6 +1201,54 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             writer.u32(*modifiers);
             writer.u32(*pointer_id);
             writer.u32(*elapsed_micros);
+            writer.u8(*pointer_type as u8);
+            writer.u8(u8::from(*is_primary));
+            writer.u16(0);
+            writer.f32(*pressure)?;
+            writer.f32(tilt[0])?;
+            writer.f32(tilt[1])?;
+            writer.f32(contact_size[0])?;
+            writer.f32(contact_size[1])?;
+        }
+        InputCommand::SetPointerCapture {
+            event_id,
+            pointer_id,
+            node_id,
+        }
+        | InputCommand::ReleasePointerCapture {
+            event_id,
+            pointer_id,
+            node_id,
+        } => {
+            if *pointer_id == 0 {
+                return Err(AbiError::InvalidValue(
+                    "pointer capture id must be non-zero",
+                ));
+            }
+            writer.u32(*event_id);
+            writer.u32(*pointer_id);
+            writer.u32(*node_id);
+        }
+        InputCommand::FocusNode {
+            event_id,
+            node_id,
+            origin,
+        } => {
+            writer.u32(*event_id);
+            writer.u32(*node_id);
+            writer.u8(*origin as u8);
+            writer.u8(0);
+            writer.u16(0);
+        }
+        InputCommand::BlurNode { event_id, node_id } => {
+            writer.u32(*event_id);
+            writer.u32(*node_id);
+        }
+        InputCommand::ResetInteraction { event_id, reason } => {
+            writer.u32(*event_id);
+            writer.u8(*reason as u8);
+            writer.u8(0);
+            writer.u16(0);
         }
         command => {
             let (node_id, base_revision) = command_target(command);
@@ -1004,6 +1313,11 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::ScrollCancel { .. } => InputOpcode::ScrollCancel,
         InputCommand::SetScrollVelocity { .. } => InputOpcode::SetScrollVelocity,
         InputCommand::DispatchEvent { .. } => InputOpcode::DispatchEvent,
+        InputCommand::SetPointerCapture { .. } => InputOpcode::SetPointerCapture,
+        InputCommand::ReleasePointerCapture { .. } => InputOpcode::ReleasePointerCapture,
+        InputCommand::FocusNode { .. } => InputOpcode::FocusNode,
+        InputCommand::BlurNode { .. } => InputOpcode::BlurNode,
+        InputCommand::ResetInteraction { .. } => InputOpcode::ResetInteraction,
     }
 }
 
@@ -1029,13 +1343,50 @@ fn validate_event_flags(flags: u16) -> Result<(), AbiError> {
     Ok(())
 }
 
-fn validate_event_fields(
+struct EventFields {
+    kind: InputEventKind,
     position: [f32; 2],
     delta: [f32; 2],
     buttons: u32,
     modifiers: u32,
+    pointer_id: u32,
     elapsed_micros: u32,
-) -> Result<(), AbiError> {
+    pointer_type: InputPointerType,
+    pressure: f32,
+    tilt: [f32; 2],
+    contact_size: [f32; 2],
+}
+
+fn validate_event_fields(fields: &EventFields) -> Result<(), AbiError> {
+    let EventFields {
+        kind,
+        position,
+        delta,
+        buttons,
+        modifiers,
+        pointer_id,
+        elapsed_micros,
+        pointer_type,
+        pressure,
+        tilt,
+        contact_size,
+    } = fields;
+    if matches!(
+        *kind,
+        InputEventKind::PointerOver
+            | InputEventKind::PointerOut
+            | InputEventKind::PointerEnter
+            | InputEventKind::GotPointerCapture
+            | InputEventKind::LostPointerCapture
+            | InputEventKind::Focus
+            | InputEventKind::Blur
+            | InputEventKind::FocusIn
+            | InputEventKind::FocusOut
+    ) {
+        return Err(AbiError::InvalidValue(
+            "synthetic event kind cannot be dispatched by the host",
+        ));
+    }
     if position.iter().any(|value| value.abs() > 1_000_000_000.0) {
         return Err(AbiError::InvalidValue("event coordinate exceeds maximum"));
     }
@@ -1047,8 +1398,36 @@ fn validate_event_fields(
             "event button or modifier bits are reserved",
         ));
     }
-    if elapsed_micros == 0 || elapsed_micros > MAX_SCROLL_DELTA_MICROS {
+    if *elapsed_micros == 0 || *elapsed_micros > MAX_SCROLL_DELTA_MICROS {
         return Err(AbiError::InvalidValue("event elapsed time is invalid"));
+    }
+    let pointer_event = matches!(
+        kind,
+        InputEventKind::PointerDown
+            | InputEventKind::PointerUp
+            | InputEventKind::PointerMove
+            | InputEventKind::PointerCancel
+            | InputEventKind::PointerLeave
+    );
+    if pointer_event != (*pointer_id != 0 && *pointer_type != InputPointerType::None) {
+        return Err(AbiError::InvalidValue(
+            "pointer event identity and type are inconsistent",
+        ));
+    }
+    if !pressure.is_finite() || !(0.0..=1.0).contains(pressure) {
+        return Err(AbiError::InvalidValue("event pressure is outside 0..=1"));
+    }
+    if tilt
+        .iter()
+        .any(|value| !value.is_finite() || !(-90.0..=90.0).contains(value))
+    {
+        return Err(AbiError::InvalidValue("event tilt is outside -90..=90"));
+    }
+    if contact_size
+        .iter()
+        .any(|value| !value.is_finite() || *value < 0.0 || *value > 1_000_000.0)
+    {
+        return Err(AbiError::InvalidValue("event contact size is invalid"));
     }
     Ok(())
 }
@@ -1258,6 +1637,11 @@ mod tests {
                     modifiers: 9,
                     pointer_id: 0,
                     elapsed_micros: 16_667,
+                    pointer_type: InputPointerType::None,
+                    is_primary: false,
+                    pressure: 0.0,
+                    tilt: [0.0, 0.0],
+                    contact_size: [0.0, 0.0],
                 }),
                 instruction(InputCommand::DispatchEvent {
                     event_id: 20,
@@ -1269,6 +1653,34 @@ mod tests {
                     modifiers: 0,
                     pointer_id: 7,
                     elapsed_micros: 8_000,
+                    pointer_type: InputPointerType::Mouse,
+                    is_primary: true,
+                    pressure: 0.5,
+                    tilt: [0.0, 0.0],
+                    contact_size: [1.0, 1.0],
+                }),
+                instruction(InputCommand::SetPointerCapture {
+                    event_id: 21,
+                    pointer_id: 7,
+                    node_id: 2,
+                }),
+                instruction(InputCommand::ReleasePointerCapture {
+                    event_id: 22,
+                    pointer_id: 7,
+                    node_id: 2,
+                }),
+                instruction(InputCommand::FocusNode {
+                    event_id: 23,
+                    node_id: 2,
+                    origin: InputFocusOrigin::Keyboard,
+                }),
+                instruction(InputCommand::BlurNode {
+                    event_id: 24,
+                    node_id: 2,
+                }),
+                instruction(InputCommand::ResetInteraction {
+                    event_id: 25,
+                    reason: InteractionResetReason::TransportRecovery,
                 }),
             ],
         }
@@ -1522,9 +1934,48 @@ mod tests {
                     modifiers,
                     pointer_id: 1,
                     elapsed_micros: elapsed,
+                    pointer_type: InputPointerType::Mouse,
+                    is_primary: true,
+                    pressure: 0.5,
+                    tilt: [0.0, 0.0],
+                    contact_size: [1.0, 1.0],
                 })
                 .is_err()
             );
+        }
+        assert!(
+            encode_one(InputCommand::DispatchEvent {
+                event_id: 1,
+                kind: InputEventKind::PointerOver,
+                flags: 0,
+                position: [0.0, 0.0],
+                delta: [0.0, 0.0],
+                buttons: 0,
+                modifiers: 0,
+                pointer_id: 1,
+                elapsed_micros: 1,
+                pointer_type: InputPointerType::Mouse,
+                is_primary: true,
+                pressure: 0.0,
+                tilt: [0.0, 0.0],
+                contact_size: [1.0, 1.0],
+            })
+            .is_err(),
+            "Core-synthesized lifecycle events must not enter through Host input"
+        );
+        for command in [
+            InputCommand::SetPointerCapture {
+                event_id: 1,
+                pointer_id: 0,
+                node_id: 1,
+            },
+            InputCommand::ReleasePointerCapture {
+                event_id: 1,
+                pointer_id: 0,
+                node_id: 1,
+            },
+        ] {
+            assert!(encode_one(command).is_err());
         }
 
         // Event flags: only defined bits encode, and reserved bits fail closed
@@ -1539,6 +1990,11 @@ mod tests {
             modifiers: 0,
             pointer_id: 0,
             elapsed_micros: 16_667,
+            pointer_type: InputPointerType::None,
+            is_primary: false,
+            pressure: 0.0,
+            tilt: [0.0, 0.0],
+            contact_size: [0.0, 0.0],
         };
         let encoded = encode_one(precise.clone()).expect("precise wheel");
         assert_eq!(
@@ -1556,6 +2012,11 @@ mod tests {
                 modifiers: 0,
                 pointer_id: 0,
                 elapsed_micros: 16_667,
+                pointer_type: InputPointerType::None,
+                is_primary: false,
+                pressure: 0.0,
+                tilt: [0.0, 0.0],
+                contact_size: [0.0, 0.0],
             })
             .is_err(),
             "reserved event flag bits must not encode"

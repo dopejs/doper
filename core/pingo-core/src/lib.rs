@@ -6,6 +6,7 @@
 mod editing;
 mod engine;
 mod error;
+mod interaction;
 mod scroll;
 mod text;
 

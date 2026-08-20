@@ -111,7 +111,7 @@ export interface IncrementalStyleResolverMetrics {
   readonly recomputedProperties: number;
 }
 
-/** Public capability description; engine support remains explicit during M6-A. */
+/** Public capability description for the delivered M6 Shell/Core contract. */
 export interface StyleCapability {
   readonly id: number;
   readonly cssName: string;
@@ -125,7 +125,7 @@ export interface StyleCapability {
   readonly feature: string;
   readonly affects: readonly string[];
   readonly percentageReference: string;
-  readonly engineSupport: "planned-m6-b";
+  readonly engineSupport: "m6-core";
 }
 
 /** Snapshot returned by styleCapabilities(). */
@@ -133,7 +133,7 @@ export interface StyleCapabilities {
   readonly cssSubsetVersion: string;
   readonly featureBits: number;
   readonly resolverReady: true;
-  readonly engineReady: false;
+  readonly engineReady: true;
   readonly interactionStateMask: number;
   readonly stateProperties: readonly StylePropertyName[];
   readonly properties: readonly StyleCapability[];

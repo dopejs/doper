@@ -80,6 +80,23 @@ describe("createHostedCanvasRoot", () => {
     await root.close();
   });
 
+  it("does not re-enter Shell style resolution on the scroll hot path", async () => {
+    installCanvasGlobal();
+    const root = await createHostedCanvasRoot(new FakeCanvas() as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(fakeCore()),
+      transport: { pageWorkerEnabled: false },
+    });
+    root.render(hostElement("text", { style: { color: "#123456" }, value: "label" }));
+    const before = root.styleMetrics();
+    expect(before.resolutions).toBeGreaterThan(0);
+    root.beginScroll(0x0010_0001);
+    root.scrollBy(0x0010_0001, 0, 10, 16.667);
+    root.endScroll(0x0010_0001);
+    expect(root.styleMetrics()).toEqual(before);
+    await root.close();
+  });
+
   it("converts passive canvas pointer input into isolated logical event commands", async () => {
     installCanvasGlobal();
     const core = fakeCore();
@@ -95,6 +112,14 @@ describe("createHostedCanvasRoot", () => {
       clientX: 30,
       clientY: 25,
       buttons: 1,
+      pointerId: 7,
+      pointerType: "mouse",
+      isPrimary: true,
+      pressure: 0.5,
+      tiltX: 4,
+      tiltY: -2,
+      width: 1,
+      height: 1,
       shiftKey: true,
       ctrlKey: false,
       altKey: true,
@@ -114,8 +139,15 @@ describe("createHostedCanvasRoot", () => {
           deltaY: 0,
           buttons: 1,
           modifiers: 5,
-          pointerId: 0,
+          pointerId: 7,
           elapsedMicros: 16_667,
+          pointerType: "mouse",
+          isPrimary: true,
+          pressure: 0.5,
+          tiltX: 4,
+          tiltY: -2,
+          width: 1,
+          height: 1,
         },
       ],
     });
@@ -132,6 +164,119 @@ describe("createHostedCanvasRoot", () => {
     });
     expect(core.inputs).toHaveLength(1);
   });
+
+  it("normalizes an unspecified pointer type before encoding browser input", async () => {
+    installCanvasGlobal();
+    const core = fakeCore();
+    const canvas = new FakeCanvas();
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+
+    canvas.emit("pointerdown", {
+      type: "pointerdown",
+      clientX: 30,
+      clientY: 25,
+      buttons: 1,
+      pointerId: 1,
+      pointerType: "",
+      isPrimary: false,
+      shiftKey: false,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+    });
+
+    const input = decodeInputBatch(core.inputs[0] ?? new Uint8Array());
+    expect(input.commands).toHaveLength(1);
+    expect(input.commands[0]).toMatchObject({
+      type: "dispatchEvent",
+      kind: "pointerdown",
+      pointerId: 1,
+      pointerType: "mouse",
+    });
+    await root.close();
+  });
+
+  it("applies the Core-resolved cursor before dispatching Shell event handlers", async () => {
+    installCanvasGlobal();
+    const core = fakeCore();
+    let pending = true;
+    core.take_event_transactions = () => {
+      if (!pending) return new Uint8Array();
+      pending = false;
+      return pointerEventTransaction("pointer");
+    };
+    const canvas = new FakeCanvas();
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+
+    canvas.emit("pointermove", {
+      type: "pointermove",
+      clientX: 30,
+      clientY: 25,
+      buttons: 0,
+      pointerId: 7,
+      pointerType: "mouse",
+      isPrimary: true,
+    });
+
+    expect(canvas.style.cursor).toBe("pointer");
+    await root.close();
+  });
+
+  it.each(["post-message", "sab"] as const)(
+    "applies the same Core event transaction on the %s Worker transport",
+    async (preference) => {
+      installCanvasGlobal();
+      const worker = readyWorker();
+      const canvas = new FakeCanvas();
+      const observed = vi.fn();
+      const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+        capabilities: allCapabilities(),
+        clockAnchorDriver: null,
+        onEventTransaction: observed,
+        transport: { preference, strict: true },
+        workerFactory: () => worker as unknown as Worker,
+      });
+      const activation = worker.posts.find((message) => hasKind(message, "pingo:activate"));
+      worker.emitMessage({
+        kind: "pingo:event-transaction",
+        sessionId: sessionOf(activation),
+        transaction: {
+          eventId: 1,
+          kind: "pointermove",
+          target: 2,
+          x: 1,
+          y: 2,
+          deltaX: 0,
+          deltaY: 0,
+          buttons: 0,
+          modifiers: 0,
+          pointerId: 7,
+          elapsedMicros: 16_667,
+          relatedTarget: null,
+          cursor: "pointer",
+          pointerType: "mouse",
+          isPrimary: true,
+          pressure: 0,
+          tiltX: 0,
+          tiltY: 0,
+          width: 1,
+          height: 1,
+          path: [1, 2],
+        },
+      });
+      expect(canvas.style.cursor).toBe("pointer");
+      expect(observed).toHaveBeenCalledOnce();
+      await root.close();
+    },
+  );
 
   it("hands touch gestures to Core instead of letting the browser pan the page", async () => {
     // A non-passive listener and preventDefault are not enough on a touch
@@ -673,7 +818,7 @@ class FakeCanvas {
   public ownerDocument = { defaultView: { EditContext: FakeEditContext } };
   public replacement: unknown;
   public transferCount = 0;
-  public style: { touchAction?: string } = {};
+  public style: { cursor?: string; touchAction?: string } = {};
   public focused = false;
 
   public focus(): void {
@@ -888,6 +1033,32 @@ function emptyDisplayList(): Uint8Array {
   view.setUint16(4, ABI_VERSION, true);
   view.setUint16(6, 16, true);
   view.setUint32(8, 16, true);
+  return bytes;
+}
+
+function pointerEventTransaction(cursor: "pointer"): Uint8Array {
+  const bytes = new Uint8Array(104);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, 0x5650_4f44, true);
+  view.setUint16(4, ABI_VERSION, true);
+  view.setUint16(6, 16, true);
+  view.setUint32(8, bytes.byteLength, true);
+  view.setUint32(12, 1, true);
+  bytes[16] = 1;
+  view.setUint16(18, (bytes.byteLength - 16) / 4, true);
+  view.setUint32(20, 1, true);
+  view.setUint16(24, 3, true);
+  view.setUint32(28, 1, true);
+  view.setUint32(56, 7, true);
+  view.setUint32(60, 16_667, true);
+  view.setUint32(64, 0xffff_ffff, true);
+  bytes[68] = 1;
+  bytes[69] = 1;
+  view.setFloat32(84, 1, true);
+  view.setFloat32(88, 1, true);
+  view.setUint16(92, cursor === "pointer" ? 34 : 2, true);
+  view.setUint32(96, 1, true);
+  view.setUint32(100, 1, true);
   return bytes;
 }
 

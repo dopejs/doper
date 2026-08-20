@@ -56,7 +56,8 @@ pub use glyph_resources::{
 };
 pub use input::{
     CaretDirection, CaretGranularity, EVENT_FLAG_MASK, EVENT_FLAG_PRECISE_WHEEL, InputAffinity,
-    InputBatch, InputCommand, InputEventKind, InputInstruction, InputPosition, InputSelection,
+    InputBatch, InputCommand, InputEventKind, InputFocusOrigin, InputInstruction, InputPointerType,
+    InputPosition, InputSelection, InteractionResetReason,
 };
 pub use mutation::{Mutation, MutationBatch, MutationInstruction};
 pub use recording::{ReplayRecord, ReplayRecording};
@@ -235,6 +236,25 @@ mod tests {
         assert_eq!(STYLE_INVALIDATION_HIT, Invalidation::HIT.bits());
         assert_eq!(STYLE_INVALIDATION_SEMANTICS, Invalidation::SEMANTICS.bits());
         assert_eq!(STYLE_INVALIDATION_SCROLL, Invalidation::SCROLL.bits());
+    }
+
+    #[test]
+    fn generated_style_keywords_and_property_grammars_are_exhaustively_queryable() {
+        let keywords = (1..=50)
+            .map(|id| StyleKeyword::from_u16(id).expect("declared style keyword id"))
+            .collect::<Vec<_>>();
+        assert_eq!(StyleKeyword::from_u16(0), None);
+        assert_eq!(StyleKeyword::from_u16(51), None);
+        assert!(keywords.iter().all(|keyword| !keyword.name().is_empty()));
+
+        for id in 1..=STYLE_PROPERTY_MAX_ID {
+            let Some(property) = StyleProperty::from_u16(id) else {
+                continue;
+            };
+            for keyword in &keywords {
+                let _ = property.accepts_keyword(*keyword);
+            }
+        }
     }
 
     #[test]

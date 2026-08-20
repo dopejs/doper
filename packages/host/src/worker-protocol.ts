@@ -353,6 +353,25 @@ function isEventTransaction(value: unknown): value is EventTransaction {
     isU32(value.elapsedMicros) &&
     value.elapsedMicros >= 1 &&
     value.elapsedMicros <= 1_000_000 &&
+    (value.relatedTarget === null || isU32(value.relatedTarget)) &&
+    (value.pointerType === "none" ||
+      value.pointerType === "mouse" ||
+      value.pointerType === "pen" ||
+      value.pointerType === "touch") &&
+    typeof value.isPrimary === "boolean" &&
+    isFiniteNumber(value.pressure) &&
+    value.pressure >= 0 &&
+    value.pressure <= 1 &&
+    isFiniteNumber(value.tiltX) &&
+    value.tiltX >= -90 &&
+    value.tiltX <= 90 &&
+    isFiniteNumber(value.tiltY) &&
+    value.tiltY >= -90 &&
+    value.tiltY <= 90 &&
+    isFiniteNumber(value.width) &&
+    value.width >= 0 &&
+    isFiniteNumber(value.height) &&
+    value.height >= 0 &&
     Array.isArray(value.path) &&
     value.path.length > 0 &&
     value.path.every(isU32) &&
@@ -367,6 +386,16 @@ function isInputEventKind(value: unknown): boolean {
     value === "pointerup" ||
     value === "pointermove" ||
     value === "pointercancel" ||
+    value === "pointerover" ||
+    value === "pointerout" ||
+    value === "pointerenter" ||
+    value === "pointerleave" ||
+    value === "gotpointercapture" ||
+    value === "lostpointercapture" ||
+    value === "focus" ||
+    value === "blur" ||
+    value === "focusin" ||
+    value === "focusout" ||
     value === "click" ||
     value === "wheel"
   );

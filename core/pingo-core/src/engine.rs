@@ -10,11 +10,12 @@ use pingo_abi::{
     FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_LAYOUT_NODES_INDEX,
     FRAME_DIAGNOSTICS_DIRTY_PAINT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_PAINT_SELF_NODES_INDEX,
     FRAME_DIAGNOSTICS_DIRTY_SEMANTICS_NODES_INDEX, FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX,
-    FRAME_DIAGNOSTICS_FRAME_SEQ_INDEX, FRAME_DIAGNOSTICS_LAYOUT_CHANGED_NODES_INDEX,
-    FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX, FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX,
-    FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX, FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
-    FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
-    FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX, FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
+    FRAME_DIAGNOSTICS_FRAME_SEQ_INDEX, FRAME_DIAGNOSTICS_INTERACTION_STATE_CHANGES_INDEX,
+    FRAME_DIAGNOSTICS_LAYOUT_CHANGED_NODES_INDEX, FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX,
+    FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX, FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX, FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX,
     FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
     FRAME_DIAGNOSTICS_SKIPPED_INSTRUCTIONS_INDEX, FRAME_DIAGNOSTICS_VERSION,
@@ -22,9 +23,9 @@ use pingo_abi::{
     FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_START_INDEX,
     FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_END_INDEX, FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_START_INDEX,
     FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX, FRAME_DIAGNOSTICS_WORDS, InputAffinity,
-    InputBatch, InputCommand, InputEventKind, InputPosition, InputSelection, Mutation,
-    MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind, Prop, ResourceKind,
-    SEMANTICS_VERSION, SystemTextMetricBatch,
+    InputBatch, InputCommand, InputEventKind, InputPointerType, InputPosition, InputSelection,
+    Mutation, MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind, Prop,
+    ResourceKind, SEMANTICS_VERSION, StyleKeyword, StyleProperty, SystemTextMetricBatch,
 };
 use pingo_hit::{HitIndex, HitPoint, WorldGeometry, WorldRect};
 use pingo_layout::{BoxConstraints, LayoutEngine};
@@ -35,6 +36,7 @@ use pingo_scroll::ScrollPlatform;
 use crate::{
     CoreError, CoreScrollMetrics, CoreTextMetrics,
     editing::{EditableConfiguration, EditingController},
+    interaction::{InteractionCommand, InteractionController, PointerEventInput},
     scroll::{ScrollAdvance, ScrollController},
     text::CoreTextSystem,
 };
@@ -54,6 +56,8 @@ pub struct CoreMetrics {
     pub accepted_input_batches: u64,
     /// Input Stream batches rejected atomically.
     pub input_rejections: u64,
+    /// Nodes whose Core-owned hover/active/focus state mask changed.
+    pub interaction_state_changes: u64,
     /// Worker clock frames that changed a Core-owned scroll position.
     pub scroll_frames: u64,
     /// Instructions stepped over because this build does not know the opcode.
@@ -126,6 +130,8 @@ pub struct FrameDiagnostics {
     pub skipped_instructions: u64,
     /// Highest ABI version observed on an accepted stream.
     pub producer_abi_version: u32,
+    /// Cumulative nodes whose Core-owned interaction mask changed.
+    pub interaction_state_changes: u64,
 }
 
 impl FrameDiagnostics {
@@ -170,6 +176,8 @@ impl FrameDiagnostics {
         words[FRAME_DIAGNOSTICS_SKIPPED_INSTRUCTIONS_INDEX] =
             count_u64_word(self.skipped_instructions);
         words[FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX] = self.producer_abi_version;
+        words[FRAME_DIAGNOSTICS_INTERACTION_STATE_CHANGES_INDEX] =
+            count_u64_word(self.interaction_state_changes);
         words
     }
 }
@@ -198,6 +206,7 @@ pub struct CoreEngine {
     hit: HitIndex,
     pending_events: Vec<u8>,
     pointer_gesture: Option<PointerGesture>,
+    interaction: InteractionController,
     caret_desired_x: Option<(NodeId, f32)>,
     requested_character_range: Option<(NodeId, [u32; 2])>,
     constraints: BoxConstraints,
@@ -214,19 +223,7 @@ struct PointerGesture {
     pointer_id: u32,
     scroll_node: NodeId,
     last_position: [f32; 2],
-}
-
-#[derive(Clone, Copy)]
-struct EventCommand {
-    event_id: u32,
-    kind: InputEventKind,
-    flags: u16,
-    position: [f32; 2],
-    delta: [f32; 2],
-    buttons: u32,
-    modifiers: u32,
-    pointer_id: u32,
-    elapsed_micros: u32,
+    allowed_axes: [bool; 2],
 }
 
 fn collect_editable_configurations(batch: &MutationBatch) -> Vec<EditableConfiguration> {
@@ -276,7 +273,7 @@ fn collect_geometry_requests(batch: &InputBatch) -> Vec<(u32, u32, u32)> {
         .collect()
 }
 
-fn collect_event_commands(batch: &InputBatch) -> Vec<EventCommand> {
+fn collect_event_commands(batch: &InputBatch) -> Result<Vec<InteractionCommand>, CoreError> {
     batch
         .instructions
         .iter()
@@ -291,7 +288,12 @@ fn collect_event_commands(batch: &InputBatch) -> Vec<EventCommand> {
                 modifiers,
                 pointer_id,
                 elapsed_micros,
-            } => Some(EventCommand {
+                pointer_type,
+                is_primary,
+                pressure,
+                tilt,
+                contact_size,
+            } => Some(Ok(InteractionCommand::Dispatch(PointerEventInput {
                 event_id: *event_id,
                 kind: *kind,
                 flags: *flags,
@@ -301,7 +303,71 @@ fn collect_event_commands(batch: &InputBatch) -> Vec<EventCommand> {
                 modifiers: *modifiers,
                 pointer_id: *pointer_id,
                 elapsed_micros: *elapsed_micros,
-            }),
+                pointer_type: *pointer_type,
+                is_primary: *is_primary,
+                pressure: *pressure,
+                tilt: *tilt,
+                contact_size: *contact_size,
+            }))),
+            InputCommand::SetPointerCapture {
+                event_id,
+                pointer_id,
+                node_id,
+            } => Some(NodeId::from_raw(*node_id).map_or_else(
+                |error| Err(CoreError::Scene(error)),
+                |node| {
+                    Ok(InteractionCommand::SetPointerCapture {
+                        event_id: *event_id,
+                        pointer_id: *pointer_id,
+                        node,
+                    })
+                },
+            )),
+            InputCommand::ReleasePointerCapture {
+                event_id,
+                pointer_id,
+                node_id,
+            } => Some(NodeId::from_raw(*node_id).map_or_else(
+                |error| Err(CoreError::Scene(error)),
+                |node| {
+                    Ok(InteractionCommand::ReleasePointerCapture {
+                        event_id: *event_id,
+                        pointer_id: *pointer_id,
+                        node,
+                    })
+                },
+            )),
+            InputCommand::FocusNode {
+                event_id,
+                node_id,
+                origin,
+            } => Some(NodeId::from_raw(*node_id).map_or_else(
+                |error| Err(CoreError::Scene(error)),
+                |node| {
+                    Ok(InteractionCommand::Focus {
+                        event_id: *event_id,
+                        node,
+                        origin: *origin,
+                    })
+                },
+            )),
+            InputCommand::BlurNode { event_id, node_id } => {
+                Some(NodeId::from_raw(*node_id).map_or_else(
+                    |error| Err(CoreError::Scene(error)),
+                    |node| {
+                        Ok(InteractionCommand::Blur {
+                            event_id: *event_id,
+                            node,
+                        })
+                    },
+                ))
+            }
+            InputCommand::ResetInteraction { event_id, reason } => {
+                Some(Ok(InteractionCommand::Reset {
+                    event_id: *event_id,
+                    reason: *reason,
+                }))
+            }
             _ => None,
         })
         .collect()
@@ -361,14 +427,26 @@ fn apply_event_scroll(
     candidate_scene: &mut Scene,
     candidate_scroll: &mut ScrollController,
     candidate_gesture: &mut Option<PointerGesture>,
-    command: &EventCommand,
-    wheel_scroll_node: Option<NodeId>,
+    command: &PointerEventInput,
+    wheel_scroll_nodes: &[NodeId],
     drag_scroll_node: Option<NodeId>,
+    touch_action: StyleKeyword,
 ) -> Result<bool, CoreError> {
     let mut scroll_changed = false;
     match command.kind {
         InputEventKind::Wheel => {
-            if let Some(scroll_node) = wheel_scroll_node {
+            for (index, scroll_node) in wheel_scroll_nodes.iter().copied().enumerate() {
+                let behavior = candidate_scene
+                    .presented_style_keyword(scroll_node, StyleProperty::OverscrollBehavior)
+                    .unwrap_or(StyleKeyword::Auto);
+                let can_scroll = candidate_scroll.can_scroll_delta(scroll_node, command.delta)?;
+                let terminal = index + 1 == wheel_scroll_nodes.len();
+                if !can_scroll && behavior == StyleKeyword::Auto && !terminal {
+                    continue;
+                }
+                if !can_scroll && behavior == StyleKeyword::None {
+                    break;
+                }
                 scroll_changed |= candidate_scroll
                     .apply_wheel(
                         candidate_scene,
@@ -376,8 +454,10 @@ fn apply_event_scroll(
                         command.delta,
                         command.elapsed_micros,
                         command.flags & EVENT_FLAG_PRECISE_WHEEL != 0,
+                        behavior != StyleKeyword::None,
                     )?
                     .changed;
+                break;
             }
         }
         InputEventKind::PointerDown if command.buttons & 1 != 0 => {
@@ -390,30 +470,21 @@ fn apply_event_scroll(
                     pointer_id: command.pointer_id,
                     scroll_node,
                     last_position: command.position,
+                    allowed_axes: default_scroll_axes(command.pointer_type, touch_action),
                 });
             }
         }
         InputEventKind::PointerMove => {
-            if let Some(mut gesture) = *candidate_gesture
-                && gesture.pointer_id == command.pointer_id
-            {
-                let drag_delta = [
-                    gesture.last_position[0] - command.position[0],
-                    gesture.last_position[1] - command.position[1],
-                ];
-                scroll_changed |= candidate_scroll
-                    .direct_delta(
-                        candidate_scene,
-                        gesture.scroll_node,
-                        drag_delta,
-                        command.elapsed_micros,
-                    )?
-                    .changed;
-                gesture.last_position = command.position;
-                *candidate_gesture = Some(gesture);
-            }
+            scroll_changed |= apply_pointer_move_scroll(
+                candidate_scene,
+                candidate_scroll,
+                candidate_gesture,
+                command,
+            )?;
         }
-        InputEventKind::PointerUp | InputEventKind::PointerCancel => {
+        InputEventKind::PointerUp
+        | InputEventKind::PointerCancel
+        | InputEventKind::PointerLeave => {
             if let Some(gesture) = *candidate_gesture
                 && gesture.pointer_id == command.pointer_id
             {
@@ -427,6 +498,85 @@ fn apply_event_scroll(
         _ => {}
     }
     Ok(scroll_changed)
+}
+
+fn apply_pointer_move_scroll(
+    scene: &mut Scene,
+    scroll: &mut ScrollController,
+    candidate_gesture: &mut Option<PointerGesture>,
+    command: &PointerEventInput,
+) -> Result<bool, CoreError> {
+    let Some(mut gesture) = *candidate_gesture else {
+        return Ok(false);
+    };
+    if gesture.pointer_id != command.pointer_id {
+        return Ok(false);
+    }
+    let raw_delta = [
+        gesture.last_position[0] - command.position[0],
+        gesture.last_position[1] - command.position[1],
+    ];
+    let drag_delta = [
+        if gesture.allowed_axes[0] {
+            raw_delta[0]
+        } else {
+            0.0
+        },
+        if gesture.allowed_axes[1] {
+            raw_delta[1]
+        } else {
+            0.0
+        },
+    ];
+    let mut behavior = scene
+        .presented_style_keyword(gesture.scroll_node, StyleProperty::OverscrollBehavior)
+        .unwrap_or(StyleKeyword::Auto);
+    if behavior == StyleKeyword::Auto
+        && !scroll.can_scroll_delta(gesture.scroll_node, drag_delta)?
+        && let Some(ancestor) = scroll_ancestor(scene, gesture.scroll_node)
+    {
+        scroll.end_direct(gesture.scroll_node, false)?;
+        scroll.begin_direct(ancestor)?;
+        gesture.scroll_node = ancestor;
+        behavior = scene
+            .presented_style_keyword(ancestor, StyleProperty::OverscrollBehavior)
+            .unwrap_or(StyleKeyword::Auto);
+    }
+    let changed = scroll
+        .direct_delta(
+            scene,
+            gesture.scroll_node,
+            drag_delta,
+            command.elapsed_micros,
+            behavior != StyleKeyword::None,
+        )?
+        .changed;
+    gesture.last_position = command.position;
+    *candidate_gesture = Some(gesture);
+    Ok(changed)
+}
+
+fn scroll_ancestor(scene: &Scene, node: NodeId) -> Option<NodeId> {
+    let mut current = scene.parent(node);
+    while let Some(candidate) = current {
+        if scene.is_scroll_container(candidate) {
+            return Some(candidate);
+        }
+        current = scene.parent(candidate);
+    }
+    None
+}
+
+fn default_scroll_axes(pointer_type: InputPointerType, touch_action: StyleKeyword) -> [bool; 2] {
+    if pointer_type != InputPointerType::Touch {
+        return [true, true];
+    }
+    match touch_action {
+        StyleKeyword::None => [false, false],
+        StyleKeyword::PanX => [true, false],
+        StyleKeyword::PanY => [false, true],
+        _ => [true, true],
+    }
 }
 
 impl CoreEngine {
@@ -466,6 +616,7 @@ impl CoreEngine {
             hit: HitIndex::default(),
             pending_events: Vec::new(),
             pointer_gesture: None,
+            interaction: InteractionController::default(),
             caret_desired_x: None,
             requested_character_range: None,
             constraints,
@@ -524,6 +675,7 @@ impl CoreEngine {
             self.metrics.scene_rejections += 1;
             return Err(CoreError::Scene(error));
         }
+        self.reconcile_interaction_after_commit()?;
 
         let editing_changed = match self
             .editing
@@ -600,6 +752,19 @@ impl CoreEngine {
         self.metrics.committed_frames += 1;
         self.last_frame_seq = Some(frame_seq);
         Ok(output)
+    }
+
+    fn reconcile_interaction_after_commit(&mut self) -> Result<(), CoreError> {
+        let interaction = self.interaction.reconcile_scene(&mut self.scene);
+        if interaction.records.is_empty() {
+            return Ok(());
+        }
+        self.pending_events = EventTransactionBatch {
+            records: interaction.records,
+        }
+        .encode()
+        .map_err(CoreError::EventTransactions)?;
+        Ok(())
     }
 
     /// Refreshes active system-font metrics after browser font availability changes.
@@ -698,7 +863,13 @@ impl CoreEngine {
         if !geometry_requests.is_empty() {
             return self.input_character_bounds(&batch, &geometry_requests);
         }
-        let event_commands = collect_event_commands(&batch);
+        let event_commands = match collect_event_commands(&batch) {
+            Ok(commands) => commands,
+            Err(error) => {
+                self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
+                return Err(error);
+            }
+        };
         if !event_commands.is_empty() {
             if event_commands.len() != batch.instructions.len() {
                 self.metrics.input_rejections = self.metrics.input_rejections.saturating_add(1);
@@ -1077,71 +1248,53 @@ impl CoreEngine {
     fn input_events(
         &mut self,
         frame_seq: u32,
-        event_commands: &[EventCommand],
+        event_commands: &[InteractionCommand],
     ) -> Result<Option<FrameOutput>, CoreError> {
         let mut candidate_scene = self.scene.clone();
         let mut candidate_scroll = self.scroll.clone();
         let mut candidate_gesture = self.pointer_gesture;
+        let mut candidate_interaction = self.interaction.clone();
         let mut scroll_changed = false;
+        let mut state_changes = 0_usize;
         let mut records = Vec::with_capacity(event_commands.len());
         for command in event_commands {
-            let hit = self.hit.hit(
-                &self.scene,
-                HitPoint {
-                    x: command.position[0],
-                    y: command.position[1],
-                },
-            );
-            let hit_scroll_node = hit.as_ref().and_then(|hit| {
-                hit.path
-                    .iter()
-                    .rev()
-                    .copied()
-                    .find(|node| self.scene.is_scroll_container(*node))
-            });
-            // Text selection wins over scroll dragging when the editable is deeper.
-            let editable_is_deeper = hit.as_ref().is_some_and(|hit| {
-                let scroll = hit
-                    .path
-                    .iter()
-                    .rposition(|node| self.scene.is_scroll_container(*node));
-                let editable = hit
-                    .path
-                    .iter()
-                    .rposition(|node| self.scene.kind(*node) == Some(NodeKind::EditableText));
-                match (scroll, editable) {
-                    (Some(scroll), Some(editable)) => editable > scroll,
-                    (None, Some(_)) => true,
-                    _ => false,
-                }
-            });
+            let InteractionCommand::Dispatch(input) = command else {
+                let mut result = candidate_interaction.apply(&mut candidate_scene, *command, None);
+                annotate_event_cursors(&candidate_scene, &mut result.records);
+                state_changes = state_changes.saturating_add(result.state_changes);
+                records.extend(result.records);
+                continue;
+            };
+            let (hit_path, hit_scroll_nodes, editable_is_deeper) = self.event_hit_context(input);
+            let hit_scroll_node = hit_scroll_nodes.first().copied();
+            let touch_action = hit_path
+                .as_ref()
+                .and_then(|path| path.last())
+                .and_then(|node| {
+                    candidate_scene.presented_style_keyword(*node, StyleProperty::TouchAction)
+                })
+                .unwrap_or(StyleKeyword::Auto);
             scroll_changed |= apply_event_scroll(
                 &mut candidate_scene,
                 &mut candidate_scroll,
                 &mut candidate_gesture,
-                command,
-                hit_scroll_node,
+                input,
+                &hit_scroll_nodes,
                 if editable_is_deeper {
                     None
                 } else {
                     hit_scroll_node
                 },
+                touch_action,
             )?;
-            let Some(hit) = hit else {
-                continue;
-            };
-            records.push(EventTransactionRecord {
-                event_id: command.event_id,
-                kind: command.kind,
-                target: hit.target.raw(),
-                position: command.position,
-                delta: command.delta,
-                buttons: command.buttons,
-                modifiers: command.modifiers,
-                pointer_id: command.pointer_id,
-                elapsed_micros: command.elapsed_micros,
-                path: hit.path.into_iter().map(NodeId::raw).collect(),
-            });
+            let mut result = candidate_interaction.apply(
+                &mut candidate_scene,
+                InteractionCommand::Dispatch(*input),
+                hit_path,
+            );
+            annotate_event_cursors(&candidate_scene, &mut result.records);
+            state_changes = state_changes.saturating_add(result.state_changes);
+            records.extend(result.records);
         }
         let encoded_events = if records.is_empty() {
             Vec::new()
@@ -1153,12 +1306,18 @@ impl CoreEngine {
         if let Err(error) = candidate_scroll.plan_virtual_frames() {
             return self.poison(error);
         }
+        let interaction_render_changed = interaction_render_changed(&candidate_scene);
         self.scene = candidate_scene;
         self.scroll = candidate_scroll;
         self.pointer_gesture = candidate_gesture;
+        self.interaction = candidate_interaction;
         self.last_input_sequence = Some(frame_seq);
         self.metrics.accepted_input_batches = self.metrics.accepted_input_batches.saturating_add(1);
-        let output = if scroll_changed {
+        self.metrics.interaction_state_changes = self
+            .metrics
+            .interaction_state_changes
+            .saturating_add(u64::try_from(state_changes).unwrap_or(u64::MAX));
+        let output = if scroll_changed || interaction_render_changed {
             let frame_seq = self
                 .last_frame_seq
                 .ok_or(CoreError::MissingCommittedFrame)?;
@@ -1168,6 +1327,45 @@ impl CoreEngine {
         };
         self.pending_events = encoded_events;
         Ok(output)
+    }
+
+    fn event_hit_context(
+        &self,
+        input: &PointerEventInput,
+    ) -> (Option<Vec<NodeId>>, Vec<NodeId>, bool) {
+        let hit = self.hit.hit(
+            &self.scene,
+            HitPoint {
+                x: input.position[0],
+                y: input.position[1],
+            },
+        );
+        let scroll_nodes = hit.as_ref().map_or_else(Vec::new, |result| {
+            result
+                .path
+                .iter()
+                .rev()
+                .copied()
+                .filter(|node| self.scene.is_scroll_container(*node))
+                .collect()
+        });
+        let editable_is_deeper = hit.as_ref().is_some_and(|result| {
+            let scroll = result
+                .path
+                .iter()
+                .rposition(|node| self.scene.is_scroll_container(*node));
+            let editable = result
+                .path
+                .iter()
+                .rposition(|node| self.scene.kind(*node) == Some(NodeKind::EditableText));
+            matches!((scroll, editable), (Some(scroll), Some(editable)) if editable > scroll)
+                || matches!((scroll, editable), (None, Some(_)))
+        });
+        (
+            hit.map(|result| result.path),
+            scroll_nodes,
+            editable_is_deeper,
+        )
     }
 
     /// Applies a mixed scroll/edit command batch transactionally.
@@ -1764,6 +1962,7 @@ impl CoreEngine {
             virtual_materialized: self.scroll.materialized_range(),
             skipped_instructions: self.metrics.skipped_instructions,
             producer_abi_version: self.metrics.producer_abi_version,
+            interaction_state_changes: self.metrics.interaction_state_changes,
         };
         self.scene.clear_dirty();
         Ok(FrameOutput {
@@ -1872,6 +2071,52 @@ impl CoreEngine {
 
 fn dirty_count(scene: &Scene, domain: DirtyDomain) -> usize {
     scene.dirty(domain).iter_ones().count()
+}
+
+fn interaction_render_changed(scene: &Scene) -> bool {
+    [
+        DirtyDomain::Layout,
+        DirtyDomain::Paint,
+        DirtyDomain::PaintSelf,
+        DirtyDomain::Hit,
+        DirtyDomain::Semantics,
+    ]
+    .into_iter()
+    .any(|domain| scene.dirty(domain).iter_ones().next().is_some())
+}
+
+fn annotate_event_cursors(scene: &Scene, records: &mut [EventTransactionRecord]) {
+    for record in records {
+        let raw_target = if matches!(
+            record.kind,
+            InputEventKind::PointerOut | InputEventKind::PointerLeave
+        ) && record.related_target != NULL_NODE_ID
+        {
+            record.related_target
+        } else {
+            record.target
+        };
+        let Ok(target) = NodeId::from_raw(raw_target) else {
+            record.cursor = StyleKeyword::Auto;
+            continue;
+        };
+        record.cursor = scene
+            .presented_style_keyword(target, StyleProperty::Cursor)
+            .filter(|cursor| {
+                matches!(
+                    cursor,
+                    StyleKeyword::Auto
+                        | StyleKeyword::Crosshair
+                        | StyleKeyword::Default
+                        | StyleKeyword::Grab
+                        | StyleKeyword::Grabbing
+                        | StyleKeyword::NotAllowed
+                        | StyleKeyword::Pointer
+                        | StyleKeyword::Text
+                )
+            })
+            .unwrap_or(StyleKeyword::Auto);
+    }
 }
 
 fn merge_geometry(
@@ -2124,16 +2369,18 @@ mod tests {
     use pingo_abi::{
         DisplayCommand, DisplayList, EVENT_FLAG_PRECISE_WHEEL, EditTransactionBatch,
         EventTransactionBatch, GlyphResourceBatch, GlyphResourceCommand, InputBatch, InputCommand,
-        InputEventKind, InputInstruction, Mutation, MutationBatch, MutationInstruction,
-        NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX, NON_PASSIVE_REGION_HEADER_VERSION_INDEX,
-        NON_PASSIVE_REGION_HEADER_WORDS, NON_PASSIVE_REGION_RECORD_BOTTOM_BITS_INDEX,
-        NON_PASSIVE_REGION_RECORD_FLAGS_INDEX, NON_PASSIVE_REGION_RECORD_LEFT_BITS_INDEX,
-        NON_PASSIVE_REGION_RECORD_RIGHT_BITS_INDEX, NON_PASSIVE_REGION_RECORD_TOP_BITS_INDEX,
-        NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind, Prop, RESOURCE_ENCODING_VERSION,
-        ReplayRecord, ReplayRecording, ResourceKind, SFNT_FONT_DATA_BYTES_OFFSET,
-        SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET, SFNT_FONT_RESOURCE_VARIANT,
-        SFNT_FONT_VARIANT_OFFSET, SFNT_FONT_VERSION_OFFSET, SystemTextMetric,
-        SystemTextMetricBatch, SystemTextMetricCommand, SystemTextMetricInstruction,
+        InputEventKind, InputInstruction, InputPointerType, Mutation, MutationBatch,
+        MutationInstruction, NON_PASSIVE_REGION_HEADER_REGION_COUNT_INDEX,
+        NON_PASSIVE_REGION_HEADER_VERSION_INDEX, NON_PASSIVE_REGION_HEADER_WORDS,
+        NON_PASSIVE_REGION_RECORD_BOTTOM_BITS_INDEX, NON_PASSIVE_REGION_RECORD_FLAGS_INDEX,
+        NON_PASSIVE_REGION_RECORD_LEFT_BITS_INDEX, NON_PASSIVE_REGION_RECORD_RIGHT_BITS_INDEX,
+        NON_PASSIVE_REGION_RECORD_TOP_BITS_INDEX, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID,
+        NodeKind, Prop, RESOURCE_ENCODING_VERSION, ReplayRecord, ReplayRecording, ResourceKind,
+        SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
+        SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET, SFNT_FONT_VERSION_OFFSET,
+        STYLE_ALL_FEATURE_BITS, STYLE_COMPUTED_ENCODING_VARIANT, STYLE_COMPUTED_ENCODING_VERSION,
+        STYLE_VALUE_KEYWORD, StyleKeyword, StyleProperty, SystemTextMetric, SystemTextMetricBatch,
+        SystemTextMetricCommand, SystemTextMetricInstruction,
     };
     use pingo_edit::{EditConfig, EditSession, Selection};
     use pingo_headless::HeadlessRenderer;
@@ -2158,6 +2405,20 @@ mod tests {
         }
         .encode()
         .expect("encode frame")
+    }
+
+    fn computed_keyword(property: StyleProperty, keyword: StyleKeyword) -> Vec<u8> {
+        let mut bytes = vec![0_u8; 28];
+        bytes[0] = STYLE_COMPUTED_ENCODING_VERSION;
+        bytes[1] = STYLE_COMPUTED_ENCODING_VARIANT;
+        bytes[4..8].copy_from_slice(&STYLE_ALL_FEATURE_BITS.to_le_bytes());
+        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&12_u32.to_le_bytes());
+        bytes[16..18].copy_from_slice(&(property as u16).to_le_bytes());
+        bytes[19] = STYLE_VALUE_KEYWORD;
+        bytes[20..22].copy_from_slice(&4_u16.to_le_bytes());
+        bytes[24..26].copy_from_slice(&(keyword as u16).to_le_bytes());
+        bytes
     }
 
     fn painted_tree() -> Vec<u8> {
@@ -2246,6 +2507,11 @@ mod tests {
                         line_height: 24.0,
                         weight: 400,
                         family: "sans-serif".to_owned(),
+                        font_style: StyleKeyword::Normal,
+                        text_align: StyleKeyword::Start,
+                        white_space: StyleKeyword::PreWrap,
+                        overflow_wrap: StyleKeyword::Anywhere,
+                        text_overflow: StyleKeyword::Clip,
                     }
                     .encode()
                     .expect("text style"),
@@ -2311,6 +2577,11 @@ mod tests {
                         line_height: 20.0,
                         weight: 400,
                         family: "sans-serif".to_owned(),
+                        font_style: StyleKeyword::Normal,
+                        text_align: StyleKeyword::Start,
+                        white_space: StyleKeyword::PreWrap,
+                        overflow_wrap: StyleKeyword::Anywhere,
+                        text_overflow: StyleKeyword::Clip,
                     }
                     .encode()
                     .expect("text style"),
@@ -2356,6 +2627,11 @@ mod tests {
                     line_height: 20.0,
                     weight: 400,
                     family: "sans-serif".to_owned(),
+                    font_style: StyleKeyword::Normal,
+                    text_align: StyleKeyword::Start,
+                    white_space: StyleKeyword::PreWrap,
+                    overflow_wrap: StyleKeyword::Anywhere,
+                    text_overflow: StyleKeyword::Clip,
                 }
                 .encode()
                 .expect("text style"),
@@ -2428,6 +2704,11 @@ mod tests {
                         line_height: 20.0,
                         weight: 400,
                         family: "sans-serif".to_owned(),
+                        font_style: StyleKeyword::Normal,
+                        text_align: StyleKeyword::Start,
+                        white_space: StyleKeyword::PreWrap,
+                        overflow_wrap: StyleKeyword::Anywhere,
+                        text_overflow: StyleKeyword::Clip,
                     }
                     .encode()
                     .expect("text style"),
@@ -2549,6 +2830,92 @@ mod tests {
         )
     }
 
+    fn nested_scroll_tree(
+        overscroll: Option<StyleKeyword>,
+        touch_action: Option<StyleKeyword>,
+    ) -> Vec<u8> {
+        let mut mutations = vec![
+            Mutation::CreateNode {
+                node_id: id(0),
+                kind: NodeKind::Root,
+                parent: NULL_NODE_ID,
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::CreateNode {
+                node_id: id(1),
+                kind: NodeKind::Scroll,
+                parent: id(0),
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::CreateNode {
+                node_id: id(2),
+                kind: NodeKind::Container,
+                parent: id(1),
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::CreateNode {
+                node_id: id(3),
+                kind: NodeKind::Scroll,
+                parent: id(2),
+                before_sibling: NULL_NODE_ID,
+            },
+            Mutation::CreateNode {
+                node_id: id(4),
+                kind: NodeKind::Container,
+                parent: id(3),
+                before_sibling: NULL_NODE_ID,
+            },
+        ];
+        for (node_id, width, height) in [
+            (id(1), 100.0, 100.0),
+            (id(2), 100.0, 500.0),
+            (id(3), 100.0, 50.0),
+            (id(4), 100.0, 200.0),
+        ] {
+            mutations.push(Mutation::SetF32 {
+                node_id,
+                prop: Prop::Width,
+                value: width,
+            });
+            mutations.push(Mutation::SetF32 {
+                node_id,
+                prop: Prop::Height,
+                value: height,
+            });
+        }
+        if let Some(behavior) = overscroll {
+            mutations.push(Mutation::DefineResource {
+                resource_id: 20,
+                kind: ResourceKind::ComputedStyle,
+                bytes: computed_keyword(StyleProperty::OverscrollBehavior, behavior),
+            });
+            mutations.push(Mutation::SetRef {
+                node_id: id(3),
+                prop: Prop::ComputedStyle,
+                resource_id: 20,
+            });
+        }
+        if let Some(action) = touch_action {
+            mutations.push(Mutation::DefineResource {
+                resource_id: 21,
+                kind: ResourceKind::ComputedStyle,
+                bytes: computed_keyword(StyleProperty::TouchAction, action),
+            });
+            mutations.push(Mutation::SetRef {
+                node_id: id(4),
+                prop: Prop::ComputedStyle,
+                resource_id: 21,
+            });
+        }
+        mutations.push(Mutation::ScrollTo {
+            node_id: id(3),
+            x: 0.0,
+            y: 150.0,
+            behavior: 0,
+        });
+        frame(1, mutations)
+    }
+
     /// Builds a virtual list sized like the playground's, so a refill window
     /// covers a hundred rows rather than a handful.
     fn sized_virtual_list_tree(viewport: f32, item_height: f32) -> Vec<u8> {
@@ -2639,6 +3006,78 @@ mod tests {
         .expect("input frame")
     }
 
+    fn assert_position(actual: [f32; 2], expected: [f32; 2]) {
+        assert_eq!(actual.map(f32::to_bits), expected.map(f32::to_bits));
+    }
+
+    fn pointer_event(
+        event_id: u32,
+        pointer_id: u32,
+        kind: InputEventKind,
+        position: [f32; 2],
+        buttons: u32,
+    ) -> InputCommand {
+        InputCommand::DispatchEvent {
+            event_id,
+            kind,
+            flags: 0,
+            position,
+            delta: [0.0, 0.0],
+            buttons,
+            modifiers: 0,
+            pointer_id,
+            elapsed_micros: 16_667,
+            pointer_type: InputPointerType::Mouse,
+            is_primary: true,
+            pressure: 0.5,
+            tilt: [0.0, 0.0],
+            contact_size: [1.0, 1.0],
+        }
+    }
+
+    fn touch_pointer_event(
+        event_id: u32,
+        kind: InputEventKind,
+        position: [f32; 2],
+        buttons: u32,
+    ) -> InputCommand {
+        InputCommand::DispatchEvent {
+            event_id,
+            kind,
+            flags: 0,
+            position,
+            delta: [0.0, 0.0],
+            buttons,
+            modifiers: 0,
+            pointer_id: 9,
+            elapsed_micros: 16_667,
+            pointer_type: InputPointerType::Touch,
+            is_primary: true,
+            pressure: 0.5,
+            tilt: [0.0, 0.0],
+            contact_size: [8.0, 8.0],
+        }
+    }
+
+    fn wheel_event(event_id: u32, position: [f32; 2], delta: [f32; 2]) -> InputCommand {
+        InputCommand::DispatchEvent {
+            event_id,
+            kind: InputEventKind::Wheel,
+            flags: EVENT_FLAG_PRECISE_WHEEL,
+            position,
+            delta,
+            buttons: 0,
+            modifiers: 0,
+            pointer_id: 0,
+            elapsed_micros: 16_667,
+            pointer_type: InputPointerType::None,
+            is_primary: false,
+            pressure: 0.0,
+            tilt: [0.0, 0.0],
+            contact_size: [0.0, 0.0],
+        }
+    }
+
     #[test]
     fn executes_the_complete_single_threaded_frame_pipeline() {
         let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
@@ -2706,6 +3145,11 @@ mod tests {
                         modifiers: 4,
                         pointer_id: 1,
                         elapsed_micros: 16_667,
+                        pointer_type: InputPointerType::Mouse,
+                        is_primary: true,
+                        pressure: 0.5,
+                        tilt: [0.0, 0.0],
+                        contact_size: [1.0, 1.0],
                     }],
                 ))
                 .expect("event"),
@@ -2720,7 +3164,22 @@ mod tests {
             &engine.take_event_transactions().expect("reverse events"),
         )
         .expect("decode reverse events");
-        assert_eq!(events.records.len(), 1);
+        assert_eq!(events.records.len(), 6);
+        assert_eq!(
+            events
+                .records
+                .iter()
+                .map(|record| record.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                InputEventKind::PointerOver,
+                InputEventKind::PointerEnter,
+                InputEventKind::PointerEnter,
+                InputEventKind::PointerDown,
+                InputEventKind::Focus,
+                InputEventKind::FocusIn,
+            ]
+        );
         assert_eq!(events.records[0].event_id, 41);
         assert_eq!(events.records[0].target, id(1));
         assert_eq!(events.records[0].path, vec![id(0), id(1)]);
@@ -2749,6 +3208,11 @@ mod tests {
                         modifiers: 0,
                         pointer_id: 0,
                         elapsed_micros: 16_667,
+                        pointer_type: InputPointerType::None,
+                        is_primary: false,
+                        pressure: 0.0,
+                        tilt: [0.0, 0.0],
+                        contact_size: [0.0, 0.0],
                     }],
                 ))
                 .expect("miss"),
@@ -2769,6 +3233,11 @@ mod tests {
                     modifiers: 0,
                     pointer_id: 0,
                     elapsed_micros: 16_667,
+                    pointer_type: InputPointerType::None,
+                    is_primary: false,
+                    pressure: 0.0,
+                    tilt: [0.0, 0.0],
+                    contact_size: [0.0, 0.0],
                 },
                 InputCommand::FocusEditable { node_id: id(1) },
             ],
@@ -2826,6 +3295,11 @@ mod tests {
             modifiers: 0,
             pointer_id: 0,
             elapsed_micros: 16_667,
+            pointer_type: InputPointerType::None,
+            is_primary: false,
+            pressure: 0.0,
+            tilt: [0.0, 0.0],
+            contact_size: [0.0, 0.0],
         };
 
         let mut precise = CoreEngine::new(320.0, 240.0).expect("Core");
@@ -2882,6 +3356,11 @@ mod tests {
                     modifiers: 0,
                     pointer_id: 0,
                     elapsed_micros: 16_667,
+                    pointer_type: InputPointerType::None,
+                    is_primary: false,
+                    pressure: 0.0,
+                    tilt: [0.0, 0.0],
+                    contact_size: [0.0, 0.0],
                 }],
             ))
             .expect("wheel event");
@@ -2899,6 +3378,86 @@ mod tests {
     }
 
     #[test]
+    fn overscroll_behavior_controls_nested_wheel_chaining_and_edge_affordance() {
+        let run = |behavior: Option<StyleKeyword>| {
+            let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+            engine
+                .commit(&nested_scroll_tree(behavior, None))
+                .expect("nested frame");
+            engine
+                .input(&input(1, vec![wheel_event(1, [10.0, 10.0], [0.0, 20.0])]))
+                .expect("wheel");
+            engine.take_event_transactions().expect("event path");
+            let position = |index| {
+                engine
+                    .scene()
+                    .scroll_position(NodeId::from_raw(id(index)).expect("scroll id"))
+                    .expect("scroll position")
+            };
+            (position(1), position(3))
+        };
+
+        let (outer_auto, inner_auto) = run(None);
+        assert_position(inner_auto, [0.0, 150.0]);
+        assert!(
+            outer_auto[1] > 0.0,
+            "auto must chain to the scrollable ancestor"
+        );
+
+        let (outer_contain, inner_contain) = run(Some(StyleKeyword::Contain));
+        assert_position(outer_contain, [0.0, 0.0]);
+        assert!(
+            inner_contain[1] > 150.0,
+            "contain retains the local edge affordance"
+        );
+
+        let (outer_none, inner_none) = run(Some(StyleKeyword::None));
+        assert_position(outer_none, [0.0, 0.0]);
+        assert_position(inner_none, [0.0, 150.0]);
+    }
+
+    #[test]
+    fn touch_action_gates_core_default_scroll_axes() {
+        let run = |action| {
+            let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+            engine
+                .commit(&nested_scroll_tree(None, Some(action)))
+                .expect("nested frame");
+            engine
+                .input(&input(
+                    1,
+                    vec![touch_pointer_event(
+                        1,
+                        InputEventKind::PointerDown,
+                        [10.0, 10.0],
+                        1,
+                    )],
+                ))
+                .expect("touch down");
+            engine.take_event_transactions().expect("down events");
+            engine
+                .input(&input(
+                    2,
+                    vec![touch_pointer_event(
+                        2,
+                        InputEventKind::PointerMove,
+                        [10.0, -10.0],
+                        1,
+                    )],
+                ))
+                .expect("touch move");
+            engine.take_event_transactions().expect("move events");
+            engine
+                .scene()
+                .scroll_position(NodeId::from_raw(id(1)).expect("outer id"))
+                .expect("outer position")
+        };
+
+        assert_position(run(StyleKeyword::None), [0.0, 0.0]);
+        assert!(run(StyleKeyword::PanY)[1] > 0.0);
+    }
+
+    #[test]
     fn pointer_dragging_continues_outside_the_hit_region_and_ends_deterministically() {
         let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
         engine.commit(&scroll_tree()).expect("frame");
@@ -2912,6 +3471,11 @@ mod tests {
             modifiers: 0,
             pointer_id: 7,
             elapsed_micros: 16_667,
+            pointer_type: InputPointerType::Mouse,
+            is_primary: true,
+            pressure: 0.5,
+            tilt: [0.0, 0.0],
+            contact_size: [1.0, 1.0],
         };
         assert_eq!(
             engine
@@ -3943,21 +4507,16 @@ mod tests {
         mutations.extend(editable_resource_mutations("ab cd"));
         engine.commit(&frame(1, mutations)).expect("frame");
 
-        let pointer = |kind, position, buttons| InputCommand::DispatchEvent {
-            event_id: 11,
-            kind,
-            flags: 0,
-            position,
-            delta: [0.0, 0.0],
-            buttons,
-            modifiers: 0,
-            pointer_id: 9,
-            elapsed_micros: 16_667,
-        };
         engine
             .input(&input(
                 1,
-                vec![pointer(InputEventKind::PointerDown, [20.0, 60.0], 1)],
+                vec![pointer_event(
+                    11,
+                    9,
+                    InputEventKind::PointerDown,
+                    [20.0, 60.0],
+                    1,
+                )],
             ))
             .expect("down");
         engine.take_event_transactions().expect("down event");
@@ -3965,7 +4524,13 @@ mod tests {
             engine
                 .input(&input(
                     2,
-                    vec![pointer(InputEventKind::PointerMove, [20.0, -20.0], 1)],
+                    vec![pointer_event(
+                        11,
+                        9,
+                        InputEventKind::PointerMove,
+                        [20.0, -20.0],
+                        1,
+                    )],
                 ))
                 .expect("move")
                 .is_none(),
@@ -3979,18 +4544,9 @@ mod tests {
             Some([0.0, 0.0])
         );
 
-        let wheel = InputCommand::DispatchEvent {
-            event_id: 12,
-            kind: InputEventKind::Wheel,
-            flags: EVENT_FLAG_PRECISE_WHEEL,
-            position: [20.0, 60.0],
-            delta: [0.0, 50.0],
-            buttons: 0,
-            modifiers: 0,
-            pointer_id: 0,
-            elapsed_micros: 16_667,
-        };
-        engine.input(&input(3, vec![wheel])).expect("wheel");
+        engine
+            .input(&input(3, vec![wheel_event(12, [20.0, 60.0], [0.0, 50.0])]))
+            .expect("wheel");
         engine.take_event_transactions().expect("wheel event");
         assert_ne!(
             engine
@@ -4447,6 +5003,7 @@ mod tests {
                 .any(|instruction| matches!(
                     instruction.command,
                     DisplayCommand::DrawTextFallback { .. }
+                        | DisplayCommand::DrawTextInlineFallback { .. }
                 ))
         );
         let text = NodeId::from_raw(id(1)).expect("text id");
@@ -5038,6 +5595,11 @@ mod tests {
                         modifiers: 0,
                         pointer_id: 0,
                         elapsed_micros: 16_667,
+                        pointer_type: InputPointerType::None,
+                        is_primary: false,
+                        pressure: 0.0,
+                        tilt: [0.0, 0.0],
+                        contact_size: [0.0, 0.0],
                     }],
                 ))
                 .expect("wheel input");
