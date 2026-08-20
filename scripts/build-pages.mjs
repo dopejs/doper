@@ -15,13 +15,13 @@ const output = path.join(repositoryRoot, "dist-pages");
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 
-// The VitePress site is the root of the deployment and already contains the
-// playground page. Storybook keeps its own build and is copied in beside it.
-await run("pnpm", ["exec", "vitepress", "build", "docs"], { cwd: repositoryRoot });
+// The React site is the root of the deployment and includes the playground.
+// Storybook keeps its own build and is copied in beside it.
+await run("pnpm", ["--filter", "@dopejs/site", "build"], { cwd: repositoryRoot });
 await run("pnpm", ["--filter", "@dopejs/storybook", "build"], { cwd: repositoryRoot });
 
-await cp(path.join(repositoryRoot, "docs/.vitepress/dist"), output, { recursive: true });
-await cp(path.join(repositoryRoot, "apps/storybook/dist"), path.join(output, "storybook"), {
+await cp(path.join(repositoryRoot, "apps/site/dist"), output, { recursive: true });
+await cp(path.join(repositoryRoot, "apps/storybook/dist"), path.join(output, "storybook-app"), {
   recursive: true,
 });
 
@@ -57,6 +57,9 @@ async function preloadEngineAssets(root) {
   const workerFile = path.basename(worker);
   const candidates = [];
   for (const asset of assets.filter((name) => name.endsWith(".js"))) {
+    // A sourcemap trailer contains the worker's own filename; only another
+    // module can be the engine entry that constructs this worker.
+    if (asset === worker) continue;
     const source = await readFile(path.join(root, "assets", asset), "utf8");
     if (source.includes(workerFile)) candidates.push(asset);
   }
@@ -98,15 +101,15 @@ async function collectAssets(root, prefix = "") {
   return found;
 }
 
-/** Returns every localized playground HTML file in the build output. */
+/** Returns the clean-URL playground entry page in the build output. */
 async function playgroundPages(root) {
   const pages = [];
   const walk = async (directory) => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const full = path.join(directory, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name !== "assets" && entry.name !== "storybook") await walk(full);
-      } else if (entry.name === "playground.html") {
+        if (entry.name !== "assets" && entry.name !== "storybook-app") await walk(full);
+      } else if (entry.name === "index.html" && path.basename(directory) === "playground") {
         pages.push(full);
       }
     }

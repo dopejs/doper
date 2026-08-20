@@ -1,0 +1,25 @@
+{
+  "name": "@dopejs/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/build-react-site.mjs",
+    "dev": "vite --port 5174",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dopejs/pingo": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.1.0",
+    "gray-matter": "4.0.3",
+    "markdown-it": "15.0.0",
+    "markdown-it-anchor": "9.2.1",
+    "markdown-it-container": "4.0.0"
+  }
+}

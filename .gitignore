@@ -20,3 +20,4 @@ apps/platform-probe/public/wasm/budget-manifest.json
 dist-pages/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+apps/site/.ssr/

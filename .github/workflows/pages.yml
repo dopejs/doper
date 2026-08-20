@@ -5,8 +5,10 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "apps/site/**"
       - "apps/storybook/**"
       - "packages/**"
+      - "scripts/build-react-site.mjs"
       - "scripts/build-pages.mjs"
       - ".github/workflows/pages.yml"
   workflow_dispatch:

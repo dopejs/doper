@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#3157df" />
+    <meta name="description" content="Pingo Web canvas rendering engine" />
+    <link rel="icon" type="image/svg+xml" href="/pingo-favicon.svg" />
+    <title>Pingo</title>
+    <script>
+      (() => {
+        const saved = localStorage.getItem("pingo-theme");
+        const dark =
+          saved === "dark" ||
+          (saved === null && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
