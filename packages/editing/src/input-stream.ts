@@ -160,6 +160,13 @@ export type InputCommand =
       readonly velocityX: number;
       readonly velocityY: number;
     }
+  | { readonly type: "scrollTo"; readonly nodeId: number; readonly x: number; readonly y: number }
+  | {
+      readonly type: "scrollBy";
+      readonly nodeId: number;
+      readonly deltaX: number;
+      readonly deltaY: number;
+    }
   | {
       readonly type: "dispatchEvent";
       readonly eventId: number;
@@ -319,6 +326,22 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
       writer.u32(command.nodeId);
       writer.f32(command.velocityX);
       writer.f32(command.velocityY);
+      return;
+    case "scrollTo":
+      assertU32(command.nodeId, "scroll nodeId");
+      assertScrollDelta(command.x, "scroll x");
+      assertScrollDelta(command.y, "scroll y");
+      writer.u32(command.nodeId);
+      writer.f32(command.x);
+      writer.f32(command.y);
+      return;
+    case "scrollBy":
+      assertU32(command.nodeId, "scroll nodeId");
+      assertScrollDelta(command.deltaX, "scroll deltaX");
+      assertScrollDelta(command.deltaY, "scroll deltaY");
+      writer.u32(command.nodeId);
+      writer.f32(command.deltaX);
+      writer.f32(command.deltaY);
       return;
     case "requestCharacterBounds":
       assertU32(command.nodeId, "editable nodeId");
@@ -595,6 +618,22 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
       assertScrollDelta(velocityY, "scroll velocityY");
       return { type: "setScrollVelocity", nodeId, velocityX, velocityY };
     }
+    case InputOpcode.ScrollTo: {
+      const nodeId = reader.u32();
+      const x = reader.f32();
+      const y = reader.f32();
+      assertScrollDelta(x, "scroll x");
+      assertScrollDelta(y, "scroll y");
+      return { type: "scrollTo", nodeId, x, y };
+    }
+    case InputOpcode.ScrollBy: {
+      const nodeId = reader.u32();
+      const deltaX = reader.f32();
+      const deltaY = reader.f32();
+      assertScrollDelta(deltaX, "scroll deltaX");
+      assertScrollDelta(deltaY, "scroll deltaY");
+      return { type: "scrollBy", nodeId, deltaX, deltaY };
+    }
     case InputOpcode.DispatchEvent: {
       const eventId = reader.u32();
       const kind = eventKind(reader.u16());
@@ -699,6 +738,10 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.ScrollCancel;
     case "setScrollVelocity":
       return InputOpcode.SetScrollVelocity;
+    case "scrollTo":
+      return InputOpcode.ScrollTo;
+    case "scrollBy":
+      return InputOpcode.ScrollBy;
     case "dispatchEvent":
       return InputOpcode.DispatchEvent;
     case "setPointerCapture":

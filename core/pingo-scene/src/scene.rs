@@ -24,7 +24,7 @@ use pingo_abi::{
     TEXT_STYLE_V2_TEXT_ALIGN_OFFSET, TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET,
     TEXT_STYLE_V2_VARIANT_OFFSET, TEXT_STYLE_V2_VERSION_OFFSET, TEXT_STYLE_V2_WEIGHT_OFFSET,
     TEXT_STYLE_V2_WHITE_SPACE_OFFSET, TEXT_STYLE_VARIANT_OFFSET, TEXT_STYLE_VERSION_OFFSET,
-    TEXT_STYLE_WEIGHT_OFFSET,
+    TEXT_STYLE_WEIGHT_OFFSET, VirtualAxis,
 };
 
 use crate::{BitSet, MAX_GENERATION, NodeId, SceneError};
@@ -69,8 +69,10 @@ pub struct TextRun {
 pub struct VirtualListConfig {
     /// Total logical item count without materializing Scene nodes.
     pub item_count: u32,
-    /// Initial logical height estimate for every item.
-    pub estimated_item_height: f32,
+    /// Initial logical size estimate for every item along `axis`.
+    pub estimated_item_size: f32,
+    /// Main axis used for item placement and measurement.
+    pub axis: VirtualAxis,
     /// Symmetric preheat extent in viewport multiples.
     pub base_overscan_viewports: f32,
     /// Velocity projection horizon in seconds.
@@ -1188,12 +1190,12 @@ fn validate_numeric_mutation(mutation: &Mutation) -> Result<(), SceneError> {
         }
         Mutation::ConfigureVirtualList {
             node_id,
-            estimated_item_height,
+            estimated_item_size,
             base_overscan_viewports,
             velocity_horizon_seconds,
             maximum_ahead_viewports,
             ..
-        } if !estimated_item_height.is_finite()
+        } if !estimated_item_size.is_finite()
             || !base_overscan_viewports.is_finite()
             || !velocity_horizon_seconds.is_finite()
             || !maximum_ahead_viewports.is_finite() =>
@@ -2231,18 +2233,20 @@ fn plan_apply_property(
         }
         Mutation::ConfigureVirtualList {
             item_count,
-            estimated_item_height,
+            estimated_item_size,
             base_overscan_viewports,
             velocity_horizon_seconds,
             maximum_ahead_viewports,
+            axis,
             ..
         } => {
             let config = VirtualListConfig {
                 item_count,
-                estimated_item_height,
+                estimated_item_size,
                 base_overscan_viewports,
                 velocity_horizon_seconds,
                 maximum_ahead_viewports,
+                axis,
             };
             validate_virtual_list_config(node, config)?;
             nodes
@@ -2279,8 +2283,8 @@ fn validate_virtual_list_config(node: NodeId, config: VirtualListConfig) -> Resu
     }
     for (field, value, minimum, maximum) in [
         (
-            "estimatedItemHeight",
-            config.estimated_item_height,
+            "estimatedItemSize",
+            config.estimated_item_size,
             f32::EPSILON,
             1_000_000_000.0,
         ),
@@ -3199,10 +3203,11 @@ mod tests {
                     Mutation::ConfigureVirtualList {
                         node_id: list.raw(),
                         item_count: 1_000_000,
-                        estimated_item_height: 24.0,
+                        estimated_item_size: 24.0,
                         base_overscan_viewports: 1.0,
                         velocity_horizon_seconds: 0.25,
                         maximum_ahead_viewports: 4.0,
+                        axis: VirtualAxis::Y,
                     },
                     Mutation::SetVirtualItem {
                         node_id: first.raw(),
@@ -3229,10 +3234,11 @@ mod tests {
                 vec![Mutation::ConfigureVirtualList {
                     node_id: list.raw(),
                     item_count: 1,
-                    estimated_item_height: 24.0,
+                    estimated_item_size: 24.0,
                     base_overscan_viewports: 1.0,
                     velocity_horizon_seconds: 0.25,
                     maximum_ahead_viewports: 4.0,
+                    axis: VirtualAxis::Y,
                 }]
             )),
             Err(SceneError::InvalidVirtualItemIndex { .. })
@@ -3246,10 +3252,11 @@ mod tests {
                 vec![Mutation::ConfigureVirtualList {
                     node_id: list.raw(),
                     item_count: MAX_VIRTUAL_ITEMS + 1,
-                    estimated_item_height: 24.0,
+                    estimated_item_size: 24.0,
                     base_overscan_viewports: 1.0,
                     velocity_horizon_seconds: 0.25,
                     maximum_ahead_viewports: 4.0,
+                    axis: VirtualAxis::Y,
                 }]
             )),
             Err(SceneError::InvalidVirtualListConfig {
@@ -3565,10 +3572,11 @@ mod tests {
                 vec![Mutation::ConfigureVirtualList {
                     node_id: text.raw(),
                     item_count: 1,
-                    estimated_item_height: 10.0,
+                    estimated_item_size: 10.0,
                     base_overscan_viewports: 1.0,
                     velocity_horizon_seconds: 0.1,
                     maximum_ahead_viewports: 2.0,
+                    axis: VirtualAxis::Y,
                 }],
             )),
             Err(SceneError::UnsupportedNodeOperation {

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 13,
+  "abiVersion": 14,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -9,6 +9,10 @@
     "generationBits": 12,
     "null": 4294967295
   },
+  "virtualAxes": [
+    { "name": "X", "id": 0 },
+    { "name": "Y", "id": 1 }
+  ],
   "streamHeader": [
     {
       "name": "magic",
@@ -460,7 +464,7 @@
         {
           "name": "ConfigureVirtualList",
           "opcode": 65,
-          "fields": ["u32", "u32", "f32", "f32", "f32", "f32"]
+          "fields": ["u32", "u32", "f32", "f32", "f32", "f32", "u8", "u8", "pad16"]
         },
         {
           "name": "SetVirtualItem",
@@ -598,6 +602,16 @@
         {
           "name": "SetScrollVelocity",
           "opcode": 36,
+          "fields": ["u32", "f32", "f32"]
+        },
+        {
+          "name": "ScrollTo",
+          "opcode": 37,
+          "fields": ["u32", "f32", "f32"]
+        },
+        {
+          "name": "ScrollBy",
+          "opcode": 38,
           "fields": ["u32", "f32", "f32"]
         },
         {

@@ -51,6 +51,7 @@ export {
   type HostType,
   type Key,
   type NodeHandle,
+  type ViewHandle,
   type Ref,
   type ScrollProps,
   type TextProps,

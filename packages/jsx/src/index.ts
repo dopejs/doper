@@ -40,6 +40,7 @@ export {
   type JSX,
   type Key,
   type NodeHandle,
+  type ViewHandle,
   type Ref,
   type ScrollProps,
   type TextProps,

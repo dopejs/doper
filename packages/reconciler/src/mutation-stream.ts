@@ -12,6 +12,7 @@ import {
   PROTOCOL_ALIGNMENT,
   ResourceKind,
   STREAM_HEADER_BYTES,
+  VirtualAxis,
   INSTRUCTION_FLAG_MASK,
   INSTRUCTION_FLAG_OPTIONAL,
   INSTRUCTION_LENGTH_ESCAPE,
@@ -87,10 +88,11 @@ export type Mutation =
       readonly type: "configureVirtualList";
       readonly nodeId: number;
       readonly itemCount: number;
-      readonly estimatedItemHeight: number;
+      readonly estimatedItemSize: number;
       readonly baseOverscanViewports: number;
       readonly velocityHorizonSeconds: number;
       readonly maximumAheadViewports: number;
+      readonly axis: VirtualAxis;
     }
   | {
       readonly type: "setVirtualItem";
@@ -342,10 +344,14 @@ function encodeMutation(writer: ByteWriter, mutation: Mutation): void {
       writer.instruction(MutationOpcode.ConfigureVirtualList);
       writer.u32(mutation.nodeId);
       writer.u32(mutation.itemCount);
-      writer.f32(mutation.estimatedItemHeight);
+      writer.f32(mutation.estimatedItemSize);
       writer.f32(mutation.baseOverscanViewports);
       writer.f32(mutation.velocityHorizonSeconds);
       writer.f32(mutation.maximumAheadViewports);
+      assertEnum(VirtualAxis, mutation.axis, "virtual axis");
+      writer.u8(mutation.axis);
+      writer.u8(0);
+      writer.u16(0);
       return;
     case "setVirtualItem":
       assertU32(mutation.nodeId, "nodeId");
@@ -458,16 +464,27 @@ function decodeMutation(reader: ByteReader, opcode: MutationOpcode): Mutation {
       reader.zeroes(2);
       return { type: "scrollTo", nodeId, x, y, behavior };
     }
-    case MutationOpcode.ConfigureVirtualList:
+    case MutationOpcode.ConfigureVirtualList: {
+      const nodeId = reader.u32();
+      const itemCount = reader.u32();
+      const estimatedItemSize = reader.f32();
+      const baseOverscanViewports = reader.f32();
+      const velocityHorizonSeconds = reader.f32();
+      const maximumAheadViewports = reader.f32();
+      const axis = reader.u8();
+      assertEnum(VirtualAxis, axis, "virtual axis");
+      reader.zeroes(3);
       return {
         type: "configureVirtualList",
-        nodeId: reader.u32(),
-        itemCount: reader.u32(),
-        estimatedItemHeight: reader.f32(),
-        baseOverscanViewports: reader.f32(),
-        velocityHorizonSeconds: reader.f32(),
-        maximumAheadViewports: reader.f32(),
+        nodeId,
+        itemCount,
+        estimatedItemSize,
+        baseOverscanViewports,
+        velocityHorizonSeconds,
+        maximumAheadViewports,
+        axis,
       };
+    }
     case MutationOpcode.SetVirtualItem:
       return {
         type: "setVirtualItem",

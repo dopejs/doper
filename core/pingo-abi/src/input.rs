@@ -454,6 +454,24 @@ pub enum InputCommand {
         /// Vertical logical pixels per second.
         velocity_y: f32,
     },
+    /// Immediately sets a Core-owned scroll position and cancels motion.
+    ScrollTo {
+        /// Generation-bearing target scroll node.
+        node_id: u32,
+        /// Horizontal logical content offset.
+        x: f32,
+        /// Vertical logical content offset.
+        y: f32,
+    },
+    /// Immediately offsets a Core-owned scroll position and cancels motion.
+    ScrollBy {
+        /// Generation-bearing target scroll node.
+        node_id: u32,
+        /// Horizontal logical content-offset delta.
+        delta_x: f32,
+        /// Vertical logical content-offset delta.
+        delta_y: f32,
+    },
     /// Routes one pointer/wheel sample through Core world geometry.
     DispatchEvent {
         /// Host-monotonic event identifier used by the reverse result.
@@ -901,6 +919,24 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
                 velocity_y,
             }
         }
+        InputOpcode::ScrollTo => {
+            let node_id = reader.read_u32()?;
+            let x = reader.read_f32()?;
+            let y = reader.read_f32()?;
+            validate_scroll_pair(x, y, "scroll position exceeds maximum")?;
+            InputCommand::ScrollTo { node_id, x, y }
+        }
+        InputOpcode::ScrollBy => {
+            let node_id = reader.read_u32()?;
+            let delta_x = reader.read_f32()?;
+            let delta_y = reader.read_f32()?;
+            validate_scroll_pair(delta_x, delta_y, "scroll delta exceeds maximum")?;
+            InputCommand::ScrollBy {
+                node_id,
+                delta_x,
+                delta_y,
+            }
+        }
         InputOpcode::DispatchEvent => {
             let event_id = reader.read_u32()?;
             let kind = InputEventKind::decode(reader.read_u16()?)?;
@@ -1160,6 +1196,22 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             writer.f32(*velocity_x)?;
             writer.f32(*velocity_y)?;
         }
+        InputCommand::ScrollTo { node_id, x, y } => {
+            validate_scroll_pair(*x, *y, "scroll position exceeds maximum")?;
+            writer.u32(*node_id);
+            writer.f32(*x)?;
+            writer.f32(*y)?;
+        }
+        InputCommand::ScrollBy {
+            node_id,
+            delta_x,
+            delta_y,
+        } => {
+            validate_scroll_pair(*delta_x, *delta_y, "scroll delta exceeds maximum")?;
+            writer.u32(*node_id);
+            writer.f32(*delta_x)?;
+            writer.f32(*delta_y)?;
+        }
         InputCommand::DispatchEvent {
             event_id,
             kind,
@@ -1312,6 +1364,8 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::ScrollEnd { .. } => InputOpcode::ScrollEnd,
         InputCommand::ScrollCancel { .. } => InputOpcode::ScrollCancel,
         InputCommand::SetScrollVelocity { .. } => InputOpcode::SetScrollVelocity,
+        InputCommand::ScrollTo { .. } => InputOpcode::ScrollTo,
+        InputCommand::ScrollBy { .. } => InputOpcode::ScrollBy,
         InputCommand::DispatchEvent { .. } => InputOpcode::DispatchEvent,
         InputCommand::SetPointerCapture { .. } => InputOpcode::SetPointerCapture,
         InputCommand::ReleasePointerCapture { .. } => InputOpcode::ReleasePointerCapture,
@@ -1319,6 +1373,14 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::BlurNode { .. } => InputOpcode::BlurNode,
         InputCommand::ResetInteraction { .. } => InputOpcode::ResetInteraction,
     }
+}
+
+fn validate_scroll_pair(x: f32, y: f32, message: &'static str) -> Result<(), AbiError> {
+    if !x.is_finite() || !y.is_finite() || x.abs() > MAX_SCROLL_DELTA || y.abs() > MAX_SCROLL_DELTA
+    {
+        return Err(AbiError::InvalidValue(message));
+    }
+    Ok(())
 }
 
 fn validate_place_caret_fields(position: [f32; 2], flags: u32) -> Result<(), AbiError> {
@@ -1604,6 +1666,16 @@ mod tests {
                     node_id: 2,
                     velocity_x: 0.0,
                     velocity_y: 216.0,
+                }),
+                instruction(InputCommand::ScrollTo {
+                    node_id: 2,
+                    x: 120.0,
+                    y: 48.0,
+                }),
+                instruction(InputCommand::ScrollBy {
+                    node_id: 2,
+                    delta_x: -20.0,
+                    delta_y: 12.0,
                 }),
                 instruction(InputCommand::RequestCharacterBounds {
                     node_id: 1,

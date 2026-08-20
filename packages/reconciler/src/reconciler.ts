@@ -17,6 +17,7 @@ import {
   type ImageProps,
   type Key,
   type NodeHandle,
+  type ViewHandle,
   type Ref,
   type VirtualListProps,
   type VirtualViewProps,
@@ -34,7 +35,7 @@ import {
   type StylePropertyName,
 } from "@dopejs/pingo-style";
 
-import { MAX_VIRTUAL_ITEMS, NodeKind, Prop, ResourceKind } from "./generated";
+import { MAX_VIRTUAL_ITEMS, NodeKind, Prop, ResourceKind, VirtualAxis } from "./generated";
 import { encodeComputedStyleResource } from "./computed-style-resource";
 import { encodeMutationBatch, NULL_NODE_ID, type Mutation } from "./mutation-stream";
 import { NodeIdAllocator } from "./node-id";
@@ -80,7 +81,20 @@ export type InteractionRequest =
   | { readonly type: "setPointerCapture"; readonly nodeId: number; readonly pointerId: number }
   | { readonly type: "releasePointerCapture"; readonly nodeId: number; readonly pointerId: number }
   | { readonly type: "focus"; readonly nodeId: number }
-  | { readonly type: "blur"; readonly nodeId: number };
+  | { readonly type: "blur"; readonly nodeId: number }
+  | { readonly type: "scrollTo"; readonly nodeId: number; readonly x: number; readonly y: number }
+  | {
+      readonly type: "scrollBy";
+      readonly nodeId: number;
+      readonly deltaX: number;
+      readonly deltaY: number;
+    }
+  | {
+      readonly type: "setScrollVelocity";
+      readonly nodeId: number;
+      readonly velocityX: number;
+      readonly velocityY: number;
+    };
 
 /** Public lifecycle for a localized component/host tree. */
 export interface PingoRoot {
@@ -237,8 +251,9 @@ interface NormalizedEditable {
 }
 
 interface NormalizedVirtualList {
+  readonly axis: "x" | "y";
   readonly itemCount: number;
-  readonly estimatedItemHeight: number;
+  readonly estimatedItemSize: number;
   readonly baseOverscanViewports: number;
   readonly velocityHorizonSeconds: number;
   readonly maximumAheadViewports: number;
@@ -1138,10 +1153,11 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
           type: "configureVirtualList",
           nodeId: instance.nodeId,
           itemCount: next.virtualList.itemCount,
-          estimatedItemHeight: next.virtualList.estimatedItemHeight,
+          estimatedItemSize: next.virtualList.estimatedItemSize,
           baseOverscanViewports: next.virtualList.baseOverscanViewports,
           velocityHorizonSeconds: next.virtualList.velocityHorizonSeconds,
           maximumAheadViewports: next.virtualList.maximumAheadViewports,
+          axis: next.virtualList.axis === "x" ? VirtualAxis.X : VirtualAxis.Y,
         });
       }
       instance.virtualList = next.virtualList;
@@ -1434,7 +1450,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     }
   }
 
-  private nodeHandle(nodeId: number): NodeHandle {
+  private nodeHandle(nodeId: number): ViewHandle {
     const requireMounted = (): void => {
       if (this.#hostsByNodeId.get(nodeId)?.mounted !== true) {
         throw new Error(`node handle ${String(nodeId)} is no longer mounted`);
@@ -1444,6 +1460,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       assertU32(pointerId, "pointerId");
       if (pointerId === 0) throw new RangeError("pointerId must be non-zero");
       return pointerId;
+    };
+    const coordinate = (value: number, label: string): number => {
+      if (!Number.isFinite(value)) throw new RangeError(`${label} must be finite`);
+      return value;
     };
     return Object.freeze({
       nodeId,
@@ -1472,6 +1492,33 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       blur: () => {
         requireMounted();
         this.#onInteractionRequest?.({ type: "blur", nodeId });
+      },
+      scrollTo: (x: number, y: number) => {
+        requireMounted();
+        this.#onInteractionRequest?.({
+          type: "scrollTo",
+          nodeId,
+          x: coordinate(x, "scroll x"),
+          y: coordinate(y, "scroll y"),
+        });
+      },
+      scrollBy: (deltaX: number, deltaY: number) => {
+        requireMounted();
+        this.#onInteractionRequest?.({
+          type: "scrollBy",
+          nodeId,
+          deltaX: coordinate(deltaX, "scroll deltaX"),
+          deltaY: coordinate(deltaY, "scroll deltaY"),
+        });
+      },
+      setScrollVelocity: (velocityX: number, velocityY: number) => {
+        requireMounted();
+        this.#onInteractionRequest?.({
+          type: "setScrollVelocity",
+          nodeId,
+          velocityX: coordinate(velocityX, "scroll velocityX"),
+          velocityY: coordinate(velocityY, "scroll velocityY"),
+        });
       },
     });
   }
@@ -1774,16 +1821,17 @@ function normalizeHostProps(
   let virtualList: NormalizedVirtualList | undefined;
   if (type === "virtualList" || (type === "container" && props.virtual !== undefined)) {
     let itemCountValue: unknown;
-    let estimatedItemHeightValue: unknown;
+    let estimatedItemSizeValue: unknown;
     let renderItemValue: unknown;
     let getItemKey: ((index: number) => Key) | undefined;
+    let axis: "x" | "y" = "y";
     let baseOverscanViewports: unknown;
     let velocityHorizonSeconds: unknown;
     let maximumAheadViewports: unknown;
     if (type === "virtualList") {
       const virtualProps = props as unknown as VirtualListProps;
       itemCountValue = virtualProps.itemCount;
-      estimatedItemHeightValue = virtualProps.estimatedItemHeight;
+      estimatedItemSizeValue = virtualProps.estimatedItemHeight;
       renderItemValue = virtualProps.renderItem;
       baseOverscanViewports = virtualProps.baseOverscanViewports;
       velocityHorizonSeconds = virtualProps.velocityHorizonSeconds;
@@ -1795,11 +1843,16 @@ function normalizeHostProps(
         );
       }
       const virtualProps = props.virtual as unknown as VirtualViewProps;
-      if (virtualProps.axis !== undefined && virtualProps.axis !== "y") {
-        throw new TypeError("M6 View virtual supports only the y axis");
+      if (
+        virtualProps.axis !== undefined &&
+        virtualProps.axis !== "x" &&
+        virtualProps.axis !== "y"
+      ) {
+        throw new TypeError("View virtual axis must be x or y");
       }
+      axis = virtualProps.axis ?? "y";
       itemCountValue = virtualProps.itemCount;
-      estimatedItemHeightValue = virtualProps.estimatedItemSize;
+      estimatedItemSizeValue = virtualProps.estimatedItemSize;
       renderItemValue = virtualProps.renderItem;
       baseOverscanViewports = virtualProps.baseOverscanViewports;
       velocityHorizonSeconds = virtualProps.velocityHorizonSeconds;
@@ -1810,19 +1863,20 @@ function normalizeHostProps(
       getItemKey = virtualProps.getItemKey;
     }
     const itemCount = requireBoundedInteger(itemCountValue, 0, MAX_VIRTUAL_ITEMS, "itemCount");
-    const estimatedItemHeight = requireBoundedFinite(
-      estimatedItemHeightValue,
+    const estimatedItemSize = requireBoundedFinite(
+      estimatedItemSizeValue,
       Number.EPSILON,
       1_000_000_000,
-      "estimatedItemHeight",
+      "estimatedItemSize",
     );
     if (typeof renderItemValue !== "function") {
       throw new TypeError("renderItem must be a function");
     }
     const renderItem = renderItemValue as (index: number) => PingoNode;
     virtualList = {
+      axis,
       itemCount,
-      estimatedItemHeight,
+      estimatedItemSize,
       baseOverscanViewports: optionalBoundedFinite(
         baseOverscanViewports,
         1,
@@ -1868,9 +1922,14 @@ function normalizeHostProps(
     scalars.set(Prop.FontSize, text.fontSize);
   }
   if (virtualList !== undefined && type === "container") {
-    const overflowY = styleResolution?.style.overflowY;
-    if (overflowY !== "auto" && overflowY !== "hidden" && overflowY !== "scroll") {
-      throw new TypeError("View virtual requires computed overflowY to be auto, hidden, or scroll");
+    const overflow =
+      virtualList.axis === "x"
+        ? styleResolution?.style.overflowX
+        : styleResolution?.style.overflowY;
+    if (overflow !== "auto" && overflow !== "hidden" && overflow !== "scroll") {
+      throw new TypeError(
+        `View virtual requires computed overflow${virtualList.axis.toUpperCase()} to be auto, hidden, or scroll`,
+      );
     }
   }
   return {
@@ -2429,7 +2488,8 @@ function equalVirtualListPolicy(
 ): boolean {
   return (
     left?.itemCount === right.itemCount &&
-    left.estimatedItemHeight === right.estimatedItemHeight &&
+    left.axis === right.axis &&
+    left.estimatedItemSize === right.estimatedItemSize &&
     left.baseOverscanViewports === right.baseOverscanViewports &&
     left.velocityHorizonSeconds === right.velocityHorizonSeconds &&
     left.maximumAheadViewports === right.maximumAheadViewports

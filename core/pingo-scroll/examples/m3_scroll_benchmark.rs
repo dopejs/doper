@@ -1,15 +1,15 @@
 use std::{hint::black_box, time::Instant};
 
-use pingo_scroll::{HeightIndex, ScrollPlatform, Virtualizer, VirtualizerConfig};
+use pingo_scroll::{ExtentIndex, ScrollPlatform, Virtualizer, VirtualizerConfig};
 
 const ITEMS: usize = 1_000_000;
 const FRAMES: usize = 20_000;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let initialization_started = Instant::now();
-    let heights = HeightIndex::with_uniform(ITEMS, 20.0)?;
+    let extents = ExtentIndex::with_uniform(ITEMS, 20.0)?;
     let mut virtualizer = Virtualizer::new(
-        heights,
+        extents,
         800.0,
         ScrollPlatform::Android,
         VirtualizerConfig::default(),
@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let initialization_micros = initialization_started.elapsed().as_secs_f64() * 1_000_000.0;
     let heap_bytes = virtualizer.estimated_heap_bytes();
 
-    let middle = virtualizer.heights().total_extent() / 2.0;
+    let middle = virtualizer.extents().total_extent() / 2.0;
     virtualizer.physics_mut().jump_to(middle)?;
     virtualizer.physics_mut().end_drag(80_000.0)?;
     let mut samples = Vec::with_capacity(FRAMES);
@@ -36,8 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if frame_index % 257 == 0 {
             let item = (frame_index * 7_919) % ITEMS;
-            let height = if frame_index % 514 == 0 { 24.0 } else { 20.0 };
-            virtualizer.update_height(item, height)?;
+            let extent = if frame_index % 514 == 0 { 24.0 } else { 20.0 };
+            virtualizer.update_extent(item, extent)?;
         }
         let started = Instant::now();
         virtualizer.physics_mut().advance(1.0 / 120.0)?;

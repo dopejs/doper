@@ -1,6 +1,6 @@
 use core::ops::Range;
 
-use crate::{HeightIndex, ScrollError, ScrollPhysics, ScrollPhysicsConfig, ScrollPlatform};
+use crate::{ExtentIndex, ScrollError, ScrollPhysics, ScrollPhysicsConfig, ScrollPlatform};
 
 /// Directional preheat and prediction policy.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -63,7 +63,7 @@ pub struct VirtualizerMetrics {
     pub refill_requests: u64,
     /// Individual items covered by refill requests.
     pub refill_items: u64,
-    /// Measured-height changes applied.
+    /// Measured-extent changes applied.
     pub measurement_corrections: u64,
 }
 
@@ -87,7 +87,7 @@ pub struct VirtualFrame<'a> {
 /// Core-side million-item range planner; it never calls Shell from a render frame.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Virtualizer {
-    heights: HeightIndex,
+    extents: ExtentIndex,
     physics: ScrollPhysics,
     config: VirtualizerConfig,
     available: Vec<bool>,
@@ -105,20 +105,20 @@ impl Virtualizer {
     ///
     /// Returns [`ScrollError::InvalidScalar`] for invalid viewport or preheat policy values.
     pub fn new(
-        heights: HeightIndex,
+        extents: ExtentIndex,
         viewport_extent: f64,
         platform: ScrollPlatform,
         config: VirtualizerConfig,
     ) -> Result<Self, ScrollError> {
         let config = config.validate()?;
         let physics = ScrollPhysics::new(
-            heights.total_extent(),
+            extents.total_extent(),
             viewport_extent,
             ScrollPhysicsConfig::for_platform(platform),
         )?;
-        let len = heights.len();
+        let len = extents.len();
         Ok(Self {
-            heights,
+            extents,
             physics,
             config,
             available: vec![false; len],
@@ -129,10 +129,10 @@ impl Virtualizer {
         })
     }
 
-    /// Returns the variable-height index.
+    /// Returns the variable-extent index.
     #[must_use]
-    pub const fn heights(&self) -> &HeightIndex {
-        &self.heights
+    pub const fn extents(&self) -> &ExtentIndex {
+        &self.extents
     }
 
     /// Returns mutable scroll physics for input integration.
@@ -160,13 +160,13 @@ impl Virtualizer {
     /// Returns [`ScrollError::InvalidScalar`] for a negative or non-finite extent.
     pub fn set_viewport_extent(&mut self, viewport_extent: f64) -> Result<(), ScrollError> {
         self.physics
-            .set_extents(self.heights.total_extent(), viewport_extent)
+            .set_extents(self.extents.total_extent(), viewport_extent)
     }
 
     /// Returns retained heap bytes for index, availability bitmaps, and refill ranges.
     #[must_use]
     pub fn estimated_heap_bytes(&self) -> usize {
-        self.heights
+        self.extents
             .estimated_heap_bytes()
             .saturating_add(self.available.capacity().div_ceil(8))
             .saturating_add(self.requested.capacity().div_ceil(8))
@@ -211,17 +211,17 @@ impl Virtualizer {
         self.available.get(index).copied().unwrap_or(false)
     }
 
-    /// Applies a measured height and preserves the first visible item's visual anchor.
+    /// Applies a measured extent and preserves the first visible item's visual anchor.
     ///
     /// # Errors
     ///
-    /// Returns an index, height, extent, or arithmetic validation error.
-    pub fn update_height(&mut self, index: usize, height: f32) -> Result<f64, ScrollError> {
-        let anchor = self.heights.index_at_offset(self.physics.position())?;
+    /// Returns an index, extent, or arithmetic validation error.
+    pub fn update_extent(&mut self, index: usize, extent: f32) -> Result<f64, ScrollError> {
+        let anchor = self.extents.index_at_offset(self.physics.position())?;
         let previous_position = self.physics.position();
-        let delta = self.heights.update(index, height)?;
+        let delta = self.extents.update(index, extent)?;
         self.physics
-            .set_extents(self.heights.total_extent(), self.viewport_extent())?;
+            .set_extents(self.extents.total_extent(), self.viewport_extent())?;
         if delta != 0.0 {
             self.metrics.measurement_corrections =
                 self.metrics.measurement_corrections.saturating_add(1);
@@ -237,27 +237,27 @@ impl Virtualizer {
     ///
     /// # Errors
     ///
-    /// Returns an index, height, extent, or arithmetic validation error.
-    pub fn insert(&mut self, index: usize, height: f32) -> Result<(), ScrollError> {
-        self.heights.insert(index, height)?;
+    /// Returns an index, extent, or arithmetic validation error.
+    pub fn insert(&mut self, index: usize, extent: f32) -> Result<(), ScrollError> {
+        self.extents.insert(index, extent)?;
         self.available.insert(index, false);
         self.requested.insert(index, false);
         self.physics
-            .set_extents(self.heights.total_extent(), self.viewport_extent())
+            .set_extents(self.extents.total_extent(), self.viewport_extent())
     }
 
-    /// Removes one item and returns its last known height.
+    /// Removes one item and returns its last known extent.
     ///
     /// # Errors
     ///
     /// Returns an index, extent, or arithmetic validation error.
     pub fn remove(&mut self, index: usize) -> Result<f32, ScrollError> {
-        let height = self.heights.remove(index)?;
+        let extent = self.extents.remove(index)?;
         self.available.remove(index);
         self.requested.remove(index);
         self.physics
-            .set_extents(self.heights.total_extent(), self.viewport_extent())?;
-        Ok(height)
+            .set_extents(self.extents.total_extent(), self.viewport_extent())?;
+        Ok(extent)
     }
 
     /// Plans visible/preheat ranges and records refill demand without invoking a callback.
@@ -271,7 +271,7 @@ impl Virtualizer {
             .physics
             .position()
             .clamp(0.0, self.physics.maximum_position());
-        let visible = self.heights.visible_range(position, viewport)?;
+        let visible = self.extents.visible_range(position, viewport)?;
         let base = viewport * self.config.base_overscan_viewports;
         // Preheat around where the offset is heading, not only where it is.
         // Wheel input never leaves a fling velocity behind, so projecting from
@@ -305,7 +305,7 @@ impl Virtualizer {
         };
         let preheat_start = (position - before).max(0.0);
         let preheat_extent = viewport + before + after;
-        let preheat = self.heights.visible_range(preheat_start, preheat_extent)?;
+        let preheat = self.extents.visible_range(preheat_start, preheat_extent)?;
 
         let mut placeholders = 0_usize;
         let mut hits = 0_u64;
@@ -370,7 +370,7 @@ impl Virtualizer {
             preheat,
             refill: &self.refill,
             position,
-            content_extent: self.heights.total_extent(),
+            content_extent: self.extents.total_extent(),
             placeholders,
         })
     }
@@ -380,10 +380,10 @@ impl Virtualizer {
     }
 
     fn validate_range(&self, range: &Range<usize>) -> Result<(), ScrollError> {
-        if range.start > range.end || range.end > self.heights.len() {
+        if range.start > range.end || range.end > self.extents.len() {
             return Err(ScrollError::IndexOutOfBounds {
                 index: range.end.max(range.start),
-                len: self.heights.len(),
+                len: self.extents.len(),
             });
         }
         Ok(())
@@ -400,7 +400,7 @@ mod tests {
         // wheel gesture never sets, so the window stayed symmetric and one
         // viewport wide and a fast gesture landed outside it every frame.
         let mut virtualizer = Virtualizer::new(
-            HeightIndex::with_uniform(10_000, 32.0).expect("heights"),
+            ExtentIndex::with_uniform(10_000, 32.0).expect("extents"),
             512.0,
             ScrollPlatform::Ios,
             VirtualizerConfig::default(),
@@ -435,7 +435,7 @@ mod tests {
         // dropped the rows the other one needed, so a settled viewport could
         // stay on skeletons indefinitely.
         let mut virtualizer = Virtualizer::new(
-            HeightIndex::with_uniform(10_000, 32.0).expect("heights"),
+            ExtentIndex::with_uniform(10_000, 32.0).expect("extents"),
             512.0,
             ScrollPlatform::Ios,
             VirtualizerConfig::default(),
@@ -474,7 +474,7 @@ mod tests {
         // Regression: `requested` was latched forever, so an item the Shell
         // never materialized could never be requested again and stayed blank.
         let mut virtualizer = Virtualizer::new(
-            HeightIndex::with_uniform(4_000, 32.0).expect("heights"),
+            ExtentIndex::with_uniform(4_000, 32.0).expect("extents"),
             320.0,
             ScrollPlatform::Ios,
             VirtualizerConfig::default(),
@@ -499,9 +499,9 @@ mod tests {
 
     #[test]
     fn emits_coalesced_refill_once_and_uses_placeholders_until_available() {
-        let heights = HeightIndex::with_uniform(1_000_000, 20.0).expect("heights");
+        let extents = ExtentIndex::with_uniform(1_000_000, 20.0).expect("extents");
         let mut virtualizer = Virtualizer::new(
-            heights,
+            extents,
             100.0,
             ScrollPlatform::Android,
             VirtualizerConfig::default(),
@@ -519,9 +519,9 @@ mod tests {
 
     #[test]
     fn correction_above_the_viewport_preserves_the_visual_anchor() {
-        let heights = HeightIndex::with_uniform(100, 20.0).expect("heights");
+        let extents = ExtentIndex::with_uniform(100, 20.0).expect("extents");
         let mut virtualizer = Virtualizer::new(
-            heights,
+            extents,
             100.0,
             ScrollPlatform::Ios,
             VirtualizerConfig::default(),
@@ -530,8 +530,8 @@ mod tests {
         virtualizer.physics_mut().jump_to(500.0).expect("position");
         assert_eq!(
             virtualizer
-                .update_height(2, 30.0)
-                .expect("height")
+                .update_extent(2, 30.0)
+                .expect("extent")
                 .to_bits(),
             10.0_f64.to_bits(),
         );
@@ -544,9 +544,9 @@ mod tests {
 
     #[test]
     fn velocity_expands_preheat_in_the_fling_direction() {
-        let heights = HeightIndex::with_uniform(1_000, 10.0).expect("heights");
+        let extents = ExtentIndex::with_uniform(1_000, 10.0).expect("extents");
         let mut virtualizer = Virtualizer::new(
-            heights,
+            extents,
             100.0,
             ScrollPlatform::Android,
             VirtualizerConfig::default(),
@@ -567,9 +567,9 @@ mod tests {
 
     #[test]
     fn reverse_velocity_expands_preheat_before_the_visible_range() {
-        let heights = HeightIndex::with_uniform(1_000, 10.0).expect("heights");
+        let extents = ExtentIndex::with_uniform(1_000, 10.0).expect("extents");
         let mut virtualizer = Virtualizer::new(
-            heights,
+            extents,
             100.0,
             ScrollPlatform::Ios,
             VirtualizerConfig::default(),
@@ -593,10 +593,10 @@ mod tests {
 
     #[test]
     fn rejects_unbounded_preheat_configuration() {
-        let heights = HeightIndex::with_uniform(1, 10.0).expect("heights");
+        let extents = ExtentIndex::with_uniform(1, 10.0).expect("extents");
         assert!(matches!(
             Virtualizer::new(
-                heights,
+                extents,
                 100.0,
                 ScrollPlatform::Android,
                 VirtualizerConfig {
@@ -613,10 +613,10 @@ mod tests {
 
     #[test]
     fn cache_invalidation_structure_edits_and_range_errors_are_explicit() {
-        let heights = HeightIndex::with_uniform(10, 20.0).expect("heights");
+        let extents = ExtentIndex::with_uniform(10, 20.0).expect("extents");
         assert!(matches!(
             Virtualizer::new(
-                heights.clone(),
+                extents.clone(),
                 -1.0,
                 ScrollPlatform::Android,
                 VirtualizerConfig::default(),
@@ -627,13 +627,13 @@ mod tests {
             })
         ));
         let mut virtualizer = Virtualizer::new(
-            heights,
+            extents,
             100.0,
             ScrollPlatform::Android,
             VirtualizerConfig::default(),
         )
         .expect("virtualizer");
-        assert_eq!(virtualizer.heights().len(), 10);
+        assert_eq!(virtualizer.extents().len(), 10);
         assert!(matches!(
             virtualizer.mark_available(11..12),
             Err(ScrollError::IndexOutOfBounds { .. })
@@ -650,12 +650,12 @@ mod tests {
         assert_eq!(frame.refill, &[1..3, 5..7]);
 
         virtualizer.insert(2, 30.0).expect("insert");
-        assert_eq!(virtualizer.heights().height(2), Some(30.0));
+        assert_eq!(virtualizer.extents().extent(2), Some(30.0));
         assert_eq!(
             virtualizer.remove(2).expect("remove").to_bits(),
             30.0_f32.to_bits()
         );
-        assert_eq!(virtualizer.heights().len(), 10);
+        assert_eq!(virtualizer.extents().len(), 10);
         assert!(matches!(
             virtualizer.insert(11, 10.0),
             Err(ScrollError::IndexOutOfBounds { .. })
@@ -669,9 +669,9 @@ mod tests {
     #[test]
     fn accelerated_thirty_minute_soak_keeps_heap_bounded() {
         const FRAMES: usize = 30 * 60 * 120;
-        let heights = HeightIndex::with_uniform(1_000_000, 20.0).expect("heights");
+        let extents = ExtentIndex::with_uniform(1_000_000, 20.0).expect("extents");
         let mut virtualizer = Virtualizer::new(
-            heights,
+            extents,
             800.0,
             ScrollPlatform::Android,
             VirtualizerConfig::default(),
@@ -696,7 +696,7 @@ mod tests {
             if frame % 3_601 == 0 {
                 let item = (frame * 7_919) % 1_000_000;
                 virtualizer
-                    .update_height(item, if frame % 7_202 == 0 { 24.0 } else { 20.0 })
+                    .update_extent(item, if frame % 7_202 == 0 { 24.0 } else { 20.0 })
                     .expect("measurement");
             }
             virtualizer

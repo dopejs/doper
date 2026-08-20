@@ -11,7 +11,7 @@ pub trait IntrinsicMeasurer {
     fn measure(&mut self, scene: &Scene, node: NodeId, constraints: BoxConstraints) -> Size;
 }
 
-/// Supplies variable-height virtual-list geometry owned by the scrolling subsystem.
+/// Supplies variable-size single-axis virtual-list geometry owned by scrolling.
 ///
 /// Returning `None` uses the Scene's validated uniform-height estimate. This keeps
 /// the reference layout path deterministic before a Core scroll state is created.
@@ -19,8 +19,8 @@ pub trait VirtualLayoutProvider {
     /// Returns the leading logical offset for one item in its virtual list.
     fn item_offset(&self, list: NodeId, item_index: u32) -> Option<f32>;
 
-    /// Returns the current total logical content height for one virtual list.
-    fn content_height(&self, list: NodeId) -> Option<f32>;
+    /// Returns the current total logical content extent along the configured axis.
+    fn content_extent(&self, list: NodeId) -> Option<f32>;
 }
 
 /// Uniform-estimate virtual geometry used by standalone layout callers.
@@ -32,7 +32,7 @@ impl VirtualLayoutProvider for EstimatedVirtualLayout {
         None
     }
 
-    fn content_height(&self, _list: NodeId) -> Option<f32> {
+    fn content_extent(&self, _list: NodeId) -> Option<f32> {
         None
     }
 }
@@ -482,10 +482,17 @@ impl LayoutEngine {
         let offset = virtual_item_offset(scene, parent, item_index, virtual_layout)?;
         let insets = parent_frame.padding.add(parent_frame.border);
         let margin = style_margin(scene, node, percentage_basis(parent_size.width, 0.0))?;
-        self.back.offsets[index] = Point::new(
-            insets.left + margin.values.left,
-            insets.top + offset + margin.values.top,
-        );
+        self.back.offsets[index] = if parent_frame.row {
+            Point::new(
+                insets.left + offset + margin.values.left,
+                insets.top + margin.values.top,
+            )
+        } else {
+            Point::new(
+                insets.left + margin.values.left,
+                insets.top + offset + margin.values.top,
+            )
+        };
         subtree_len(scene, node)
     }
 
@@ -699,14 +706,23 @@ fn compute_subtree(
             {
                 let offset = virtual_item_offset(scene, parent.node, item_index, virtual_layout)?;
                 let parent_insets = parent.padding.add(parent.border);
-                output.offsets[frame.index] = Point::new(
-                    parent_insets.left + frame.margin.values.left,
-                    parent_insets.top + offset + frame.margin.values.top,
-                );
-                // A virtual list is always a column, so its cross axis is width.
-                parent.cross = parent
-                    .cross
-                    .max(frame.margin.values.left + size.width + frame.margin.values.right);
+                output.offsets[frame.index] = if parent.row {
+                    Point::new(
+                        parent_insets.left + offset + frame.margin.values.left,
+                        parent_insets.top + frame.margin.values.top,
+                    )
+                } else {
+                    Point::new(
+                        parent_insets.left + frame.margin.values.left,
+                        parent_insets.top + offset + frame.margin.values.top,
+                    )
+                };
+                let cross = if parent.row {
+                    frame.margin.values.top + size.height + frame.margin.values.bottom
+                } else {
+                    frame.margin.values.left + size.width + frame.margin.values.right
+                };
+                parent.cross = parent.cross.max(cross);
             } else {
                 if parent.placed {
                     parent.main += parent.gap;
@@ -916,18 +932,21 @@ fn make_frame(
         insets.vertical(),
         border_box,
     )?;
-    // A virtual list always flows vertically: its item offsets come from Core's
-    // height index, not from sibling accumulation.
+    // Virtual items use Core's axis-neutral extent index rather than sibling accumulation.
     let virtual_list = scene.virtual_list(node);
     let direction = scene
         .style_keyword(node, StyleProperty::FlexDirection, 0)
         .unwrap_or(StyleKeyword::Column);
-    let row = virtual_list.is_none()
-        && (scene
-            .f32_prop(node, Prop::Direction)
-            .is_some_and(|value| value == DIRECTION_ROW)
-            || (scene.f32_prop(node, Prop::Direction).is_none()
-                && matches!(direction, StyleKeyword::Row | StyleKeyword::RowReverse)));
+    let row = virtual_list.map_or_else(
+        || {
+            scene
+                .f32_prop(node, Prop::Direction)
+                .is_some_and(|value| value == DIRECTION_ROW)
+                || (scene.f32_prop(node, Prop::Direction).is_none()
+                    && matches!(direction, StyleKeyword::Row | StyleKeyword::RowReverse))
+        },
+        |config| config.axis == pingo_abi::VirtualAxis::X,
+    );
     let reverse = virtual_list.is_none()
         && scene.f32_prop(node, Prop::Direction).is_none()
         && matches!(
@@ -985,7 +1004,7 @@ fn make_frame(
         None => 0.0,
     };
     let main = match virtual_list {
-        Some(_) => virtual_content_height(scene, node, virtual_layout)?,
+        Some(_) => virtual_content_extent(scene, node, virtual_layout)?,
         None => 0.0,
     };
     Ok(Frame {
@@ -1248,24 +1267,21 @@ fn virtual_item_offset(
     let config = scene.virtual_list(list).ok_or(LayoutError::SceneInvariant(
         "virtual item parent lost its configuration",
     ))?;
-    validate_virtual_dimension(list, config.estimated_item_height * item_index as f32)
+    validate_virtual_dimension(list, config.estimated_item_size * item_index as f32)
 }
 
-fn virtual_content_height(
+fn virtual_content_extent(
     scene: &Scene,
     list: NodeId,
     virtual_layout: &impl VirtualLayoutProvider,
 ) -> Result<f32, LayoutError> {
-    if let Some(height) = virtual_layout.content_height(list) {
-        return validate_virtual_dimension(list, height);
+    if let Some(extent) = virtual_layout.content_extent(list) {
+        return validate_virtual_dimension(list, extent);
     }
     let config = scene.virtual_list(list).ok_or(LayoutError::SceneInvariant(
         "virtual list lost its configuration",
     ))?;
-    validate_virtual_dimension(
-        list,
-        config.estimated_item_height * config.item_count as f32,
-    )
+    validate_virtual_dimension(list, config.estimated_item_size * config.item_count as f32)
 }
 
 fn validate_virtual_dimension(node: NodeId, value: f32) -> Result<f32, LayoutError> {
@@ -2067,7 +2083,7 @@ mod tests {
                 (list == id(1)).then_some(item_index as f32 * 30.0)
             }
 
-            fn content_height(&self, list: NodeId) -> Option<f32> {
+            fn content_extent(&self, list: NodeId) -> Option<f32> {
                 (list == id(1)).then_some(300.0)
             }
         }
@@ -2092,10 +2108,11 @@ mod tests {
                 Mutation::ConfigureVirtualList {
                     node_id: list.raw(),
                     item_count: 10,
-                    estimated_item_height: 20.0,
+                    estimated_item_size: 20.0,
                     base_overscan_viewports: 1.0,
                     velocity_horizon_seconds: 0.25,
                     maximum_ahead_viewports: 4.0,
+                    axis: pingo_abi::VirtualAxis::Y,
                 },
                 Mutation::SetVirtualItem {
                     node_id: seventh.raw(),
@@ -2124,6 +2141,78 @@ mod tests {
         assert_eq!(
             engine.snapshot().geometry(ninth),
             Some((Point::new(0.0, 270.0), Size::new(0.0, 30.0)))
+        );
+    }
+
+    #[test]
+    fn horizontal_virtual_items_share_the_axis_neutral_offset_oracle() {
+        struct VirtualGeometry;
+
+        impl VirtualLayoutProvider for VirtualGeometry {
+            fn item_offset(&self, list: NodeId, item_index: u32) -> Option<f32> {
+                (list == id(1)).then_some(item_index as f32 * 30.0)
+            }
+
+            fn content_extent(&self, list: NodeId) -> Option<f32> {
+                (list == id(1)).then_some(300.0)
+            }
+        }
+
+        let root = id(0);
+        let list = id(1);
+        let seventh = id(2);
+        let ninth = id(3);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(list, NodeKind::Scroll, Some(root)),
+                create(seventh, NodeKind::Container, Some(list)),
+                create(ninth, NodeKind::Container, Some(list)),
+                set_f32(list, Prop::Width, 80.0),
+                set_f32(list, Prop::Height, 100.0),
+                set_f32(seventh, Prop::Width, 30.0),
+                set_f32(seventh, Prop::Height, 10.0),
+                set_f32(ninth, Prop::Width, 30.0),
+                set_f32(ninth, Prop::Height, 10.0),
+                Mutation::ConfigureVirtualList {
+                    node_id: list.raw(),
+                    item_count: 10,
+                    estimated_item_size: 20.0,
+                    base_overscan_viewports: 1.0,
+                    velocity_horizon_seconds: 0.25,
+                    maximum_ahead_viewports: 4.0,
+                    axis: pingo_abi::VirtualAxis::X,
+                },
+                Mutation::SetVirtualItem {
+                    node_id: seventh.raw(),
+                    item_index: 7,
+                },
+                Mutation::SetVirtualItem {
+                    node_id: ninth.raw(),
+                    item_index: 9,
+                },
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout_with_virtual(
+                &scene,
+                BoxConstraints::tight(Size::new(80.0, 100.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+                &VirtualGeometry,
+            )
+            .expect("layout");
+
+        assert_eq!(
+            engine.snapshot().geometry(seventh),
+            Some((Point::new(210.0, 0.0), Size::new(30.0, 10.0)))
+        );
+        assert_eq!(
+            engine.snapshot().geometry(ninth),
+            Some((Point::new(270.0, 0.0), Size::new(30.0, 10.0)))
         );
     }
 

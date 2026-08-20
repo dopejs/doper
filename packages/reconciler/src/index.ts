@@ -4,6 +4,7 @@ export {
   NodeKind,
   Prop,
   ResourceKind,
+  VirtualAxis,
   PROP_METADATA,
 } from "./generated";
 export {

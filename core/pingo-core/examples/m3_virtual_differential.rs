@@ -73,10 +73,11 @@ fn initial_mutations() -> Vec<Mutation> {
         Mutation::ConfigureVirtualList {
             node_id: id(1),
             item_count: 1_000_000,
-            estimated_item_height: 20.0,
+            estimated_item_size: 20.0,
             base_overscan_viewports: 1.0,
             velocity_horizon_seconds: 0.25,
             maximum_ahead_viewports: 4.0,
+            axis: pingo_abi::VirtualAxis::Y,
         },
     ]
 }

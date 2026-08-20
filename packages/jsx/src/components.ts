@@ -5,14 +5,17 @@ import type {
   EditableTextProps,
   ImageProps,
   TextProps,
+  ViewHandle,
   VirtualViewProps,
+  Ref,
 } from "./types";
 
 const FOUNDATION_COMPONENT = Symbol.for("dopejs.pingo.foundation-component");
 
 /** Public general-purpose box, currently mapped to the compatible container intrinsic. */
-export type ViewProps = ContainerProps & {
-  /** Explicit vertical virtualization contract; never inferred from overflow. */
+export type ViewProps = Omit<ContainerProps, "ref"> & {
+  readonly ref?: Ref<ViewHandle>;
+  /** Explicit single-axis virtualization contract; never inferred from overflow. */
   readonly virtual?: VirtualViewProps;
   readonly scrollX?: number;
   readonly scrollY?: number;
@@ -49,13 +52,13 @@ export function TextArea(props: TextAreaProps): AnyPingoElement {
   return compatibleHostElement("editableText", { ...props, multiline: true });
 }
 
-function compatibleHostElement(type: "container", props: ContainerProps): AnyPingoElement;
+function compatibleHostElement(type: "container", props: ViewProps): AnyPingoElement;
 function compatibleHostElement(type: "text", props: TextProps): AnyPingoElement;
 function compatibleHostElement(type: "image", props: ImageProps): AnyPingoElement;
 function compatibleHostElement(type: "editableText", props: EditableTextProps): AnyPingoElement;
 function compatibleHostElement(
   type: "container" | "editableText" | "image" | "text",
-  props: ContainerProps | EditableTextProps | ImageProps | TextProps,
+  props: ViewProps | EditableTextProps | ImageProps | TextProps,
 ): AnyPingoElement {
   const compatibleProps: Record<string, unknown> = {
     ...props,

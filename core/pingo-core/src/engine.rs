@@ -2139,6 +2139,8 @@ fn is_scroll_command(command: &InputCommand) -> bool {
             | InputCommand::ScrollEnd { .. }
             | InputCommand::ScrollCancel { .. }
             | InputCommand::SetScrollVelocity { .. }
+            | InputCommand::ScrollTo { .. }
+            | InputCommand::ScrollBy { .. }
     )
 }
 
@@ -2947,10 +2949,11 @@ mod tests {
                 Mutation::ConfigureVirtualList {
                     node_id: id(1),
                     item_count: 1_000_000,
-                    estimated_item_height: item_height,
+                    estimated_item_size: item_height,
                     base_overscan_viewports: 1.0,
                     velocity_horizon_seconds: 0.25,
                     maximum_ahead_viewports: 4.0,
+                    axis: pingo_abi::VirtualAxis::Y,
                 },
             ],
         )
@@ -2985,10 +2988,50 @@ mod tests {
                 Mutation::ConfigureVirtualList {
                     node_id: id(1),
                     item_count: 1_000_000,
-                    estimated_item_height: 20.0,
+                    estimated_item_size: 20.0,
                     base_overscan_viewports: 1.0,
                     velocity_horizon_seconds: 0.25,
                     maximum_ahead_viewports: 4.0,
+                    axis: pingo_abi::VirtualAxis::Y,
+                },
+            ],
+        )
+    }
+
+    fn horizontal_virtual_list_tree() -> Vec<u8> {
+        frame(
+            1,
+            vec![
+                Mutation::CreateNode {
+                    node_id: id(0),
+                    kind: NodeKind::Root,
+                    parent: NULL_NODE_ID,
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::CreateNode {
+                    node_id: id(1),
+                    kind: NodeKind::Scroll,
+                    parent: id(0),
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Width,
+                    value: 100.0,
+                },
+                Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Height,
+                    value: 80.0,
+                },
+                Mutation::ConfigureVirtualList {
+                    node_id: id(1),
+                    item_count: 1_000_000,
+                    estimated_item_size: 20.0,
+                    base_overscan_viewports: 1.0,
+                    velocity_horizon_seconds: 0.25,
+                    maximum_ahead_viewports: 4.0,
+                    axis: pingo_abi::VirtualAxis::X,
                 },
             ],
         )
@@ -5190,6 +5233,47 @@ mod tests {
     }
 
     #[test]
+    fn imperative_scroll_commands_are_atomic_clamped_and_cancel_motion() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine.commit(&scroll_tree()).expect("initial frame");
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::SetScrollVelocity {
+                    node_id: id(1),
+                    velocity_x: 0.0,
+                    velocity_y: 120.0,
+                }],
+            ))
+            .expect("velocity");
+        engine
+            .input(&input(
+                2,
+                vec![
+                    InputCommand::ScrollTo {
+                        node_id: id(1),
+                        x: 12.0,
+                        y: 500.0,
+                    },
+                    InputCommand::ScrollBy {
+                        node_id: id(1),
+                        delta_x: 8.0,
+                        delta_y: -40.0,
+                    },
+                ],
+            ))
+            .expect("imperative scroll")
+            .expect("changed frame");
+        assert_eq!(
+            engine
+                .scene()
+                .scroll_position(NodeId::from_raw(id(1)).expect("id")),
+            Some([20.0, 460.0])
+        );
+        assert_eq!(engine.advance(0.25), Ok(None));
+    }
+
+    #[test]
     fn scroll_input_is_atomic_sequence_checked_and_programmatic_scroll_wins() {
         let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
         engine.commit(&scroll_tree()).expect("initial frame");
@@ -5415,6 +5499,59 @@ mod tests {
             );
             assert_ne!(*rgba & 0xff, 0, "skeleton must be opaque enough to see");
         }
+    }
+
+    #[test]
+    fn horizontal_virtualization_scrolls_measures_and_paints_along_x() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let output = engine
+            .commit(&horizontal_virtual_list_tree())
+            .expect("initial frame");
+        let display = DisplayList::decode(&output.display_list).expect("display list");
+        let skeletons: Vec<[f32; 4]> = display
+            .instructions
+            .iter()
+            .filter_map(|instruction| match instruction.command {
+                DisplayCommand::FillPlaceholder { rect, .. } => Some(rect),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(skeletons.len(), 5);
+        assert!(skeletons.iter().all(|rect| rect[1] == 0.0));
+        assert!(
+            skeletons
+                .iter()
+                .all(|rect| (rect[2] - 20.0).abs() < f32::EPSILON)
+        );
+        assert!(
+            skeletons
+                .iter()
+                .all(|rect| (rect[3] - 80.0).abs() < f32::EPSILON)
+        );
+
+        engine.take_virtual_refills();
+        engine
+            .input(&input(
+                1,
+                vec![InputCommand::ScrollDelta {
+                    node_id: id(1),
+                    delta_x: 200.0,
+                    delta_y: 0.0,
+                    elapsed_micros: 16_667,
+                }],
+            ))
+            .expect("horizontal input");
+        let list = NodeId::from_raw(id(1)).expect("list");
+        let position = engine.scene().scroll_position(list).expect("position");
+        assert!(position[0] > 0.0);
+        assert!(position[1].abs() < f32::EPSILON);
+        assert!(
+            engine
+                .take_virtual_refills()
+                .iter()
+                .any(|request| request.start > 0),
+            "moving beyond the first viewport must request a later window"
+        );
     }
 
     #[test]

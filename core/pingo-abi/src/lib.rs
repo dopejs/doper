@@ -309,6 +309,9 @@ mod tests {
             InputOpcode::ScrollDelta,
             InputOpcode::ScrollEnd,
             InputOpcode::ScrollCancel,
+            InputOpcode::SetScrollVelocity,
+            InputOpcode::ScrollTo,
+            InputOpcode::ScrollBy,
             InputOpcode::Commit,
         ];
         for opcode in inputs {

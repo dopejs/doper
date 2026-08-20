@@ -4,7 +4,7 @@ use crate::codec::{
 };
 use crate::{
     AbiError, MAX_MUTATION_BYTES, MAX_MUTATION_INSTRUCTIONS, MAX_RESOURCE_BYTES, MUTATION_MAGIC,
-    MutationOpcode, NodeKind, Prop, PropValueType, ResourceKind, StreamKind,
+    MutationOpcode, NodeKind, Prop, PropValueType, ResourceKind, StreamKind, VirtualAxis,
 };
 
 /// One validated Shell-to-Core mutation.
@@ -118,14 +118,16 @@ pub enum Mutation {
         node_id: u32,
         /// Total logical item count without materializing Scene nodes.
         item_count: u32,
-        /// Initial logical height estimate for every item.
-        estimated_item_height: f32,
+        /// Initial logical size estimate for every item along `axis`.
+        estimated_item_size: f32,
         /// Symmetric preheat extent in viewport multiples.
         base_overscan_viewports: f32,
         /// Velocity projection horizon in seconds.
         velocity_horizon_seconds: f32,
         /// Maximum directional preheat extent in viewport multiples.
         maximum_ahead_viewports: f32,
+        /// Main axis used for item offsets, measurement, scrolling, and placeholders.
+        axis: VirtualAxis,
     },
     /// Associates one materialized direct child with its logical list index.
     SetVirtualItem {
@@ -398,14 +400,20 @@ fn decode_mutation(opcode: MutationOpcode, reader: &mut Reader<'_>) -> Result<Mu
             reader.read_zeroes(2)?;
             result
         }
-        MutationOpcode::ConfigureVirtualList => Mutation::ConfigureVirtualList {
-            node_id: reader.read_u32()?,
-            item_count: reader.read_u32()?,
-            estimated_item_height: reader.read_f32()?,
-            base_overscan_viewports: reader.read_f32()?,
-            velocity_horizon_seconds: reader.read_f32()?,
-            maximum_ahead_viewports: reader.read_f32()?,
-        },
+        MutationOpcode::ConfigureVirtualList => {
+            let result = Mutation::ConfigureVirtualList {
+                node_id: reader.read_u32()?,
+                item_count: reader.read_u32()?,
+                estimated_item_size: reader.read_f32()?,
+                base_overscan_viewports: reader.read_f32()?,
+                velocity_horizon_seconds: reader.read_f32()?,
+                maximum_ahead_viewports: reader.read_f32()?,
+                axis: VirtualAxis::from_u8(reader.read_u8()?)
+                    .ok_or(AbiError::InvalidValue("virtual axis"))?,
+            };
+            reader.read_zeroes(3)?;
+            result
+        }
         MutationOpcode::SetVirtualItem => Mutation::SetVirtualItem {
             node_id: reader.read_u32()?,
             item_index: reader.read_u32()?,
@@ -597,18 +605,22 @@ fn encode_mutation(writer: &mut Writer, instruction: &MutationInstruction) -> Re
         Mutation::ConfigureVirtualList {
             node_id,
             item_count,
-            estimated_item_height,
+            estimated_item_size,
             base_overscan_viewports,
             velocity_horizon_seconds,
             maximum_ahead_viewports,
+            axis,
         } => {
             writer.instruction(MutationOpcode::ConfigureVirtualList as u8, flags);
             writer.u32(*node_id);
             writer.u32(*item_count);
-            writer.f32(*estimated_item_height)?;
+            writer.f32(*estimated_item_size)?;
             writer.f32(*base_overscan_viewports)?;
             writer.f32(*velocity_horizon_seconds)?;
             writer.f32(*maximum_ahead_viewports)?;
+            writer.u8(*axis as u8);
+            writer.u8(0);
+            writer.u16(0);
         }
         Mutation::SetVirtualItem {
             node_id,
@@ -830,10 +842,11 @@ mod tests {
             Mutation::ConfigureVirtualList {
                 node_id: 17,
                 item_count: 1_000_000,
-                estimated_item_height: 24.0,
+                estimated_item_size: 24.0,
                 base_overscan_viewports: 1.0,
                 velocity_horizon_seconds: 0.25,
                 maximum_ahead_viewports: 4.0,
+                axis: VirtualAxis::Y,
             },
             Mutation::SetVirtualItem {
                 node_id: 18,

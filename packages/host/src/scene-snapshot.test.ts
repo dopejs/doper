@@ -3,6 +3,7 @@ import {
   NodeKind,
   Prop,
   ResourceKind,
+  VirtualAxis,
   decodeMutationBatch,
   encodeMutationBatch,
   type Mutation,
@@ -171,10 +172,11 @@ describe("MutationSceneSnapshot", () => {
           type: "configureVirtualList",
           nodeId: 2,
           itemCount: 1_000_000,
-          estimatedItemHeight: 24,
+          estimatedItemSize: 24,
           baseOverscanViewports: 1,
           velocityHorizonSeconds: 0.25,
           maximumAheadViewports: 4,
+          axis: VirtualAxis.Y,
         },
         { type: "setVirtualItem", nodeId: 3, itemIndex: 456_789 },
       ]),
@@ -185,10 +187,11 @@ describe("MutationSceneSnapshot", () => {
       type: "configureVirtualList",
       nodeId: 2,
       itemCount: 1_000_000,
-      estimatedItemHeight: 24,
+      estimatedItemSize: 24,
       baseOverscanViewports: 1,
       velocityHorizonSeconds: 0.25,
       maximumAheadViewports: 4,
+      axis: VirtualAxis.Y,
     });
     expect(mutations).toContainEqual({ type: "setVirtualItem", nodeId: 3, itemIndex: 456_789 });
   });

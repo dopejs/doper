@@ -9,6 +9,7 @@ import {
   type PingoEvent,
   type PingoNode,
   type NodeHandle,
+  type ViewHandle,
 } from "@dopejs/pingo-jsx";
 import { signal, useEffect } from "@dopejs/pingo-runtime";
 import { createStyleSheet } from "@dopejs/pingo-style";
@@ -31,6 +32,7 @@ import {
   TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET,
   TEXT_STYLE_V2_VARIANT_OFFSET,
   TEXT_STYLE_V2_WHITE_SPACE_OFFSET,
+  VirtualAxis,
 } from "./generated";
 import { decodeMutationBatch, type Mutation, type MutationBatch } from "./mutation-stream";
 import { createRoot, type MutationSink } from "./reconciler";
@@ -564,6 +566,27 @@ describe("reconciler", () => {
     expect(targetRef.current?.hasPointerCapture(7)).toBe(false);
   });
 
+  it("bridges ViewHandle programmatic scrolling without a Shell render", () => {
+    const sink = new RecordingSink();
+    const requests: unknown[] = [];
+    const viewRef: { current: ViewHandle | null } = { current: null };
+    const root = createRoot(sink, { onInteractionRequest: (request) => requests.push(request) });
+
+    root.render(View({ ref: viewRef, style: { overflowX: "scroll", overflowY: "scroll" } }));
+    const nodeId = viewRef.current?.nodeId;
+    viewRef.current?.scrollTo(120, 48);
+    viewRef.current?.scrollBy(-20, 12);
+    viewRef.current?.setScrollVelocity(30, -15);
+
+    expect(requests).toEqual([
+      { type: "scrollTo", nodeId, x: 120, y: 48 },
+      { type: "scrollBy", nodeId, deltaX: -20, deltaY: 12 },
+      { type: "setScrollVelocity", nodeId, velocityX: 30, velocityY: -15 },
+    ]);
+    expect(sink.batches).toHaveLength(1);
+    expect(() => viewRef.current?.scrollTo(Number.NaN, 0)).toThrow("scroll x must be finite");
+  });
+
   it("materializes only Core-requested virtual-list windows and reuses overlapping items", () => {
     const sink = new RecordingSink();
     const renderItem = vi.fn((index: number) => createElement("text", { value: `item ${index}` }));
@@ -583,7 +606,7 @@ describe("reconciler", () => {
     expect(configuration).toEqual(
       expect.objectContaining({
         itemCount: 1_000_000,
-        estimatedItemHeight: 40,
+        estimatedItemSize: 40,
         baseOverscanViewports: 1,
         velocityHorizonSeconds: 0.25,
         maximumAheadViewports: 4,
@@ -632,7 +655,11 @@ describe("reconciler", () => {
     expect(renderItem).not.toHaveBeenCalled();
     const configuration = mutationsOfType(sink.batches[0], "configureVirtualList")[0];
     expect(configuration).toEqual(
-      expect.objectContaining({ itemCount: 100, estimatedItemHeight: 32 }),
+      expect.objectContaining({
+        itemCount: 100,
+        estimatedItemSize: 32,
+        axis: VirtualAxis.Y,
+      }),
     );
     const nodeId = configuration?.nodeId ?? 0;
     expect(
@@ -649,10 +676,34 @@ describe("reconciler", () => {
     ).toEqual([4, 5, 6]);
   });
 
+  it("maps horizontal View.virtual to the same axis-neutral mutation contract", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    root.render(
+      createElement(View, {
+        style: { width: 320, height: 80, overflowX: "auto" },
+        virtual: {
+          axis: "x",
+          itemCount: 1_000_000,
+          estimatedItemSize: 48,
+          renderItem: (index) => createElement(Text, { value: String(index) }),
+        },
+      }),
+    );
+
+    expect(mutationsOfType(sink.batches[0], "configureVirtualList")).toEqual([
+      expect.objectContaining({
+        axis: VirtualAxis.X,
+        itemCount: 1_000_000,
+        estimatedItemSize: 48,
+      }),
+    ]);
+  });
+
   it("rejects conflicting View.virtual declarations before committing", () => {
     const cases: PingoNode[] = [
       createElement(View, {
-        style: { overflowY: "auto" },
+        style: { overflowX: "visible", overflowY: "visible" },
         children: createElement(Text, { value: "header" }),
         virtual: { itemCount: 1, estimatedItemSize: 20, renderItem: () => null },
       }),
@@ -661,9 +712,18 @@ describe("reconciler", () => {
         virtual: { itemCount: 1, estimatedItemSize: 20, renderItem: () => null },
       }),
       createElement(View, {
+        style: { overflowX: "visible", overflowY: "visible" },
+        virtual: {
+          axis: "x",
+          itemCount: 1,
+          estimatedItemSize: 20,
+          renderItem: () => null,
+        },
+      }),
+      createElement(View, {
         style: { overflowY: "auto" },
         virtual: {
-          axis: "x" as "y",
+          axis: "z" as "y",
           itemCount: 1,
           estimatedItemSize: 20,
           renderItem: () => null,

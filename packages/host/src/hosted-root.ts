@@ -588,6 +588,31 @@ class HostedCanvasRootController implements HostedCanvasRoot {
         return;
       case "blur":
         this.sendInputCommands([{ type: "blurNode", eventId, nodeId: request.nodeId }]);
+        return;
+      case "scrollTo":
+        this.sendInputCommands([
+          { type: "scrollTo", nodeId: request.nodeId, x: request.x, y: request.y },
+        ]);
+        return;
+      case "scrollBy":
+        this.sendInputCommands([
+          {
+            type: "scrollBy",
+            nodeId: request.nodeId,
+            deltaX: request.deltaX,
+            deltaY: request.deltaY,
+          },
+        ]);
+        return;
+      case "setScrollVelocity":
+        this.sendInputCommands([
+          {
+            type: "setScrollVelocity",
+            nodeId: request.nodeId,
+            velocityX: request.velocityX,
+            velocityY: request.velocityY,
+          },
+        ]);
     }
   }
 

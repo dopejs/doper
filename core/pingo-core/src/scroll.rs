@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use pingo_abi::{InputBatch, InputCommand};
+use pingo_abi::{InputBatch, InputCommand, VirtualAxis};
 use pingo_layout::{LayoutSnapshot, VirtualLayoutProvider};
 use pingo_paint::{PlaceholderRect, VirtualPaintResolver};
 use pingo_scene::{NodeId, Scene, VirtualListConfig};
 use pingo_scroll::{
-    HeightIndex, ScrollPhysics, ScrollPhysicsConfig, ScrollPlatform, Virtualizer, VirtualizerConfig,
+    ExtentIndex, ScrollPhysics, ScrollPhysicsConfig, ScrollPlatform, Virtualizer, VirtualizerConfig,
 };
 
 use crate::CoreError;
@@ -66,7 +66,7 @@ pub(crate) struct ScrollAdvance {
 }
 
 #[derive(Clone, Debug)]
-struct VirtualAxis {
+struct VirtualState {
     planner: Virtualizer,
     source: VirtualListConfig,
     materialized: BTreeSet<u32>,
@@ -77,21 +77,42 @@ struct VirtualAxis {
     unanswered_frames: u32,
     /// Skeletons for this frame, reused across frames without reallocating.
     placeholders: Vec<PlaceholderRect>,
-    /// Width used for skeleton rectangles, tracked from the scroll viewport.
-    content_width: f32,
+    /// Cross-axis extent used for skeleton rectangles.
+    cross_extent: f32,
     /// Item range the viewport intersects, as of the last plan.
     visible: (usize, usize),
 }
 
 #[derive(Clone, Debug)]
-enum VerticalAxis {
+enum AxisState {
     // Boxed for the same reason the virtual variant is: the physics grew a
     // pending fling and the enum is stored per scroll node.
     Plain(Box<ScrollPhysics>),
-    Virtual(Box<VirtualAxis>),
+    Virtual(Box<VirtualState>),
 }
 
-impl VerticalAxis {
+impl AxisState {
+    fn new(
+        content_extent: f64,
+        viewport_extent: f64,
+        cross_extent: f64,
+        platform: ScrollPlatform,
+        virtual_list: Option<VirtualListConfig>,
+    ) -> Result<Self, CoreError> {
+        match virtual_list {
+            Some(config) => {
+                let mut state = create_virtual_axis(config, viewport_extent, platform)?;
+                state.cross_extent = checked_position(cross_extent)?;
+                Ok(Self::Virtual(Box::new(state)))
+            }
+            None => Ok(Self::Plain(Box::new(ScrollPhysics::new(
+                content_extent,
+                viewport_extent,
+                ScrollPhysicsConfig::for_platform(platform),
+            )?))),
+        }
+    }
+
     fn physics(&self) -> &ScrollPhysics {
         match self {
             Self::Plain(physics) => physics,
@@ -105,17 +126,69 @@ impl VerticalAxis {
             Self::Virtual(axis) => axis.planner.physics_mut(),
         }
     }
+
+    fn set_extents(
+        &mut self,
+        content_extent: f64,
+        viewport_extent: f64,
+        cross_extent: f64,
+        platform: ScrollPlatform,
+        virtual_list: Option<VirtualListConfig>,
+    ) -> Result<(), CoreError> {
+        match (self, virtual_list) {
+            (Self::Virtual(state), Some(config)) if state.source == config => {
+                state.planner.set_viewport_extent(viewport_extent)?;
+                state.cross_extent = checked_position(cross_extent)?;
+            }
+            (Self::Plain(physics), None) => {
+                physics.set_extents(content_extent, viewport_extent)?;
+            }
+            (state, config) => {
+                let position = state.physics().position();
+                let mut replacement = Self::new(
+                    content_extent,
+                    viewport_extent,
+                    cross_extent,
+                    platform,
+                    config,
+                )?;
+                replacement.physics_mut().jump_to(position)?;
+                *state = replacement;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
 struct ScrollAxes {
-    x: ScrollPhysics,
-    y: VerticalAxis,
+    x: AxisState,
+    y: AxisState,
     estimated_velocity: [f64; 2],
     continuous_velocity: [f64; 2],
 }
 
 impl ScrollAxes {
+    fn virtual_state(&self) -> Option<&VirtualState> {
+        match &self.x {
+            AxisState::Virtual(state) => Some(state),
+            AxisState::Plain(_) => match &self.y {
+                AxisState::Virtual(state) => Some(state),
+                AxisState::Plain(_) => None,
+            },
+        }
+    }
+
+    fn virtual_state_mut(&mut self) -> Option<&mut VirtualState> {
+        match &mut self.x {
+            AxisState::Virtual(state) => Some(state),
+            AxisState::Plain(_) => match &mut self.y {
+                AxisState::Virtual(state) => Some(state),
+                AxisState::Plain(_) => None,
+            },
+        }
+    }
+
     fn has_continuous_velocity(&self) -> bool {
         self.continuous_velocity
             .iter()
@@ -129,21 +202,11 @@ impl ScrollAxes {
         platform: ScrollPlatform,
         virtual_list: Option<VirtualListConfig>,
     ) -> Result<Self, CoreError> {
-        let config = ScrollPhysicsConfig::for_platform(platform);
+        let x_virtual = virtual_list.filter(|config| config.axis == VirtualAxis::X);
+        let y_virtual = virtual_list.filter(|config| config.axis == VirtualAxis::Y);
         let mut result = Self {
-            x: ScrollPhysics::new(content[0], viewport[0], config)?,
-            y: match virtual_list {
-                Some(virtual_list) => VerticalAxis::Virtual(Box::new(create_virtual_axis(
-                    virtual_list,
-                    viewport[1],
-                    platform,
-                )?)),
-                None => VerticalAxis::Plain(Box::new(ScrollPhysics::new(
-                    content[1],
-                    viewport[1],
-                    config,
-                )?)),
-            },
+            x: AxisState::new(content[0], viewport[0], viewport[1], platform, x_virtual)?,
+            y: AxisState::new(content[1], viewport[1], viewport[0], platform, y_virtual)?,
             estimated_velocity: [0.0; 2],
             continuous_velocity: [0.0; 2],
         };
@@ -158,47 +221,40 @@ impl ScrollAxes {
         platform: ScrollPlatform,
         virtual_list: Option<VirtualListConfig>,
     ) -> Result<(), CoreError> {
-        self.x.set_extents(content[0], viewport[0])?;
-        let width = checked_position(viewport[0])?;
-        match (&mut self.y, virtual_list) {
-            (VerticalAxis::Virtual(axis), Some(config)) if axis.source == config => {
-                axis.planner.set_viewport_extent(viewport[1])?;
-                axis.content_width = width;
-            }
-            (VerticalAxis::Plain(physics), None) => {
-                physics.set_extents(content[1], viewport[1])?;
-            }
-            (_, Some(config)) => {
-                let position = self.y.physics().position();
-                let mut axis = create_virtual_axis(config, viewport[1], platform)?;
-                axis.content_width = width;
-                axis.planner.physics_mut().jump_to(position)?;
-                self.y = VerticalAxis::Virtual(Box::new(axis));
-            }
-            (_, None) => {
-                let position = self.y.physics().position();
-                let mut physics = ScrollPhysics::new(
-                    content[1],
-                    viewport[1],
-                    ScrollPhysicsConfig::for_platform(platform),
-                )?;
-                physics.jump_to(position)?;
-                self.y = VerticalAxis::Plain(Box::new(physics));
-            }
-        }
+        self.x.set_extents(
+            content[0],
+            viewport[0],
+            viewport[1],
+            platform,
+            virtual_list.filter(|config| config.axis == VirtualAxis::X),
+        )?;
+        self.y.set_extents(
+            content[1],
+            viewport[1],
+            viewport[0],
+            platform,
+            virtual_list.filter(|config| config.axis == VirtualAxis::Y),
+        )?;
         Ok(())
     }
 
     fn jump_to(&mut self, position: [f32; 2]) -> Result<(), CoreError> {
-        self.x.jump_to(f64::from(position[0]))?;
+        self.x.physics_mut().jump_to(f64::from(position[0]))?;
         self.y.physics_mut().jump_to(f64::from(position[1]))?;
         self.estimated_velocity = [0.0; 2];
+        self.continuous_velocity = [0.0; 2];
         Ok(())
+    }
+
+    fn jump_by(&mut self, delta: [f32; 2]) -> Result<bool, CoreError> {
+        let before = self.position()?;
+        self.jump_to([before[0] + delta[0], before[1] + delta[1]])?;
+        Ok(position_changed(self.position()?, before))
     }
 
     fn begin(&mut self) {
         self.continuous_velocity = [0.0; 2];
-        self.x.begin_drag();
+        self.x.physics_mut().begin_drag();
         self.y.physics_mut().begin_drag();
         self.estimated_velocity = [0.0; 2];
     }
@@ -217,31 +273,35 @@ impl ScrollAxes {
         }
         // Feed the observed gesture speed to both axes so the virtualizer can
         // preheat ahead of the motion even when no fling velocity is retained.
-        self.x.note_input_speed(self.estimated_velocity[0]);
+        self.x
+            .physics_mut()
+            .note_input_speed(self.estimated_velocity[0]);
         self.y
             .physics_mut()
             .note_input_speed(self.estimated_velocity[1]);
-        let x = self.x.drag_by(f64::from(delta_x))?;
+        let x = self.x.physics_mut().drag_by(f64::from(delta_x))?;
         let y = self.y.physics_mut().drag_by(f64::from(delta_y))?;
         Ok(x.changed || y.changed)
     }
 
     /// Adds a discrete wheel notch to both axes' animated destinations.
     fn wheel_notch(&mut self, delta_x: f32, delta_y: f32) -> Result<bool, CoreError> {
-        let x = self.x.wheel_notch_by(f64::from(delta_x))?;
+        let x = self.x.physics_mut().wheel_notch_by(f64::from(delta_x))?;
         let y = self.y.physics_mut().wheel_notch_by(f64::from(delta_y))?;
         Ok(x.changed || y.changed)
     }
 
     /// Returns whether either axis still owes a wheel animation frame.
     fn is_animating(&self) -> bool {
-        self.has_continuous_velocity() || self.x.is_animating() || self.y.physics().is_animating()
+        self.has_continuous_velocity()
+            || self.x.physics().is_animating()
+            || self.y.physics().is_animating()
     }
 
     fn set_velocity(&mut self, velocity: [f32; 2]) -> Result<(), CoreError> {
-        self.x.begin_drag();
+        self.x.physics_mut().begin_drag();
         self.y.physics_mut().begin_drag();
-        self.x.end_drag(0.0)?;
+        self.x.physics_mut().end_drag(0.0)?;
         self.y.physics_mut().end_drag(0.0)?;
         self.estimated_velocity = [0.0; 2];
         self.continuous_velocity = velocity.map(f64::from);
@@ -254,7 +314,7 @@ impl ScrollAxes {
         } else {
             [0.0; 2]
         };
-        self.x.end_drag(velocity[0])?;
+        self.x.physics_mut().end_drag(velocity[0])?;
         self.y.physics_mut().end_drag(velocity[1])?;
         self.estimated_velocity = [0.0; 2];
         Ok(())
@@ -262,12 +322,12 @@ impl ScrollAxes {
 
     fn advance(&mut self, elapsed: f64) -> Result<ScrollAdvance, CoreError> {
         if self.has_continuous_velocity() {
-            let previous = [self.x.position(), self.y.physics().position()];
+            let previous = [self.x.physics().position(), self.y.physics().position()];
             let x = (previous[0] + self.continuous_velocity[0] * elapsed)
-                .clamp(0.0, self.x.maximum_position());
+                .clamp(0.0, self.x.physics().maximum_position());
             let y_maximum = self.y.physics().maximum_position();
             let y = (previous[1] + self.continuous_velocity[1] * elapsed).clamp(0.0, y_maximum);
-            self.x.jump_to(x)?;
+            self.x.physics_mut().jump_to(x)?;
             self.y.physics_mut().jump_to(y)?;
             let x_changed = (x - previous[0]).abs() > f64::EPSILON;
             let y_changed = (y - previous[1]).abs() > f64::EPSILON;
@@ -282,7 +342,7 @@ impl ScrollAxes {
                 changed: x_changed || y_changed,
             });
         }
-        let x = self.x.advance(elapsed)?;
+        let x = self.x.physics_mut().advance(elapsed)?;
         let y = self.y.physics_mut().advance(elapsed)?;
         Ok(ScrollAdvance {
             active: x.active || y.active,
@@ -292,7 +352,7 @@ impl ScrollAxes {
 
     fn position(&self) -> Result<[f32; 2], CoreError> {
         Ok([
-            checked_position(self.x.position())?,
+            checked_position(self.x.physics().position())?,
             checked_position(self.y.physics().position())?,
         ])
     }
@@ -303,7 +363,7 @@ impl ScrollAxes {
         layout: &LayoutSnapshot,
         list: NodeId,
     ) -> Result<bool, CoreError> {
-        let VerticalAxis::Virtual(axis) = &mut self.y else {
+        let Some(axis) = self.virtual_state_mut() else {
             return Ok(false);
         };
         let mut next = BTreeSet::new();
@@ -339,7 +399,12 @@ impl ScrollAxes {
             {
                 let item_index = usize::try_from(item_index)
                     .map_err(|_| CoreError::InvalidScrollTarget { node: list })?;
-                corrected |= axis.planner.update_height(item_index, size.height)? != 0.0;
+                let item_size = if axis.source.axis == VirtualAxis::X {
+                    size.width
+                } else {
+                    size.height
+                };
+                corrected |= axis.planner.update_extent(item_index, item_size)? != 0.0;
             }
             child = scene.next_sibling(node);
         }
@@ -357,12 +422,12 @@ fn create_virtual_axis(
     source: VirtualListConfig,
     viewport: f64,
     platform: ScrollPlatform,
-) -> Result<VirtualAxis, CoreError> {
+) -> Result<VirtualState, CoreError> {
     let item_count = usize::try_from(source.item_count)
         .map_err(|_| CoreError::InvalidScrollPosition(f64::from(source.item_count)))?;
-    let heights = HeightIndex::with_uniform(item_count, source.estimated_item_height)?;
+    let extents = ExtentIndex::with_uniform(item_count, source.estimated_item_size)?;
     let planner = Virtualizer::new(
-        heights,
+        extents,
         viewport,
         platform,
         VirtualizerConfig {
@@ -371,7 +436,7 @@ fn create_virtual_axis(
             maximum_ahead_viewports: f64::from(source.maximum_ahead_viewports),
         },
     )?;
-    Ok(VirtualAxis {
+    Ok(VirtualState {
         planner,
         source,
         materialized: BTreeSet::new(),
@@ -380,7 +445,7 @@ fn create_virtual_axis(
         refill_in_flight: false,
         unanswered_frames: 0,
         placeholders: Vec::new(),
-        content_width: 0.0,
+        cross_extent: 0.0,
     })
 }
 
@@ -514,6 +579,14 @@ impl ScrollController {
                     velocity_y,
                     ..
                 } => state.set_velocity([*velocity_x, *velocity_y])?,
+                InputCommand::ScrollTo { x, y, .. } => {
+                    let before = state.position()?;
+                    state.jump_to([*x, *y])?;
+                    changed |= position_changed(state.position()?, before);
+                }
+                InputCommand::ScrollBy {
+                    delta_x, delta_y, ..
+                } => changed |= state.jump_by([*delta_x, *delta_y])?,
                 _ => return Err(CoreError::UnsupportedInputCommand),
             }
             active |= state.is_animating();
@@ -590,14 +663,15 @@ impl ScrollController {
         let can_axis = |position: f64, maximum: f64, incoming: f32| {
             (incoming < 0.0 && position > 0.0) || (incoming > 0.0 && position < maximum)
         };
-        Ok(
-            can_axis(state.x.position(), state.x.maximum_position(), delta[0])
-                || can_axis(
-                    state.y.physics().position(),
-                    state.y.physics().maximum_position(),
-                    delta[1],
-                ),
-        )
+        Ok(can_axis(
+            state.x.physics().position(),
+            state.x.physics().maximum_position(),
+            delta[0],
+        ) || can_axis(
+            state.y.physics().position(),
+            state.y.physics().maximum_position(),
+            delta[1],
+        ))
     }
 
     pub(crate) fn begin_direct(&mut self, node: NodeId) -> Result<(), CoreError> {
@@ -696,10 +770,7 @@ impl ScrollController {
     pub(crate) fn visible_item_range(&self) -> (usize, usize) {
         self.states
             .values()
-            .find_map(|state| match &state.y {
-                VerticalAxis::Virtual(axis) => Some(axis.visible),
-                VerticalAxis::Plain(_) => None,
-            })
+            .find_map(|state| state.virtual_state().map(|axis| axis.visible))
             .unwrap_or((0, 0))
     }
 
@@ -707,10 +778,7 @@ impl ScrollController {
     pub(crate) fn materialized_range(&self) -> (usize, usize) {
         self.states
             .values()
-            .find_map(|state| match &state.y {
-                VerticalAxis::Virtual(axis) => Some(axis.materialized.clone()),
-                VerticalAxis::Plain(_) => None,
-            })
+            .find_map(|state| state.virtual_state().map(|axis| axis.materialized.clone()))
             .and_then(|items| {
                 let first = *items.first()?;
                 let last = *items.last()?;
@@ -723,18 +791,19 @@ impl ScrollController {
     pub(crate) fn visible_placeholders(&self) -> usize {
         self.states
             .values()
-            .map(|state| match &state.y {
-                VerticalAxis::Virtual(axis) => axis.placeholders.len(),
-                VerticalAxis::Plain(_) => 0,
+            .map(|state| {
+                state
+                    .virtual_state()
+                    .map_or(0, |axis| axis.placeholders.len())
             })
             .sum()
     }
 
     pub(crate) fn placeholders(&self, node: NodeId) -> &[PlaceholderRect] {
-        match self.states.get(&node).map(|state| &state.y) {
-            Some(VerticalAxis::Virtual(axis)) => &axis.placeholders,
-            _ => &[],
-        }
+        self.states
+            .get(&node)
+            .and_then(ScrollAxes::virtual_state)
+            .map_or(&[], |axis| axis.placeholders.as_slice())
     }
 
     pub(crate) fn take_refills(&mut self) -> Vec<VirtualRefillRequest> {
@@ -743,7 +812,7 @@ impl ScrollController {
 
     pub(crate) fn plan_virtual_frames(&mut self) -> Result<(), CoreError> {
         for (&node, state) in &mut self.states {
-            let VerticalAxis::Virtual(axis) = &mut state.y else {
+            let Some(axis) = state.virtual_state_mut() else {
                 continue;
             };
             let (missing, visible, ranges, preheat) = {
@@ -764,15 +833,20 @@ impl ScrollController {
             axis.visible = (visible_range.start, visible_range.end);
             axis.placeholders.clear();
             if missing > 0 {
-                let width = axis.content_width;
+                let cross_extent = axis.cross_extent;
                 for index in visible {
                     if axis.planner.is_available(index) {
                         continue;
                     }
-                    let top = axis.planner.heights().offset_of(index)?;
-                    let height = axis.planner.heights().height(index).unwrap_or(0.0);
+                    let offset = axis.planner.extents().offset_of(index)?;
+                    let extent = axis.planner.extents().extent(index).unwrap_or(0.0);
+                    let rect = if axis.source.axis == VirtualAxis::X {
+                        [checked_position(offset)?, 0.0, extent, cross_extent]
+                    } else {
+                        [0.0, checked_position(offset)?, cross_extent, extent]
+                    };
                     axis.placeholders.push(PlaceholderRect {
-                        rect: [0.0, checked_position(top)?, width, height],
+                        rect,
                         rgba: PLACEHOLDER_RGBA,
                     });
                 }
@@ -871,19 +945,15 @@ fn position_changed(left: [f32; 2], right: [f32; 2]) -> bool {
 impl VirtualLayoutProvider for ScrollController {
     fn item_offset(&self, list: NodeId, item_index: u32) -> Option<f32> {
         let state = self.states.get(&list)?;
-        let VerticalAxis::Virtual(axis) = &state.y else {
-            return None;
-        };
+        let axis = state.virtual_state()?;
         let index = usize::try_from(item_index).ok()?;
-        virtual_dimension(axis.planner.heights().offset_of(index).ok()?)
+        virtual_dimension(axis.planner.extents().offset_of(index).ok()?)
     }
 
-    fn content_height(&self, list: NodeId) -> Option<f32> {
+    fn content_extent(&self, list: NodeId) -> Option<f32> {
         let state = self.states.get(&list)?;
-        let VerticalAxis::Virtual(axis) = &state.y else {
-            return None;
-        };
-        virtual_dimension(axis.planner.heights().total_extent())
+        let axis = state.virtual_state()?;
+        virtual_dimension(axis.planner.extents().total_extent())
     }
 }
 
@@ -893,7 +963,9 @@ fn input_node(command: &InputCommand) -> Result<NodeId, CoreError> {
         | InputCommand::ScrollDelta { node_id, .. }
         | InputCommand::ScrollEnd { node_id }
         | InputCommand::ScrollCancel { node_id }
-        | InputCommand::SetScrollVelocity { node_id, .. } => *node_id,
+        | InputCommand::SetScrollVelocity { node_id, .. }
+        | InputCommand::ScrollTo { node_id, .. }
+        | InputCommand::ScrollBy { node_id, .. } => *node_id,
         _ => return Err(CoreError::UnsupportedInputCommand),
     };
     NodeId::from_raw(raw).map_err(CoreError::Scene)

@@ -171,6 +171,8 @@ pub fn edit_command_from_input(
         | InputCommand::ScrollEnd { .. }
         | InputCommand::ScrollCancel { .. }
         | InputCommand::SetScrollVelocity { .. }
+        | InputCommand::ScrollTo { .. }
+        | InputCommand::ScrollBy { .. }
         | InputCommand::DispatchEvent { .. }
         | InputCommand::SetPointerCapture { .. }
         | InputCommand::ReleasePointerCapture { .. }

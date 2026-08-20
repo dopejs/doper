@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_MUTATION_INSTRUCTIONS, NodeKind, Prop, ResourceKind } from "./generated";
+import { MAX_MUTATION_INSTRUCTIONS, NodeKind, Prop, ResourceKind, VirtualAxis } from "./generated";
 import {
   NULL_NODE_ID,
   decodeMutationBatch,
@@ -35,7 +35,7 @@ describe("Mutation Stream", () => {
     const bytes = encodeMutationBatch(GOLDEN_BATCH);
     expect(decodeMutationBatch(bytes)).toEqual(GOLDEN_BATCH);
     expect(toHex(bytes)).toBe(
-      "444f504d0d0010006400000005000000010005000700000003000000ffffffffffffffff1000040007000000010000000040a0433000060009000000010000000500000068656c6c6f0000002000040007000000090000000a000000f00002002a000000",
+      "444f504d0e0010006400000005000000010005000700000003000000ffffffffffffffff1000040007000000010000000040a0433000060009000000010000000500000068656c6c6f0000002000040007000000090000000a000000f00002002a000000",
     );
   });
 
@@ -91,10 +91,11 @@ describe("Mutation Stream", () => {
           type: "configureVirtualList",
           nodeId: 1,
           itemCount: 1_000_000,
-          estimatedItemHeight: 24,
+          estimatedItemSize: 24,
           baseOverscanViewports: 1,
           velocityHorizonSeconds: 0.25,
           maximumAheadViewports: 4,
+          axis: VirtualAxis.Y,
         },
         { type: "setVirtualItem", nodeId: 2, itemIndex: 999_999 },
       ],
@@ -106,7 +107,7 @@ describe("Mutation Stream", () => {
         mutations: [
           {
             ...(batch.mutations[0] as Extract<Mutation, { type: "configureVirtualList" }>),
-            estimatedItemHeight: Number.NaN,
+            estimatedItemSize: Number.NaN,
           },
         ],
       }),

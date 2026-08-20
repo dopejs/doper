@@ -6,6 +6,7 @@ import {
   type NodeKind,
   type Prop,
   type ResourceKind,
+  type VirtualAxis,
 } from "@dopejs/pingo-reconciler";
 
 interface SnapshotResource {
@@ -34,10 +35,11 @@ interface SnapshotNode {
   virtualList:
     | {
         itemCount: number;
-        estimatedItemHeight: number;
+        estimatedItemSize: number;
         baseOverscanViewports: number;
         velocityHorizonSeconds: number;
         maximumAheadViewports: number;
+        axis: VirtualAxis;
       }
     | undefined;
 }
@@ -283,10 +285,11 @@ export class MutationSceneSnapshot {
       case "configureVirtualList":
         touchNode(mutation.nodeId).virtualList = {
           itemCount: mutation.itemCount,
-          estimatedItemHeight: mutation.estimatedItemHeight,
+          estimatedItemSize: mutation.estimatedItemSize,
           baseOverscanViewports: mutation.baseOverscanViewports,
           velocityHorizonSeconds: mutation.velocityHorizonSeconds,
           maximumAheadViewports: mutation.maximumAheadViewports,
+          axis: mutation.axis,
         };
         return;
       case "setVirtualItem":

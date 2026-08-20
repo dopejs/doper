@@ -25,6 +25,16 @@ export interface NodeHandle {
   blur(): void;
 }
 
+/** Mounted View handle for deterministic Core-owned scrolling. */
+export interface ViewHandle extends NodeHandle {
+  /** Immediately sets the logical content offset and cancels existing motion. */
+  scrollTo(x: number, y: number): void;
+  /** Immediately offsets the logical content position and cancels existing motion. */
+  scrollBy(deltaX: number, deltaY: number): void;
+  /** Starts constant-velocity Core scrolling; two zeros stop it. */
+  setScrollVelocity(velocityX: number, velocityY: number): void;
+}
+
 /** Object or callback ref. */
 export type Ref<T> = { current: T | null } | ((value: T | null) => void);
 
@@ -193,9 +203,9 @@ export interface VirtualListProps extends Omit<CommonProps, "children"> {
   readonly scrollY?: number;
 }
 
-/** Explicit vertical data window attached to a View. */
+/** Explicit single-axis data window attached to a View. */
 export interface VirtualViewProps {
-  readonly axis?: "y";
+  readonly axis?: "x" | "y";
   readonly itemCount: number;
   readonly estimatedItemSize: number;
   readonly getItemKey?: (index: number) => Key;
