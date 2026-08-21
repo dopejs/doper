@@ -4,8 +4,9 @@
 
 shadcn 心智的 pingo 原生组件库：组件 API 与皮肤语义对齐 shadcn/ui，渲染目标是
 pingo canvas 引擎而不是 DOM。以 npm 包分发（`publishConfig.access: public`，发布
-产物为 `dist/` + `styles/`），运行时是纯 TS——只组合 `@dopejs/pingo-jsx` 原语与
-`@dopejs/pingo-widgets` 的 Pressable，对引擎零改动依赖。
+产物为 `dist/` + `styles/`），运行时是纯 TS——组合 `@dopejs/pingo-jsx` 原语、
+`@dopejs/pingo-widgets` 的 Pressable、`@dopejs/pingo-editing` 的
+TextEditingController 与 `@dopejs/pingo-runtime` 的 hooks/signal，对引擎零改动依赖。
 
 ## 快速开始
 
@@ -35,7 +36,8 @@ root.render(
   覆盖，写在后面的 sheet 生效。即
   `styleSheets: [createPingoUiStyleSheet(), myOverrides]`。
 - 组件的 `className` prop 追加在组件自身类名之后（如
-  `pui-input pui-input--disabled mine`），因此同名规则下用户类可以覆盖组件默认。
+  `pui-input pui-input--disabled mine`）。注意：覆盖生效的依据是上面的 sheet 注册
+  顺序（同优先级按 source order），与类名在 className 字符串里的位置无关。
 
 ## 主题
 
