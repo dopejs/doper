@@ -21,6 +21,14 @@ export {
   type Woff2Decoder,
 } from "./font-loader";
 export {
+  PINGO_MEMO_TYPE,
+  isMemoComponent,
+  memo,
+  shallowEqual,
+  type MemoComponent,
+  type PropsAreEqual,
+} from "./memo";
+export {
   Fragment,
   type AnyPingoElement,
   type Color,
