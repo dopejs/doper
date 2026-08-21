@@ -1,0 +1,10 @@
+@use "../tokens" as t;
+
+// No pulse animation: Core animation only covers opacity/transform and CSS
+// keyframes are out of subset. Static placeholder until then.
+
+.pui-skeleton {
+  background-color: t.$accent;
+  border-radius: t.$radius-md;
+  &.pui-dark { background-color: t.$dark-accent; }
+}
