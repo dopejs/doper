@@ -269,11 +269,13 @@ impl LayoutEngine {
                             ))?;
                     BoxConstraints::tight(prior_size)?
                 };
+                let boundary_basis = PercentBasis::from_constraints(boundary_constraints);
                 compute_subtree(
                     scene,
                     boundary,
                     boundary_constraints,
-                    PercentBasis::from_constraints(boundary_constraints),
+                    boundary_basis,
+                    percentage_basis(boundary_basis.width, boundary_constraints.min_width),
                     measurer,
                     virtual_layout,
                     &mut self.back,
@@ -292,11 +294,13 @@ impl LayoutEngine {
                 .ids()
                 .first()
                 .ok_or(LayoutError::SceneInvariant("non-empty Scene has no root"))?;
+            let root_basis = PercentBasis::from_constraints(constraints);
             compute_subtree(
                 scene,
                 root,
                 constraints,
-                PercentBasis::from_constraints(constraints),
+                root_basis,
+                percentage_basis(root_basis.width, constraints.min_width),
                 measurer,
                 virtual_layout,
                 &mut self.back,
@@ -458,19 +462,22 @@ impl LayoutEngine {
                 "virtual item parent has no prior geometry",
             ))?;
         let parent_constraints = BoxConstraints::tight(parent_size)?;
+        let parent_basis = PercentBasis::from_constraints(parent_constraints);
         let parent_frame = make_frame(
             scene,
             parent,
             parent_constraints,
-            PercentBasis::from_constraints(parent_constraints),
+            parent_basis,
+            percentage_basis(parent_basis.width, parent_constraints.min_width),
             virtual_layout,
         )?;
-        let (child_constraints, child_basis) = constraints_for_child(scene, &parent_frame, node)?;
+        let input = constraints_for_child(scene, &parent_frame, node)?;
         compute_subtree(
             scene,
             node,
-            child_constraints,
-            child_basis,
+            input.constraints,
+            input.basis,
+            input.margin_basis,
             measurer,
             virtual_layout,
             &mut self.back,
@@ -486,7 +493,7 @@ impl LayoutEngine {
             ))?;
         let offset = virtual_item_offset(scene, parent, item_index, virtual_layout)?;
         let insets = parent_frame.padding.add(parent_frame.border);
-        let margin = style_margin(scene, node, percentage_basis(parent_size.width, 0.0))?;
+        let margin = style_margin(scene, node, input.margin_basis)?;
         self.back.offsets[index] = if parent_frame.row {
             Point::new(
                 insets.left + offset + margin.values.left,
@@ -564,23 +571,23 @@ fn relayout_boundary(
 }
 
 #[derive(Clone, Copy, Default)]
-struct EdgeInsets {
-    top: f32,
-    right: f32,
-    bottom: f32,
-    left: f32,
+pub(crate) struct EdgeInsets {
+    pub(crate) top: f32,
+    pub(crate) right: f32,
+    pub(crate) bottom: f32,
+    pub(crate) left: f32,
 }
 
 impl EdgeInsets {
-    fn horizontal(self) -> f32 {
+    pub(crate) fn horizontal(self) -> f32 {
         self.left + self.right
     }
 
-    fn vertical(self) -> f32 {
+    pub(crate) fn vertical(self) -> f32 {
         self.top + self.bottom
     }
 
-    fn add(self, other: Self) -> Self {
+    pub(crate) fn add(self, other: Self) -> Self {
         Self {
             top: self.top + other.top,
             right: self.right + other.right,
@@ -591,24 +598,24 @@ impl EdgeInsets {
 }
 
 #[derive(Clone, Copy, Default)]
-struct AutoEdges {
-    top: bool,
-    right: bool,
-    bottom: bool,
-    left: bool,
+pub(crate) struct AutoEdges {
+    pub(crate) top: bool,
+    pub(crate) right: bool,
+    pub(crate) bottom: bool,
+    pub(crate) left: bool,
 }
 
 #[derive(Clone, Copy, Default)]
-struct Margins {
-    values: EdgeInsets,
-    auto: AutoEdges,
+pub(crate) struct Margins {
+    pub(crate) values: EdgeInsets,
+    pub(crate) auto: AutoEdges,
 }
 
 /// Value of [`Prop::Direction`] that lays children out along the main axis.
 ///
 /// The prop is an `f32` because the Mutation Stream has no integer prop value
 /// type; anything other than exactly this value keeps the default column flow.
-const DIRECTION_ROW: f32 = 1.0;
+pub(crate) const DIRECTION_ROW: f32 = 1.0;
 
 /// Definite content-box extents used to resolve child percentage lengths.
 ///
@@ -673,6 +680,7 @@ fn compute_subtree(
     root: NodeId,
     constraints: BoxConstraints,
     basis: PercentBasis,
+    margin_basis: f32,
     measurer: &mut impl IntrinsicMeasurer,
     virtual_layout: &impl VirtualLayoutProvider,
     output: &mut LayoutSnapshot,
@@ -687,7 +695,14 @@ fn compute_subtree(
     }
 
     stack.clear();
-    stack.push(make_frame(scene, root, constraints, basis, virtual_layout)?);
+    stack.push(make_frame(
+        scene,
+        root,
+        constraints,
+        basis,
+        margin_basis,
+        virtual_layout,
+    )?);
     while let Some(frame) = stack.last_mut() {
         if let Some(child) = frame.next_child {
             frame.next_child = scene.next_sibling(child);
@@ -695,9 +710,15 @@ fn compute_subtree(
                 zero_subtree(scene, child, output)?;
                 continue;
             }
-            let (child_constraints, child_basis) = constraints_for_child(scene, frame, child)?;
-            let child_frame =
-                make_frame(scene, child, child_constraints, child_basis, virtual_layout)?;
+            let input = constraints_for_child(scene, frame, child)?;
+            let child_frame = make_frame(
+                scene,
+                child,
+                input.constraints,
+                input.basis,
+                input.margin_basis,
+                virtual_layout,
+            )?;
             stack.push(child_frame);
             continue;
         }
@@ -915,6 +936,7 @@ fn make_frame(
     node: NodeId,
     incoming: BoxConstraints,
     basis: PercentBasis,
+    margin_basis: f32,
     virtual_layout: &impl VirtualLayoutProvider,
 ) -> Result<Frame, LayoutError> {
     let index = scene.resolve(node).ok_or(LayoutError::SceneInvariant(
@@ -1096,7 +1118,7 @@ fn make_frame(
         next_child: scene.first_child(node),
         padding,
         border,
-        margin: style_margin(scene, node, width_basis)?,
+        margin: style_margin(scene, node, margin_basis)?,
         fixed_width,
         fixed_height,
         main,
@@ -1115,14 +1137,20 @@ fn make_frame(
     })
 }
 
+/// Everything a parent hands to one child before it is measured.
+struct ChildInput {
+    constraints: BoxConstraints,
+    basis: PercentBasis,
+    margin_basis: f32,
+}
+
 fn constraints_for_child(
     scene: &Scene,
     parent: &Frame,
     child: NodeId,
-) -> Result<(BoxConstraints, PercentBasis), LayoutError> {
-    let percentage_basis =
-        percentage_basis(parent.percent.width, parent.child_constraints.min_width);
-    let margin = style_margin(scene, child, percentage_basis)?.values;
+) -> Result<ChildInput, LayoutError> {
+    let margin_basis = child_margin_basis(parent);
+    let margin = style_margin(scene, child, margin_basis)?.values;
     let mut constraints = parent.child_constraints;
     constraints.max_width = subtract_insets(constraints.max_width, margin.horizontal());
     constraints.max_height = subtract_insets(constraints.max_height, margin.vertical());
@@ -1143,7 +1171,21 @@ fn constraints_for_child(
             constraints.min_width = constraints.max_width;
         }
     }
-    Ok((constraints, basis))
+    Ok(ChildInput {
+        constraints,
+        basis,
+        margin_basis,
+    })
+}
+
+/// Inline basis every direct child of `parent` uses for percentage margins.
+///
+/// Margins are resolved once against this number by `constraints_for_child`,
+/// by the child's own frame, and by arrangement. Re-deriving them from a
+/// different basis in each phase sized a child against one number and placed it
+/// against another.
+fn child_margin_basis(parent: &Frame) -> f32 {
+    percentage_basis(parent.percent.width, parent.child_constraints.min_width)
 }
 
 fn arrange_children(
@@ -1166,7 +1208,7 @@ fn arrange_children(
     } else {
         (size.width - insets.horizontal()).max(0.0)
     };
-    let percentage_basis = (size.width - insets.horizontal()).max(0.0);
+    let percentage_basis = child_margin_basis(frame);
     let mut child_count = 0_usize;
     let mut auto_main_edges = 0_usize;
     let mut child = scene.first_child(frame.node);
@@ -1301,7 +1343,7 @@ fn arrange_children(
     Ok(())
 }
 
-fn justify_spacing(justify: StyleKeyword, free: f32, child_count: usize) -> (f32, f32) {
+pub(crate) fn justify_spacing(justify: StyleKeyword, free: f32, child_count: usize) -> (f32, f32) {
     match justify {
         StyleKeyword::Center => (free * 0.5, 0.0),
         StyleKeyword::End | StyleKeyword::FlexEnd => (free, 0.0),
@@ -1319,7 +1361,7 @@ fn justify_spacing(justify: StyleKeyword, free: f32, child_count: usize) -> (f32
     }
 }
 
-fn has_requested_dimension(
+pub(crate) fn has_requested_dimension(
     scene: &Scene,
     node: NodeId,
     direct: Prop,
@@ -1331,7 +1373,7 @@ fn has_requested_dimension(
             .is_some_and(|length| length.unit != StyleLengthUnit::Auto)
 }
 
-fn subtract_insets(value: f32, insets: f32) -> f32 {
+pub(crate) fn subtract_insets(value: f32, insets: f32) -> f32 {
     if value.is_infinite() {
         value
     } else {
@@ -1376,7 +1418,7 @@ fn validate_virtual_dimension(node: NodeId, value: f32) -> Result<f32, LayoutErr
     }
 }
 
-fn intersect_constraints(
+pub(crate) fn intersect_constraints(
     incoming: BoxConstraints,
     style_min_width: f32,
     style_max_width: f32,
@@ -1393,7 +1435,7 @@ fn intersect_constraints(
     }
 }
 
-fn outer_dimension(
+pub(crate) fn outer_dimension(
     scene: &Scene,
     node: NodeId,
     direct: Prop,
@@ -1430,7 +1472,7 @@ fn outer_dimension(
     }))
 }
 
-fn style_padding(
+pub(crate) fn style_padding(
     scene: &Scene,
     node: NodeId,
     percentage_basis: f32,
@@ -1460,7 +1502,7 @@ fn style_padding(
     })
 }
 
-fn style_margin(
+pub(crate) fn style_margin(
     scene: &Scene,
     node: NodeId,
     percentage_basis: f32,
@@ -1487,7 +1529,7 @@ fn style_margin(
     })
 }
 
-fn margin_value(
+pub(crate) fn margin_value(
     scene: &Scene,
     node: NodeId,
     property: StyleProperty,
@@ -1510,7 +1552,7 @@ fn margin_value(
     Ok((value, false))
 }
 
-fn style_border(
+pub(crate) fn style_border(
     scene: &Scene,
     node: NodeId,
     percentage_basis: f32,
@@ -1547,7 +1589,7 @@ fn style_border(
     })
 }
 
-fn border_width(
+pub(crate) fn border_width(
     scene: &Scene,
     node: NodeId,
     width_property: StyleProperty,
@@ -1573,7 +1615,7 @@ fn border_width(
     }
 }
 
-fn percentage_basis(maximum: f32, minimum: f32) -> f32 {
+pub(crate) fn percentage_basis(maximum: f32, minimum: f32) -> f32 {
     if maximum.is_finite() {
         maximum
     } else {
@@ -1581,7 +1623,10 @@ fn percentage_basis(maximum: f32, minimum: f32) -> f32 {
     }
 }
 
-fn resolve_style_length(length: Option<StyleLength>, percentage_basis: f32) -> Option<f32> {
+pub(crate) fn resolve_style_length(
+    length: Option<StyleLength>,
+    percentage_basis: f32,
+) -> Option<f32> {
     match length? {
         StyleLength {
             unit: StyleLengthUnit::Px,
@@ -1602,7 +1647,7 @@ fn resolve_style_length(length: Option<StyleLength>, percentage_basis: f32) -> O
     }
 }
 
-fn style_length_or_zero(
+pub(crate) fn style_length_or_zero(
     scene: &Scene,
     node: NodeId,
     property: StyleProperty,

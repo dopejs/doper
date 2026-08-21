@@ -6,6 +6,7 @@
 mod engine;
 mod error;
 mod geometry;
+mod reference;
 
 pub use engine::{
     EstimatedVirtualLayout, IntrinsicMeasurer, LayoutEngine, LayoutMetrics, LayoutOutcome,
@@ -13,3 +14,4 @@ pub use engine::{
 };
 pub use error::LayoutError;
 pub use geometry::{BoxConstraints, Point, Size};
+pub use reference::{ReferenceLayout, reference_layout};
