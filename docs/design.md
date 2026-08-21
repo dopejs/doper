@@ -1889,6 +1889,10 @@ style 与逐帧 presentation style 分离；第一批只开放 opacity/transform
 Video/foundation controls 已分别进入自动工程门禁。未来 CSS/事件扩展在实现和自动验证前
 仍不得写成已交付 API。
 
+`position`/`zIndex` 已按 [`m10-capability-decisions.md`](./m10-capability-decisions.md)
+2026-08-21 的 Adopt 决策立项（pingo-ui 弹层 fixture），以独立 feature bit 门控推进；
+在 oracle 与帧时/节点预算出口条件通过前，属于未交付能力，不出现在 `styleCapabilities()`。
+
 ### Video Host/Core 所有权边界（M8 决策，2026-08-21）
 
 ABI 16 的 `VideoFrame` resource 是不可变、可校验的尺寸/poster 描述符，Scene 不保存
