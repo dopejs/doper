@@ -343,7 +343,7 @@ export type ElementType<Props = Record<string, unknown>> =
   | HostType
   | FunctionComponent<Props>
   | MemoComponent<Props>
-  | ContextProvider<Props>
+  | ContextProvider<unknown>
   | typeof Fragment;
 
 /** Erased immutable descriptor used in heterogeneous child collections. */
