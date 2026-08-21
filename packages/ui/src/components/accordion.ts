@@ -3,16 +3,22 @@ import {
   memo,
   Text,
   View,
+  type NodeHandle,
   type PingoEvent,
   type PingoNode,
 } from "@dopejs/pingo-jsx";
-import { createContext, useContext, useSignal } from "@dopejs/pingo-runtime";
+import { createContext, useContext, useMemo, useSignal } from "@dopejs/pingo-runtime";
 
+import { orderedValues, step } from "../keyboard";
 import { useTheme } from "../theme";
 
 export type AccordionContextValue = {
   readonly openValue: string | undefined;
   readonly onToggle: (value: string) => void;
+  /** Records an item trigger's mounted node so arrow keys can move focus. */
+  readonly registerTrigger: (value: string, handle: NodeHandle | null) => void;
+  /** Focuses a registered item trigger, if it is still mounted. */
+  readonly focusTrigger: (value: string) => void;
 };
 
 const AccordionContext = createContext<AccordionContextValue | undefined>(undefined);
@@ -33,6 +39,7 @@ function AccordionImpl(props: AccordionProps): PingoNode {
   // .get() (not .peek()): the root must subscribe to its own signal so an
   // uncontrolled toggle re-renders it and republishes the context value.
   const current = props.openValue !== undefined ? props.openValue : internal.get();
+  const handles = useMemo(() => new Map<string, NodeHandle>(), []);
   const contextValue: AccordionContextValue = {
     openValue: current,
     onToggle: (value) => {
@@ -40,13 +47,52 @@ function AccordionImpl(props: AccordionProps): PingoNode {
       internal.set(next);
       props.onValueChange?.(next);
     },
+    registerTrigger: (value, handle) => {
+      if (handle === null) handles.delete(value);
+      else handles.set(value, handle);
+    },
+    focusTrigger: (value) => handles.get(value)?.focus(),
   };
   const className = ["pui-accordion", theme === "dark" ? "pui-dark" : undefined, props.className]
     .filter((part) => part !== undefined && part !== "")
     .join(" ");
+  const focused = useSignal<string | undefined>(undefined);
   return createElement(AccordionContext.Provider, {
     value: contextValue,
-    children: View({ className, children: props.children }),
+    children: accordionDescriptor(props, contextValue, className, focused),
+  });
+}
+
+/** A cursor the arrow keys move without opening anything. */
+export interface AccordionFocusCursor {
+  peek: () => string | undefined;
+  set: (value: string | undefined) => void;
+}
+
+/**
+ * Builds the accordion container. Pure: safe to call without a component scope.
+ *
+ * Arrows move focus between headers without opening anything; Enter and Space
+ * on a header toggle it. That split is what WAI-ARIA specifies, and it is why
+ * the cursor is separate from the open value.
+ */
+export function accordionDescriptor(
+  props: Pick<AccordionProps, "children">,
+  context: AccordionContextValue,
+  className: string,
+  focused: AccordionFocusCursor,
+): PingoNode {
+  const values = orderedValues(props.children);
+  return View({
+    className,
+    onKeyDown: (event: PingoEvent): void => {
+      const next = step(values, focused.peek() ?? context.openValue, event.key, "vertical");
+      if (next === undefined) return;
+      event.preventDefault();
+      focused.set(next);
+      context.focusTrigger(next);
+    },
+    children: props.children,
   });
 }
 
@@ -85,7 +131,13 @@ export function accordionItemDescriptor(
         direction: "row",
         semanticRole: "button",
         semanticValue: open ? "open" : "closed",
+        ref: (handle: NodeHandle | null) => context?.registerTrigger(props.value, handle),
         onPointerDown: (event: PingoEvent): void => event.currentTarget.focus(),
+        onKeyDown: (event: PingoEvent): void => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          toggle();
+        },
         onTap: toggle,
         onClick: toggle,
         children: [

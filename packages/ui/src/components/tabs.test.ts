@@ -14,6 +14,7 @@ import {
   TabsList,
   TabsTrigger,
   tabsContentDescriptor,
+  tabsListDescriptor,
   tabsTriggerDescriptor,
   type TabsContentProps,
   type TabsContextValue,
@@ -23,8 +24,17 @@ afterEach(() => setTheme("light"));
 
 type Host = { props: Record<string, unknown> };
 
-function context(value: string | undefined): TabsContextValue {
-  return { value, onSelect: () => {} };
+function context(
+  value: string | undefined,
+  overrides: Partial<TabsContextValue> = {},
+): TabsContextValue {
+  return {
+    value,
+    onSelect: () => {},
+    registerTrigger: () => {},
+    focusTrigger: () => {},
+    ...overrides,
+  };
 }
 
 class RecordingSink implements MutationSink {
@@ -60,10 +70,7 @@ describe("tabsTriggerDescriptor", () => {
     const onSelect = vi.fn();
     const node = tabsTriggerDescriptor(
       { value: "b", children: "乙" },
-      {
-        value: "a",
-        onSelect,
-      },
+      context("a", { onSelect }),
     ) as unknown as Host;
     (node.props.onTap as () => void)();
     expect(onSelect).toHaveBeenCalledWith("b");
@@ -104,10 +111,63 @@ describe("tabsContentDescriptor", () => {
 });
 
 describe("TabsList", () => {
-  it("renders the list row without needing context", () => {
-    const node = TabsList.component({ children: "x", className: "mine" }) as unknown as Host;
+  it("renders the list row", () => {
+    const node = tabsListDescriptor(
+      { children: "x", className: "mine" },
+      context("a"),
+    ) as unknown as Host;
     expect(node.props.className).toBe("pui-tabs__list mine");
     expect(node.props.direction).toBe("row");
+    expect(node.props.semanticRole).toBe("tablist");
+  });
+
+  it("moves selection and focus with the horizontal arrows, Home and End", () => {
+    const onSelect = vi.fn();
+    const focusTrigger = vi.fn();
+    const children = [
+      createElement(TabsTrigger, { value: "a", children: "甲" }),
+      createElement(TabsTrigger, { value: "b", children: "乙" }),
+      createElement(TabsTrigger, { value: "c", children: "丙" }),
+    ];
+    const press = (current: string, key: string): void => {
+      const node = tabsListDescriptor(
+        { children },
+        context(current, { onSelect, focusTrigger }),
+      ) as unknown as Host;
+      (node.props.onKeyDown as (event: { key: string; preventDefault: () => void }) => void)({
+        key,
+        preventDefault: () => {},
+      });
+    };
+
+    press("a", "ArrowRight");
+    expect(onSelect).toHaveBeenLastCalledWith("b");
+    // Selection without focus would send the next arrow back to the old tab.
+    expect(focusTrigger).toHaveBeenLastCalledWith("b");
+
+    press("a", "ArrowLeft");
+    expect(onSelect).toHaveBeenLastCalledWith("c");
+    press("b", "Home");
+    expect(onSelect).toHaveBeenLastCalledWith("a");
+    press("b", "End");
+    expect(onSelect).toHaveBeenLastCalledWith("c");
+  });
+
+  it("leaves keys it does not navigate with alone", () => {
+    const onSelect = vi.fn();
+    const node = tabsListDescriptor(
+      { children: [createElement(TabsTrigger, { value: "a", children: "甲" })] },
+      context("a", { onSelect }),
+    ) as unknown as Host;
+    const prevented = vi.fn();
+    for (const key of ["ArrowUp", "ArrowDown", "a", "Escape"]) {
+      (node.props.onKeyDown as (event: { key: string; preventDefault: () => void }) => void)({
+        key,
+        preventDefault: prevented,
+      });
+    }
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(prevented).not.toHaveBeenCalled();
   });
 });
 

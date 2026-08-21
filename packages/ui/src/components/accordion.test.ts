@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setTheme } from "../theme";
 import {
   Accordion,
+  accordionDescriptor,
   AccordionItem,
   accordionItemDescriptor,
   type AccordionContextValue,
@@ -24,8 +25,17 @@ function descriptor(props: AccordionItemProps, context: AccordionContextValue | 
   return accordionItemDescriptor(props, context) as unknown as Host;
 }
 
-function context(openValue: string | undefined): AccordionContextValue {
-  return { openValue, onToggle: () => {} };
+function context(
+  openValue: string | undefined,
+  overrides: Partial<AccordionContextValue> = {},
+): AccordionContextValue {
+  return {
+    openValue,
+    onToggle: () => {},
+    registerTrigger: () => {},
+    focusTrigger: () => {},
+    ...overrides,
+  };
 }
 
 class RecordingSink implements MutationSink {
@@ -65,10 +75,7 @@ describe("accordionItemDescriptor", () => {
     const onToggle = vi.fn();
     const node = descriptor(
       { value: "b", title: "t", children: "body" },
-      {
-        openValue: "a",
-        onToggle,
-      },
+      context("a", { onToggle }),
     );
     const [trigger] = node.props.children as [Host, Host];
     (trigger.props.onTap as () => void)();
@@ -85,6 +92,71 @@ describe("accordionItemDescriptor", () => {
     const [trigger, content] = node.props.children as [Host, Host];
     expect(trigger.props.className).toBe("pui-accordion__trigger pui-dark");
     expect(content.props.className).toBe("pui-accordion__content pui-dark");
+  });
+});
+
+describe("accordionDescriptor", () => {
+  function cursor(initial?: string): { peek: () => string | undefined; set: (v?: string) => void } {
+    let value = initial;
+    return {
+      peek: () => value,
+      set: (next) => {
+        value = next;
+      },
+    };
+  }
+
+  it("moves focus between headers without opening anything", () => {
+    const onToggle = vi.fn();
+    const focusTrigger = vi.fn();
+    const focused = cursor();
+    const children = [
+      createElement(AccordionItem, { value: "a", title: "甲", children: "x" }),
+      createElement(AccordionItem, { value: "b", title: "乙", children: "y" }),
+    ];
+    const press = (key: string): void => {
+      const node = accordionDescriptor(
+        { children },
+        context("a", { onToggle, focusTrigger }),
+        "pui-accordion",
+        focused,
+      ) as unknown as Host;
+      (node.props.onKeyDown as (event: { key: string; preventDefault: () => void }) => void)({
+        key,
+        preventDefault: () => {},
+      });
+    };
+
+    press("ArrowDown");
+    expect(focusTrigger).toHaveBeenLastCalledWith("b");
+    press("ArrowDown");
+    expect(focusTrigger).toHaveBeenLastCalledWith("a");
+    // Moving the cursor must never open a panel.
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("toggles a header on Enter and Space and ignores other keys", () => {
+    const onToggle = vi.fn();
+    const node = descriptor(
+      { value: "b", title: "t", children: "body" },
+      context("a", { onToggle }),
+    );
+    const trigger = (node.props.children as Host[])[0] as Host;
+    const press = (key: string): void => {
+      (trigger.props.onKeyDown as (event: { key: string; preventDefault: () => void }) => void)({
+        key,
+        preventDefault: () => {},
+      });
+    };
+
+    press("Enter");
+    press(" ");
+    expect(onToggle).toHaveBeenCalledTimes(2);
+    expect(onToggle).toHaveBeenCalledWith("b");
+
+    onToggle.mockClear();
+    for (const key of ["ArrowDown", "Escape", "a"]) press(key);
+    expect(onToggle).not.toHaveBeenCalled();
   });
 });
 

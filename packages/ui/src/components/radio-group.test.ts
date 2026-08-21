@@ -11,6 +11,7 @@ import { setTheme } from "../theme";
 import {
   RadioGroup,
   RadioGroupItem,
+  radioGroupDescriptor,
   radioGroupItemDescriptor,
   type RadioGroupContextValue,
   type RadioGroupItemProps,
@@ -24,8 +25,19 @@ function descriptor(props: RadioGroupItemProps, context: RadioGroupContextValue 
   return radioGroupItemDescriptor(props, context) as unknown as Host;
 }
 
-function context(value: string | undefined, disabled = false): RadioGroupContextValue {
-  return { value, disabled, onSelect: () => {} };
+function context(
+  value: string | undefined,
+  disabled = false,
+  overrides: Partial<RadioGroupContextValue> = {},
+): RadioGroupContextValue {
+  return {
+    value,
+    disabled,
+    onSelect: () => {},
+    registerItem: () => {},
+    focusItem: () => {},
+    ...overrides,
+  };
 }
 
 class RecordingSink implements MutationSink {
@@ -56,7 +68,7 @@ describe("radioGroupItemDescriptor", () => {
 
   it("forwards the item value to the group onSelect", () => {
     const onSelect = vi.fn();
-    const node = descriptor({ value: "b" }, { value: "a", disabled: false, onSelect });
+    const node = descriptor({ value: "b" }, context("a", false, { onSelect }));
     (node.props.onTap as () => void)();
     expect(onSelect).toHaveBeenCalledWith("b");
   });
@@ -84,6 +96,50 @@ describe("radioGroupItemDescriptor", () => {
     expect(circle.props.className).toBe("pui-radio__circle pui-dark");
     expect((circle.props.children as Host).props.className).toBe("pui-radio__indicator pui-dark");
     expect(label.props.className).toBe("pui-label pui-radio__label pui-dark");
+  });
+});
+
+describe("radioGroupDescriptor", () => {
+  it("moves selection and focus with either arrow pair", () => {
+    const onSelect = vi.fn();
+    const focusItem = vi.fn();
+    const children = [
+      createElement(RadioGroupItem, { value: "a" }),
+      createElement(RadioGroupItem, { value: "b" }),
+      createElement(RadioGroupItem, { value: "c" }),
+    ];
+    const press = (current: string, key: string): void => {
+      const node = radioGroupDescriptor(
+        { children },
+        context(current, false, { onSelect, focusItem }),
+        "pui-radiogroup",
+      ) as unknown as Host;
+      (node.props.onKeyDown as (event: { key: string; preventDefault: () => void }) => void)({
+        key,
+        preventDefault: () => {},
+      });
+    };
+
+    for (const [current, key, expected] of [
+      ["a", "ArrowRight", "b"],
+      ["a", "ArrowDown", "b"],
+      ["a", "ArrowLeft", "c"],
+      ["a", "ArrowUp", "c"],
+    ] as const) {
+      press(current, key);
+      expect(onSelect).toHaveBeenLastCalledWith(expected);
+      // Selection without focus would send the next arrow to the old item.
+      expect(focusItem).toHaveBeenLastCalledWith(expected);
+    }
+  });
+
+  it("does not navigate while the group is disabled", () => {
+    const node = radioGroupDescriptor(
+      { children: [createElement(RadioGroupItem, { value: "a" })] },
+      context("a", true),
+      "pui-radiogroup",
+    ) as unknown as Host;
+    expect(node.props.onKeyDown).toBeUndefined();
   });
 });
 

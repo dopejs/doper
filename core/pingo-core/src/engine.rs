@@ -350,7 +350,7 @@ fn collect_geometry_requests(batch: &InputBatch) -> Vec<(u32, u32, u32)> {
 }
 
 /// Reads one already-validated key command into its routing input.
-fn key_input(command: &InputCommand) -> KeyEventInput {
+fn key_input(command: &InputCommand) -> Option<KeyEventInput> {
     let InputCommand::DispatchKeyEvent {
         event_id,
         kind,
@@ -362,9 +362,9 @@ fn key_input(command: &InputCommand) -> KeyEventInput {
         elapsed_micros,
     } = command
     else {
-        unreachable!("caller matched a key command")
+        return None;
     };
-    KeyEventInput {
+    Some(KeyEventInput {
         event_id: *event_id,
         kind: *kind,
         flags: *flags,
@@ -373,7 +373,7 @@ fn key_input(command: &InputCommand) -> KeyEventInput {
         key_text: *key_text,
         modifiers: *modifiers,
         elapsed_micros: *elapsed_micros,
-    }
+    })
 }
 
 fn collect_event_commands(batch: &InputBatch) -> Result<Vec<InteractionCommand>, CoreError> {
@@ -412,9 +412,8 @@ fn collect_event_commands(batch: &InputBatch) -> Result<Vec<InteractionCommand>,
                 tilt: *tilt,
                 contact_size: *contact_size,
             }))),
-            InputCommand::DispatchKeyEvent { .. } => Some(Ok(InteractionCommand::DispatchKey(
-                key_input(&instruction.command),
-            ))),
+            InputCommand::DispatchKeyEvent { .. } => key_input(&instruction.command)
+                .map(|input| Ok(InteractionCommand::DispatchKey(input))),
             InputCommand::SetPointerCapture {
                 event_id,
                 pointer_id,

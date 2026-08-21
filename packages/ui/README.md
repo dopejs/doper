@@ -102,7 +102,12 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
   `prefix` / `suffix` slot 已随 E5（flexGrow/flexShrink/flexBasis）落地：
   field 用 `flex: 1 1 0px` 吃掉装饰件剩下的行宽。TextArea 仍无 slot。
 - 无 focus ring：pingo 没有 `:focus-within`，且边框挂在 shell 上（待选择器能力
-  或 E4 shadow 方案落地）。
+  或 E4 shadow 方案落地）。焦点本身是可见的（Core 有 focus/focus-visible 状态），
+  缺的只是描边样式。
+- 键盘导航（E1 已落地）：Tabs 用 Left/Right/Home/End，RadioGroup 用四向方向键，
+  Accordion 用 Up/Down 移动焦点、Enter/Space 展开。键事件只送达**当前焦点节点**，
+  因此组件必须先被点击或程序聚焦；引擎不内建 Tab 顺序，跨组件的 Tab 循环由业务
+  用 `ref` + `handle.focus()` 实现。
 - Card 无 boxShadow（E4 shadow 未落地）。
 - Skeleton 无 pulse 动画（Core 动画只覆盖 opacity/transform，CSS keyframes 不在
   子集内）。
