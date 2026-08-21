@@ -22,8 +22,12 @@
    light/dark 两套皮肤预编译，运行时通过 context 切换。
 3. **弹层路径：补引擎能力，不做 HTML overlay。** Dialog/Popover/Tooltip/Select 等
    依赖 zIndex/position/keyboard 引擎能力，按 §7 的工作包立项推进。
-4. **SCSS / LESS 构建期支持视为已有能力**（见 `scss-less-support.md`），包括
-   `rgb()/rgba()/hsl()/hsla()` 颜色函数归一到 `rgba8` 的 Shell 扩展。
+4. **SCSS / LESS 构建期支持已落地**（`@dopejs/pingo-style-preprocess`：
+   `compileScssString` / `compileLessString` / `createStyleSheetFromScss|Less` /
+   `compilePingoStyleFile` codegen + `?pingo-style` Vite 插件 + source-map 诊断；
+   `rgb()/rgba()/hsl()/hsla()` 已归一到 `rgba8`；浏览器 bundle 无 `sass`/`less`，
+   边界检查通过）。注意：颜色关键字（`white`/`black` 等）**未支持**，preset 作者
+   只能写 hex 或 `rgb()/hsl()`。
 
 原则不变：组件库产出 pingo 原生 TSX 组件；皮肤使用 `className + PingoStyleSheet`
 模型；不扩大"通用浏览器 CSS 兼容"范围。
@@ -99,8 +103,9 @@ m10 决策把 absolute positioning 判为 Defer 的原因是"没有覆盖层叠�
 - **品牌定制**：`@use "@dopejs/pingo-ui/styles/tokens" with ($primary: ...)`，经
   style-preprocess 的 Vite 插件重新编译组件皮肤。**改品牌色 = 重新构建。**
 
-包构建用 style-preprocess 的 codegen 模式（SCSS → CSS 文本 → `compileStyleSheet`
-校验 → 生成 TS 模块），预编译产物进入 npm 包；浏览器 bundle 不含 `sass`/`less`。
+包构建用 style-preprocess 的 codegen 模式（`compilePingoStyleFile`：SCSS → CSS
+文本 → `compileStyleSheet` 校验 → 生成 TS 模块），预编译产物进入 npm 包；浏览器
+bundle 不含 `sass`/`less`。
 
 ---
 
