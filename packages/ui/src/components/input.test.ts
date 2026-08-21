@@ -13,7 +13,7 @@ import { Input, inputDescriptor } from "./input";
 
 afterEach(() => setTheme("light"));
 
-type Host = { props: Record<string, unknown> };
+type Host = { props: Record<string, unknown> & { className?: string } };
 type Tree = Host & { props: { children: readonly Host[] } };
 
 function descriptor(props: Parameters<typeof inputDescriptor>[0]): Tree {
@@ -22,8 +22,8 @@ function descriptor(props: Parameters<typeof inputDescriptor>[0]): Tree {
 
 /** The editable field, wherever the adornments put it. */
 function field(node: Tree): Record<string, unknown> {
-  const found = node.props.children.find((child) =>
-    String(child.props.className ?? "").includes("pui-input__field"),
+  const found = node.props.children.find(
+    (child) => child.props.className?.includes("pui-input__field") === true,
   );
   if (found === undefined) throw new Error("input has no editable field");
   return found.props;
