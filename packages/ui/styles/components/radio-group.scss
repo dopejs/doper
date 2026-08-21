@@ -1,0 +1,41 @@
+@use "../tokens" as t;
+
+// shadcn RadioGroup: vertical group of circle + label items.
+
+.pui-radiogroup {
+  flex-direction: column;
+}
+
+.pui-radio {
+  align-items: center;
+  cursor: pointer;
+}
+
+.pui-radio--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}
+
+.pui-radio__circle {
+  justify-content: center;
+  align-items: center;
+  width: t.$radio-size;
+  height: t.$radio-size;
+  border-radius: t.$radio-radius;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$primary;
+  &.pui-dark { border-color: t.$dark-primary; }
+}
+
+.pui-radio__indicator {
+  width: t.$radio-indicator-size;
+  height: t.$radio-indicator-size;
+  border-radius: t.$radio-indicator-radius;
+  background-color: t.$primary;
+  &.pui-dark { background-color: t.$dark-primary; }
+}
+
+.pui-radio__label {
+  margin-left: t.$control-label-gap;
+}

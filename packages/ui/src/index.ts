@@ -32,6 +32,8 @@ export { Label } from "./components/label";
 export type { LabelProps } from "./components/label";
 export { Progress } from "./components/progress";
 export type { ProgressProps } from "./components/progress";
+export { RadioGroup, RadioGroupItem } from "./components/radio-group";
+export type { RadioGroupItemProps, RadioGroupProps } from "./components/radio-group";
 export { Skeleton } from "./components/skeleton";
 export type { SkeletonProps } from "./components/skeleton";
 export { Switch } from "./components/switch";
