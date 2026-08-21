@@ -76,11 +76,12 @@ describe("M2 production transport matrix", () => {
     }
   });
 
-  it("keeps Core transition output equivalent across all transports without Shell mutations", async () => {
-    const finalHashes: Array<bigint | undefined> = [];
+  it("keeps transition pixels equivalent across all transports without Shell mutations", async () => {
+    const finalPixels: number[][] = [];
     for (const preference of ["main-thread", "post-message", "sab"] as const) {
       const reports: FrameReport[] = [];
-      const root = await createHostedCanvasRoot(createCanvas(), {
+      const canvas = createCanvas();
+      const root = await createHostedCanvasRoot(canvas, {
         onFrame: (report) => reports.push(report),
         transport: { preference, strict: true },
       });
@@ -101,6 +102,14 @@ describe("M2 production transport matrix", () => {
       );
       reports.length = 0;
       root.render(animated(1));
+      // Observe the new transition becoming active before accepting a terminal
+      // frame. A queued idle animation frame from before this commit may arrive
+      // after render() and also reports animationActive === 0.
+      await withTimeout(
+        waitUntil(() => reports.some((report) => report.core?.animationActive === 1)),
+        3_000,
+        `${preference} started transition`,
+      );
       await withTimeout(
         waitUntil(() =>
           reports.some(
@@ -116,12 +125,17 @@ describe("M2 production transport matrix", () => {
       expect(animationReports.every((report) => report.core?.animationLayoutNodes === 0)).toBe(
         true,
       );
-      finalHashes.push(animationReports.at(-1)?.core?.pictureHash);
+      // Incremental Picture hashes include generation ids. Those ids correctly
+      // differ when transport clocks sample a transition a different number of
+      // times, even though the completed pixels are identical. Compare the
+      // rendered contract instead of an internal resource identity.
+      finalPixels.push(snapshotCanvas(canvas));
       await root.close();
       roots.pop();
     }
-    expect(finalHashes[1]).toBe(finalHashes[0]);
-    expect(finalHashes[2]).toBe(finalHashes[0]);
+    expect(finalPixels[0]?.some((byte) => byte !== 0)).toBe(true);
+    expectEquivalentTransportPixels(finalPixels[0] ?? [], finalPixels[1] ?? []);
+    expectEquivalentTransportPixels(finalPixels[0] ?? [], finalPixels[2] ?? []);
   });
 
   it("continues sampling Core animation in the Worker during a 200ms main-thread stall", async () => {
@@ -462,6 +476,34 @@ function createCanvas(): HTMLCanvasElement {
   canvas.width = 160;
   document.body.append(canvas);
   return canvas;
+}
+
+function snapshotCanvas(canvas: HTMLCanvasElement): number[] {
+  const sampler = document.createElement("canvas");
+  sampler.width = canvas.width;
+  sampler.height = canvas.height;
+  const context = sampler.getContext("2d");
+  if (context === null) throw new Error("sampler context unavailable");
+  context.drawImage(canvas, 0, 0);
+  return Array.from(context.getImageData(0, 0, sampler.width, sampler.height).data);
+}
+
+function expectEquivalentTransportPixels(expected: readonly number[], actual: readonly number[]) {
+  expect(actual).toHaveLength(expected.length);
+  let maximumRgbDelta = 0;
+  let alphaMismatch = false;
+  for (let index = 0; index < expected.length; index += 1) {
+    const left = expected[index] ?? 0;
+    const right = actual[index] ?? 0;
+    if (index % 4 === 3) alphaMismatch ||= left !== right;
+    else maximumRgbDelta = Math.max(maximumRgbDelta, Math.abs(left - right));
+  }
+  // Chromium may round one color channel by one LSB when the same opaque
+  // solid is read back from main-thread Canvas and worker OffscreenCanvas.
+  // Alpha remains exact, so this cannot hide incomplete transition opacity or
+  // different painted geometry.
+  expect(alphaMismatch).toBe(false);
+  expect(maximumRgbDelta).toBeLessThanOrEqual(1);
 }
 
 function busyWait(durationMs: number): void {
