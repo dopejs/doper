@@ -45,18 +45,6 @@ impl ReferenceLayout {
     pub fn geometry(&self, node: NodeId) -> Option<(Point, Size)> {
         self.geometry.get(&node).copied()
     }
-
-    /// Returns the number of nodes with recorded geometry.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.geometry.len()
-    }
-
-    /// Returns whether nothing was laid out.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.geometry.is_empty()
-    }
 }
 
 /// Lays out a whole Scene from scratch with no incremental machinery.
@@ -255,13 +243,16 @@ fn resolve_flex(
     let mut target = base.clone();
     let mut frozen = vec![false; items.len()];
     for (index, item) in items.iter().enumerate() {
-        let inflexible = if growing {
-            item.grow <= 0.0 || base[index] >= item.max_main
-        } else {
-            item.shrink <= 0.0 || base[index] <= item.min_main
-        };
-        if inflexible {
-            target[index] = base[index].clamp(item.min_main, item.max_main);
+        let factor = if growing { item.grow } else { item.shrink };
+        // No factor in this direction means the item keeps the size its own
+        // layout produced; the flex step never resizes an inflexible item.
+        if factor <= 0.0 {
+            frozen[index] = true;
+        } else if growing && base[index] >= item.max_main {
+            target[index] = item.max_main;
+            frozen[index] = true;
+        } else if !growing && base[index] <= item.min_main {
+            target[index] = item.min_main;
             frozen[index] = true;
         }
     }
@@ -476,7 +467,6 @@ fn describe(
         flex_basis_main(
             scene,
             node,
-            row,
             if row { width_basis } else { height_basis },
             if row {
                 insets.horizontal()
@@ -487,30 +477,31 @@ fn describe(
         )
         .map(|value| (row, value))
     });
-    let fixed_width = match flex_basis {
-        Some((true, value)) => Some(value),
-        _ => outer_dimension(
-            scene,
-            node,
-            Prop::Width,
-            StyleProperty::Width,
-            width_basis,
-            insets.horizontal(),
-            border_box,
-        )?,
-    };
-    let fixed_height = match flex_basis {
-        Some((false, value)) => Some(value),
-        _ => outer_dimension(
-            scene,
-            node,
-            Prop::Height,
-            StyleProperty::Height,
-            height_basis,
-            insets.vertical(),
-            border_box,
-        )?,
-    };
+    let mut fixed_width = outer_dimension(
+        scene,
+        node,
+        Prop::Width,
+        StyleProperty::Width,
+        width_basis,
+        insets.horizontal(),
+        border_box,
+    )?;
+    let mut fixed_height = outer_dimension(
+        scene,
+        node,
+        Prop::Height,
+        StyleProperty::Height,
+        height_basis,
+        insets.vertical(),
+        border_box,
+    )?;
+    if let Some((row, value)) = flex_basis {
+        if row {
+            fixed_width = Some(value);
+        } else {
+            fixed_height = Some(value);
+        }
+    }
     let direction = scene
         .style_keyword(node, StyleProperty::FlexDirection, 0)
         .unwrap_or(StyleKeyword::Column);

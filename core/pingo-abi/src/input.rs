@@ -4,7 +4,8 @@ use crate::codec::{
 };
 use crate::{
     AbiError, INPUT_MAGIC, InputOpcode, MAX_INPUT_BYTES, MAX_INPUT_INSTRUCTIONS,
-    MAX_RESOURCE_BYTES, MAX_WORD_BOUNDARIES, StreamKind,
+    MAX_KEYBOARD_CODE_ID, MAX_KEYBOARD_KEY_NAME_ID, MAX_RESOURCE_BYTES, MAX_WORD_BOUNDARIES,
+    StreamKind,
 };
 
 /// Visual edge preference carried at the browser UTF-16 boundary.
@@ -142,6 +143,10 @@ pub enum InputEventKind {
     FocusIn = 15,
     /// Bubbling focus loss companion.
     FocusOut = 16,
+    /// Non-editing key press routed to the focused node.
+    KeyDown = 17,
+    /// Non-editing key release routed to the focused node.
+    KeyUp = 18,
 }
 
 impl InputEventKind {
@@ -163,6 +168,8 @@ impl InputEventKind {
             14 => Ok(Self::Blur),
             15 => Ok(Self::FocusIn),
             16 => Ok(Self::FocusOut),
+            17 => Ok(Self::KeyDown),
+            18 => Ok(Self::KeyUp),
             _ => Err(AbiError::UnknownIdentifier {
                 category: "input event kind",
                 value: u32::from(value),
@@ -270,6 +277,12 @@ pub const EVENT_FLAG_PRECISE_WHEEL: u16 = 1;
 
 /// Every event flag bit defined by this ABI version.
 pub const EVENT_FLAG_MASK: u16 = EVENT_FLAG_PRECISE_WHEEL;
+
+/// Key event flag: the press is an auto-repeat rather than a fresh one.
+pub const KEY_FLAG_REPEAT: u16 = 1;
+
+/// Every key flag bit this ABI version defines.
+pub const KEY_FLAG_MASK: u16 = KEY_FLAG_REPEAT;
 
 /// One browser-independent editing or direct-manipulation command.
 #[derive(Clone, Debug, PartialEq)]
@@ -502,6 +515,29 @@ pub enum InputCommand {
         tilt: [f32; 2],
         /// Contact geometry in positive logical pixels.
         contact_size: [f32; 2],
+    },
+    /// Routes one non-editing key sample to the currently focused node.
+    ///
+    /// The identifiers are opaque to Core: it routes and forwards them, and the
+    /// Shell turns them back into `KeyboardEvent.key`/`.code` strings. Text
+    /// insertion never comes from here; see docs/e1-keyboard-events-design.md.
+    DispatchKeyEvent {
+        /// Host-monotonic event identifier used by the reverse result.
+        event_id: u32,
+        /// [`InputEventKind::KeyDown`] or [`InputEventKind::KeyUp`].
+        kind: InputEventKind,
+        /// Key source bits; see [`KEY_FLAG_REPEAT`].
+        flags: u16,
+        /// Interned `KeyboardEvent.code`, or zero when unrecognized.
+        key_code: u16,
+        /// Interned named `KeyboardEvent.key`, or zero for a printable key.
+        key_name: u16,
+        /// Unicode scalar of a single-character `key`, or zero.
+        key_text: u32,
+        /// Shift/Control/Alt/Meta bits.
+        modifiers: u32,
+        /// Time since the previous related sample in microseconds.
+        elapsed_micros: u32,
     },
     /// Assigns explicit pointer capture to one live Scene node.
     SetPointerCapture {
@@ -993,6 +1029,35 @@ fn decode_command(opcode: InputOpcode, reader: &mut Reader<'_>) -> Result<InputC
                 contact_size,
             }
         }
+        InputOpcode::DispatchKeyEvent => {
+            let event_id = reader.read_u32()?;
+            let kind = InputEventKind::decode(reader.read_u16()?)?;
+            let flags = reader.read_u16()?;
+            let key_code = reader.read_u16()?;
+            let key_name = reader.read_u16()?;
+            let key_text = reader.read_u32()?;
+            let modifiers = reader.read_u32()?;
+            let elapsed_micros = reader.read_u32()?;
+            validate_key_fields(
+                kind,
+                flags,
+                key_code,
+                key_name,
+                key_text,
+                modifiers,
+                elapsed_micros,
+            )?;
+            InputCommand::DispatchKeyEvent {
+                event_id,
+                kind,
+                flags,
+                key_code,
+                key_name,
+                key_text,
+                modifiers,
+                elapsed_micros,
+            }
+        }
         InputOpcode::SetPointerCapture | InputOpcode::ReleasePointerCapture => {
             let event_id = reader.read_u32()?;
             let pointer_id = reader.read_u32()?;
@@ -1262,6 +1327,34 @@ fn encode_command(writer: &mut Writer, instruction: &InputInstruction) -> Result
             writer.f32(contact_size[0])?;
             writer.f32(contact_size[1])?;
         }
+        InputCommand::DispatchKeyEvent {
+            event_id,
+            kind,
+            flags,
+            key_code,
+            key_name,
+            key_text,
+            modifiers,
+            elapsed_micros,
+        } => {
+            validate_key_fields(
+                *kind,
+                *flags,
+                *key_code,
+                *key_name,
+                *key_text,
+                *modifiers,
+                *elapsed_micros,
+            )?;
+            writer.u32(*event_id);
+            writer.u16(*kind as u16);
+            writer.u16(*flags);
+            writer.u16(*key_code);
+            writer.u16(*key_name);
+            writer.u32(*key_text);
+            writer.u32(*modifiers);
+            writer.u32(*elapsed_micros);
+        }
         InputCommand::SetPointerCapture {
             event_id,
             pointer_id,
@@ -1367,6 +1460,7 @@ fn command_opcode(command: &InputCommand) -> InputOpcode {
         InputCommand::ScrollTo { .. } => InputOpcode::ScrollTo,
         InputCommand::ScrollBy { .. } => InputOpcode::ScrollBy,
         InputCommand::DispatchEvent { .. } => InputOpcode::DispatchEvent,
+        InputCommand::DispatchKeyEvent { .. } => InputOpcode::DispatchKeyEvent,
         InputCommand::SetPointerCapture { .. } => InputOpcode::SetPointerCapture,
         InputCommand::ReleasePointerCapture { .. } => InputOpcode::ReleasePointerCapture,
         InputCommand::FocusNode { .. } => InputOpcode::FocusNode,
@@ -1394,6 +1488,51 @@ fn validate_place_caret_fields(position: [f32; 2], flags: u32) -> Result<(), Abi
     }
     if flags & !0x03 != 0 {
         return Err(AbiError::InvalidValue("caret placement flags are reserved"));
+    }
+    Ok(())
+}
+
+/// Validates one key sample before it can reach Core routing.
+///
+/// Core never interprets a key, so the identifiers only have to be inside the
+/// table bounds this ABI version declares; anything above them came from a
+/// newer producer or a corrupt stream and is rejected outright.
+#[allow(clippy::too_many_arguments)]
+fn validate_key_fields(
+    kind: InputEventKind,
+    flags: u16,
+    key_code: u16,
+    key_name: u16,
+    key_text: u32,
+    modifiers: u32,
+    elapsed_micros: u32,
+) -> Result<(), AbiError> {
+    if !matches!(kind, InputEventKind::KeyDown | InputEventKind::KeyUp) {
+        return Err(AbiError::InvalidValue(
+            "key dispatch requires a key event kind",
+        ));
+    }
+    if flags & !KEY_FLAG_MASK != 0 {
+        return Err(AbiError::InvalidValue("key flag bits are reserved"));
+    }
+    if key_code > MAX_KEYBOARD_CODE_ID || key_name > MAX_KEYBOARD_KEY_NAME_ID {
+        return Err(AbiError::InvalidValue("key identifier is out of range"));
+    }
+    // Unicode scalar values exclude the surrogate range; `key` is never a lone
+    // surrogate, so a stream carrying one is malformed.
+    if key_text != 0 && (key_text > 0x0010_ffff || (0xd800..=0xdfff).contains(&key_text)) {
+        return Err(AbiError::InvalidValue("key text is not a Unicode scalar"));
+    }
+    if key_name != 0 && key_text != 0 {
+        return Err(AbiError::InvalidValue(
+            "key cannot be both named and printable",
+        ));
+    }
+    if modifiers & !0x0f != 0 {
+        return Err(AbiError::InvalidValue("key modifier bits are reserved"));
+    }
+    if elapsed_micros == 0 || elapsed_micros > MAX_SCROLL_DELTA_MICROS {
+        return Err(AbiError::InvalidValue("key elapsed time is invalid"));
     }
     Ok(())
 }
@@ -1570,10 +1709,92 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::INSTRUCTION_FLAG_OPTIONAL;
+    use crate::{INSTRUCTION_FLAG_OPTIONAL, INSTRUCTION_HEADER_BYTES, STREAM_HEADER_BYTES};
 
     fn instruction(command: InputCommand) -> InputInstruction {
         InputInstruction { flags: 0, command }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn key_command(
+        kind: InputEventKind,
+        flags: u16,
+        key_code: u16,
+        key_name: u16,
+        key_text: u32,
+        modifiers: u32,
+        elapsed_micros: u32,
+    ) -> InputCommand {
+        InputCommand::DispatchKeyEvent {
+            event_id: 9,
+            kind,
+            flags,
+            key_code,
+            key_name,
+            key_text,
+            modifiers,
+            elapsed_micros,
+        }
+    }
+
+    fn printable_key(kind: InputEventKind) -> InputCommand {
+        key_command(kind, KEY_FLAG_REPEAT, 12, 0, 0x4e2d, 0x05, 16_667)
+    }
+
+    fn encode_key(command: InputCommand) -> Result<Vec<u8>, AbiError> {
+        InputBatch {
+            frame_seq: 3,
+            instructions: vec![instruction(command)],
+        }
+        .encode()
+    }
+
+    #[test]
+    fn key_events_round_trip_and_reject_impossible_payloads() {
+        for kind in [InputEventKind::KeyDown, InputEventKind::KeyUp] {
+            let command = printable_key(kind);
+            let bytes = encode_key(command.clone()).expect("key bytes");
+            let decoded = InputBatch::decode(&bytes).expect("decode");
+            assert_eq!(decoded.instructions.len(), 1);
+            assert_eq!(decoded.instructions[0].command, command);
+        }
+
+        // A pointer kind is not dispatchable through the key command.
+        assert!(encode_key(printable_key(InputEventKind::PointerDown)).is_err());
+
+        let down = InputEventKind::KeyDown;
+        for broken in [
+            key_command(down, KEY_FLAG_MASK + 1, 12, 0, 0x4e2d, 0, 16_667),
+            key_command(down, 0, MAX_KEYBOARD_CODE_ID + 1, 0, 0, 0, 16_667),
+            key_command(down, 0, 12, MAX_KEYBOARD_KEY_NAME_ID + 1, 0, 0, 16_667),
+            // A lone surrogate is never a `KeyboardEvent.key`.
+            key_command(down, 0, 12, 0, 0xd800, 0, 16_667),
+            // Named and printable at once is contradictory.
+            key_command(down, 0, 12, 1, 0x41, 0, 16_667),
+            key_command(down, 0, 12, 0, 0x41, 0x10, 16_667),
+            key_command(down, 0, 12, 0, 0x41, 0, 0),
+        ] {
+            assert!(encode_key(broken.clone()).is_err(), "{broken:?} encoded");
+        }
+    }
+
+    #[test]
+    fn a_malformed_key_instruction_is_rejected_on_decode() {
+        let bytes = encode_key(printable_key(InputEventKind::KeyDown)).expect("key bytes");
+        // Stream header, then the first instruction's 4-byte header.
+        let payload = STREAM_HEADER_BYTES + INSTRUCTION_HEADER_BYTES;
+
+        let mut unknown_kind = bytes.clone();
+        unknown_kind[payload + 4] = 3;
+        assert!(InputBatch::decode(&unknown_kind).is_err());
+
+        let mut reserved_flag = bytes.clone();
+        reserved_flag[payload + 6] = 0xff;
+        assert!(InputBatch::decode(&reserved_flag).is_err());
+
+        let mut truncated = bytes.clone();
+        truncated.truncate(truncated.len() - 4);
+        assert!(InputBatch::decode(&truncated).is_err());
     }
 
     fn sample_batch() -> InputBatch {

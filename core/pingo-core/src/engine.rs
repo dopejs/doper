@@ -46,7 +46,7 @@ use crate::{
     CoreError, CoreScrollMetrics, CoreTextMetrics,
     animation::AnimationController,
     editing::{EditableConfiguration, EditingController},
-    interaction::{InteractionCommand, InteractionController, PointerEventInput},
+    interaction::{InteractionCommand, InteractionController, KeyEventInput, PointerEventInput},
     scroll::{ScrollAdvance, ScrollController},
     text::CoreTextSystem,
 };
@@ -349,6 +349,33 @@ fn collect_geometry_requests(batch: &InputBatch) -> Vec<(u32, u32, u32)> {
         .collect()
 }
 
+/// Reads one already-validated key command into its routing input.
+fn key_input(command: &InputCommand) -> KeyEventInput {
+    let InputCommand::DispatchKeyEvent {
+        event_id,
+        kind,
+        flags,
+        key_code,
+        key_name,
+        key_text,
+        modifiers,
+        elapsed_micros,
+    } = command
+    else {
+        unreachable!("caller matched a key command")
+    };
+    KeyEventInput {
+        event_id: *event_id,
+        kind: *kind,
+        flags: *flags,
+        key_code: *key_code,
+        key_name: *key_name,
+        key_text: *key_text,
+        modifiers: *modifiers,
+        elapsed_micros: *elapsed_micros,
+    }
+}
+
 fn collect_event_commands(batch: &InputBatch) -> Result<Vec<InteractionCommand>, CoreError> {
     batch
         .instructions
@@ -385,6 +412,9 @@ fn collect_event_commands(batch: &InputBatch) -> Result<Vec<InteractionCommand>,
                 tilt: *tilt,
                 contact_size: *contact_size,
             }))),
+            InputCommand::DispatchKeyEvent { .. } => Some(Ok(InteractionCommand::DispatchKey(
+                key_input(&instruction.command),
+            ))),
             InputCommand::SetPointerCapture {
                 event_id,
                 pointer_id,

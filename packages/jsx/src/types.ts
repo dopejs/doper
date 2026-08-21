@@ -60,6 +60,8 @@ export interface PingoEvent {
     | "focusin"
     | "focusout"
     | "gotpointercapture"
+    | "keydown"
+    | "keyup"
     | "lostpointercapture"
     | "pointercancel"
     | "pointerdown"
@@ -89,6 +91,18 @@ export interface PingoEvent {
   readonly width: number;
   readonly height: number;
   readonly elapsedMicros: number;
+  /**
+   * `KeyboardEvent.key` on a key event, `""` otherwise.
+   *
+   * `preventDefault()` on a key event only stops Shell propagation. It never
+   * suppresses editing: text insertion comes from the editing transaction path,
+   * which does not read key events.
+   */
+  readonly key: string;
+  /** `KeyboardEvent.code` on a key event, `""` otherwise or when unrecognized. */
+  readonly code: string;
+  /** Whether a key press is an auto-repeat. */
+  readonly repeat: boolean;
   readonly shiftKey: boolean;
   readonly ctrlKey: boolean;
   readonly altKey: boolean;
@@ -219,6 +233,16 @@ export interface CommonProps {
   readonly onClick?: PingoEventHandler;
   readonly onWheelCapture?: PingoEventHandler;
   readonly onWheel?: PingoEventHandler;
+  /**
+   * Key press routed to the focused node.
+   *
+   * Core delivers key events only to whatever currently holds focus; a node
+   * that is not focused never sees them.
+   */
+  readonly onKeyDownCapture?: PingoEventHandler;
+  readonly onKeyDown?: PingoEventHandler;
+  readonly onKeyUpCapture?: PingoEventHandler;
+  readonly onKeyUp?: PingoEventHandler;
   readonly semanticRole?: string;
   readonly semanticLabel?: string;
   readonly semanticValue?: string;

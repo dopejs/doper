@@ -6,8 +6,8 @@ use crate::codec::{
 };
 use crate::{
     AbiError, EVENT_TRANSACTIONS_MAGIC, EventTransactionOpcode, InputEventKind, InputPointerType,
-    MAX_EVENT_TRANSACTION_INSTRUCTIONS, MAX_EVENT_TRANSACTIONS_BYTES, MAX_RESOURCE_BYTES,
-    NULL_NODE_ID, StreamKind, StyleKeyword,
+    MAX_EVENT_TRANSACTION_INSTRUCTIONS, MAX_EVENT_TRANSACTIONS_BYTES, MAX_KEYBOARD_CODE_ID,
+    MAX_KEYBOARD_KEY_NAME_ID, MAX_RESOURCE_BYTES, NULL_NODE_ID, StreamKind, StyleKeyword,
 };
 
 /// One Core-hit-tested event and its stable propagation path.
@@ -45,6 +45,14 @@ pub struct EventTransactionRecord {
     pub contact_size: [f32; 2],
     /// Core-resolved CSS cursor for the current physical pointer target.
     pub cursor: StyleKeyword,
+    /// Interned `KeyboardEvent.code`, or zero outside a key event.
+    pub key_code: u16,
+    /// Interned named `KeyboardEvent.key`, or zero.
+    pub key_name: u16,
+    /// Unicode scalar of a single-character `key`, or zero.
+    pub key_text: u32,
+    /// Whether a key press is an auto-repeat.
+    pub repeat: bool,
     /// Root-to-target generation-bearing path.
     pub path: Vec<u32>,
 }
@@ -174,7 +182,11 @@ impl EventTransactionBatch {
             writer.f32(record.contact_size[0])?;
             writer.f32(record.contact_size[1])?;
             writer.u16(record.cursor as u16);
-            writer.u16(0);
+            writer.u16(record.key_code);
+            writer.u16(record.key_name);
+            writer.u8(u8::from(record.repeat));
+            writer.u8(0);
+            writer.u32(record.key_text);
             writer.u32(u32::try_from(record.path.len()).map_err(|_| AbiError::ArithmeticOverflow)?);
             for node in &record.path {
                 writer.u32(*node);
@@ -215,7 +227,20 @@ fn decode_record(reader: &mut Reader<'_>) -> Result<EventTransactionRecord, AbiE
     let cursor = StyleKeyword::from_u16(reader.read_u16()?).ok_or(AbiError::InvalidValue(
         "event transaction cursor is unknown",
     ))?;
-    reader.read_zeroes(2)?;
+    let key_code = reader.read_u16()?;
+    let key_name = reader.read_u16()?;
+    let repeat = match reader.read_u8()? {
+        0 => false,
+        1 => true,
+        value => {
+            return Err(AbiError::UnknownIdentifier {
+                category: "key repeat flag",
+                value: u32::from(value),
+            });
+        }
+    };
+    reader.read_zeroes(1)?;
+    let key_text = reader.read_u32()?;
     let path_count =
         usize::try_from(reader.read_u32()?).map_err(|_| AbiError::ArithmeticOverflow)?;
     let path_bytes = path_count
@@ -248,6 +273,10 @@ fn decode_record(reader: &mut Reader<'_>) -> Result<EventTransactionRecord, AbiE
         tilt,
         contact_size,
         cursor,
+        key_code,
+        key_name,
+        key_text,
+        repeat,
         path,
     };
     validate_record(&record)?;
@@ -337,6 +366,37 @@ fn validate_record(record: &EventTransactionRecord) -> Result<(), AbiError> {
     {
         return Err(AbiError::InvalidValue("event contact size is invalid"));
     }
+    validate_key_payload(record)?;
+    Ok(())
+}
+
+/// Rejects key payloads on non-key records and out-of-range identifiers.
+///
+/// Every non-key record zeroes these fields, the same way a focus record
+/// already zeroes the pointer fields, so a non-zero value there means the
+/// producer and this build disagree about the layout.
+fn validate_key_payload(record: &EventTransactionRecord) -> Result<(), AbiError> {
+    let key_event = matches!(record.kind, InputEventKind::KeyDown | InputEventKind::KeyUp);
+    if !key_event
+        && (record.key_code != 0 || record.key_name != 0 || record.key_text != 0 || record.repeat)
+    {
+        return Err(AbiError::InvalidValue(
+            "non-key event carries a key payload",
+        ));
+    }
+    if record.key_code > MAX_KEYBOARD_CODE_ID || record.key_name > MAX_KEYBOARD_KEY_NAME_ID {
+        return Err(AbiError::InvalidValue("key identifier is out of range"));
+    }
+    if record.key_text != 0
+        && (record.key_text > 0x0010_ffff || (0xd800..=0xdfff).contains(&record.key_text))
+    {
+        return Err(AbiError::InvalidValue("key text is not a Unicode scalar"));
+    }
+    if record.key_name != 0 && record.key_text != 0 {
+        return Err(AbiError::InvalidValue(
+            "key cannot be both named and printable",
+        ));
+    }
     Ok(())
 }
 
@@ -382,6 +442,10 @@ mod tests {
             tilt: [0.0, 0.0],
             contact_size: [1.0, 1.0],
             cursor: StyleKeyword::Pointer,
+            key_code: 0,
+            key_name: 0,
+            key_text: 0,
+            repeat: false,
             path: vec![1, 2, 3],
         };
         let batch = EventTransactionBatch {
@@ -410,6 +474,10 @@ mod tests {
                     tilt: [0.0, 0.0],
                     contact_size: [0.0, 0.0],
                     cursor: StyleKeyword::Auto,
+                    key_code: 0,
+                    key_name: 0,
+                    key_text: 0,
+                    repeat: false,
                     path: vec![],
                 }
             }],
@@ -436,6 +504,10 @@ mod tests {
             tilt: [0.0, 0.0],
             contact_size: [1.0, 1.0],
             cursor: StyleKeyword::Pointer,
+            key_code: 0,
+            key_name: 0,
+            key_text: 0,
+            repeat: false,
             path: vec![1, 2, 3],
         };
         let reject = |mutate: fn(&mut EventTransactionRecord)| {

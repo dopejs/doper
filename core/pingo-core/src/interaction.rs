@@ -25,9 +25,23 @@ pub(crate) struct PointerEventInput {
     pub contact_size: [f32; 2],
 }
 
+/// One non-editing key sample, already validated by the ABI decoder.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct KeyEventInput {
+    pub event_id: u32,
+    pub kind: InputEventKind,
+    pub flags: u16,
+    pub key_code: u16,
+    pub key_name: u16,
+    pub key_text: u32,
+    pub modifiers: u32,
+    pub elapsed_micros: u32,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum InteractionCommand {
     Dispatch(PointerEventInput),
+    DispatchKey(KeyEventInput),
     SetPointerCapture {
         event_id: u32,
         pointer_id: u32,
@@ -91,6 +105,7 @@ impl InteractionController {
             InteractionCommand::Dispatch(input) => {
                 self.dispatch(scene, input, raw_hit_path, &mut records);
             }
+            InteractionCommand::DispatchKey(input) => self.dispatch_key(scene, input, &mut records),
             InteractionCommand::SetPointerCapture {
                 event_id,
                 pointer_id,
@@ -223,6 +238,32 @@ impl InteractionController {
                 self.pointers.remove(&input.pointer_id);
             }
         }
+    }
+
+    /// Routes one key sample to the focused node and nowhere else.
+    ///
+    /// A key event has no coordinates, so there is nothing to hit test: the
+    /// route is the path to whatever currently holds focus. With no focus the
+    /// event is dropped rather than delivered to the root — routing it there
+    /// would let any component intercept keys it was never given. Key events
+    /// never move focus and never touch hover/active state; focus transitions
+    /// stay with `FocusNode`/`BlurNode` and pointer presses.
+    fn dispatch_key(
+        &mut self,
+        scene: &Scene,
+        input: KeyEventInput,
+        records: &mut Vec<EventTransactionRecord>,
+    ) {
+        let Some(focus) = self.focus else {
+            return;
+        };
+        let Some(path) = scene.path_to_root(focus.node) else {
+            return;
+        };
+        if path.is_empty() {
+            return;
+        }
+        records.push(key_record(input, &path));
     }
 
     fn boundary_events(
@@ -523,6 +564,10 @@ fn event_record(
         tilt: input.tilt,
         contact_size: input.contact_size,
         cursor: StyleKeyword::Auto,
+        key_code: 0,
+        key_name: 0,
+        key_text: 0,
+        repeat: false,
         path: path.iter().map(|node| node.raw()).collect(),
     }
 }
@@ -537,6 +582,19 @@ fn event_record_with_id(
     EventTransactionRecord {
         event_id,
         ..event_record(input, kind, path, related_target)
+    }
+}
+
+fn key_record(input: KeyEventInput, path: &[NodeId]) -> EventTransactionRecord {
+    // A key record is a focus-shaped record: no pointer identity, no geometry.
+    EventTransactionRecord {
+        modifiers: input.modifiers,
+        elapsed_micros: input.elapsed_micros,
+        key_code: input.key_code,
+        key_name: input.key_name,
+        key_text: input.key_text,
+        repeat: input.flags & pingo_abi::KEY_FLAG_REPEAT != 0,
+        ..focus_record(input.event_id, input.kind, path, NULL_NODE_ID)
     }
 }
 
@@ -563,6 +621,10 @@ fn focus_record(
         tilt: [0.0, 0.0],
         contact_size: [0.0, 0.0],
         cursor: StyleKeyword::Auto,
+        key_code: 0,
+        key_name: 0,
+        key_text: 0,
+        repeat: false,
         path: path.iter().map(|node| node.raw()).collect(),
     }
 }
@@ -609,6 +671,88 @@ mod tests {
             .expect("scene commit");
         scene.clear_dirty();
         scene
+    }
+
+    fn key(event_id: u32, kind: InputEventKind) -> KeyEventInput {
+        KeyEventInput {
+            event_id,
+            kind,
+            flags: 0,
+            key_code: 12,
+            key_name: 8,
+            key_text: 0,
+            modifiers: 0,
+            elapsed_micros: 16_667,
+        }
+    }
+
+    #[test]
+    fn a_key_event_routes_to_the_focused_node_and_leaves_interaction_state_alone() {
+        let mut scene = scene();
+        let mut controller = InteractionController::default();
+        controller.apply(
+            &mut scene,
+            InteractionCommand::Focus {
+                event_id: 1,
+                node: id(1),
+                origin: InputFocusOrigin::Keyboard,
+            },
+            None,
+        );
+        let masks_before = scene.interaction_state(id(1));
+
+        let result = controller.apply(
+            &mut scene,
+            InteractionCommand::DispatchKey(key(2, InputEventKind::KeyDown)),
+            None,
+        );
+
+        assert_eq!(result.records.len(), 1);
+        let record = &result.records[0];
+        assert_eq!(record.kind, InputEventKind::KeyDown);
+        assert_eq!(record.path, vec![id(0).raw(), id(1).raw()]);
+        assert_eq!(record.target, id(1).raw());
+        assert_eq!(record.key_code, 12);
+        assert_eq!(record.key_name, 8);
+        assert!(!record.repeat);
+        // Keys observe; they never move focus or touch hover/active.
+        assert_eq!(result.state_changes, 0);
+        assert_eq!(scene.interaction_state(id(1)), masks_before);
+    }
+
+    #[test]
+    fn a_key_event_with_no_focus_produces_no_record() {
+        let mut scene = scene();
+        let mut controller = InteractionController::default();
+
+        let result = controller.apply(
+            &mut scene,
+            InteractionCommand::DispatchKey(key(1, InputEventKind::KeyUp)),
+            None,
+        );
+
+        assert!(result.records.is_empty());
+    }
+
+    #[test]
+    fn a_repeat_flag_reaches_the_record() {
+        let mut scene = scene();
+        let mut controller = InteractionController::default();
+        controller.apply(
+            &mut scene,
+            InteractionCommand::Focus {
+                event_id: 1,
+                node: id(1),
+                origin: InputFocusOrigin::Keyboard,
+            },
+            None,
+        );
+        let mut input = key(2, InputEventKind::KeyDown);
+        input.flags = pingo_abi::KEY_FLAG_REPEAT;
+
+        let result = controller.apply(&mut scene, InteractionCommand::DispatchKey(input), None);
+
+        assert!(result.records[0].repeat);
     }
 
     fn pointer(event_id: u32, kind: InputEventKind) -> PointerEventInput {

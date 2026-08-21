@@ -13,6 +13,7 @@ import {
   decodeInputBatch,
   encodeInputBatch,
   EVENT_FLAG_PRECISE_WHEEL,
+  KEY_FLAG_REPEAT,
   NativeTextInputBridge,
   type EditTransaction,
   type EditingGeometry,
@@ -20,7 +21,15 @@ import {
   type InputCommand,
 } from "@dopejs/pingo-editing";
 
-import { MAX_INPUT_BYTES, MAX_MUTATION_BYTES } from "./generated";
+import {
+  KEYBOARD_CODES_BY_NAME,
+  KEYBOARD_KEY_NAMES_BY_NAME,
+  MAX_INPUT_BYTES,
+  MAX_MUTATION_BYTES,
+} from "./generated";
+
+/** Reported when the platform gives a key neither a known name nor one code point. */
+const UNIDENTIFIED_KEY_NAME = KEYBOARD_KEY_NAMES_BY_NAME.get("Unidentified") ?? 0;
 import {
   CanvasFrameSink,
   createDefaultRasterCache,
@@ -184,6 +193,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #inputSequence = 1;
   #eventSequence = 1;
   readonly #eventTimestamps = new Map<number, number>();
+  #keyTimestamp: number | undefined;
   #wheelGesture: { readonly precise: boolean; readonly timestamp: number } | undefined;
   #pendingWheel:
     { deltaX: number; deltaY: number; event: WheelEvent; readonly flags: number } | undefined;
@@ -742,6 +752,67 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.dispatchCanvasEvent("click", event, 0, 0);
   };
 
+  private readonly handleCanvasKeyDown = (event: Event): void => {
+    this.dispatchCanvasKeyEvent("keydown", event as KeyboardEvent);
+  };
+
+  private readonly handleCanvasKeyUp = (event: Event): void => {
+    this.dispatchCanvasKeyEvent("keyup", event as KeyboardEvent);
+  };
+
+  /**
+   * Interns one `KeyboardEvent` and hands it to Core for focus routing.
+   *
+   * `key` and `code` are strings, and putting a string on a per-event binary
+   * path would allocate every keystroke and break replay determinism, so both
+   * are interned against the schema tables. A key the tables do not know still
+   * reaches the Shell: `code` comes back empty, but a printable `key` survives
+   * as its code point.
+   *
+   * Nothing here can produce text. Insertion comes from the editing
+   * transaction path (EditContext or the textarea proxy); Core never derives an
+   * edit from a key. During composition the key is reported as `Process`, which
+   * is what a browser reports too.
+   */
+  private dispatchCanvasKeyEvent(kind: "keydown" | "keyup", event: KeyboardEvent): void {
+    if (this.#closing || this.#unmounted || this.#recovering) return;
+    const composing = event.isComposing === true || event.keyCode === 229;
+    const name = composing ? "Process" : event.key;
+    const keyName = KEYBOARD_KEY_NAMES_BY_NAME.get(name) ?? 0;
+    // A single code point is carried as text; anything else has to be a name.
+    const keyText = keyName === 0 && [...name].length === 1 ? (name.codePointAt(0) ?? 0) : 0;
+    const timestamp = Number.isFinite(event.timeStamp) ? event.timeStamp : 0;
+    const previous = this.#keyTimestamp;
+    this.#keyTimestamp = timestamp;
+    const elapsedMs =
+      previous === undefined || timestamp <= previous
+        ? 1000 / 60
+        : Math.min(1000, timestamp - previous);
+    const eventId = this.#eventSequence;
+    this.#eventSequence = nextSequence(eventId);
+    try {
+      this.sendInputCommands([
+        {
+          type: "dispatchKeyEvent",
+          eventId,
+          kind,
+          flags: event.repeat ? KEY_FLAG_REPEAT : 0,
+          keyCode: KEYBOARD_CODES_BY_NAME.get(event.code) ?? 0,
+          keyName: keyName === 0 && keyText === 0 ? UNIDENTIFIED_KEY_NAME : keyName,
+          keyText,
+          modifiers:
+            (event.shiftKey ? 1 : 0) |
+            (event.ctrlKey ? 2 : 0) |
+            (event.altKey ? 4 : 0) |
+            (event.metaKey ? 8 : 0),
+          elapsedMicros: Math.max(1, Math.min(1_000_000, Math.round(elapsedMs * 1000))),
+        },
+      ]);
+    } catch (cause) {
+      this.#options.onHostError?.(toError(cause, `${kind} dispatch failed`));
+    }
+  }
+
   private readonly handleCanvasWheel = (event: WheelEvent): void => {
     const scale =
       event.deltaMode === 1
@@ -1204,6 +1275,14 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#canvas.addEventListener("click", this.handleCanvasClick, { passive: true });
     this.#canvas.addEventListener("dblclick", this.handleCanvasDoubleClick, { passive: true });
     this.#canvas.addEventListener("wheel", this.handleCanvasWheel, { passive: wheelPassive });
+    // Non-passive: an application has to be able to stop a key from also
+    // scrolling or tabbing the page. A canvas only receives key events when it
+    // is focusable, and making it so is the host's job, not the application's.
+    if (typeof this.#canvas.getAttribute === "function" && this.#canvas.tabIndex < 0) {
+      this.#canvas.tabIndex = 0;
+    }
+    this.#canvas.addEventListener("keydown", this.handleCanvasKeyDown, { passive: false });
+    this.#canvas.addEventListener("keyup", this.handleCanvasKeyUp, { passive: false });
     if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
       // Capture, so a handler that stops propagation cannot strand the session.
       document.addEventListener("pointerdown", this.handleDocumentPointerDown, {
@@ -1242,6 +1321,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
       window.removeEventListener("blur", this.handleWindowBlur);
     }
+    this.#canvas.removeEventListener("keydown", this.handleCanvasKeyDown);
+    this.#canvas.removeEventListener("keyup", this.handleCanvasKeyUp);
     this.#canvas.removeEventListener("pointerdown", this.handleCanvasPointerEvent);
     this.#canvas.removeEventListener("pointerup", this.handleCanvasPointerEvent);
     this.#canvas.removeEventListener("pointermove", this.handleCanvasPointerEvent);

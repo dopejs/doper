@@ -1227,6 +1227,93 @@ describe("context", () => {
   });
 });
 
+describe("keyboard events", () => {
+  it("propagates key events and exposes key, code and repeat", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    const calls: string[] = [];
+    root.render(
+      createElement("container", {
+        onKeyDownCapture: (event: PingoEvent) => calls.push(`capture:${event.key}`),
+        children: createElement("text", {
+          value: "target",
+          onKeyDown: (event: PingoEvent) => {
+            calls.push(`down:${event.key}:${event.code}:${String(event.repeat)}`);
+            calls.push(`mods:${String(event.ctrlKey)}${String(event.shiftKey)}`);
+          },
+          onKeyUp: (event: PingoEvent) => calls.push(`up:${event.key}`),
+        }),
+      }),
+    );
+    const nodes = mutationsOfType(sink.batches[0], "createNode");
+    const rootId = nodes[0]?.nodeId ?? 0;
+    const outerId = nodes[1]?.nodeId ?? 0;
+    const targetId = nodes[2]?.nodeId ?? 0;
+
+    root.applyEventTransaction(
+      eventTransaction({
+        eventId: 1,
+        kind: "keydown",
+        target: targetId,
+        modifiers: 3,
+        key: "ArrowDown",
+        code: "ArrowDown",
+        repeat: true,
+        path: [rootId, outerId, targetId],
+      }),
+    );
+    root.applyEventTransaction(
+      eventTransaction({
+        eventId: 2,
+        kind: "keyup",
+        target: targetId,
+        key: "a",
+        code: "KeyA",
+        path: [rootId, outerId, targetId],
+      }),
+    );
+
+    expect(calls).toEqual([
+      "capture:ArrowDown",
+      "down:ArrowDown:ArrowDown:true",
+      "mods:truetrue",
+      "up:a",
+    ]);
+  });
+
+  it("stops a key event at a handler that stops propagation", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    const calls: string[] = [];
+    root.render(
+      createElement("container", {
+        onKeyDown: () => calls.push("outer"),
+        children: createElement("text", {
+          value: "target",
+          onKeyDown: (event: PingoEvent) => {
+            calls.push("target");
+            event.stopPropagation();
+          },
+        }),
+      }),
+    );
+    const nodes = mutationsOfType(sink.batches[0], "createNode");
+
+    root.applyEventTransaction(
+      eventTransaction({
+        eventId: 1,
+        kind: "keydown",
+        target: nodes[2]?.nodeId ?? 0,
+        key: "Escape",
+        code: "Escape",
+        path: [nodes[0]?.nodeId ?? 0, nodes[1]?.nodeId ?? 0, nodes[2]?.nodeId ?? 0],
+      }),
+    );
+
+    expect(calls).toEqual(["target"]);
+  });
+});
+
 interface StyleDiagnosticRecord {
   readonly items: readonly { readonly code: string }[];
   readonly context: { readonly nodeId: number; readonly hostType: string };
@@ -1254,6 +1341,9 @@ function eventTransaction(
     tiltY: 0,
     width: 0,
     height: 0,
+    code: "",
+    key: "",
+    repeat: false,
     ...overrides,
   };
 }

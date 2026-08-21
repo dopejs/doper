@@ -6,6 +6,8 @@ import {
   INSTRUCTION_FLAG_OPTIONAL,
   INSTRUCTION_HEADER_BYTES,
   INSTRUCTION_LENGTH_ESCAPE,
+  KEYBOARD_CODES,
+  KEYBOARD_KEY_NAMES,
   MINIMUM_READABLE_ABI_VERSION,
   InputOpcode,
   MAX_INPUT_BYTES,
@@ -31,6 +33,12 @@ export const EVENT_FLAG_PRECISE_WHEEL = 1;
 
 /** Every event flag bit defined by this ABI version. */
 export const EVENT_FLAG_MASK = EVENT_FLAG_PRECISE_WHEEL;
+
+/** Key event flag: the press is an auto-repeat rather than a fresh one. */
+export const KEY_FLAG_REPEAT = 1;
+
+/** Every key flag bit this ABI version defines. */
+export const KEY_FLAG_MASK = KEY_FLAG_REPEAT;
 const utf8Encoder = new TextEncoder();
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
@@ -76,7 +84,9 @@ export type InputEventKind =
   | "pointerout"
   | "pointerover"
   | "pointerup"
-  | "wheel";
+  | "wheel"
+  | "keydown"
+  | "keyup";
 
 export type InputPointerType = "mouse" | "none" | "pen" | "touch";
 export type InputFocusOrigin = "accessibility" | "keyboard" | "pointer" | "programmatic";
@@ -188,6 +198,28 @@ export type InputCommand =
       readonly tiltY: number;
       readonly width: number;
       readonly height: number;
+    }
+  | {
+      /**
+       * One non-editing key sample routed to whatever holds focus.
+       *
+       * The identifiers are interned against the schema tables so no string
+       * crosses the binary boundary; the Shell turns them back into
+       * `KeyboardEvent.key`/`.code`. Text insertion never comes from here.
+       */
+      readonly type: "dispatchKeyEvent";
+      readonly eventId: number;
+      readonly kind: Extract<InputEventKind, "keydown" | "keyup">;
+      /** Key source bits; see {@link KEY_FLAG_REPEAT}. */
+      readonly flags: number;
+      /** Interned `KeyboardEvent.code`, or zero when unrecognized. */
+      readonly keyCode: number;
+      /** Interned named `KeyboardEvent.key`, or zero for a printable key. */
+      readonly keyName: number;
+      /** Unicode scalar of a single-character `key`, or zero. */
+      readonly keyText: number;
+      readonly modifiers: number;
+      readonly elapsedMicros: number;
     }
   | {
       readonly type: "setPointerCapture" | "releasePointerCapture";
@@ -409,6 +441,18 @@ function encodeCommand(writer: ByteWriter, command: InputCommand): void {
       writer.f32(command.tiltY);
       writer.f32(command.width);
       writer.f32(command.height);
+      return;
+    case "dispatchKeyEvent":
+      assertU32(command.eventId, "eventId");
+      validateKeyFields(command);
+      writer.u32(command.eventId);
+      writer.u16(eventKindCode(command.kind));
+      writer.u16(command.flags);
+      writer.u16(command.keyCode);
+      writer.u16(command.keyName);
+      writer.u32(command.keyText);
+      writer.u32(command.modifiers);
+      writer.u32(command.elapsedMicros);
       return;
     case "setPointerCapture":
     case "releasePointerCapture":
@@ -658,6 +702,21 @@ function decodeCommand(reader: ByteReader, opcode: InputOpcode): InputCommand {
       validateEventFields(command);
       return command;
     }
+    case InputOpcode.DispatchKeyEvent: {
+      const command = {
+        type: "dispatchKeyEvent" as const,
+        eventId: reader.u32(),
+        kind: eventKind(reader.u16()) as Extract<InputEventKind, "keydown" | "keyup">,
+        flags: reader.u16(),
+        keyCode: reader.u16(),
+        keyName: reader.u16(),
+        keyText: reader.u32(),
+        modifiers: reader.u32(),
+        elapsedMicros: reader.u32(),
+      };
+      validateKeyFields(command);
+      return command;
+    }
     case InputOpcode.SetPointerCapture:
     case InputOpcode.ReleasePointerCapture: {
       const eventId = reader.u32();
@@ -744,6 +803,8 @@ function opcodeFor(command: InputCommand): InputOpcode {
       return InputOpcode.ScrollBy;
     case "dispatchEvent":
       return InputOpcode.DispatchEvent;
+    case "dispatchKeyEvent":
+      return InputOpcode.DispatchKeyEvent;
     case "setPointerCapture":
       return InputOpcode.SetPointerCapture;
     case "releasePointerCapture":
@@ -827,6 +888,10 @@ function eventKindCode(kind: InputEventKind): number {
       return 15;
     case "focusout":
       return 16;
+    case "keydown":
+      return 17;
+    case "keyup":
+      return 18;
   }
 }
 
@@ -864,8 +929,66 @@ function eventKind(value: number): InputEventKind {
       return "focusin";
     case 16:
       return "focusout";
+    case 17:
+      return "keydown";
+    case 18:
+      return "keyup";
     default:
       return fail("unknown input event kind");
+  }
+}
+
+/**
+ * Rejects key samples that cannot describe a real `KeyboardEvent`.
+ *
+ * Core never interprets a key, so the identifiers only have to be inside the
+ * table bounds this ABI version declares; anything above them came from a newer
+ * producer or a corrupt stream.
+ */
+function validateKeyFields(
+  command: Pick<
+    Extract<InputCommand, { readonly type: "dispatchKeyEvent" }>,
+    "elapsedMicros" | "flags" | "keyCode" | "keyName" | "keyText" | "kind" | "modifiers"
+  >,
+): void {
+  if (command.kind !== "keydown" && command.kind !== "keyup") {
+    fail("key dispatch requires a key event kind");
+  }
+  if (!Number.isInteger(command.flags) || command.flags < 0 || command.flags > KEY_FLAG_MASK) {
+    fail("key flag bits are reserved");
+  }
+  if (
+    !Number.isInteger(command.keyCode) ||
+    command.keyCode < 0 ||
+    command.keyCode > KEYBOARD_CODES.length ||
+    !Number.isInteger(command.keyName) ||
+    command.keyName < 0 ||
+    command.keyName > KEYBOARD_KEY_NAMES.length
+  ) {
+    fail("key identifier is out of range");
+  }
+  // Unicode scalar values exclude the surrogate range; `key` is never a lone
+  // surrogate, so a stream carrying one is malformed.
+  if (
+    !Number.isInteger(command.keyText) ||
+    command.keyText < 0 ||
+    command.keyText > 0x10ffff ||
+    (command.keyText >= 0xd800 && command.keyText <= 0xdfff)
+  ) {
+    fail("key text is not a Unicode scalar");
+  }
+  if (command.keyName !== 0 && command.keyText !== 0) {
+    fail("key cannot be both named and printable");
+  }
+  if (!Number.isInteger(command.modifiers) || command.modifiers < 0 || command.modifiers > 0x0f) {
+    fail("key modifier bits are reserved");
+  }
+  if (
+    !Number.isInteger(command.elapsedMicros) ||
+    command.elapsedMicros <= 0 ||
+    command.elapsedMicros > MAX_SCROLL_DELTA_MICROS
+  ) {
+    fail("key elapsed time is invalid");
   }
 }
 
@@ -903,6 +1026,9 @@ function validateEventFields(
     command.kind === "focusout"
   ) {
     fail("synthetic event kind cannot be dispatched by the host");
+  }
+  if (command.kind === "keydown" || command.kind === "keyup") {
+    fail("key events use dispatchKeyEvent");
   }
   if (!Number.isInteger(command.flags) || command.flags < 0 || command.flags > EVENT_FLAG_MASK) {
     fail("event flags are invalid");

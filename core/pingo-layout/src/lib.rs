@@ -6,6 +6,9 @@
 mod engine;
 mod error;
 mod geometry;
+/// The differential oracle is a test tool, not a product path: compiling it into
+/// the shipped WASM would spend the size budget on code no application calls.
+#[cfg(test)]
 mod reference;
 
 pub use engine::{
@@ -14,4 +17,3 @@ pub use engine::{
 };
 pub use error::LayoutError;
 pub use geometry::{BoxConstraints, Point, Size};
-pub use reference::{ReferenceLayout, reference_layout};

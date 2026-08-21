@@ -174,6 +174,7 @@ pub fn edit_command_from_input(
         | InputCommand::ScrollTo { .. }
         | InputCommand::ScrollBy { .. }
         | InputCommand::DispatchEvent { .. }
+        | InputCommand::DispatchKeyEvent { .. }
         | InputCommand::SetPointerCapture { .. }
         | InputCommand::ReleasePointerCapture { .. }
         | InputCommand::FocusNode { .. }

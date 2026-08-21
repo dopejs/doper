@@ -58,7 +58,7 @@ pub use glyph_resources::{
 pub use input::{
     CaretDirection, CaretGranularity, EVENT_FLAG_MASK, EVENT_FLAG_PRECISE_WHEEL, InputAffinity,
     InputBatch, InputCommand, InputEventKind, InputFocusOrigin, InputInstruction, InputPointerType,
-    InputPosition, InputSelection, InteractionResetReason,
+    InputPosition, InputSelection, InteractionResetReason, KEY_FLAG_MASK, KEY_FLAG_REPEAT,
 };
 pub use mutation::{Mutation, MutationBatch, MutationInstruction};
 pub use picture_resources::{

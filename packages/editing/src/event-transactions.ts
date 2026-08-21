@@ -6,6 +6,8 @@ import {
   INSTRUCTION_FLAG_OPTIONAL,
   INSTRUCTION_HEADER_BYTES,
   INSTRUCTION_LENGTH_ESCAPE,
+  KEYBOARD_CODES,
+  KEYBOARD_KEY_NAMES,
   MINIMUM_READABLE_ABI_VERSION,
   MAX_EVENT_TRANSACTIONS_BYTES,
   MAX_EVENT_TRANSACTION_INSTRUCTIONS,
@@ -39,6 +41,12 @@ export interface EventTransaction {
   readonly width: number;
   readonly height: number;
   readonly cursor: EventCursor;
+  /** `KeyboardEvent.code`, or `""` outside a key event or for an unknown key. */
+  readonly code: string;
+  /** `KeyboardEvent.key`, or `""` outside a key event. */
+  readonly key: string;
+  /** Whether a key press is an auto-repeat. */
+  readonly repeat: boolean;
   readonly path: readonly number[];
 }
 
@@ -117,7 +125,11 @@ function decodeEvent(reader: Reader): EventTransaction {
   const width = reader.f32();
   const height = reader.f32();
   const cursor = cursorName(reader.u16());
-  reader.zeroes(2);
+  const keyCode = reader.u16();
+  const keyName = reader.u16();
+  const repeat = booleanByte(reader.u8(), "key repeat flag");
+  reader.zeroes(1);
+  const keyText = reader.u32();
   const pathCount = reader.u32();
   if (
     pathCount > Math.floor(MAX_RESOURCE_BYTES / 4) ||
@@ -147,6 +159,20 @@ function decodeEvent(reader: Reader): EventTransaction {
   if (width < 0 || width > 1_000_000 || height < 0 || height > 1_000_000) {
     fail("event transaction contact size is invalid");
   }
+  // Every non-key record zeroes the key payload, the same way a focus record
+  // zeroes the pointer fields, so a value here means the producer and this
+  // build disagree about the layout.
+  const keyEvent = kind === "keydown" || kind === "keyup";
+  if (!keyEvent && (keyCode !== 0 || keyName !== 0 || keyText !== 0 || repeat)) {
+    fail("non-key event carries a key payload");
+  }
+  if (keyCode > KEYBOARD_CODES.length || keyName > KEYBOARD_KEY_NAMES.length) {
+    fail("event transaction key identifier is out of range");
+  }
+  if (keyText > 0x10ffff || (keyText >= 0xd800 && keyText <= 0xdfff)) {
+    fail("event transaction key text is not a Unicode scalar");
+  }
+  if (keyName !== 0 && keyText !== 0) fail("key cannot be both named and printable");
   return {
     eventId,
     kind,
@@ -168,6 +194,15 @@ function decodeEvent(reader: Reader): EventTransaction {
     width,
     height,
     cursor,
+    code: keyCode === 0 ? "" : (KEYBOARD_CODES[keyCode - 1] ?? ""),
+    key: keyEvent
+      ? keyName === 0
+        ? keyText === 0
+          ? "Unidentified"
+          : String.fromCodePoint(keyText)
+        : (KEYBOARD_KEY_NAMES[keyName - 1] ?? "Unidentified")
+      : "",
+    repeat,
     path,
   };
 }
@@ -206,6 +241,10 @@ function eventKind(value: number): InputEventKind {
       return "focusin";
     case 16:
       return "focusout";
+    case 17:
+      return "keydown";
+    case 18:
+      return "keyup";
     default:
       return fail("unknown event transaction kind");
   }

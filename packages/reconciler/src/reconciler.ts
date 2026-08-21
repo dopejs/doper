@@ -372,6 +372,10 @@ const COMMON_KEYS = new Set([
   "onClick",
   "onWheelCapture",
   "onWheel",
+  "onKeyDownCapture",
+  "onKeyDown",
+  "onKeyUpCapture",
+  "onKeyUp",
   "opacity",
   "padding",
   "ref",
@@ -2637,6 +2641,10 @@ function normalizeEventHandlers(
     ["click:bubble", "onClick"],
     ["wheel:capture", "onWheelCapture"],
     ["wheel:bubble", "onWheel"],
+    ["keydown:capture", "onKeyDownCapture"],
+    ["keydown:bubble", "onKeyDown"],
+    ["keyup:capture", "onKeyUpCapture"],
+    ["keyup:bubble", "onKeyUp"],
   ] as const satisfies readonly (readonly [EventHandlerKey, string])[];
   const result = new Map<EventHandlerKey, PingoEventHandler>();
   for (const [key, property] of bindings) {
@@ -2688,6 +2696,9 @@ class PropagationState {
       width: transaction.width,
       height: transaction.height,
       elapsedMicros: transaction.elapsedMicros,
+      key: transaction.key,
+      code: transaction.code,
+      repeat: transaction.repeat,
       shiftKey: (transaction.modifiers & 1) !== 0,
       ctrlKey: (transaction.modifiers & 2) !== 0,
       altKey: (transaction.modifiers & 4) !== 0,

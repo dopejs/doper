@@ -3,11 +3,16 @@ import {
   decodeInputBatch,
   encodeInputBatch,
   EVENT_FLAG_PRECISE_WHEEL,
+  KEY_FLAG_REPEAT,
 } from "@dopejs/pingo-editing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedCanvasRoot } from "./hosted-root";
-import { VIRTUAL_REFILL_VERSION } from "./generated";
+import {
+  KEYBOARD_CODES_BY_NAME,
+  KEYBOARD_KEY_NAMES_BY_NAME,
+  VIRTUAL_REFILL_VERSION,
+} from "./generated";
 import type { CoreClient } from "./main-thread";
 import { SabMutationRing } from "./sab-ring";
 
@@ -251,6 +256,94 @@ describe("createHostedCanvasRoot", () => {
     await root.close();
   });
 
+  it("interns key identifiers and makes the canvas focusable so keys arrive", async () => {
+    installCanvasGlobal();
+    const core = fakeCore();
+    const canvas = new FakeCanvas();
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+
+    // A canvas that is not focusable never receives a key event at all.
+    expect(canvas.tabIndex).toBe(0);
+
+    canvas.emit("keydown", {
+      type: "keydown",
+      key: "ArrowDown",
+      code: "ArrowDown",
+      repeat: true,
+      shiftKey: false,
+      ctrlKey: true,
+      altKey: false,
+      metaKey: false,
+    });
+    canvas.emit("keyup", {
+      type: "keyup",
+      key: "a",
+      code: "KeyA",
+      repeat: false,
+      shiftKey: false,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+    });
+
+    const commands = core.inputs.flatMap((bytes) => decodeInputBatch(bytes).commands);
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toMatchObject({
+      type: "dispatchKeyEvent",
+      kind: "keydown",
+      keyName: KEYBOARD_KEY_NAMES_BY_NAME.get("ArrowDown"),
+      keyCode: KEYBOARD_CODES_BY_NAME.get("ArrowDown"),
+      keyText: 0,
+      flags: KEY_FLAG_REPEAT,
+      modifiers: 2,
+    });
+    // A printable key travels as its code point, not as a name.
+    expect(commands[1]).toMatchObject({
+      type: "dispatchKeyEvent",
+      kind: "keyup",
+      keyName: 0,
+      keyCode: KEYBOARD_CODES_BY_NAME.get("KeyA"),
+      keyText: 0x61,
+      flags: 0,
+    });
+    await root.close();
+  });
+
+  it("reports a composing key as Process rather than assembling text from it", async () => {
+    installCanvasGlobal();
+    const core = fakeCore();
+    const canvas = new FakeCanvas();
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+
+    canvas.emit("keydown", {
+      type: "keydown",
+      key: "a",
+      code: "KeyA",
+      isComposing: true,
+      repeat: false,
+      shiftKey: false,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+    });
+
+    const [command] = decodeInputBatch(core.inputs[0] ?? new Uint8Array()).commands;
+    expect(command).toMatchObject({
+      type: "dispatchKeyEvent",
+      keyName: KEYBOARD_KEY_NAMES_BY_NAME.get("Process"),
+      keyText: 0,
+    });
+    await root.close();
+  });
+
   it("applies the Core-resolved cursor before dispatching Shell event handlers", async () => {
     installCanvasGlobal();
     const core = fakeCore();
@@ -328,6 +421,63 @@ describe("createHostedCanvasRoot", () => {
       await root.close();
     },
   );
+
+  it.each(["post-message", "sab"] as const)(
+    "keeps key event order intact on the %s Worker transport",
+    async (preference) => {
+      installCanvasGlobal();
+      const worker = readyWorker();
+      const canvas = new FakeCanvas();
+      const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+        capabilities: allCapabilities(),
+        clockAnchorDriver: null,
+        transport: { preference, strict: true },
+        workerFactory: () => worker as unknown as Worker,
+      });
+
+      const modifiers = {
+        shiftKey: false,
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        repeat: false,
+      };
+      canvas.emit("keydown", { type: "keydown", key: "a", code: "KeyA", ...modifiers });
+      canvas.emit("keyup", { type: "keyup", key: "a", code: "KeyA", ...modifiers });
+
+      expect(workerKeyEvents(worker)).toEqual(["keydown", "keyup"]);
+      await root.close();
+    },
+  );
+
+  it("keeps key event order intact on the main-thread transport", async () => {
+    installCanvasGlobal();
+    const core = fakeCore();
+    const canvas = new FakeCanvas();
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+
+    const modifiers = {
+      shiftKey: false,
+      ctrlKey: false,
+      altKey: false,
+      metaKey: false,
+      repeat: false,
+    };
+    canvas.emit("keydown", { type: "keydown", key: "a", code: "KeyA", ...modifiers });
+    canvas.emit("keyup", { type: "keyup", key: "a", code: "KeyA", ...modifiers });
+
+    expect(
+      core.inputs
+        .flatMap((bytes) => decodeInputBatch(bytes).commands)
+        .filter((command) => command.type === "dispatchKeyEvent")
+        .map((command) => command.kind),
+    ).toEqual(["keydown", "keyup"]);
+    await root.close();
+  });
 
   it("hands touch gestures to Core instead of letting the browser pan the page", async () => {
     // A non-passive listener and preventDefault are not enough on a touch
@@ -871,6 +1021,11 @@ class FakeCanvas {
   public transferCount = 0;
   public style: { cursor?: string; touchAction?: string } = {};
   public focused = false;
+  public tabIndex = -1;
+
+  public getAttribute(): string | null {
+    return null;
+  }
 
   public focus(): void {
     this.focused = true;
@@ -1033,6 +1188,32 @@ class FakeWorker {
   }
 }
 
+/**
+ * Key event kinds in the order the transport actually carried them.
+ *
+ * Every transport moves the same encoded bytes, so ordering is checked at the
+ * bytes rather than at whatever each transport wraps them in.
+ */
+function workerKeyEvents(worker: FakeWorker): string[] {
+  const batches: Uint8Array[] = [];
+  const activation = worker.posts.find((candidate) => hasKind(candidate, "pingo:activate")) as
+    { inputRingBuffer?: SharedArrayBuffer } | undefined;
+  if (activation?.inputRingBuffer !== undefined) {
+    const ring = SabMutationRing.attach(activation.inputRingBuffer);
+    for (let frame = ring.take(); frame !== null && frame !== undefined; frame = ring.take()) {
+      batches.push(frame.bytes);
+    }
+  }
+  for (const post of worker.posts) {
+    if (!hasKind(post, "pingo:input")) continue;
+    batches.push((post as { bytes: Uint8Array }).bytes);
+  }
+  return batches
+    .flatMap((bytes) => decodeInputBatch(bytes).commands)
+    .filter((command) => command.type === "dispatchKeyEvent")
+    .map((command) => command.kind);
+}
+
 function readyWorker(acknowledgeMutations = true): FakeWorker {
   const worker = new FakeWorker();
   let sessionId = 0;
@@ -1095,7 +1276,7 @@ function emptyDisplayList(): Uint8Array {
 }
 
 function pointerEventTransaction(cursor: "pointer"): Uint8Array {
-  const bytes = new Uint8Array(104);
+  const bytes = new Uint8Array(112);
   const view = new DataView(bytes.buffer);
   view.setUint32(0, 0x5650_4f44, true);
   view.setUint16(4, ABI_VERSION, true);
@@ -1115,8 +1296,9 @@ function pointerEventTransaction(cursor: "pointer"): Uint8Array {
   view.setFloat32(84, 1, true);
   view.setFloat32(88, 1, true);
   view.setUint16(92, cursor === "pointer" ? 34 : 2, true);
-  view.setUint32(96, 1, true);
-  view.setUint32(100, 1, true);
+  // 94..102 is the key payload, which a pointer event leaves zeroed.
+  view.setUint32(104, 1, true);
+  view.setUint32(108, 1, true);
   return bytes;
 }
 

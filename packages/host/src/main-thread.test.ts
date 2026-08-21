@@ -461,6 +461,9 @@ describe("CanvasFrameSink", () => {
       tiltY: 0,
       width: 0,
       height: 0,
+      code: "",
+      key: "",
+      repeat: false,
       path: [1, 2, 3],
     });
   });
@@ -1084,7 +1087,7 @@ function selectionTransactionStream(): Uint8Array {
 }
 
 function eventTransactionStream(): Uint8Array {
-  const bytes = new Uint8Array(112);
+  const bytes = new Uint8Array(120);
   const view = new DataView(bytes.buffer);
   view.setUint32(0, EVENT_TRANSACTIONS_MAGIC, true);
   view.setUint16(4, ABI_VERSION, true);
@@ -1102,10 +1105,11 @@ function eventTransactionStream(): Uint8Array {
   view.setUint32(60, 16_667, true);
   view.setUint32(64, 0xffff_ffff, true);
   view.setUint16(92, 2, true);
-  view.setUint32(96, 3, true);
-  view.setUint32(100, 1, true);
-  view.setUint32(104, 2, true);
-  view.setUint32(108, 3, true);
+  // 94..102 is the key payload, which a pointer event leaves zeroed.
+  view.setUint32(104, 3, true);
+  view.setUint32(108, 1, true);
+  view.setUint32(112, 2, true);
+  view.setUint32(116, 3, true);
   return bytes;
 }
 

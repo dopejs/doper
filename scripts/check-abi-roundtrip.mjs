@@ -1,9 +1,21 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "vite";
 
 const root = path.resolve(import.meta.dirname, "..");
+/**
+ * Rewrites the golden fixtures from the canonical inputs below.
+ *
+ * Only run this when the wire format itself changed on purpose, and say what
+ * changed in the commit: a golden that is regenerated to silence a failure has
+ * stopped being a contract.
+ */
+const update = process.argv.includes("--update");
+/** @type {Map<string, string>} */
+const regenerated = new Map();
+/** @type {Map<string, string>} */
+const goldenNames = new Map();
 const moduleRunner = await createServer({
   appType: "custom",
   logLevel: "error",
@@ -14,8 +26,14 @@ const moduleRunner = await createServer({
 
 try {
   await checkAbiRoundtrip();
+  if (update) await writeGoldens(await currentAbiVersion());
 } finally {
   await moduleRunner.close();
+}
+
+async function currentAbiVersion() {
+  const schema = JSON.parse(await readFile(path.join(root, "schemas/protocol.v1.json"), "utf8"));
+  return schema.abiVersion;
 }
 
 async function checkAbiRoundtrip() {
@@ -104,13 +122,24 @@ async function checkAbiRoundtrip() {
         baseRevision: 0x0123_4567_89ab_cdf2n,
         text: "你好",
       },
+      {
+        type: "dispatchKeyEvent",
+        eventId: 0x0000_0021,
+        kind: "keydown",
+        flags: editing.KEY_FLAG_REPEAT,
+        keyCode: 37,
+        keyName: 8,
+        keyText: 0,
+        modifiers: 0x05,
+        elapsedMicros: 16_667,
+      },
     ],
   });
   const inputHex = encodeHex(inputBytes);
   assertEqual(inputHex, inputGolden, "TypeScript input encoder vs golden");
   assertEqual(roundTripInRust("input", inputHex), inputHex, "TypeScript to Rust input round trip");
 
-  const [event] = editing.decodeEventTransactionBatch(decodeHex(eventGolden));
+  const [event, keyEvent] = editing.decodeEventTransactionBatch(decodeHex(eventGolden));
   if (
     event?.kind !== "pointerdown" ||
     event.target !== 3 ||
@@ -118,9 +147,22 @@ async function checkAbiRoundtrip() {
     event.pointerType !== "mouse" ||
     event.pressure !== 0.5 ||
     event.cursor !== "pointer" ||
+    event.key !== "" ||
+    event.code !== "" ||
+    event.repeat !== false ||
     event.path.join(",") !== "1,2,3"
   ) {
     throw new Error("TypeScript event-transaction decoder did not accept the golden contract");
+  }
+  if (
+    keyEvent?.kind !== "keydown" ||
+    keyEvent.code !== "Enter" ||
+    keyEvent.key !== "ArrowUp" ||
+    keyEvent.repeat !== true ||
+    keyEvent.pointerId !== 0 ||
+    keyEvent.pointerType !== "none"
+  ) {
+    throw new Error("TypeScript event-transaction decoder did not accept the key contract");
   }
   assertEqual(
     roundTripInRust("events", eventGolden),
@@ -284,7 +326,20 @@ async function readGolden(name) {
   if (typeof value.hex !== "string" || !/^(?:[0-9a-f]{2})+$/u.test(value.hex)) {
     throw new Error(`${name} does not contain canonical lowercase hex`);
   }
+  goldenNames.set(value.hex, name);
   return value.hex;
+}
+
+async function writeGoldens(abiVersion) {
+  for (const [name, hex] of regenerated) {
+    const file = path.join(root, "benchmarks/abi", name);
+    const value = JSON.parse(await readFile(file, "utf8"));
+    // Only fixtures that already pinned a version get one; adding the field
+    // where it never existed would quietly widen the contract.
+    const stamped = value.abiVersion === undefined ? value : { ...value, abiVersion };
+    await writeFile(file, `${JSON.stringify({ ...stamped, hex }, null, 2)}\n`);
+    process.stdout.write(`regenerated benchmarks/abi/${name}\n`);
+  }
 }
 
 function roundTripInRust(kind, hex) {
@@ -308,5 +363,11 @@ function decodeHex(hex) {
 }
 
 function assertEqual(actual, expected, label) {
-  if (actual !== expected) throw new Error(`${label} mismatch`);
+  if (actual === expected) return;
+  const golden = goldenNames.get(expected);
+  if (update && golden !== undefined) {
+    regenerated.set(golden, actual);
+    return;
+  }
+  throw new Error(`${label} mismatch`);
 }
