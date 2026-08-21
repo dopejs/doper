@@ -47,6 +47,7 @@ describe("cva", () => {
     expect(buttonClass({ variant: "default", size: "lg" })).toBe(
       "pui-button pui-button--default pui-button--lg",
     );
+    expect(buttonClass({ size: "xl" })).toBe("pui-button pui-button--default");
   });
 
   it("is deterministic across calls", () => {
