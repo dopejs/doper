@@ -1,0 +1,37 @@
+@use "../tokens" as t;
+
+// shadcn Switch: track + thumb. No margin transition — Core animation covers
+// opacity/transform only; the thumb snaps (documented gap).
+
+.pui-switch {
+  width: t.$switch-width;
+  height: t.$switch-height;
+  border-radius: t.$switch-radius;
+  background-color: t.$input-border;
+  cursor: pointer;
+  &.pui-dark { background-color: t.$dark-input-border; }
+}
+
+.pui-switch--checked {
+  background-color: t.$primary;
+  &.pui-dark { background-color: t.$dark-primary; }
+}
+
+.pui-switch--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}
+
+.pui-switch__thumb {
+  width: t.$switch-thumb-size;
+  height: t.$switch-thumb-size;
+  border-radius: t.$switch-thumb-radius;
+  margin-left: t.$switch-thumb-offset;
+  margin-top: t.$switch-thumb-offset;
+  background-color: t.$switch-thumb;
+  &.pui-dark { background-color: t.$dark-switch-thumb; }
+}
+
+.pui-switch__thumb--checked {
+  margin-left: t.$switch-thumb-offset-checked;
+}

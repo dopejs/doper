@@ -32,3 +32,5 @@ export { Progress } from "./components/progress";
 export type { ProgressProps } from "./components/progress";
 export { Skeleton } from "./components/skeleton";
 export type { SkeletonProps } from "./components/skeleton";
+export { Switch } from "./components/switch";
+export type { SwitchProps } from "./components/switch";

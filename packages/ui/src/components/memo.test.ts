@@ -12,6 +12,7 @@ import { IconButton } from "./icon-button";
 import { Label } from "./label";
 import { Progress } from "./progress";
 import { Skeleton } from "./skeleton";
+import { Switch } from "./switch";
 
 describe("memoized components", () => {
   it("all presentational components are memo-wrapped", () => {
@@ -31,6 +32,7 @@ describe("memoized components", () => {
       Alert,
       Avatar,
       Progress,
+      Switch,
     ]) {
       expect(isMemoComponent(component)).toBe(true);
     }
