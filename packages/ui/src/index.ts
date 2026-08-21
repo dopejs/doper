@@ -3,6 +3,8 @@ export type { CvaCompound, CvaConfig, CvaProps } from "./cva";
 export { getTheme, setTheme, useTheme } from "./theme";
 export type { PingoUiTheme } from "./theme";
 export { createPingoUiStyleSheet, pingoUiCssText } from "./generated/styles";
+export { Alert } from "./components/alert";
+export type { AlertProps, AlertVariant } from "./components/alert";
 export { Badge } from "./components/badge";
 export type { BadgeProps, BadgeVariant } from "./components/badge";
 export { Button } from "./components/button";

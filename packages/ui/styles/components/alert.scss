@@ -1,0 +1,39 @@
+@use "../tokens" as t;
+
+.pui-alert {
+  flex-direction: column;
+  padding: t.$alert-padding;
+  background-color: t.$background;
+  color: t.$foreground;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$border;
+  border-radius: t.$radius-lg;
+  &.pui-dark {
+    background-color: t.$dark-background;
+    color: t.$dark-foreground;
+    border-color: t.$dark-border;
+  }
+}
+
+.pui-alert--destructive {
+  border-color: t.$destructive;
+  &.pui-dark { border-color: t.$dark-destructive; }
+}
+
+.pui-alert__title {
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+  margin-bottom: t.$alert-title-gap;
+}
+
+.pui-alert__title--destructive {
+  color: t.$destructive;
+  &.pui-dark { color: t.$dark-destructive; }
+}
+
+.pui-alert__description {
+  font-size: t.$font-size-sm;
+  color: t.$muted-foreground;
+  &.pui-dark { color: t.$dark-muted-foreground; }
+}
