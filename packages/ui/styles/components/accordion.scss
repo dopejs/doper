@@ -1,0 +1,36 @@
+@use "../tokens" as t;
+
+// shadcn Accordion: single-open list of items; content uses display:none
+// when closed (preserves state; no mount/unmount).
+
+.pui-accordion {
+  flex-direction: column;
+}
+
+.pui-accordion__item {
+  flex-direction: column;
+  border-bottom-width: t.$border-width;
+  border-bottom-style: solid;
+  border-bottom-color: t.$border;
+  &.pui-dark { border-bottom-color: t.$dark-border; }
+}
+
+.pui-accordion__trigger {
+  align-items: center;
+  justify-content: space-between;
+  padding-top: t.$accordion-trigger-padding-y;
+  padding-bottom: t.$accordion-trigger-padding-y;
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+  color: t.$foreground;
+  cursor: pointer;
+  &.pui-dark { color: t.$dark-foreground; }
+}
+
+.pui-accordion__content {
+  flex-direction: column;
+  padding-bottom: t.$accordion-content-padding-bottom;
+  font-size: t.$font-size-sm;
+  color: t.$muted-foreground;
+  &.pui-dark { color: t.$dark-muted-foreground; }
+}

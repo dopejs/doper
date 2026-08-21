@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { isMemoComponent } from "@dopejs/pingo-jsx";
 
+import { Accordion, AccordionItem } from "./accordion";
+
 import { Badge } from "./badge";
 import { Alert } from "./alert";
 import { Avatar } from "./avatar";
@@ -20,6 +22,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";
 describe("memoized components", () => {
   it("all presentational components are memo-wrapped", () => {
     for (const component of [
+      Accordion,
+      AccordionItem,
       Button,
       Badge,
       Card,

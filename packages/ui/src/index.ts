@@ -3,6 +3,8 @@ export type { CvaCompound, CvaConfig, CvaProps } from "./cva";
 export { getTheme, setTheme, useTheme } from "./theme";
 export type { PingoUiTheme } from "./theme";
 export { createPingoUiStyleSheet, pingoUiCssText } from "./generated/styles";
+export { Accordion, AccordionItem } from "./components/accordion";
+export type { AccordionItemProps, AccordionProps } from "./components/accordion";
 export { Alert } from "./components/alert";
 export type { AlertProps, AlertVariant } from "./components/alert";
 export { Avatar } from "./components/avatar";
