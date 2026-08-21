@@ -17,17 +17,17 @@ function join(...parts: readonly (string | undefined)[]): string {
 }
 
 function section(base: string, props: CardSectionProps, themed: boolean): PingoNode {
-  const theme = useTheme();
+  const dark = themed && useTheme() === "dark";
   return View({
-    className: join(base, themed && theme === "dark" ? "pui-dark" : undefined, props.className),
+    className: join(base, dark ? "pui-dark" : undefined, props.className),
     children: props.children,
   });
 }
 
 function text(base: string, props: CardTextProps, themed: boolean): PingoNode {
-  const theme = useTheme();
+  const dark = themed && useTheme() === "dark";
   return Text({
-    className: join(base, themed && theme === "dark" ? "pui-dark" : undefined, props.className),
+    className: join(base, dark ? "pui-dark" : undefined, props.className),
     value: props.children,
   });
 }

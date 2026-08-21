@@ -26,6 +26,20 @@ describe("Card family", () => {
     expect(node.props.className).toBe("pui-card-description pui-dark mine");
   });
 
+  it("unthemed sections never subscribe to theme: className identical in light and dark", () => {
+    setTheme("light");
+    const lightHeader = (CardHeader({ children: null }) as Host).props.className;
+    const lightTitle = (CardTitle({ children: "t" }) as Host).props.className;
+    const lightContent = (CardContent({ children: null }) as Host).props.className;
+    const lightFooter = (CardFooter({ children: null }) as Host).props.className;
+    setTheme("dark");
+    expect((CardHeader({ children: null }) as Host).props.className).toBe(lightHeader);
+    expect((CardTitle({ children: "t" }) as Host).props.className).toBe(lightTitle);
+    expect((CardContent({ children: null }) as Host).props.className).toBe(lightContent);
+    expect((CardFooter({ children: null }) as Host).props.className).toBe(lightFooter);
+    expect(lightHeader).toBe("pui-card-header");
+  });
+
   it("children pass through untouched (slot identity contract)", () => {
     const child = CardTitle({ children: "keep-me" });
     const node = CardHeader({ children: child }) as {
