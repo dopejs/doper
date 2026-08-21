@@ -4,6 +4,7 @@ import type {
   ContainerProps,
   EditableTextProps,
   ImageProps,
+  VideoProps,
   TextProps,
   ViewHandle,
   VirtualViewProps,
@@ -42,6 +43,11 @@ export function Image(props: ImageProps): AnyPingoElement {
   return compatibleHostElement("image", props);
 }
 
+/** Creates a Host-decoded, Core-composited video without a browser object in Scene. */
+export function Video(props: VideoProps): AnyPingoElement {
+  return compatibleHostElement("video", props);
+}
+
 /** Creates a single-line editor; callers cannot change its multiline invariant. */
 export function Input(props: InputProps): AnyPingoElement {
   return compatibleHostElement("editableText", { ...props, multiline: false });
@@ -55,10 +61,11 @@ export function TextArea(props: TextAreaProps): AnyPingoElement {
 function compatibleHostElement(type: "container", props: ViewProps): AnyPingoElement;
 function compatibleHostElement(type: "text", props: TextProps): AnyPingoElement;
 function compatibleHostElement(type: "image", props: ImageProps): AnyPingoElement;
+function compatibleHostElement(type: "video", props: VideoProps): AnyPingoElement;
 function compatibleHostElement(type: "editableText", props: EditableTextProps): AnyPingoElement;
 function compatibleHostElement(
-  type: "container" | "editableText" | "image" | "text",
-  props: ViewProps | EditableTextProps | ImageProps | TextProps,
+  type: "container" | "editableText" | "image" | "text" | "video",
+  props: ViewProps | EditableTextProps | ImageProps | TextProps | VideoProps,
 ): AnyPingoElement {
   const compatibleProps: Record<string, unknown> = {
     ...props,

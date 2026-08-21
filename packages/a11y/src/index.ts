@@ -18,6 +18,8 @@ export interface SemanticMirrorNode {
 export interface SemanticTreeMirrorOptions {
   /** Called when the user focuses a mirrored focusable element. */
   readonly onFocusRequest?: (nodeId: number) => void;
+  /** Native Enter/Space activation for focusable button semantics. */
+  readonly onActivateRequest?: (nodeId: number) => void;
 }
 
 /**
@@ -74,6 +76,17 @@ export class SemanticTreeMirror {
             this.#options.onFocusRequest?.(Number(raw));
           }
         });
+        element.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          if (element?.getAttribute("role") !== "button") return;
+          event.preventDefault();
+          if (event.key === "Enter") this.activate(element);
+        });
+        element.addEventListener("keyup", (event) => {
+          if (event.key !== " " || element?.getAttribute("role") !== "button") return;
+          event.preventDefault();
+          this.activate(element);
+        });
         this.#container.append(element);
         this.#elements.set(node.nodeId, element);
       }
@@ -88,8 +101,11 @@ export class SemanticTreeMirror {
       const value = node.password ? "" : node.value;
       if (element.textContent !== value) element.textContent = value;
       if (node.password) element.setAttribute("aria-invalid", "false");
-      element.tabIndex = node.focusable ? 0 : -1;
-      if (node.focusable) {
+      const disabled = node.role === "button" && value === "disabled";
+      if (disabled) element.setAttribute("aria-disabled", "true");
+      else element.removeAttribute("aria-disabled");
+      element.tabIndex = node.focusable && !disabled ? 0 : -1;
+      if (node.focusable && !disabled) {
         element.style.pointerEvents = "none";
       }
     }
@@ -106,6 +122,11 @@ export class SemanticTreeMirror {
     this.#disposed = true;
     this.#container.remove();
     this.#elements.clear();
+  }
+
+  private activate(element: HTMLElement): void {
+    const raw = element.getAttribute("data-pingo-node");
+    if (raw !== null) this.#options.onActivateRequest?.(Number(raw));
   }
 }
 

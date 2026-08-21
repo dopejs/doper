@@ -25,5 +25,7 @@ export {
   type RootOptions,
   type StyleRuntimeMetrics,
   type InteractionRequest,
+  type MediaBinding,
   type VirtualRangeRequest,
 } from "./reconciler";
+export type { PingoMediaError, PingoMediaEvent } from "@dopejs/pingo-jsx";

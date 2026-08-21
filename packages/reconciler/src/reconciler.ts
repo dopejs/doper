@@ -13,11 +13,14 @@ import {
   type EditableTextProps,
   type FunctionComponent,
   PingoImage,
+  type PingoMediaError,
+  type PingoMediaEvent,
   type HostType,
   type ImageProps,
   type Key,
   type NodeHandle,
   type ViewHandle,
+  type VideoProps,
   type Ref,
   type VirtualListProps,
   type VirtualViewProps,
@@ -44,6 +47,7 @@ import {
   ResourcePool,
   encodeAffine,
   encodeImageBitmap,
+  encodeVideoFrameDescriptor,
   encodeSfntFont,
   encodeSolidPaint,
   encodeTextStyle,
@@ -70,6 +74,8 @@ export interface RootOptions {
   readonly foundationComponentsEnabled?: boolean;
   /** Independent rollback switch for Core presentation animation. Defaults to enabled. */
   readonly coreAnimationEnabled?: boolean;
+  /** Independent rollback switch for the M8 media pipeline. Defaults to enabled. */
+  readonly videoEnabled?: boolean;
   /** Receives deterministic per-node style diagnostics before commit. */
   readonly onStyleDiagnostics?: (
     diagnostics: readonly StyleDiagnostic[],
@@ -77,6 +83,20 @@ export interface RootOptions {
   ) => void;
   /** Host bridge for imperative capture/focus requests issued by node handles. */
   readonly onInteractionRequest?: (request: InteractionRequest) => void;
+  /** Host bridge for mounting, updating, and releasing browser-owned media state. */
+  readonly onMediaBinding?: (binding: MediaBinding | undefined, nodeId: number) => void;
+}
+
+/** Serializable media configuration; browser objects remain owned by Host. */
+export interface MediaBinding {
+  readonly nodeId: number;
+  readonly resourceId: number;
+  readonly src: string;
+  readonly autoPlay: boolean;
+  readonly loop: boolean;
+  readonly muted: boolean;
+  readonly crossOrigin?: "anonymous" | "use-credentials";
+  readonly preload: "auto" | "metadata" | "none";
 }
 
 /** Imperative interaction request forwarded to the active Host transport. */
@@ -97,7 +117,9 @@ export type InteractionRequest =
       readonly nodeId: number;
       readonly velocityX: number;
       readonly velocityY: number;
-    };
+    }
+  | { readonly type: "mediaPlay" | "mediaPause"; readonly nodeId: number }
+  | { readonly type: "mediaSeek"; readonly nodeId: number; readonly timeSeconds: number };
 
 /** Public lifecycle for a localized component/host tree. */
 export interface PingoRoot {
@@ -125,6 +147,9 @@ export interface CoreDrivenPingoRoot extends PingoRoot {
   editableState(nodeId: number): EditableStateSnapshot | undefined;
   submitEditable(nodeId: number): void;
   resetInteractionState(): void;
+  updateMediaMetadata(nodeId: number, width: number, height: number): void;
+  applyMediaEvent(nodeId: number, event: PingoMediaEvent | PingoMediaError): void;
+  activateNode(nodeId: number): void;
 }
 
 /** Shell-owned durable state used to activate one native editing surface. */
@@ -191,6 +216,9 @@ interface HostInstance extends BaseInstance {
   onEditTransaction: ((transaction: EditTransaction) => void) | undefined;
   onSubmit: (() => void) | undefined;
   eventHandlers: Map<EventHandlerKey, PingoEventHandler>;
+  media: NormalizedMedia | undefined;
+  mediaResourceId: number | undefined;
+  mediaNaturalSize: readonly [number, number] | undefined;
 }
 
 interface ComponentInstance extends BaseInstance {
@@ -231,6 +259,7 @@ interface NormalizedHostProps {
       }
     | undefined;
   readonly image: Uint8Array | undefined;
+  readonly media: NormalizedMedia | undefined;
   readonly scrollPosition: readonly [number, number] | undefined;
   readonly virtualItemIndex: number | undefined;
   readonly virtualList: NormalizedVirtualList | undefined;
@@ -240,6 +269,19 @@ interface NormalizedHostProps {
   readonly computedStyleBytes: Uint8Array | undefined;
   readonly animationBytes: Uint8Array | undefined;
   readonly styleDiagnostics: readonly StyleDiagnostic[];
+}
+
+interface NormalizedMedia {
+  readonly width: number;
+  readonly height: number;
+  readonly poster: PingoImage | undefined;
+  readonly binding: Omit<MediaBinding, "nodeId" | "resourceId">;
+  readonly onPlay: ((event: PingoMediaEvent) => void) | undefined;
+  readonly onPause: ((event: PingoMediaEvent) => void) | undefined;
+  readonly onEnded: ((event: PingoMediaEvent) => void) | undefined;
+  readonly onLoadedMetadata: ((event: PingoMediaEvent) => void) | undefined;
+  readonly onTimeUpdate: ((event: PingoMediaEvent) => void) | undefined;
+  readonly onError: ((error: PingoMediaError) => void) | undefined;
 }
 
 type EventHandlerKey = `${InputEventKind}:${"bubble" | "capture"}`;
@@ -353,6 +395,22 @@ const EDITABLE_KEYS = new Set([
 const SCROLL_KEYS = new Set([...COMMON_KEYS, "scrollX", "scrollY"]);
 const CONTAINER_KEYS = new Set([...SCROLL_KEYS, "virtual"]);
 const IMAGE_KEYS = new Set([...[...COMMON_KEYS].filter((key) => key !== "children"), "source"]);
+const VIDEO_KEYS = new Set([
+  ...[...COMMON_KEYS].filter((key) => key !== "children"),
+  "autoPlay",
+  "crossOrigin",
+  "loop",
+  "muted",
+  "onEnded",
+  "onError",
+  "onLoadedMetadata",
+  "onPause",
+  "onPlay",
+  "onTimeUpdate",
+  "poster",
+  "preload",
+  "src",
+]);
 const VIRTUAL_LIST_KEYS = new Set([
   ...[...SCROLL_KEYS].filter((key) => key !== "children"),
   "baseOverscanViewports",
@@ -370,6 +428,7 @@ interface StyleResolutionContext {
   readonly enabled: boolean;
   readonly foundationComponentsEnabled: boolean;
   readonly interactionStylesEnabled: boolean;
+  readonly videoEnabled: boolean;
   readonly parentStyle: ComputedStyle | undefined;
   readonly styleSheets: readonly PingoStyleSheet[];
   readonly recordResolution: (result: ResolveInteractionStylesResult) => void;
@@ -390,6 +449,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
   readonly #interactionStylesEnabled: boolean;
   readonly #foundationComponentsEnabled: boolean;
   readonly #coreAnimationEnabled: boolean;
+  readonly #videoEnabled: boolean;
   readonly #onStyleDiagnostics:
     | ((
         diagnostics: readonly StyleDiagnostic[],
@@ -397,6 +457,8 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       ) => void)
     | undefined;
   readonly #onInteractionRequest: ((request: InteractionRequest) => void) | undefined;
+  readonly #onMediaBinding:
+    ((binding: MediaBinding | undefined, nodeId: number) => void) | undefined;
   readonly #pointerCaptures = new Map<number, number>();
   #focusedNodeId: number | undefined;
   readonly #allocator = new NodeIdAllocator();
@@ -434,8 +496,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     this.#interactionStylesEnabled = options.interactionStylesEnabled ?? true;
     this.#foundationComponentsEnabled = options.foundationComponentsEnabled ?? true;
     this.#coreAnimationEnabled = options.coreAnimationEnabled ?? true;
+    this.#videoEnabled = options.videoEnabled ?? true;
     this.#onStyleDiagnostics = options.onStyleDiagnostics;
     this.#onInteractionRequest = options.onInteractionRequest;
+    this.#onMediaBinding = options.onMediaBinding;
   }
 
   public get failed(): boolean {
@@ -640,6 +704,63 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
   public resetInteractionState(): void {
     this.#pointerCaptures.clear();
     this.#focusedNodeId = undefined;
+  }
+
+  public updateMediaMetadata(nodeId: number, width: number, height: number): void {
+    this.assertUsable();
+    assertU32(nodeId, "media metadata nodeId");
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+      throw new RangeError("media metadata dimensions must be positive integers");
+    }
+    const instance = this.#hostsByNodeId.get(nodeId);
+    if (instance?.mounted !== true || instance.media === undefined) return;
+    if (instance.media.width === width && instance.media.height === height) return;
+    this.perform(() => {
+      instance.mediaNaturalSize = [width, height];
+      const media: NormalizedMedia = {
+        ...instance.media!,
+        width,
+        height,
+        poster:
+          instance.media?.poster?.width === width && instance.media.poster.height === height
+            ? instance.media.poster
+            : undefined,
+      };
+      this.replaceResourceProp(
+        instance,
+        "video-frame",
+        Prop.VideoFrame,
+        ResourceKind.VideoFrame,
+        encodeVideoFrameDescriptor(width, height, media.poster),
+      );
+      this.updateMediaBinding(instance, media);
+    });
+  }
+
+  public applyMediaEvent(nodeId: number, event: PingoMediaEvent | PingoMediaError): void {
+    this.assertUsable();
+    const instance = this.#hostsByNodeId.get(nodeId);
+    const media = instance?.mounted === true ? instance.media : undefined;
+    if (media === undefined) return;
+    try {
+      if (!("type" in event)) media.onError?.(event);
+      else if (event.type === "play") media.onPlay?.(event);
+      else if (event.type === "pause") media.onPause?.(event);
+      else if (event.type === "ended") media.onEnded?.(event);
+      else if (event.type === "loadedmetadata") media.onLoadedMetadata?.(event);
+      else media.onTimeUpdate?.(event);
+    } catch (cause) {
+      const error = toError(cause, "media event handler failed");
+      if (this.#onPostCommitError === undefined) throw error;
+      this.#onPostCommitError(error);
+    }
+  }
+
+  public activateNode(nodeId: number): void {
+    this.assertUsable();
+    const instance = this.#hostsByNodeId.get(nodeId);
+    if (instance?.mounted !== true || instance.onTapId === undefined) return;
+    this.invokeCallback(instance.onTapId);
   }
 
   public submitEditable(nodeId: number): void {
@@ -930,6 +1051,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       enabled: this.#styleResolverEnabled,
       foundationComponentsEnabled: this.#foundationComponentsEnabled,
       interactionStylesEnabled: this.#interactionStylesEnabled,
+      videoEnabled: this.#videoEnabled,
       parentStyle: nearestComputedStyle(owner),
       recordResolution: (result) => this.recordStyleResolution(result),
       styleSheets: this.#styleSheets,
@@ -961,6 +1083,9 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       onEditTransaction: undefined,
       onSubmit: undefined,
       eventHandlers: new Map(),
+      media: undefined,
+      mediaResourceId: undefined,
+      mediaNaturalSize: undefined,
       mounted: true,
     };
     this.mutations().push({
@@ -1007,6 +1132,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       enabled: this.#styleResolverEnabled,
       foundationComponentsEnabled: this.#foundationComponentsEnabled,
       interactionStylesEnabled: this.#interactionStylesEnabled,
+      videoEnabled: this.#videoEnabled,
       parentStyle: nearestComputedStyle(instance.parent),
       recordResolution: (result) => this.recordStyleResolution(result),
       styleSheets: this.#styleSheets,
@@ -1058,6 +1184,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
   }
 
   private applyHostProps(instance: HostInstance, next: NormalizedHostProps): void {
+    if (instance.media?.binding.src !== next.media?.binding.src) {
+      instance.mediaNaturalSize = undefined;
+    }
+    const media = resolveMediaNaturalSize(next.media, instance.mediaNaturalSize);
     this.diffScalars(instance, next.scalars);
     this.diffVectors(instance, next.vectors);
     this.replaceResourceProp(
@@ -1098,6 +1228,16 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     instance.eventHandlers = next.eventHandlers;
     this.replaceResourceProp(instance, "text:font", Prop.Font, ResourceKind.Font, next.text?.font);
     this.replaceResourceProp(instance, "image", Prop.Image, ResourceKind.Image, next.image);
+    this.replaceResourceProp(
+      instance,
+      "video-frame",
+      Prop.VideoFrame,
+      ResourceKind.VideoFrame,
+      media === undefined
+        ? undefined
+        : encodeVideoFrameDescriptor(media.width, media.height, media.poster),
+    );
+    this.updateMediaBinding(instance, media);
     this.replaceResourceProp(
       instance,
       "computed-style",
@@ -1212,6 +1352,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
         enabled: this.#styleResolverEnabled,
         foundationComponentsEnabled: this.#foundationComponentsEnabled,
         interactionStylesEnabled: this.#interactionStylesEnabled,
+        videoEnabled: this.#videoEnabled,
         parentStyle: nearestComputedStyle(instance.parent),
         recordResolution: (result) => this.recordStyleResolution(result),
         styleSheets: this.#styleSheets,
@@ -1440,6 +1581,27 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     instance.onTapId = nextId;
   }
 
+  private updateMediaBinding(instance: HostInstance, media: NormalizedMedia | undefined): void {
+    const previous = instance.media;
+    const previousResourceId = instance.mediaResourceId;
+    const resourceId = instance.resources.get("video-frame");
+    instance.media = media;
+    instance.mediaResourceId = resourceId;
+    if (sameMedia(previous, media) && previousResourceId === resourceId) return;
+    if (media === undefined || resourceId === undefined) {
+      if (previous !== undefined) {
+        this.#postCommitCleanups.push(() => this.#onMediaBinding?.(undefined, instance.nodeId));
+      }
+      return;
+    }
+    const binding: MediaBinding = Object.freeze({
+      ...media.binding,
+      nodeId: instance.nodeId,
+      resourceId,
+    });
+    this.#postCommitAttachments.push(() => this.#onMediaBinding?.(binding, instance.nodeId));
+  }
+
   private invokeEventHandler(
     instance: HostInstance,
     kind: InputEventKind,
@@ -1539,6 +1701,22 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
           velocityY: coordinate(velocityY, "scroll velocityY"),
         });
       },
+      play: () => {
+        requireMounted();
+        this.#onInteractionRequest?.({ type: "mediaPlay", nodeId });
+      },
+      pause: () => {
+        requireMounted();
+        this.#onInteractionRequest?.({ type: "mediaPause", nodeId });
+      },
+      seek: (timeSeconds: number) => {
+        requireMounted();
+        this.#onInteractionRequest?.({
+          type: "mediaSeek",
+          nodeId,
+          timeSeconds: coordinate(timeSeconds, "media seek time"),
+        });
+      },
     });
   }
 
@@ -1563,6 +1741,9 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       this.#resources.release(resourceId, this.mutations());
     }
     instance.resources.clear();
+    if (instance.media !== undefined) {
+      this.#postCommitCleanups.push(() => this.#onMediaBinding?.(undefined, instance.nodeId));
+    }
     instance.eventHandlers.clear();
     if (instance.onTapId !== undefined) this.releaseCallback(instance.onTapId);
     if (instance.ref !== undefined) {
@@ -1786,6 +1967,52 @@ function normalizeHostProps(
     }
   }
 
+  let media: NormalizedMedia | undefined;
+  if (type === "video") {
+    if (!styleContext.videoEnabled) throw new Error("M8 Video is disabled for this root");
+    const video = props as unknown as VideoProps;
+    const src = requireNonEmptyString(video.src, "Video src");
+    if (video.poster !== undefined && !(video.poster instanceof PingoImage)) {
+      throw new TypeError("video poster must be created by createImage");
+    }
+    if (
+      video.crossOrigin !== undefined &&
+      video.crossOrigin !== "anonymous" &&
+      video.crossOrigin !== "use-credentials"
+    ) {
+      throw new TypeError("video crossOrigin must be anonymous or use-credentials");
+    }
+    if (
+      video.preload !== undefined &&
+      video.preload !== "auto" &&
+      video.preload !== "metadata" &&
+      video.preload !== "none"
+    ) {
+      throw new TypeError("video preload must be auto, metadata, or none");
+    }
+    const width = video.poster?.width ?? Math.max(1, Math.round(common.width ?? 1));
+    const height = video.poster?.height ?? Math.max(1, Math.round(common.height ?? 1));
+    media = {
+      width,
+      height,
+      poster: video.poster,
+      binding: {
+        src,
+        autoPlay: video.autoPlay === true,
+        loop: video.loop === true,
+        muted: video.muted === true,
+        ...(video.crossOrigin === undefined ? {} : { crossOrigin: video.crossOrigin }),
+        preload: video.preload ?? "metadata",
+      },
+      onPlay: normalizeMediaCallback(video.onPlay, "onPlay"),
+      onPause: normalizeMediaCallback(video.onPause, "onPause"),
+      onEnded: normalizeMediaCallback(video.onEnded, "onEnded"),
+      onLoadedMetadata: normalizeMediaCallback(video.onLoadedMetadata, "onLoadedMetadata"),
+      onTimeUpdate: normalizeMediaCallback(video.onTimeUpdate, "onTimeUpdate"),
+      onError: normalizeMediaErrorCallback(video.onError),
+    };
+  }
+
   let scrollPosition: readonly [number, number] | undefined;
   if (
     type === "scroll" ||
@@ -1963,6 +2190,7 @@ function normalizeHostProps(
     onTap,
     text,
     image,
+    media,
     scrollPosition,
     virtualItemIndex,
     virtualList,
@@ -2074,6 +2302,8 @@ function styleNodeType(
       return "text";
     case "image":
       return "image";
+    case "video":
+      return "video";
     case "editableText":
       return editable !== undefined && (editable.flags & 1) !== 0 ? "textArea" : "input";
   }
@@ -2137,6 +2367,8 @@ function hostNodeKind(type: HostType): NodeKind {
       return NodeKind.EditableText;
     case "image":
       return NodeKind.Image;
+    case "video":
+      return NodeKind.Video;
     case "scroll":
     case "virtualList":
       return NodeKind.Scroll;
@@ -2472,12 +2704,31 @@ function assertAllowedProps(type: HostType, props: Readonly<Record<string, unkno
             ? SCROLL_KEYS
             : type === "image"
               ? IMAGE_KEYS
-              : type === "container"
-                ? CONTAINER_KEYS
-                : COMMON_KEYS;
+              : type === "video"
+                ? VIDEO_KEYS
+                : type === "container"
+                  ? CONTAINER_KEYS
+                  : COMMON_KEYS;
   for (const key of Object.keys(props)) {
     if (!allowed.has(key)) throw new TypeError(`unknown ${type} prop ${key}`);
   }
+}
+
+function normalizeMediaCallback(
+  value: unknown,
+  label: string,
+): ((event: PingoMediaEvent) => void) | undefined {
+  if (value === undefined) return;
+  if (typeof value !== "function") throw new TypeError(`${label} must be a function`);
+  return value as (event: PingoMediaEvent) => void;
+}
+
+function normalizeMediaErrorCallback(
+  value: unknown,
+): ((error: PingoMediaError) => void) | undefined {
+  if (value === undefined) return;
+  if (typeof value !== "function") throw new TypeError("onError must be a function");
+  return value as (error: PingoMediaError) => void;
 }
 
 function assignRef(ref: Ref<NodeHandle>, value: NodeHandle | null): void {
@@ -2490,6 +2741,36 @@ function equalPair(
   right: readonly [number, number],
 ): boolean {
   return left?.[0] === right[0] && left?.[1] === right[1];
+}
+
+function sameMedia(left: NormalizedMedia | undefined, right: NormalizedMedia | undefined): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.width === right.width &&
+    left.height === right.height &&
+    left.poster === right.poster &&
+    left.binding.src === right.binding.src &&
+    left.binding.autoPlay === right.binding.autoPlay &&
+    left.binding.loop === right.binding.loop &&
+    left.binding.muted === right.binding.muted &&
+    left.binding.crossOrigin === right.binding.crossOrigin &&
+    left.binding.preload === right.binding.preload
+  );
+}
+
+function resolveMediaNaturalSize(
+  media: NormalizedMedia | undefined,
+  naturalSize: readonly [number, number] | undefined,
+): NormalizedMedia | undefined {
+  if (media === undefined || naturalSize === undefined) return media;
+  const [width, height] = naturalSize;
+  return {
+    ...media,
+    width,
+    height,
+    poster:
+      media.poster?.width === width && media.poster.height === height ? media.poster : undefined,
+  };
 }
 
 function equalQuad(

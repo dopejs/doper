@@ -9,6 +9,10 @@ ABI 版本独立管理。
 
 ## Unreleased
 
+- 完成 M8：ABI 16 增加 Video/VideoFrame 资源契约，Host 提供 HTMLMediaElement 加载、
+  CORS、媒体控制/事件与 main-thread/VideoFrame/ImageBitmap 降级；Worker protocol 升至 v11。
+  每个视频一帧在途、丢旧保新、资源回收/后台暂停与复制/掉帧诊断均有自动门禁；新增
+  `Pressable`/`Button` 和语义镜像 Enter/Space 默认动作，保留 `videoEnabled` 独立回滚。
 - 完成 M7：`View.virtual` 支持 x/y 单轴与 `ViewHandle` 滚动 API；Core 新增 ABI 15
   immutable animation resource、opacity/transform transition 与 keyframes、retarget/cancel、
   连续 pause/resume、实时 reduced motion、稳定诊断和逻辑帧录制回放。三 transport 的

@@ -53,6 +53,7 @@ import {
   type RenderWorkerClientOptions,
 } from "./worker-client";
 import type { RenderClockMetrics } from "./render-clock";
+import { MediaPipeline, type MediaPipelineMetrics, type MediaFramePath } from "./media";
 
 interface MutationTransport {
   abort(reason?: Error): void;
@@ -95,6 +96,7 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly onClockMetrics?: (metrics: RenderClockMetrics) => void;
   readonly onFrame?: (report: FrameReport) => void;
   readonly onHostError?: (error: Error) => void;
+  readonly onMediaMetrics?: (metrics: MediaPipelineMetrics) => void;
   readonly onModeChange?: (mode: HostTransportMode, decision: HostTransportDecision) => void;
   readonly onVirtualRefills?: (requests: readonly VirtualRefillRange[]) => void;
   readonly onEditTransaction?: (transaction: EditTransaction) => void;
@@ -150,6 +152,7 @@ export interface HostedCanvasRoot extends PingoRoot {
   blurEditable(): void;
   updateEditingGeometry(geometry: EditingGeometry): void;
   inputTransportMetrics(): HostInputTransportMetrics;
+  mediaMetrics(): MediaPipelineMetrics | undefined;
   resize(width: number, height: number): void;
   setReducedMotion(reduced: boolean): void;
   transportMetrics(): HostMutationTransportMetrics | undefined;
@@ -195,6 +198,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #lastInputRingMetrics: SabMutationRingMetrics | undefined;
   #mode: HostTransportMode = "main-thread";
   #lastTransportMetrics: HostMutationTransportMetrics | undefined;
+  #media: MediaPipeline | undefined;
   #nonPassiveRegions: readonly NonPassiveRegion[] = [];
   #editingGeometry: EditingGeometryFrame | undefined;
   /** A double click held until its editor becomes active; see the handler. */
@@ -219,9 +223,24 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#inputBridge = this.createInputBridge(canvas);
     if (options.accessibility !== false && typeof canvas.insertAdjacentElement === "function") {
       this.#semanticMirror = new SemanticTreeMirror(canvas, {
+        onActivateRequest: (nodeId) => {
+          try {
+            this.#root?.activateNode(nodeId);
+          } catch (cause) {
+            this.#options.onHostError?.(toError(cause, "semantic activation failed"));
+          }
+        },
         onFocusRequest: (nodeId) => {
           try {
-            this.focusEditableWithOrigin(nodeId, "accessibility");
+            if (this.#root?.editableState(nodeId) !== undefined) {
+              this.focusEditableWithOrigin(nodeId, "accessibility");
+            } else {
+              const eventId = this.#eventSequence;
+              this.#eventSequence = nextSequence(eventId);
+              this.sendInputCommands([
+                { type: "focusNode", eventId, nodeId, origin: "accessibility" },
+              ]);
+            }
           } catch (cause) {
             this.#options.onHostError?.(toError(cause, "semantic focus request failed"));
           }
@@ -256,6 +275,10 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   /** Current Worker queue state, or the final snapshot retained after runtime fallback. */
   public transportMetrics(): HostMutationTransportMetrics | undefined {
     return this.#transport?.metrics() ?? this.#lastTransportMetrics;
+  }
+
+  public mediaMetrics(): MediaPipelineMetrics | undefined {
+    return this.#media?.metrics();
   }
 
   public inputTransportMetrics(): HostInputTransportMetrics {
@@ -567,6 +590,10 @@ class HostedCanvasRootController implements HostedCanvasRoot {
         this.handleInteractionRequest(request);
         this.#options.onInteractionRequest?.(request);
       },
+      onMediaBinding: (binding, nodeId) => {
+        this.mediaPipeline().bind(binding, nodeId);
+        this.#options.onMediaBinding?.(binding, nodeId);
+      },
     };
   }
 
@@ -636,7 +663,62 @@ class HostedCanvasRootController implements HostedCanvasRoot {
             velocityY: request.velocityY,
           },
         ]);
+        return;
+      case "mediaPlay":
+        this.mediaPipeline().play(request.nodeId);
+        return;
+      case "mediaPause":
+        this.mediaPipeline().pause(request.nodeId);
+        return;
+      case "mediaSeek":
+        this.mediaPipeline().seek(request.nodeId, request.timeSeconds);
+        return;
     }
+  }
+
+  private mediaPipeline(): MediaPipeline {
+    this.#media ??= new MediaPipeline({
+      transferableFrames: this.#mode !== "main-thread",
+      target: {
+        submit: (resourceId, source, path) => this.submitMediaFrame(resourceId, source, path),
+      },
+      createVideoFrame: createTransferableVideoFrame,
+      onMetadata: (nodeId, width, height) => {
+        try {
+          this.#root?.updateMediaMetadata(nodeId, width, height);
+        } catch (cause) {
+          this.#options.onHostError?.(toError(cause, "media metadata update failed"));
+        }
+      },
+      onEvent: (nodeId, event) => {
+        try {
+          this.#root?.applyMediaEvent(nodeId, event);
+        } catch (cause) {
+          this.#options.onHostError?.(toError(cause, "media event dispatch failed"));
+        }
+      },
+      ...(this.#options.onMediaMetrics === undefined
+        ? {}
+        : { onMetrics: this.#options.onMediaMetrics }),
+    });
+    return this.#media;
+  }
+
+  private submitMediaFrame(
+    resourceId: number,
+    source: CanvasImageSource,
+    path: MediaFramePath,
+  ): void {
+    if (this.#mode === "main-thread") {
+      const sink = this.#frameSink;
+      if (sink === undefined) throw new Error("main-thread media sink is unavailable");
+      sink.updateVideoFrame(resourceId, source, path);
+      return;
+    }
+    if (path === "html-media") throw new Error("HTMLMediaElement cannot cross the Worker boundary");
+    const client = this.#client;
+    if (client === undefined) throw new Error("render Worker media sink is unavailable");
+    client.postMediaFrame(resourceId, source, path);
   }
 
   private readonly handleCanvasPointerEvent = (event: PointerEvent): void => {
@@ -1549,6 +1631,8 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (client !== undefined) await client.close();
     this.closeInputRing();
     this.#frameSink?.dispose();
+    this.#media?.close();
+    this.#media = undefined;
     this.#inputBridge.dispose();
     this.#semanticMirror?.dispose();
     this.#semanticMirror = undefined;
@@ -1816,6 +1900,16 @@ function reducedMotionPreference(value: boolean | "auto" | undefined): boolean {
   return (matchMedia as (query: string) => { readonly matches: boolean })(
     "(prefers-reduced-motion: reduce)",
   ).matches;
+}
+
+function createTransferableVideoFrame(source: CanvasImageSource): CanvasImageSource | undefined {
+  const constructor = (
+    globalThis as {
+      readonly VideoFrame?: new (source: CanvasImageSource, init?: object) => CanvasImageSource;
+    }
+  ).VideoFrame;
+  if (constructor === undefined) return;
+  return new constructor(source);
 }
 
 function toError(cause: unknown, message: string): Error {

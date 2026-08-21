@@ -1858,8 +1858,28 @@ style 与逐帧 presentation style 分离；第一批只开放 opacity/transform
 完整属性矩阵、API 草案、M6–M8 顺序、兼容与回滚见
 [`css-events-plan.md`](./css-events-plan.md)，架构决策见
 [`ADR-0007`](./adr/0007-css-events-and-foundation-components.md)。M6 能力已由
-`pnpm m6:check` 自动验证并通过 `styleCapabilities()` 发布；M7/M8 计划能力在实现和自动
-验证前仍不得写成已交付 API。
+`pnpm m6:check` 自动验证并通过 `styleCapabilities()` 发布；M7 动画/轴泛化与 M8
+Video/foundation controls 已分别进入自动工程门禁。未来 CSS/事件扩展在实现和自动验证前
+仍不得写成已交付 API。
+
+### Video Host/Core 所有权边界（M8 决策，2026-08-21）
+
+ABI 16 的 `VideoFrame` resource 是不可变、可校验的尺寸/poster 描述符，Scene 不保存
+HTMLMediaElement、VideoFrame 或 ImageBitmap。Host 设置 CORS 后再设置 `src`，持有加载、
+解码、audio、媒体时钟与错误；Core 只计算 Video 固有尺寸、object-fit/object-position，
+并继续用 DisplayList `DrawImage` 合成。实时帧以 resource id 关联的 Host/Worker side channel
+替换 backend image source，不产生每帧 Shell mutation。
+
+主线程可直接 replay HTMLMediaElement；Worker 优先接收 transferable VideoFrame，失败时
+回退到 ImageBitmap copy。每个 Video 同时最多一个异步传输，生产突发时只记一个 pending
+请求，当前 copy 完成后丢弃旧结果并捕获最新帧。resource id 变更、node 卸载、root close、
+异步迟到完成与 Worker 恢复都必须显式 close 可关闭帧；后台页面暂停播放并在可见后仅恢复
+此前正在播放的实例。绑定数、提交/掉帧/copy/释放/错误和当前/最大在途数是公开诊断。
+
+`Pressable`/`Button` 组合 View/Text 与现有事件、focus、语义和 interaction styles，不增加
+Core control kind。DOM 语义镜像实现 button 的 Enter-keydown 与 Space-keyup 默认激活；
+disabled 同时禁止 handler、焦点和镜像默认动作。`videoEnabled` 是独立回滚开关，关闭后
+旧 direct props/intrinsic/editing/virtual 路径保持不变。
 
 ---
 

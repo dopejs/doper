@@ -683,7 +683,10 @@ layout animation 不随 M7 默认开放。每个候选属性必须另证每帧 l
 
 ### M8：Video、foundation controls 与后续能力扩展
 
-> 当前状态：**计划中**。Video API 可早期评审，但媒体管线不进入 M6/M7 关键路径。
+> 当前状态：**已完成（2026-08-21）**。ABI 16 增加 Video node 与版本化帧描述资源；
+> Host 持有 HTMLMediaElement、解码和音频，并按 main-thread 直接绘制、Worker VideoFrame、
+> ImageBitmap copy fallback 的顺序提交实时帧。每个 Video 最多一帧传输在途，突发请求合并为
+> 最新帧，替换、卸载、恢复和后台可见性切换均显式回收或暂停。Worker protocol 升至 v11。
 
 - Video 公开组件；Host 管加载/CORS/解码/audio/fallback，Core 消费有界可回收帧资源。
 - poster/object-fit、play/pause/seek/loop/muted 与媒体事件契约。
@@ -695,6 +698,13 @@ layout animation 不随 M7 默认开放。每个候选属性必须另证每帧 l
 
 `pnpm m8:check` 必须包含媒体资源生命周期、错误/seek/loop/fallback、内存硬预算和浏览器
 E2E；真实硬件解码、功耗与受版权内容仍属平台资格，不能由开发机结果冒充支持声明。
+
+交付证据包括 Video metadata/事件/控制与资源替换单测、单帧在途和丢旧保新的内存契约、
+三 transport 的真实 Chromium MP4 播放与 object-fit E2E、Button/Pressable Enter/Space 默认
+动作与 disabled 语义 E2E，以及完整 M7 回归、协议/API 快照和 WASM 400 KiB gzip 门禁。
+本里程碑没有为“可能的未来需求”推测性增加 CSS grammar、selector 或二维虚拟化；这些扩展
+继续按 style 分类表逐项立项，避免无使用证据的 ABI 与包体增长。独立回滚开关为
+`videoEnabled: false`，关闭后旧 intrinsic、direct props、编辑和虚拟列表路径不受影响。
 
 ## 7. 关键依赖与并行关系
 

@@ -105,9 +105,21 @@ async function handle(message: RenderWorkerInboundMessage): Promise<void> {
       if (!active || message.sessionId !== sessionId) return;
       sink?.setReducedMotion(message.reduced);
       return;
+    case "pingo:media-frame":
+      if (!active || message.sessionId !== sessionId) {
+        closeMediaSource(message.source);
+        return;
+      }
+      sink?.updateVideoFrame(message.resourceId, message.source, message.path);
+      return;
     case "pingo:clock-anchor":
       return;
   }
+}
+
+function closeMediaSource(source: CanvasImageSource): void {
+  const close = (source as { close?: () => void }).close;
+  if (typeof close === "function") close.call(source);
 }
 
 async function activate(message: WorkerActivateMessage): Promise<void> {

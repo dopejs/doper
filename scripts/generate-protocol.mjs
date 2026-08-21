@@ -42,7 +42,7 @@ for (const [file, contents] of outputs) {
 if (stale) process.exitCode = 1;
 
 function validateSchema(value) {
-  if (value.schemaVersion !== 1 || value.abiVersion !== 15) {
+  if (value.schemaVersion !== 1 || value.abiVersion !== 16) {
     throw new Error("unsupported protocol schema or ABI version");
   }
   if (value.endianness !== "little" || value.alignment !== 4) {

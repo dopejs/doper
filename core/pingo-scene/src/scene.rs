@@ -1456,6 +1456,7 @@ fn validate_resource(resource_id: u32, kind: ResourceKind, bytes: &[u8]) -> Resu
         ResourceKind::TextStyle => validate_text_style_resource(resource_id, bytes)?,
         ResourceKind::Font => validate_sfnt_font_resource(resource_id, bytes)?,
         ResourceKind::Image => validate_image_resource(resource_id, bytes)?,
+        ResourceKind::VideoFrame => validate_video_frame_resource(resource_id, bytes)?,
         ResourceKind::ComputedStyle => {
             ComputedStyleResource::decode(bytes)
                 .map_err(|_| SceneError::InvalidResourceEncoding { resource_id })?;
@@ -1465,6 +1466,45 @@ fn validate_resource(resource_id: u32, kind: ResourceKind, bytes: &[u8]) -> Resu
                 .map_err(|_| SceneError::InvalidResourceEncoding { resource_id })?;
         }
         ResourceKind::Path | ResourceKind::GlyphSpan => {}
+    }
+    Ok(())
+}
+
+fn validate_video_frame_resource(resource_id: u32, bytes: &[u8]) -> Result<(), SceneError> {
+    use pingo_abi::{
+        VIDEO_FRAME_HEIGHT_OFFSET, VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET,
+        VIDEO_FRAME_POSTER_PIXELS_OFFSET, VIDEO_FRAME_RESOURCE_MINIMUM_BYTES,
+        VIDEO_FRAME_RESOURCE_VARIANT, VIDEO_FRAME_VARIANT_OFFSET, VIDEO_FRAME_VERSION_OFFSET,
+        VIDEO_FRAME_WIDTH_OFFSET,
+    };
+    if bytes.len() < VIDEO_FRAME_RESOURCE_MINIMUM_BYTES
+        || !bytes.len().is_multiple_of(4)
+        || bytes[VIDEO_FRAME_VERSION_OFFSET] != RESOURCE_ENCODING_VERSION
+        || bytes[VIDEO_FRAME_VARIANT_OFFSET] != VIDEO_FRAME_RESOURCE_VARIANT
+    {
+        return Err(SceneError::InvalidResourceEncoding { resource_id });
+    }
+    let read = |offset: usize| -> Option<u32> {
+        Some(u32::from_le_bytes(
+            bytes.get(offset..offset + 4)?.try_into().ok()?,
+        ))
+    };
+    let width = read(VIDEO_FRAME_WIDTH_OFFSET).unwrap_or(0);
+    let height = read(VIDEO_FRAME_HEIGHT_OFFSET).unwrap_or(0);
+    let poster_bytes = read(VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET).unwrap_or(u32::MAX);
+    let expected = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4));
+    let end = VIDEO_FRAME_POSTER_PIXELS_OFFSET.checked_add(poster_bytes as usize);
+    if width == 0
+        || height == 0
+        || (poster_bytes != 0 && Some(poster_bytes) != expected)
+        || end.is_none_or(|end| end > bytes.len())
+        || bytes[end.unwrap_or(bytes.len())..]
+            .iter()
+            .any(|byte| *byte != 0)
+    {
+        return Err(SceneError::InvalidResourceEncoding { resource_id });
     }
     Ok(())
 }
@@ -4688,6 +4728,68 @@ mod tests {
             Err(SceneError::InvalidResourceEncoding { resource_id: 10 })
         );
         assert_eq!(scene.resource(10), None);
+    }
+
+    #[test]
+    fn video_frame_resources_validate_descriptors_posters_and_hostile_lengths() {
+        use pingo_abi::{
+            VIDEO_FRAME_HEIGHT_OFFSET, VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET,
+            VIDEO_FRAME_POSTER_PIXELS_OFFSET, VIDEO_FRAME_RESOURCE_MINIMUM_BYTES,
+            VIDEO_FRAME_RESOURCE_VARIANT, VIDEO_FRAME_VARIANT_OFFSET, VIDEO_FRAME_VERSION_OFFSET,
+            VIDEO_FRAME_WIDTH_OFFSET,
+        };
+
+        let descriptor = |width: u32, height: u32, poster: &[u8]| {
+            let mut bytes = vec![0; VIDEO_FRAME_POSTER_PIXELS_OFFSET + poster.len()];
+            bytes[VIDEO_FRAME_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
+            bytes[VIDEO_FRAME_VARIANT_OFFSET] = VIDEO_FRAME_RESOURCE_VARIANT;
+            bytes[VIDEO_FRAME_WIDTH_OFFSET..VIDEO_FRAME_WIDTH_OFFSET + 4]
+                .copy_from_slice(&width.to_le_bytes());
+            bytes[VIDEO_FRAME_HEIGHT_OFFSET..VIDEO_FRAME_HEIGHT_OFFSET + 4]
+                .copy_from_slice(&height.to_le_bytes());
+            bytes[VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET..VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET + 4]
+                .copy_from_slice(&(poster.len() as u32).to_le_bytes());
+            bytes[VIDEO_FRAME_POSTER_PIXELS_OFFSET..].copy_from_slice(poster);
+            bytes
+        };
+
+        assert_eq!(
+            validate_video_frame_resource(20, &descriptor(320, 180, &[])),
+            Ok(())
+        );
+        assert_eq!(
+            validate_video_frame_resource(21, &descriptor(2, 1, &[255; 8])),
+            Ok(())
+        );
+
+        let hostile = [
+            vec![0; VIDEO_FRAME_RESOURCE_MINIMUM_BYTES - 1],
+            {
+                let mut bytes = descriptor(1, 1, &[]);
+                bytes[VIDEO_FRAME_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION + 1;
+                bytes
+            },
+            descriptor(0, 1, &[]),
+            descriptor(1, 1, &[255; 8]),
+            {
+                let mut bytes = descriptor(1, 1, &[]);
+                bytes[VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET
+                    ..VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET + 4]
+                    .copy_from_slice(&4_u32.to_le_bytes());
+                bytes
+            },
+            {
+                let mut bytes = descriptor(1, 1, &[]);
+                bytes.extend_from_slice(&[0, 0, 0, 1]);
+                bytes
+            },
+        ];
+        for bytes in hostile {
+            assert_eq!(
+                validate_video_frame_resource(22, &bytes),
+                Err(SceneError::InvalidResourceEncoding { resource_id: 22 })
+            );
+        }
     }
 
     #[test]

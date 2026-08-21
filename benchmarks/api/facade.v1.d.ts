@@ -23,6 +23,7 @@ export {
   PingoFontLoadError,
   PingoImage,
   Text,
+  Video,
   TextArea as UnstyledTextArea,
   View,
   createElement,
@@ -41,6 +42,8 @@ export {
   type PingoEvent,
   type PingoEventHandler,
   type PingoEventPhase,
+  type PingoMediaError,
+  type PingoMediaEvent,
   type PingoNode,
   type EdgeInsets,
   type PingoFontLoadErrorCode,
@@ -57,6 +60,8 @@ export {
   type KeyframeAnimationSpec,
   type TransitionSpec,
   type ViewHandle,
+  type VideoHandle,
+  type VideoProps,
   type Ref,
   type ScrollProps,
   type TextProps,
@@ -75,8 +80,12 @@ export type {
 } from "@dopejs/pingo-editing";
 export { TextEditingController, type TextEditingControllerOptions } from "@dopejs/pingo-editing";
 export {
+  Button,
+  Pressable,
   TextArea,
   TextField,
+  type ButtonProps,
+  type PressableProps,
   type TextAreaProps,
   type TextFieldProps,
 } from "@dopejs/pingo-widgets";
@@ -119,6 +128,7 @@ export { useTextEditingController } from "./editing";
 export {
   createCanvasRoot,
   createHostedCanvasRoot,
+  detectMediaCapabilities,
   createCanvasRoot as createRoot,
   createWasmCore,
   initializeWasm,
@@ -131,6 +141,8 @@ export {
   type NonPassiveRegion,
   type SemanticNode,
   type HostInputTransportMetrics,
+  type MediaPipelineMetrics,
+  type MediaCapabilities,
   type HostTransportDecision,
   type HostTransportMode,
   type HostTransportPolicy,

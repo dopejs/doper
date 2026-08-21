@@ -228,6 +228,33 @@ describe("RenderWorkerClient", () => {
     expect(onFatal).toHaveBeenCalledOnce();
     client.terminate();
   });
+
+  it("closes a media transferable when Worker submission fails", async () => {
+    const worker = preparedWorker(15);
+    const client = new RenderWorkerClient(worker, { sessionId: 15 });
+    await client.prepare();
+    worker.onPost = (message) => {
+      if (hasKind(message, "pingo:activate")) {
+        worker.emitMessage({ kind: "pingo:ready", mode: "post-message", sessionId: 15 });
+      }
+    };
+    await client.activate({
+      canvas: {} as OffscreenCanvas,
+      devicePixelRatio: 1,
+      height: 1,
+      mode: "post-message",
+      rasterCache: false,
+      reducedMotion: false,
+      width: 1,
+    });
+    const close = vi.fn();
+    worker.postError = new Error("transfer failed");
+    expect(() =>
+      client.postMediaFrame(4, { close } as unknown as CanvasImageSource, "video-frame"),
+    ).toThrow(/transfer failed/u);
+    expect(close).toHaveBeenCalledOnce();
+    client.terminate();
+  });
 });
 
 type Listener = (event: never) => void;
@@ -240,6 +267,7 @@ class FakeWorker {
   };
   public onPost: ((message: unknown) => void) | undefined;
   public readonly posts: unknown[] = [];
+  public postError: Error | undefined;
   public terminated = false;
 
   public addEventListener(type: "error" | "message" | "messageerror", listener: Listener): void {
@@ -251,6 +279,7 @@ class FakeWorker {
   }
 
   public postMessage(message: unknown): void {
+    if (this.postError !== undefined) throw this.postError;
     this.posts.push(message);
     this.onPost?.(message);
   }

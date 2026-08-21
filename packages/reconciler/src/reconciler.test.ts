@@ -4,12 +4,15 @@ import {
   Text,
   TextArea as UnstyledTextArea,
   View,
+  Video,
+  createImage,
   createElement,
   createFont,
   type PingoEvent,
   type PingoNode,
   type NodeHandle,
   type ViewHandle,
+  type VideoHandle,
 } from "@dopejs/pingo-jsx";
 import { signal, useEffect } from "@dopejs/pingo-runtime";
 import { createStyleSheet } from "@dopejs/pingo-style";
@@ -48,6 +51,70 @@ class RecordingSink implements MutationSink {
 }
 
 describe("reconciler", () => {
+  it("binds Video lifecycle, metadata replacement, events, and imperative controls", () => {
+    const sink = new RecordingSink();
+    const bindings = vi.fn();
+    const requestTypes: string[] = [];
+    const loaded = vi.fn();
+    const failed = vi.fn();
+    const ref = { current: null as VideoHandle | null };
+    const poster = createImage(new Uint8Array(2 * 2 * 4), 2, 2);
+    const root = createRoot(sink, {
+      onMediaBinding: bindings,
+      onInteractionRequest: (request) => requestTypes.push(request.type),
+    });
+    root.render(
+      Video({
+        src: "movie.mp4",
+        poster,
+        muted: true,
+        ref,
+        onLoadedMetadata: loaded,
+        onError: failed,
+      }),
+    );
+
+    expect(createdKinds(sink.batches[0])).toEqual([NodeKind.Root, NodeKind.Video]);
+    const resource = resourceForProp(sink.batches[0], Prop.VideoFrame);
+    expect(resource?.kind).toBe(ResourceKind.VideoFrame);
+    expect(bindings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ nodeId: ref.current?.nodeId, resourceId: resource?.resourceId }),
+      ref.current?.nodeId,
+    );
+
+    ref.current?.play();
+    ref.current?.pause();
+    ref.current?.seek(3.5);
+    expect(requestTypes).toEqual(["mediaPlay", "mediaPause", "mediaSeek"]);
+
+    const nodeId = ref.current?.nodeId;
+    if (nodeId === undefined) throw new Error("Video ref missing");
+    root.updateMediaMetadata(nodeId, 320, 180);
+    expect(mutationsOfType(sink.batches[1], "releaseResource")).toHaveLength(1);
+    root.render(
+      Video({
+        src: "movie.mp4",
+        poster,
+        muted: false,
+        ref,
+        onLoadedMetadata: loaded,
+        onError: failed,
+      }),
+    );
+    expect(resourceForProp(sink.batches[2], Prop.VideoFrame)).toBeUndefined();
+    expect(mutationsOfType(sink.batches[2], "releaseResource")).toHaveLength(0);
+    root.applyMediaEvent(nodeId, {
+      type: "loadedmetadata",
+      currentTime: 0,
+      duration: 12,
+    });
+    root.applyMediaEvent(nodeId, { code: "decode", message: "bad frame" });
+    expect(loaded).toHaveBeenCalledOnce();
+    expect(failed).toHaveBeenCalledWith({ code: "decode", message: "bad frame" });
+    root.unmount();
+    expect(bindings).toHaveBeenLastCalledWith(undefined, nodeId);
+  });
+
   it("maps foundation components to the compatible Core node contract", () => {
     const sink = new RecordingSink();
     createRoot(sink).render(

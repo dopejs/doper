@@ -1,9 +1,48 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { RESOURCE_ENCODING_VERSION, ResourceKind } from "./generated";
+import {
+  RESOURCE_ENCODING_VERSION,
+  ResourceKind,
+  VIDEO_FRAME_HEIGHT_OFFSET,
+  VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET,
+  VIDEO_FRAME_RESOURCE_MINIMUM_BYTES,
+  VIDEO_FRAME_RESOURCE_VARIANT,
+  VIDEO_FRAME_VARIANT_OFFSET,
+  VIDEO_FRAME_VERSION_OFFSET,
+  VIDEO_FRAME_WIDTH_OFFSET,
+} from "./generated";
 import { Canvas2DResourceRegistry, cssFont } from "./resources";
 
 describe("Canvas2DResourceRegistry", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("owns one replaceable live Video frame and closes superseded resources", () => {
+    class FakeCanvas {
+      public constructor(
+        public readonly width: number,
+        public readonly height: number,
+      ) {}
+    }
+    vi.stubGlobal("OffscreenCanvas", FakeCanvas);
+    const descriptor = new Uint8Array(VIDEO_FRAME_RESOURCE_MINIMUM_BYTES);
+    const view = new DataView(descriptor.buffer);
+    descriptor[VIDEO_FRAME_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
+    descriptor[VIDEO_FRAME_VARIANT_OFFSET] = VIDEO_FRAME_RESOURCE_VARIANT;
+    view.setUint32(VIDEO_FRAME_WIDTH_OFFSET, 320, true);
+    view.setUint32(VIDEO_FRAME_HEIGHT_OFFSET, 180, true);
+    view.setUint32(VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET, 0, true);
+
+    const resources = new Canvas2DResourceRegistry();
+    resources.defineEncodedResource(9, ResourceKind.VideoFrame, descriptor);
+    const first = { close: vi.fn() } as unknown as CanvasImageSource;
+    const second = { close: vi.fn() } as unknown as CanvasImageSource;
+    resources.updateVideoFrame(9, first);
+    resources.updateVideoFrame(9, second);
+    expect((first as unknown as { close: ReturnType<typeof vi.fn> }).close).toHaveBeenCalledOnce();
+    resources.releaseEncodedResource(9, ResourceKind.VideoFrame);
+    expect((second as unknown as { close: ReturnType<typeof vi.fn> }).close).toHaveBeenCalledOnce();
+  });
+
   it("decodes schema-versioned paint, text, and text-style resources", () => {
     const resources = new Canvas2DResourceRegistry();
     resources.defineEncodedResource(

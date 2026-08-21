@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { TextArea, TextField } from "./index";
+import { Button, Pressable, TextArea, TextField } from "./index";
 
 interface ElementLike {
   readonly type: unknown;
@@ -60,5 +60,25 @@ describe("decorated text widgets", () => {
     if (editable === undefined) throw new Error("editableText missing");
     expect(editable.props.multiline).toBe(true);
     expect(editable.props.height).toBe(4 * 21);
+  });
+});
+
+describe("foundation controls", () => {
+  it("composes Pressable and Button without a control host kind", () => {
+    const press = Pressable({ onPress: () => undefined, semanticLabel: "Open" }) as ElementLike;
+    expect(press.type).toBe("container");
+    expect(press.props).toMatchObject({ semanticRole: "button", semanticLabel: "Open" });
+    expect(typeof press.props.onClick).toBe("function");
+    expect(typeof press.props.onTap).toBe("function");
+
+    const button = Button({ children: "Save", disabled: true }) as ElementLike;
+    expect(button.type).toBe("container");
+    expect(button.props).toMatchObject({
+      semanticRole: "button",
+      semanticLabel: "Save",
+      opacity: 0.5,
+    });
+    expect(button.props.onClick).toBeUndefined();
+    expect(children(button)[0]?.type).toBe("text");
   });
 });

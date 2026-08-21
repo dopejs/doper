@@ -34,11 +34,12 @@ JavaScript realm 内是幂等的：并发与后续调用共享第一次成功的
 | `setReducedMotion(value)`                                 | 实时覆盖 Core animation 的 reduced-motion 策略       |
 | `focusEditable` / `blurEditable`                          | 激活或结束原生编辑会话                               |
 | `updateEditingGeometry`                                   | 手动提供 IME 几何（通常自动完成）                    |
-| `transportMetrics()` / `inputTransportMetrics()`          | 传输与背压快照                                       |
+| `transportMetrics()` / `inputTransportMetrics()`          | mutation/input 传输与背压快照                        |
+| `mediaMetrics()`                                          | 媒体绑定、copy、掉帧、释放与在途帧快照               |
 
-常用选项：`onFrame`、`onHostError`、`onEditTransaction`、`onEventTransaction`、
-`onSemantics`、`onNonPassiveRegions`、`transport`、`rasterCache`、`accessibility`、
-`nativeTextInputMode`。
+常用选项：`onFrame`、`onHostError`、`onMediaMetrics`、`onEditTransaction`、
+`onEventTransaction`、`onSemantics`、`onNonPassiveRegions`、`transport`、`rasterCache`、
+`accessibility`、`nativeTextInputMode`。
 
 ## 元素与 JSX
 
@@ -107,6 +108,23 @@ animation resource。它不回退 ABI；旧 Core 必须通过正常 ABI 协商�
 CSS 文本中的 `transition-*` / `animation-*` longhand 尚未加入 subset；M7 公开的是结构化、
 类型安全的组件属性，Core 始终不解析 CSS。
 
+## Video（M8）
+
+```ts
+Video(props: VideoProps): PingoElement
+detectMediaCapabilities(): MediaCapabilities
+```
+
+`VideoProps` 提供 `src`、`poster`、`autoPlay`、`loop`、`muted`、`crossOrigin`、`preload`，
+以及 `onPlay`、`onPause`、`onEnded`、`onLoadedMetadata`、`onTimeUpdate`、`onError`。
+`ref` 的 `VideoHandle` 提供 `play()`、`pause()` 与 `seek(seconds)`。尺寸与
+`style.objectFit`/`objectPosition` 由 Core 计算，HTMLVideoElement、解码与 audio 始终留在 Host。
+
+主线程使用 `html-media` 零 copy 路径；Worker 优先使用 transferable `VideoFrame`，不可用时
+使用 `ImageBitmap` copy。路径通过媒体帧的 `FrameReport.mediaPath` 观测，资源与背压通过
+`root.mediaMetrics()` / `onMediaMetrics` 观测。每个 Video 最多一帧传输在途，突发帧丢旧保新；
+解绑、替换和关闭 root 会清理浏览器资源。`videoEnabled: false` 是独立回滚开关。
+
 ## 响应式与 hooks
 
 ```ts
@@ -130,7 +148,13 @@ useTextEditingController(options);
 ```ts
 TextField(props): PingoNode
 TextArea(props): PingoNode
+Pressable(props): PingoNode
+Button(props): PingoNode
 ```
+
+`Pressable` 与 `Button` 只组合 View/Text 和既有事件/语义，不引入 Core control kind。
+语义镜像为 button 提供 Enter keydown 与 Space keyup 默认激活；`disabled` 同时移除事件、
+焦点顺序和原生语义激活。
 
 ## 无障碍
 

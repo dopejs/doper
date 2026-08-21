@@ -21,6 +21,7 @@ import {
   type WorkerInputWakeMessage,
   type WorkerPrepareMessage,
   type WorkerReducedMotionMessage,
+  type WorkerMediaFrameMessage,
   type WorkerShutdownMessage,
 } from "./worker-protocol";
 
@@ -251,6 +252,28 @@ export class RenderWorkerClient {
     this.#worker.postMessage(message);
   }
 
+  /** Transfers ownership of one bounded live media frame to the render Worker. */
+  public postMediaFrame(
+    resourceId: number,
+    source: CanvasImageSource,
+    path: WorkerMediaFrameMessage["path"],
+  ): void {
+    try {
+      this.requireState("ready");
+      const message: WorkerMediaFrameMessage = {
+        kind: "pingo:media-frame",
+        path,
+        resourceId: positiveU32(resourceId, "media resourceId"),
+        sessionId: this.#sessionId,
+        source,
+      };
+      this.#worker.postMessage(message, [source as Transferable]);
+    } catch (cause) {
+      closeMediaSource(source);
+      throw cause;
+    }
+  }
+
   public async close(): Promise<void> {
     if (this.#state === "closed") return;
     if (this.#state === "failed" || this.#state === "created") {
@@ -406,6 +429,11 @@ export class RenderWorkerClient {
     this.#worker.removeEventListener("error", this.#handleError);
     this.#worker.removeEventListener("messageerror", this.#handleMessageError);
   }
+}
+
+function closeMediaSource(source: CanvasImageSource): void {
+  const close = (source as { close?: () => void }).close;
+  if (typeof close === "function") close.call(source);
 }
 
 /** Default bundler-resolved production Worker factory. */

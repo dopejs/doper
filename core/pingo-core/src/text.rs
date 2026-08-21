@@ -1306,9 +1306,28 @@ fn span_wire_bytes(span: &GlyphSpanResource) -> usize {
 /// Interpreting stored pixels as logical units keeps the demo-scale case simple
 /// and predictable; a device-pixel-ratio-aware image box is a separate decision.
 fn image_intrinsic_size(scene: &Scene, node: NodeId) -> Option<Size> {
-    let resource_id = scene.ref_prop(node, pingo_abi::Prop::Image)?;
+    let (resource_id, kind, width_offset, height_offset) = scene
+        .ref_prop(node, pingo_abi::Prop::Image)
+        .map(|id| {
+            (
+                id,
+                pingo_abi::ResourceKind::Image,
+                pingo_abi::IMAGE_BITMAP_WIDTH_OFFSET,
+                pingo_abi::IMAGE_BITMAP_HEIGHT_OFFSET,
+            )
+        })
+        .or_else(|| {
+            scene.ref_prop(node, pingo_abi::Prop::VideoFrame).map(|id| {
+                (
+                    id,
+                    pingo_abi::ResourceKind::VideoFrame,
+                    pingo_abi::VIDEO_FRAME_WIDTH_OFFSET,
+                    pingo_abi::VIDEO_FRAME_HEIGHT_OFFSET,
+                )
+            })
+        })?;
     let resource = scene.resource(resource_id)?;
-    if resource.kind != pingo_abi::ResourceKind::Image {
+    if resource.kind != kind {
         return None;
     }
     // Converted through `u16` so the cast is lossless rather than merely
@@ -1319,8 +1338,5 @@ fn image_intrinsic_size(scene: &Scene, node: NodeId) -> Option<Size> {
         let value = u32::from_le_bytes(bytes.try_into().ok()?);
         u16::try_from(value).ok().map(f32::from)
     };
-    Some(Size::new(
-        read(pingo_abi::IMAGE_BITMAP_WIDTH_OFFSET)?,
-        read(pingo_abi::IMAGE_BITMAP_HEIGHT_OFFSET)?,
-    ))
+    Some(Size::new(read(width_offset)?, read(height_offset)?))
 }

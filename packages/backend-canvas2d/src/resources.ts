@@ -58,6 +58,14 @@ import {
   TEXT_STYLE_V2_WEIGHT_OFFSET,
   TEXT_STYLE_V2_WHITE_SPACE_OFFSET,
   MAX_SYSTEM_TEXT_LINES,
+  VIDEO_FRAME_HEIGHT_OFFSET,
+  VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET,
+  VIDEO_FRAME_POSTER_PIXELS_OFFSET,
+  VIDEO_FRAME_RESOURCE_MINIMUM_BYTES,
+  VIDEO_FRAME_RESOURCE_VARIANT,
+  VIDEO_FRAME_VARIANT_OFFSET,
+  VIDEO_FRAME_VERSION_OFFSET,
+  VIDEO_FRAME_WIDTH_OFFSET,
 } from "./generated";
 
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
@@ -267,6 +275,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
     const images = new Map(this.#images);
     const glyphSpans = new Map(this.#glyphSpans);
     const glyphRasters = new Map(this.#glyphRasters);
+    const videoFramesToClose: CanvasImageSource[] = [];
 
     for (const action of actions) {
       if (action.type === "define") {
@@ -319,6 +328,9 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
           case ResourceKind.Image:
             define(images, action.id, decodeImageBitmap(action.bytes), "image");
             break;
+          case ResourceKind.VideoFrame:
+            define(images, action.id, decodeVideoFrame(action.bytes), "video frame");
+            break;
           case ResourceKind.Affine:
             validateAffine(action.bytes);
             break;
@@ -357,6 +369,11 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
               return fonts.delete(action.id);
             case ResourceKind.Image:
               return images.delete(action.id);
+            case ResourceKind.VideoFrame: {
+              const frame = images.get(action.id);
+              if (frame !== undefined) videoFramesToClose.push(frame);
+              return images.delete(action.id);
+            }
             case ResourceKind.Affine:
             case ResourceKind.ComputedStyle:
             case ResourceKind.Animation:
@@ -404,6 +421,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
     replaceMap(this.#encodedKinds, encodedKinds);
     replaceMap(this.#glyphSpans, glyphSpans);
     replaceMap(this.#glyphRasters, glyphRasters);
+    for (const frame of videoFramesToClose) closeFrame(frame);
   }
 
   public getPaint(id: number): string | CanvasGradient | CanvasPattern | undefined {
@@ -416,6 +434,17 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
 
   public getImage(id: number): CanvasImageSource | undefined {
     return this.#images.get(id);
+  }
+
+  /** Replaces one live Video frame without changing the immutable Scene descriptor. */
+  public updateVideoFrame(id: number, source: CanvasImageSource): void {
+    if (this.#encodedKinds.get(id) !== ResourceKind.VideoFrame) {
+      closeFrame(source);
+      throw new Error(`video frame resource ${String(id)} is not defined`);
+    }
+    const previous = this.#images.get(id);
+    this.#images.set(id, source);
+    if (previous !== source) closeFrame(previous);
   }
 
   public getText(id: number): string | undefined {
@@ -635,6 +664,44 @@ function decodeImageBitmap(bytes: Uint8Array): CanvasImageSource {
   );
   context.putImageData(image, 0, 0);
   return surface;
+}
+
+function decodeVideoFrame(bytes: Uint8Array): CanvasImageSource {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (
+    bytes.byteLength < VIDEO_FRAME_RESOURCE_MINIMUM_BYTES ||
+    bytes[VIDEO_FRAME_VERSION_OFFSET] !== RESOURCE_ENCODING_VERSION ||
+    bytes[VIDEO_FRAME_VARIANT_OFFSET] !== VIDEO_FRAME_RESOURCE_VARIANT
+  ) {
+    throw new Error("video frame resource header is malformed");
+  }
+  const width = view.getUint32(VIDEO_FRAME_WIDTH_OFFSET, true);
+  const height = view.getUint32(VIDEO_FRAME_HEIGHT_OFFSET, true);
+  const pixelBytes = view.getUint32(VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET, true);
+  if (
+    width === 0 ||
+    height === 0 ||
+    (pixelBytes !== 0 && pixelBytes !== width * height * 4) ||
+    VIDEO_FRAME_POSTER_PIXELS_OFFSET + pixelBytes > bytes.byteLength
+  ) {
+    throw new Error("video frame dimensions do not describe its poster");
+  }
+  if (!canCreateGlyphSurface()) throw new Error("video frame surfaces are unavailable");
+  const surface = createGlyphSurface(pixelBytes === 0 ? 1 : width, pixelBytes === 0 ? 1 : height);
+  if (pixelBytes === 0) return surface;
+  const context = glyphSurfaceContext(surface);
+  if (context === null) throw new Error("video poster surface has no Canvas2D context");
+  const image = context.createImageData(width, height);
+  image.data.set(
+    bytes.subarray(VIDEO_FRAME_POSTER_PIXELS_OFFSET, VIDEO_FRAME_POSTER_PIXELS_OFFSET + pixelBytes),
+  );
+  context.putImageData(image, 0, 0);
+  return surface;
+}
+
+function closeFrame(source: CanvasImageSource | undefined): void {
+  const close = (source as { close?: () => void } | undefined)?.close;
+  if (typeof close === "function") close.call(source);
 }
 
 function canCreateGlyphSurface(): boolean {

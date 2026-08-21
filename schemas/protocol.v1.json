@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 15,
+  "abiVersion": 16,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -1091,6 +1091,10 @@
     {
       "name": "Scroll",
       "id": 6
+    },
+    {
+      "name": "Video",
+      "id": 7
     }
   ],
   "resourceKinds": [
@@ -1133,6 +1137,10 @@
     {
       "name": "Animation",
       "id": 10
+    },
+    {
+      "name": "VideoFrame",
+      "id": 11
     }
   ],
   "resourceLayouts": {
@@ -1380,6 +1388,39 @@
         ]
       },
       {
+        "name": "VideoFrame",
+        "resourceKind": "VideoFrame",
+        "variant": 1,
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "variant",
+            "type": "u8"
+          },
+          "pad16",
+          {
+            "name": "width",
+            "type": "u32"
+          },
+          {
+            "name": "height",
+            "type": "u32"
+          },
+          {
+            "name": "posterPixelBytes",
+            "type": "u32"
+          },
+          {
+            "name": "posterPixels",
+            "type": "bytes"
+          },
+          "align4"
+        ]
+      },
+      {
         "name": "ComputedStyle",
         "resourceKind": "ComputedStyle",
         "variant": 1,
@@ -1521,6 +1562,13 @@
       "id": 35,
       "valueType": "ref",
       "resourceKind": "Image",
+      "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "VideoFrame",
+      "id": 36,
+      "valueType": "ref",
+      "resourceKind": "VideoFrame",
       "invalidation": ["layout", "paint"]
     },
     {

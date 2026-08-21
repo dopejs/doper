@@ -27,6 +27,7 @@ import {
 } from "@dopejs/pingo-editing";
 
 import { encodeSystemTextMetricBatch } from "./system-text-metrics";
+import { MediaPipeline, type MediaFramePath, type MediaPipelineMetrics } from "./media";
 
 import {
   FRAME_DIAGNOSTICS_ANIMATION_ACTIVE_INDEX,
@@ -269,7 +270,8 @@ export interface CoreFrameDiagnostics {
 
 /** Diagnostics emitted after one Core frame and Canvas replay both succeed. */
 export interface FrameReport extends ReplayStats {
-  readonly cause?: "animation" | "input" | "mutation";
+  readonly cause?: "animation" | "input" | "media" | "mutation";
+  readonly mediaPath?: MediaFramePath;
   readonly inputBytes?: number;
   readonly animationDeltaMs?: number;
   readonly mutationBytes: number;
@@ -297,6 +299,7 @@ export interface CanvasRootOptions extends RootOptions {
   readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
   readonly onEditingGeometry?: (frame: EditingGeometryFrame) => void;
   readonly onSemantics?: (nodes: readonly SemanticNode[]) => void;
+  readonly onMediaMetrics?: (metrics: MediaPipelineMetrics) => void;
 }
 
 type ResourceAction =
@@ -670,6 +673,25 @@ export class CanvasFrameSink implements MutationSink {
     return displayList === undefined ? null : this.replay(displayList, this.#lastPictureKey).value;
   }
 
+  /** Installs one newest-wins live frame and redraws without a Shell mutation. */
+  public updateVideoFrame(
+    resourceId: number,
+    source: CanvasImageSource,
+    path: MediaFramePath,
+  ): ReplayStats | null {
+    this.#resources.updateVideoFrame(resourceId, source);
+    this.#resourceRevision = nextSequence(this.#resourceRevision);
+    this.#rasterCache?.clear();
+    const displayList = this.#lastDisplayList;
+    if (displayList === undefined) return null;
+    return this.acceptDynamicFrame(displayList, {
+      cause: "media",
+      inputBytes: 0,
+      mediaPath: path,
+      mutationBytes: 0,
+    });
+  }
+
   /** Returns a stable snapshot for diagnostics without exposing mutable cache state. */
   public rasterCacheMetrics(): RasterTileCacheMetrics | undefined {
     return this.#rasterCache?.metrics();
@@ -868,7 +890,10 @@ export class CanvasFrameSink implements MutationSink {
 
   private acceptDynamicFrame(
     displayList: Uint8Array,
-    source: Pick<FrameReport, "animationDeltaMs" | "cause" | "inputBytes" | "mutationBytes">,
+    source: Pick<
+      FrameReport,
+      "animationDeltaMs" | "cause" | "inputBytes" | "mediaPath" | "mutationBytes"
+    >,
   ): ReplayStats {
     if (!(displayList instanceof Uint8Array)) {
       throw new TypeError("Core dynamic frame must return Uint8Array DisplayList bytes");
@@ -1485,6 +1510,7 @@ export function createCanvasRoot(
   options: CanvasRootOptions = {},
 ): PingoRoot {
   const coreRoot: { current: CoreDrivenPingoRoot | undefined } = { current: undefined };
+  let media: MediaPipeline | undefined;
   const sink = new CanvasFrameSink(
     context,
     core,
@@ -1510,7 +1536,33 @@ export function createCanvasRoot(
     options.onEditingGeometry,
     options.onSemantics,
   );
-  const root = createRoot(sink, options);
+  const mediaPipeline = (): MediaPipeline => {
+    media ??= new MediaPipeline({
+      transferableFrames: false,
+      target: {
+        submit: (resourceId, source, path) => sink.updateVideoFrame(resourceId, source, path),
+      },
+      onMetadata: (nodeId, width, height) =>
+        coreRoot.current?.updateMediaMetadata(nodeId, width, height),
+      onEvent: (nodeId, event) => coreRoot.current?.applyMediaEvent(nodeId, event),
+      ...(options.onMediaMetrics === undefined ? {} : { onMetrics: options.onMediaMetrics }),
+    });
+    return media;
+  };
+  const root = createRoot(sink, {
+    ...options,
+    onMediaBinding: (binding, nodeId) => {
+      mediaPipeline().bind(binding, nodeId);
+      options.onMediaBinding?.(binding, nodeId);
+    },
+    onInteractionRequest: (request) => {
+      if (request.type === "mediaPlay") mediaPipeline().play(request.nodeId);
+      else if (request.type === "mediaPause") mediaPipeline().pause(request.nodeId);
+      else if (request.type === "mediaSeek")
+        mediaPipeline().seek(request.nodeId, request.timeSeconds);
+      options.onInteractionRequest?.(request);
+    },
+  });
   coreRoot.current = root;
   return {
     render: (node) => root.render(node),
@@ -1521,6 +1573,7 @@ export function createCanvasRoot(
       try {
         root.unmount();
       } finally {
+        media?.close();
         sink.dispose();
       }
     },

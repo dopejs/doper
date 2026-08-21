@@ -577,12 +577,25 @@ fn build_node(
             );
         }
     }
-    if visible && let Some(image_id) = scene.ref_prop(node, Prop::Image) {
+    if visible
+        && let Some((image_id, resource_kind)) = scene
+            .ref_prop(node, Prop::Image)
+            .map(|id| (id, ResourceKind::Image))
+            .or_else(|| {
+                scene
+                    .ref_prop(node, Prop::VideoFrame)
+                    .map(|id| (id, ResourceKind::VideoFrame))
+            })
+    {
         // The whole image is drawn into the node's box. Scene validation has
         // already checked that the declared dimensions describe the pixels that
         // follow, so the source rectangle here cannot exceed the resource.
-        let resource = typed_resource(scene, image_id, ResourceKind::Image)?;
-        let (image_width, image_height) = image_dimensions(image_id, resource)?;
+        let resource = typed_resource(scene, image_id, resource_kind)?;
+        let (image_width, image_height) = if resource_kind == ResourceKind::Image {
+            image_dimensions(image_id, resource)?
+        } else {
+            video_dimensions(image_id, resource)?
+        };
         let (source, destination) = image_rects(scene, node, size, image_width, image_height);
         push(
             &mut instructions,
@@ -710,6 +723,23 @@ fn build_node(
         }
     }
     Ok(instructions)
+}
+
+fn video_dimensions(
+    resource_id: u32,
+    resource: &pingo_scene::Resource,
+) -> Result<(f32, f32), PaintError> {
+    use pingo_abi::{VIDEO_FRAME_HEIGHT_OFFSET, VIDEO_FRAME_WIDTH_OFFSET};
+    let read = |offset: usize| -> Option<f32> {
+        let value = u32::from_le_bytes(resource.bytes.get(offset..offset + 4)?.try_into().ok()?);
+        u16::try_from(value).ok().map(f32::from)
+    };
+    read(VIDEO_FRAME_WIDTH_OFFSET)
+        .zip(read(VIDEO_FRAME_HEIGHT_OFFSET))
+        .ok_or(PaintError::InvalidResource {
+            resource_id,
+            reason: "video dimensions are invalid",
+        })
 }
 
 fn push_presentation_transform(

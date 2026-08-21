@@ -1878,7 +1878,7 @@ impl CoreEngine {
     pub fn semantics(&self) -> Vec<u8> {
         let mut records = 0_u32;
         let mut payload = Vec::new();
-        let focused = self.editing.active_visual().map(|visual| visual.node);
+        let editing_focused = self.editing.active_visual().map(|visual| visual.node);
         for &node in self.scene.ids() {
             if self.scene.excluded_by_display(node) || !self.scene.visible(node) {
                 continue;
@@ -1894,6 +1894,9 @@ impl CoreEngine {
                 continue;
             };
             let role = role.or(if editable { Some("textbox") } else { None });
+            let focusable = editable || role == Some("button");
+            let focused = editing_focused == Some(node)
+                || self.scene.interaction_state(node) & pingo_abi::STYLE_INTERACTION_FOCUS != 0;
             if editable && value.is_none() {
                 let password = self.editing.session_is_password(node).unwrap_or(false);
                 if !password {
@@ -1903,8 +1906,8 @@ impl CoreEngine {
                         .map(pingo_edit::EditSession::text);
                 }
             }
-            let flags = u32::from(editable)
-                | (u32::from(focused == Some(node)) << 1)
+            let flags = u32::from(focusable)
+                | (u32::from(focused) << 1)
                 | (u32::from(editable && self.editing.session_is_password(node).unwrap_or(false))
                     << 2);
             let rect = geometry.aabb;

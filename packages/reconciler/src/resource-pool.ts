@@ -59,6 +59,14 @@ import {
   IMAGE_BITMAP_VARIANT_OFFSET,
   IMAGE_BITMAP_VERSION_OFFSET,
   IMAGE_BITMAP_WIDTH_OFFSET,
+  VIDEO_FRAME_HEIGHT_OFFSET,
+  VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET,
+  VIDEO_FRAME_POSTER_PIXELS_OFFSET,
+  VIDEO_FRAME_RESOURCE_MINIMUM_BYTES,
+  VIDEO_FRAME_RESOURCE_VARIANT,
+  VIDEO_FRAME_VARIANT_OFFSET,
+  VIDEO_FRAME_VERSION_OFFSET,
+  VIDEO_FRAME_WIDTH_OFFSET,
 } from "./generated";
 import type { ResourceKind } from "./generated";
 import type { Mutation } from "./mutation-stream";
@@ -319,6 +327,39 @@ export function encodeImageBitmap(image: PingoImage): Uint8Array {
   bytes.set(pixels, IMAGE_BITMAP_PIXELS_OFFSET);
   if (bytes.byteLength < IMAGE_BITMAP_RESOURCE_MINIMUM_BYTES) {
     throw new Error("generated image bitmap layout is inconsistent");
+  }
+  return bytes;
+}
+
+/** Encodes immutable Video metadata plus an optional same-size poster fallback. */
+export function encodeVideoFrameDescriptor(
+  width: number,
+  height: number,
+  poster?: PingoImage,
+): Uint8Array {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    throw new RangeError("video dimensions must be positive integers");
+  }
+  if (width > 65_535 || height > 65_535) {
+    throw new RangeError("video dimensions exceed the portable resource limit");
+  }
+  if (poster !== undefined && (poster.width !== width || poster.height !== height)) {
+    throw new RangeError("video poster dimensions must match the frame descriptor");
+  }
+  const pixels = poster?.copyPixels() ?? new Uint8Array();
+  const byteLength = align4(VIDEO_FRAME_POSTER_PIXELS_OFFSET + pixels.byteLength);
+  if (byteLength > MAX_RESOURCE_BYTES)
+    throw new RangeError("video poster exceeds the resource budget");
+  const bytes = new Uint8Array(byteLength);
+  const view = new DataView(bytes.buffer);
+  bytes[VIDEO_FRAME_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
+  bytes[VIDEO_FRAME_VARIANT_OFFSET] = VIDEO_FRAME_RESOURCE_VARIANT;
+  view.setUint32(VIDEO_FRAME_WIDTH_OFFSET, width, true);
+  view.setUint32(VIDEO_FRAME_HEIGHT_OFFSET, height, true);
+  view.setUint32(VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET, pixels.byteLength, true);
+  bytes.set(pixels, VIDEO_FRAME_POSTER_PIXELS_OFFSET);
+  if (bytes.byteLength < VIDEO_FRAME_RESOURCE_MINIMUM_BYTES) {
+    throw new Error("generated video frame layout is inconsistent");
   }
   return bytes;
 }

@@ -7,7 +7,8 @@ import type { PingoStyle } from "@dopejs/pingo-style";
 export type Key = string | number;
 
 /** Engine-native host element names. */
-export type HostType = "container" | "editableText" | "image" | "scroll" | "text" | "virtualList";
+export type HostType =
+  "container" | "editableText" | "image" | "scroll" | "text" | "video" | "virtualList";
 
 /** Mounted host handle exposed through refs without leaking internal instances. */
 export interface NodeHandle {
@@ -33,6 +34,13 @@ export interface ViewHandle extends NodeHandle {
   scrollBy(deltaX: number, deltaY: number): void;
   /** Starts constant-velocity Core scrolling; two zeros stop it. */
   setScrollVelocity(velocityX: number, velocityY: number): void;
+}
+
+/** Mounted Video handle. Commands are forwarded to the Host-owned media element. */
+export interface VideoHandle extends NodeHandle {
+  play(): void;
+  pause(): void;
+  seek(timeSeconds: number): void;
 }
 
 /** Object or callback ref. */
@@ -227,6 +235,37 @@ export interface ImageProps extends Omit<CommonProps, "children"> {
   readonly source: PingoImage;
 }
 
+/** Stable media event emitted by the Host-owned playback pipeline. */
+export interface PingoMediaEvent {
+  readonly type: "ended" | "loadedmetadata" | "pause" | "play" | "timeupdate";
+  readonly currentTime: number;
+  readonly duration: number;
+}
+
+/** Bounded, diagnosable media failure without exposing a browser media object. */
+export interface PingoMediaError {
+  readonly code: "aborted" | "decode" | "network" | "not-supported" | "security" | "unknown";
+  readonly message: string;
+}
+
+/** Engine-drawn video whose browser loading and decoding remain Host-owned. */
+export interface VideoProps extends Omit<CommonProps, "children" | "ref"> {
+  readonly src: string;
+  readonly poster?: PingoImage;
+  readonly ref?: Ref<VideoHandle>;
+  readonly autoPlay?: boolean;
+  readonly loop?: boolean;
+  readonly muted?: boolean;
+  readonly crossOrigin?: "anonymous" | "use-credentials";
+  readonly preload?: "auto" | "metadata" | "none";
+  readonly onPlay?: (event: PingoMediaEvent) => void;
+  readonly onPause?: (event: PingoMediaEvent) => void;
+  readonly onEnded?: (event: PingoMediaEvent) => void;
+  readonly onLoadedMetadata?: (event: PingoMediaEvent) => void;
+  readonly onTimeUpdate?: (event: PingoMediaEvent) => void;
+  readonly onError?: (error: PingoMediaError) => void;
+}
+
 /** Clipped Core-owned scrolling element. */
 export interface ScrollProps extends CommonProps {
   readonly scrollX?: number;
@@ -337,6 +376,7 @@ export declare namespace JSX {
     image: ImageProps;
     scroll: ScrollProps;
     text: TextProps;
+    video: VideoProps;
     virtualList: VirtualListProps;
   }
 }

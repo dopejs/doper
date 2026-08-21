@@ -1,7 +1,7 @@
 # CSS 子集、原生事件与基础组件演进方案
 
-> 状态：M6 已完成（2026-08-20），M7 animation/virtual axis 已完成（2026-08-21）；
-> M8 media/keyboard 仍按计划延后
+> 状态：M6 已完成（2026-08-20），M7 animation/virtual axis 与 M8 media/keyboard
+> 已完成（2026-08-21）
 > 日期：2026-08-20
 > 关联决策：[`ADR-0007`](./adr/0007-css-events-and-foundation-components.md)
 
@@ -267,9 +267,10 @@ gap/flex 等 layout animation 必须单独证明每帧 layout、虚拟测量、�
 
 ## 9. Video 边界
 
-`Video` 的公开 API 可在 M6 冻结，实际媒体管线在 M8 交付。Host 负责加载、CORS、解码、
-audio 与 HTMLMediaElement/WebCodecs fallback；Core 只消费有界、可回收的视频帧资源并按
-媒体时钟合成。不得把 HTMLVideoElement 或浏览器对象放进 Scene，也不得无界排队 VideoFrame。
+`Video` 的公开 API 与媒体管线已在 M8 交付。Host 负责加载、CORS、HTMLMediaElement 解码
+与 audio；Core 只消费版本化帧描述资源并按媒体时钟合成。主线程直接使用媒体元素，Worker
+优先传 VideoFrame、再回退到 ImageBitmap copy。不得把 HTMLVideoElement 或其他浏览器对象
+放进 Scene，也不得无界排队 VideoFrame。
 
 首期媒体事件对齐 play/pause/ended/error/loadedmetadata/timeupdate 的可观察语义；autoplay、
 muted、loop、poster、object-fit 明确能力检测。没有 Worker/WebCodecs 时功能降级必须可用，
@@ -304,10 +305,13 @@ E2E、native/WASM 字节差分以及性能/内存/包体预算均已落地。
 
 ### M8：媒体与后续 CSS/事件扩展
 
-1. Video Host/Core 资源管线、媒体事件和降级。
-2. 非编辑 keyboard/default actions 与 foundation controls 完整契约。
-3. 基于真实需求增加 selector、伪类、custom properties/calc 或二维虚拟窗口。
-4. 每个扩展按 §4.3 分类，避免无关 ABI 变化。
+M8 已于 2026-08-21 完成工程实现：
+
+1. Video Host/Core 资源管线、媒体事件、imperative control 与三档降级已落地。
+2. 每个 Video 一帧在途、突发丢旧保新、资源替换/卸载回收、后台暂停与指标已落地。
+3. Pressable/Button 组合组件及非编辑 Enter/Space default action、focus、disabled 语义已落地。
+4. 没有真实需求与独立门禁的 selector、custom properties/calc 和二维虚拟窗口未推测性加入；
+   后续扩展仍必须按 §4.3 分类，避免无关 ABI 变化。
 
 ## 11. 测试与出口门禁
 

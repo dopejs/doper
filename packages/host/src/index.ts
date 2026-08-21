@@ -72,6 +72,16 @@ export {
 } from "./recording";
 export { SabMutationRing, type SabMutationFrame, type SabMutationRingMetrics } from "./sab-ring";
 export {
+  MediaPipeline,
+  MAX_MEDIA_BINDINGS,
+  detectMediaCapabilities,
+  type MediaCapabilities,
+  type MediaFramePath,
+  type MediaFrameTarget,
+  type MediaPipelineMetrics,
+  type MediaPipelineOptions,
+} from "./media";
+export {
   SystemTextMetricError,
   decodeSystemTextMetricBatch,
   encodeSystemTextMetricBatch,

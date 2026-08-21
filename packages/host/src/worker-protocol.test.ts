@@ -256,6 +256,34 @@ describe("render Worker protocol validation", () => {
         sessionId: 9,
       }),
     ).toBe(true);
+    const mediaReport = {
+      commands: 1,
+      displayListBytes: 16,
+      maximumPictureDepth: 0,
+      mutationBytes: 0,
+      pictures: 0,
+    };
+    expect(
+      isRenderWorkerOutboundMessage({
+        kind: "pingo:frame",
+        report: { ...mediaReport, cause: "media", mediaPath: "video-frame" },
+        sessionId: 9,
+      }),
+    ).toBe(true);
+    expect(
+      isRenderWorkerOutboundMessage({
+        kind: "pingo:frame",
+        report: { ...mediaReport, cause: "media" },
+        sessionId: 9,
+      }),
+    ).toBe(false);
+    expect(
+      isRenderWorkerOutboundMessage({
+        kind: "pingo:frame",
+        report: { ...mediaReport, cause: "mutation", mediaPath: "image-bitmap" },
+        sessionId: 9,
+      }),
+    ).toBe(false);
     expect(
       isRenderWorkerOutboundMessage({
         kind: "pingo:clock-metrics",

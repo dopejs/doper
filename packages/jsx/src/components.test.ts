@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { Image, Input, Text, TextArea, View } from "./components";
+import { Image, Input, Text, TextArea, Video, View } from "./components";
 import { createImage } from "./image";
 
 describe("foundation component compatibility adapters", () => {
@@ -17,6 +17,14 @@ describe("foundation component compatibility adapters", () => {
     expect(Image({ source: image })).toMatchObject({
       type: "image",
       props: { source: image },
+    });
+  });
+
+  it("maps Video to the dedicated media host contract", () => {
+    const poster = createImage(new Uint8Array([1, 2, 3, 4]), 1, 1);
+    expect(Video({ src: "movie.mp4", poster, muted: true, loop: true })).toMatchObject({
+      type: "video",
+      props: { src: "movie.mp4", poster, muted: true, loop: true },
     });
   });
 

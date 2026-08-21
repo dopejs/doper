@@ -1,11 +1,15 @@
 import {
   Input,
+  Text,
+  View,
   TextArea as UnstyledTextArea,
   createElement,
   type Color,
+  type CommonProps,
   type PingoNode,
   type EditableInputMode,
   type EditableTextProps,
+  type PingoEvent,
 } from "@dopejs/pingo-jsx";
 import type { EditTransaction, TextEditingController } from "@dopejs/pingo-editing";
 
@@ -36,6 +40,25 @@ export interface TextFieldProps {
 /** Multiline variant; submit stays with the host form, not Enter. */
 export interface TextAreaProps extends TextFieldProps {
   readonly rows?: number;
+}
+
+/** Native-event foundation primitive; it never introduces a Core control kind. */
+export interface PressableProps {
+  readonly children?: PingoNode;
+  readonly disabled?: boolean;
+  readonly onPress?: () => void;
+  readonly className?: string;
+  readonly style?: CommonProps["style"];
+  readonly width?: number;
+  readonly height?: number;
+  readonly semanticLabel?: string;
+}
+
+/** Text-button convenience composed from Pressable + Text. */
+export interface ButtonProps extends Omit<PressableProps, "children"> {
+  readonly children: string | number;
+  readonly color?: Color;
+  readonly fontSize?: number;
 }
 
 const DEFAULT_BORDER: Color = "#c0c4ccff";
@@ -109,4 +132,35 @@ export function TextField(props: TextFieldProps): PingoNode {
 /** Multiline decorated input composing only the engine editable primitive. */
 export function TextArea(props: TextAreaProps): PingoNode {
   return decoratedField(props, true, props.rows ?? 3);
+}
+
+/** Focusable activation surface composed from View, focus, and native click state. */
+export function Pressable(props: PressableProps): PingoNode {
+  const disabled = props.disabled === true;
+  const focus = (event: PingoEvent): void => event.currentTarget.focus();
+  return View({
+    children: props.children,
+    semanticRole: "button",
+    ...(disabled ? { semanticValue: "disabled" } : {}),
+    ...(props.semanticLabel === undefined ? {} : { semanticLabel: props.semanticLabel }),
+    ...(props.className === undefined ? {} : { className: props.className }),
+    ...(props.style === undefined ? {} : { style: props.style }),
+    ...(props.width === undefined ? {} : { width: props.width }),
+    ...(props.height === undefined ? {} : { height: props.height }),
+    opacity: disabled ? 0.5 : 1,
+    ...(disabled ? {} : { onPointerDown: focus, onClick: props.onPress, onTap: props.onPress }),
+  });
+}
+
+/** Accessible text button without a dedicated Scene node kind. */
+export function Button(props: ButtonProps): PingoNode {
+  return Pressable({
+    ...props,
+    children: Text({
+      value: String(props.children),
+      ...(props.color === undefined ? {} : { color: props.color }),
+      ...(props.fontSize === undefined ? {} : { fontSize: props.fontSize }),
+    }),
+    semanticLabel: props.semanticLabel ?? String(props.children),
+  });
 }

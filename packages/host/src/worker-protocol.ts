@@ -10,8 +10,9 @@ import type {
 import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
 import type { EditTransaction, EventTransaction } from "@dopejs/pingo-editing";
+import type { MediaFramePath } from "./media";
 
-export const WORKER_PROTOCOL_VERSION = 10 as const;
+export const WORKER_PROTOCOL_VERSION = 11 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
@@ -73,11 +74,20 @@ export interface WorkerReducedMotionMessage {
   readonly sessionId: number;
 }
 
+export interface WorkerMediaFrameMessage {
+  readonly kind: "pingo:media-frame";
+  readonly resourceId: number;
+  readonly source: CanvasImageSource;
+  readonly path: Exclude<MediaFramePath, "html-media">;
+  readonly sessionId: number;
+}
+
 export type RenderWorkerInboundMessage =
   | WorkerActivateMessage
   | WorkerClockAnchorMessage
   | WorkerInputMessage
   | WorkerInputWakeMessage
+  | WorkerMediaFrameMessage
   | WorkerPrepareMessage
   | WorkerReducedMotionMessage
   | WorkerResizeMessage
@@ -204,6 +214,12 @@ export function isRenderWorkerInboundMessage(value: unknown): value is RenderWor
       return true;
     case "pingo:reduced-motion":
       return typeof value.reduced === "boolean";
+    case "pingo:media-frame":
+      return (
+        isPositiveU32(value.resourceId) &&
+        isRecord(value.source) &&
+        (value.path === "image-bitmap" || value.path === "video-frame")
+      );
     case "pingo:shutdown":
       return true;
     default:
@@ -220,6 +236,7 @@ export function isRenderWorkerInboundEnvelope(value: unknown): boolean {
     value.kind === "pingo:clock-anchor" ||
     value.kind === "pingo:input" ||
     value.kind === "pingo:input-wake" ||
+    value.kind === "pingo:media-frame" ||
     value.kind === "pingo:reduced-motion" ||
     value.kind === "pingo:shutdown"
   );
@@ -492,7 +509,14 @@ function isFrameReport(value: unknown): value is FrameReport {
     value.cause !== undefined &&
     value.cause !== "mutation" &&
     value.cause !== "input" &&
-    value.cause !== "animation"
+    value.cause !== "animation" &&
+    value.cause !== "media"
+  )
+    return false;
+  if (
+    value.cause === "media"
+      ? value.mediaPath !== "image-bitmap" && value.mediaPath !== "video-frame"
+      : value.mediaPath !== undefined
   )
     return false;
   if (value.inputBytes !== undefined && !isNonNegativeInteger(value.inputBytes)) return false;
