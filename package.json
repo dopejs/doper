@@ -104,7 +104,7 @@
     "m9:picture:wasm-native": "node scripts/run-with-rust-target-cleanup.mjs node scripts/check-m9-wasm-native.mjs",
     "m9:soak": "node scripts/run-with-rust-target-cleanup.mjs node scripts/check-m9-soak.mjs",
     "m9:candidate": "node scripts/m9-candidate-report.mjs",
-    "m9:contracts": "vitest run packages/backend-canvas2d/src/picture-resources.test.ts packages/host/src/main-thread.test.ts packages/host/src/worker-protocol.test.ts scripts/m9-picture-report.test.mjs scripts/audit-m9-evidence.test.mjs",
+    "m9:contracts": "vitest run packages/backend-canvas2d/src/picture-resources.test.ts packages/host/src/main-thread.test.ts packages/host/src/worker-protocol.test.ts scripts/m9-picture-report.test.mjs scripts/audit-m9-evidence.test.mjs scripts/wasm-opt-toolchain.test.mjs",
     "m9:check": "node scripts/run-with-rust-target-cleanup.mjs pnpm m9:check:run",
     "m9:check:run": "pnpm m8:check && pnpm m9:contracts && pnpm m9:picture:perf && pnpm m9:picture:wasm-native && pnpm m9:soak && pnpm core:wasm:repro && pnpm platform:qualify:v2 && pnpm protocol:check && pnpm api:check && pnpm npm:release:verify && node scripts/m9-candidate-report.mjs --gates-passed",
     "wasm:build": "node scripts/run-with-rust-target-cleanup.mjs pnpm wasm:build:run",

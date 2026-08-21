@@ -8,6 +8,8 @@ M9 另设 `≤ 384 KiB` 工程门禁，以保留至少 16 KiB 的维护余量。
 - Rust：`rustc 1.96.0 (ac68faa20 2026-05-25)`，由仓库 `rust-toolchain.toml` 固定；
 - 打包：`wasm-pack 0.14.0`，target `web`，workspace release profile；
 - Binaryen：`wasm-opt 117`，pass 列表写入生成的 `packages/host/wasm/manifest.json`；
+- 冷环境：第一次 `wasm-pack build` 先原子填充它自带的 Binaryen cache，构建器随后验证
+  cache 中的实际 `wasm-opt --version` 必须精确为 117；错误或缺失版本仍失败关闭；
 - 命令：`pnpm core:wasm:repro` 在两个独立临时 target/output 目录 clean build，要求
   SHA-256、raw bytes 和 gzip bytes 三者完全一致；
 - 冷启动：同一门禁实例化候选 WASM，并要求 `< 50ms`。

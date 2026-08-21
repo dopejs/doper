@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { createGzip } from "node:zlib";
+
+import { bootstrapAndLocatePinnedWasmOpt, locatePinnedWasmOpt } from "./wasm-opt-toolchain.mjs";
 
 const engineeringMaximumGzipBytes = 384 * 1024;
 const productMaximumGzipBytes = 400 * 1024;
@@ -30,21 +32,21 @@ const rustcVersion = (await runCapture("rustc", ["--version"])).trim();
 if (rustcVersion !== expectedRustc) {
   throw new Error(`product Core requires ${expectedRustc}; received ${rustcVersion}`);
 }
-const wasmOpt = await locatePinnedWasmOpt();
-const wasmOptVersion = (await runCapture(wasmOpt, ["--version"])).trim();
-if (wasmOptVersion !== expectedWasmOpt) {
-  throw new Error(`product Core requires ${expectedWasmOpt}; received ${wasmOptVersion}`);
-}
-
 const verifyReproducible = process.argv.includes("--verify-reproducible");
 let cleanRoots = [];
 let result;
+let wasmOptVersion;
 try {
   if (verifyReproducible) {
     const firstRoot = await mkdtemp(path.join(tmpdir(), "pingo-m9-wasm-a-"));
     const secondRoot = await mkdtemp(path.join(tmpdir(), "pingo-m9-wasm-b-"));
     cleanRoots = [firstRoot, secondRoot];
-    const first = await build(path.join(firstRoot, "package"), path.join(firstRoot, "target"));
+    const verified = await buildAndVerifyWasmOpt(
+      path.join(firstRoot, "package"),
+      path.join(firstRoot, "target"),
+    );
+    const first = verified.result;
+    wasmOptVersion = verified.version;
     const second = await build(path.join(secondRoot, "package"), path.join(secondRoot, "target"));
     if (
       first.sha256 !== second.sha256 ||
@@ -57,7 +59,9 @@ try {
     }
     result = second;
   } else {
-    result = await build(buildDirectory);
+    const verified = await buildAndVerifyWasmOpt(buildDirectory);
+    result = verified.result;
+    wasmOptVersion = verified.version;
   }
 
   await mkdir(packageDirectory, { recursive: true });
@@ -133,6 +137,17 @@ async function build(outputDirectory, cargoTargetDirectory) {
   };
 }
 
+async function buildAndVerifyWasmOpt(outputDirectory, cargoTargetDirectory) {
+  return bootstrapAndLocatePinnedWasmOpt({
+    build: async () => build(outputDirectory, cargoTargetDirectory),
+    locate: async () =>
+      locatePinnedWasmOpt({
+        expectedVersion: expectedWasmOpt,
+        readVersion: async (executable) => runCapture(executable, ["--version"]),
+      }),
+  });
+}
+
 function run(command, arguments_, environment) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, arguments_, {
@@ -147,38 +162,6 @@ function run(command, arguments_, environment) {
         reject(new Error(`${command} failed with code ${String(code)} signal ${String(signal)}`));
     });
   });
-}
-
-async function locatePinnedWasmOpt() {
-  const roots = [
-    path.join(homedir(), "Library/Caches/.wasm-pack"),
-    path.join(homedir(), ".cache/.wasm-pack"),
-  ];
-  for (const root of roots) {
-    let entries;
-    try {
-      entries = await readdir(root, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (!entry.isDirectory() || !entry.name.startsWith("wasm-opt-")) continue;
-      const candidate = path.join(root, entry.name, "bin", "wasm-opt");
-      try {
-        if (
-          (await stat(candidate)).isFile() &&
-          (await runCapture(candidate, ["--version"])).trim() === expectedWasmOpt
-        ) {
-          return candidate;
-        }
-      } catch {
-        // Try the next wasm-pack cache entry.
-      }
-    }
-  }
-  throw new Error(
-    `wasm-pack Binaryen cache does not contain ${expectedWasmOpt}; run wasm-pack once to install it`,
-  );
 }
 
 function attributeWasmSections(bytes) {
