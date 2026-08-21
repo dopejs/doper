@@ -1,7 +1,9 @@
 # pingo 总体实施计划
 
-> 状态：草案 v0.2  
-> 依据：[`design.md`](design.md)  
+> 状态：草案 v0.3（M9 已规划）
+>
+> 依据：[`design.md`](design.md)
+>
 > 规划口径：按依赖顺序、交付物和出口门禁管理，不含人力与工期估算
 
 ---
@@ -37,7 +39,7 @@
 - PC 连续交互帧时间 P95 ≤ 16.7ms、P99 ≤ 25ms，10 秒掉帧率 < 0.5%。
 - 记录 pingo 自身的历史趋势；P95/吞吐变化超过 5% 时触发调查，但只有绝对指标
   失守才判定性能门禁失败。
-- WASM gzip < 400KB，冷启动额外延迟 < 50ms。
+- WASM gzip < 400 KiB，冷启动额外延迟 < 50ms。
 
 ### 2.2 正确性
 
@@ -706,6 +708,33 @@ E2E；真实硬件解码、功耗与受版权内容仍属平台资格，不能�
 继续按 style 分类表逐项立项，避免无使用证据的 ABI 与包体增长。独立回滚开关为
 `videoEnabled: false`，关闭后旧 intrinsic、direct props、编辑和虚拟列表路径不受影响。
 
+### M9：生产资格、增量合成与发布硬化
+
+> 当前状态：**已规划，未开始（2026-08-21）**。详细执行方案、阶段出口、失败模式和
+> 回滚路径见 [`m9-production-plan.md`](m9-production-plan.md)。M9 只硬化已交付能力，不把
+> bidi、二维虚拟化、复杂 CSS、WebGPU 默认启用或 overlay 布局混入本阶段。
+
+目标：把 M0–M8 的工程能力推进到可度量、可审计、可回退的生产准入状态，优先解决
+纯滚动帧重复构建/传输未变化子树和 M8 出口产品 WASM 只剩 403 bytes 余量的问题。
+
+主要交付：
+
+- 冻结 rich-scroll fixture、Picture 资源/时序 ADR 和 inline reference oracle。
+- 让 immutable 子树通过 `DrawPicture` 复用；纯滚动只重组有界引用与外层变换。
+- 保留 `incrementalPicturesEnabled` 优化开关，三 transport、native/WASM 与 reference
+  路径严格差分，资源发布/引用/释放事务化且受硬预算约束。
+- 产品 Core 继续满足 `< 400 KiB` 硬上限，并在 M9 clean build 恢复到 `≤ 384 KiB`，
+  保留至少 16 KiB 工程余量；冷启动仍 `< 50ms`。
+- 平台资格 evidence/support matrix v2：从原始真机样本复算，支持状态可过期且失败关闭。
+- 不产生 tag、npm publish 或线上写入的候选发布报告、组合 soak 与回滚演练。
+- 对 bidi、placeholder/overlay、二维虚拟化、复杂 CSS、WebGPU 和独立 DevTools UI
+  形成 Adopt / Defer / Reject 决策，不在 M9 内实现。
+
+M9 工程出口命令规划为 `pnpm m9:check`，必须完整串联 `pnpm m8:check`，并加入 Picture
+资源/差分/性能、WASM 384 KiB 余量、资格审计器、加速 soak、发布 tarball 与回滚演练。
+真实设备、IME、屏幕阅读器、媒体功耗和 DRM 证据只决定对应 role 是否 `qualified`，缺失时
+保持 `unqualified`；它们不改变自动化工程里程碑状态，也不得由模拟数据替代。
+
 ## 7. 关键依赖与并行关系
 
 关键路径为：
@@ -721,6 +750,7 @@ P0 基线
   → M6 style schema + View overflow + 原生交互状态
   → M7 Core animation + x/y 虚拟轴
   → M8 Video + 按证据扩展 CSS/事件
+  → M9 Picture 增量合成 + WASM 余量 + 资格/发布硬化
 ```
 
 可并行但有集成边界的工作：
@@ -740,6 +770,9 @@ P0 基线
   frame diagnostics 与 stall fault injection，出口必须合流。
 - M8 Video 可以在 M6 后做隔离探针，但 Host/Core 帧资源协议必须等通用资源预算和事件命名
   评审通过，不得阻塞 CSS/事件关键路径。
+- M9 必须先冻结 Picture 资源时序和 rich-scroll 量具；Picture 合成、WASM 归因与资格 v2
+  工程基建可并行，候选发布总门禁必须等三者合流。真实资格采集绑定候选 build digest，
+  但不阻塞仓库工程出口。
 
 ## 8. 启动阶段执行顺序
 
@@ -825,6 +858,7 @@ P0 基线
 | M6    | style schema/parser/cascade、display/overflow、事件状态、兼容等价 | selector/cascade fuzz、状态压力  | 三 transport、回退与 API 审核  |
 | M7    | timeline/插值、横纵虚拟化、stall 快集                             | animation/virtual soak、内存压力 | reduced-motion、包体与性能门禁 |
 | M8    | Video 生命周期、媒体事件、fallback 与后续能力门禁                 | 解码/seek/loop soak、设备资格    | 媒体能力矩阵与资源回收演练     |
+| M9    | Picture 资源时序、增量合成、WASM 余量、资格审计与候选发布         | 组合 soak、资格证据采集          | 支持矩阵、产物与回滚总演练     |
 
 覆盖率下限沿用设计：Rust Core ≥ 85%，核心 crates ≥ 95%，TypeScript ≥ 80%。
 覆盖率只作为底线，不能替代不变式、差分和失败路径测试。
@@ -851,6 +885,10 @@ P0 基线
 | class/伪类重算进入热路径   | M6       | pointermove 标脏大子树、滚动帧 style recompute | 首期同节点 selector、状态声明预编译、重算节点数门禁            |
 | animation 与布局反馈       | M7       | 虚拟测量抖动、hit 重建、每帧全量 layout        | 先 opacity/transform；layout animation 独立 feature/门禁       |
 | Video 队列与资源泄漏       | M8       | VideoFrame 堆积、复制尖峰、后台仍解码          | 有界帧池、丢旧保新、可见性暂停、生命周期/内存 fault injection  |
+| Picture 资源时序或陈旧引用 | M9       | 未发布 ID 被引用、旧 generation 复活、空白帧   | committed-frame 原子发布；generation 校验；关闭 Picture 优化   |
+| WASM 无工程余量            | M9       | clean build 接近 400 KiB、正常改动频繁撞线     | 384 KiB M9 门禁；size attribution；拆分可选模块；暂停扩张      |
+| 资格证据陈旧或不可复算     | M9       | 只存汇总值、环境漂移、digest/批次不一致        | v2 原始证据审计；自动过期；对应平台保持 unqualified            |
+| 候选发布门禁产生外部状态   | M9       | 检查命令创建 tag、发布包或修改线上配置         | 候选命令只读；实际发布必须由维护者独立授权                     |
 
 风险台账在里程碑检查时更新。没有明确缓解方案的红色风险必须升级为范围
 或架构决策，不允许只记录状态而不处理。
@@ -861,13 +899,16 @@ P0 基线
 按设备扩大 → 默认开启。每一级都比较正确性、崩溃率、P95/P99、输入延迟、
 内存和降级比例。
 
-需要保留三个独立开关：
+需要保留四类独立开关：
 
 1. 页面级：pingo → 原有渲染路径。
 2. 引擎级：Worker/SAB → postMessage → 主线程 Canvas2D。
 3. 优化级：激进 invalidation、Picture/Raster Cache、未来 WebGPU 可分别关闭。
 4. 能力级：CSS resolver、新组件 facade、interaction styles、Core animation、Video
    分别关闭；旧 direct props/intrinsic/event/virtualList 继续可用。
+
+M9 把 `incrementalPicturesEnabled` 纳入优化级开关；关闭后回到现有 inline DisplayList，
+不得改变公开 API、Scene、业务 durable state 或编辑 revision。
 
 回滚开关必须在试点前演练，并记录生效时间、状态迁移和资源清理行为。
 不能把“重新发布旧版本”作为唯一回滚方案。
@@ -895,6 +936,10 @@ P0 基线
 | pointer/focus 状态协议          | M6-C      | enter/leave/capture/cancel/recovery 事件 fixture    |
 | animation resource/retarget ABI | M7 前半   | 确定性 timeline、背压、恢复和 reduced-motion        |
 | Video Host/Core 帧所有权        | M8 前半   | WebCodecs/HTMLMediaElement fallback 与资源预算      |
+| Picture 资源时序与 generation   | M9-A      | publish/reference/release 模型、重启恢复、D3 oracle |
+| M9 WASM 余量恢复方案            | M9-C      | clean size attribution、冷启动、fallback 完整性     |
+| 资格 evidence/support matrix v2 | M9-D      | 原始样本复算、过期策略、篡改/串组失败关闭           |
+| M10 候选能力范围                | M9-F      | 业务 fixture、预算、oracle、资格与回滚证据          |
 
 ## 14. 计划维护
 

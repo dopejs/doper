@@ -271,6 +271,13 @@ Follow the dependency order in `docs/design.md`:
 - M3 adds native virtual scrolling and the initial text subsystem.
 - M4 adds complete hit testing, event phases, and accessibility behavior.
 - M5 adds migration tooling and evaluates WebGPU with measured device data.
+- M6 adds the versioned CSS subset, foundation facade, overflow, and native
+  interaction state.
+- M7 adds deterministic Core animation and x/y single-axis virtualization.
+- M8 adds the bounded Video pipeline and composed foundation controls.
+- M9 hardens existing capability through immutable Picture reuse, restored
+  WASM headroom, auditable platform qualification, soak, and release-candidate
+  rollback gates. It does not absorb deferred product capabilities.
 
 Engineering milestone completion is determined only by automated, reproducible
 repository/CI gates. Physical-device performance, real IME, authenticated
@@ -281,6 +288,10 @@ visible but must not mark completed engineering work incomplete.
 Do not pull WebGPU work before M2 is proven, or complex text work before the
 minimal text path and core are stable. A prototype may cross milestone
 boundaries only when it is isolated, disposable, and clearly marked as such.
+M9 work must preserve the inline DisplayList reference path and keep real-device
+qualification separate from automated engineering completion. Until M9-E
+upgrades the release workflow to the current full gate, do not tag or publish
+the unreleased M6+ changes.
 
 ## Documentation decisions
 

@@ -6,6 +6,10 @@
 > description 均标注 "internal"，公开契约只有 facade 与 compat 的导出面
 > （迁移扫描器阻止业务 import 内部包）。
 
+> **下一版本发布阻断**：当前 GitHub release workflow 仍只运行 `pnpm m5:check`，不能覆盖
+> 尚未发布的 M6–M8 能力。在 M9-E 把发布工作流升级为 `pnpm m9:check`、完成候选产物与
+> 回滚演练之前，不得为当前 `main` 创建版本 tag 或发布 npm。历史已发布版本不受影响。
+
 ## 1. 版本策略
 
 - 全部 11 个包**同版本**发布；`ENGINE_VERSION`（facade 导出）与包版本

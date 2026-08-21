@@ -88,6 +88,7 @@ function sidebarSections(page: SitePage, locale: SiteLocale): readonly NavSectio
       items: [
         { text: locale.ui.design, route: "/design" },
         { text: locale.ui.plan, route: "/plan" },
+        { text: "M9", route: "/m9-production-plan" },
         { text: locale.ui.adr, route: "/adr/0007-css-events-and-foundation-components" },
         { text: locale.ui.changelog, route: "/changelog" },
       ],
@@ -146,6 +147,7 @@ function SiteHeader({
             <div>
               <a href={pageHref("/design")}>{locale.ui.design}</a>
               <a href={pageHref("/plan")}>{locale.ui.plan}</a>
+              <a href={pageHref("/m9-production-plan")}>M9</a>
               <a href={pageHref("/adr/0007-css-events-and-foundation-components")}>
                 {locale.ui.adr}
               </a>

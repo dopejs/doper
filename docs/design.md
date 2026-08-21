@@ -47,7 +47,8 @@ FPS，但资格判断以帧时间分位数与掉帧率为主，避免平均 FPS 
 | 主线程人为阻塞 200ms 期间滚动               | 不掉帧、不停顿                            |
 | PC 端连续交互帧时间（60Hz 参考设备）        | P95 ≤ 16.7ms，P99 ≤ 25ms                  |
 | PC 端连续交互 10s 掉帧率                    | < 0.5%                                    |
-| WASM 体积（gzip）                           | < 400KB                                   |
+| WASM 体积（gzip）                           | < 400 KiB（409,600 bytes）                |
+| M9 产品 Core 工程余量（gzip）               | ≤ 384 KiB（硬上限下保留至少 16 KiB）      |
 | WASM 冷启对首帧的额外延迟                   | < 50ms（streaming compile + JS 降级兜底） |
 
 同设备、同构建口径下的 pingo 历史数据用于发现趋势和定位回归，不单独决定
@@ -293,6 +294,13 @@ Prop::OnTap     => NONE,         // 纯回调，什么都不脏
 Core 按启发式自动决定哪些子树独立成 layer：滚动容器内容、带 transform 动画的节点、被频繁标脏但 picture hash 稳定的子树。业务不标注。
 
 配合 `DrawPicture`：子树内容未变时，父节点只需重组一条引用指令，不重建子指令流。
+
+M9 将这条设计从 ABI/backend 能力推进为生产优化。Picture 必须是 immutable、带
+generation（或等价陈旧引用保护）、受字节/资源数预算约束的资源；publish、reference 与
+release 服从 committed-frame 顺序，Worker 重启和 transport 切换从完整快照恢复。现有 inline
+DisplayList builder 作为 D3 reference oracle 和运行时回滚路径永久保留。预热后的纯滚动帧只
+允许重组有界 `DrawPicture` 引用及外层 transform/clip；子树内部 command 数增加不能使稳态
+滚动 payload 同比例增长。完整实施与门禁见 [`m9-production-plan.md`](m9-production-plan.md)。
 
 **L5 · 过度失效必须可观测**
 
@@ -2005,7 +2013,9 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 - **平台资格采集**：设备或自动设备云可用时覆盖低端安卓与主流 iOS，数据入库并做
   趋势告警；外部设备不可用不阻塞工程合入或里程碑完成。
 - **过度失效率**（§5.1 L5）作为一等指标进卡点，与帧时间同等对待。
-- **WASM 体积**进卡点（§2 目标 < 400KB gzip）。
+- **WASM 体积**进卡点（§2 目标 < 400 KiB gzip）。
+- M9 额外要求产品 Core clean build `≤ 384 KiB` gzip，恢复至少 16 KiB 工程余量；
+  该余量门禁不能通过删除 fallback、改变压缩口径或降低正确性要求达成。
 - 内存：Raster Cache 预算遵守、长时间运行无泄漏（L9 soak）。
 
 ### 15.7 覆盖率与门禁策略
@@ -2036,6 +2046,7 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 | **M6 CSS + 原生事件基础** | style schema 与生成器；View/Text/Image/Input/TextArea facade；style/className/cascade；display/overflow；View.virtual 纵向等价迁移；pointer lifecycle 与基础伪类                                                                                               | CSS/事件三 transport 契约、增量/全量 oracle、旧 API 等价与回滚演练自动通过                          |
 | **M7 动画 + 轴泛化**      | x/y 单轴虚拟化；ViewHandle 滚动 API；Core transition/keyframes；opacity/transform；reduced motion；按门禁扩展 CSS 属性和值语法                                                                                                                                 | 主线程 stall 下 Worker 动画连续；确定性 timeline、横纵虚拟化与性能/体积门禁通过                     |
 | **M8 Video + 能力扩展**   | Video Host/Core 帧资源与媒体事件/降级；foundation controls；基于需求增加 selector、伪类、CSS grammar 或二维虚拟窗口                                                                                                                                            | 媒体资源有界、降级等价；新增 CSS/事件能力逐项通过 schema、差分、E2E 与资格矩阵                      |
+| **M9 生产资格与硬化**     | immutable Picture 增量合成；WASM 余量恢复；资格 evidence/support matrix v2；候选发布、soak 与回滚演练                                                                                                                                                          | `m9:check` 串联 M8 回归、D3/transport/wasm 差分、384 KiB 余量、资格审计与无副作用候选发布门禁       |
 
 关键排序原则：**M2 之前不碰 WebGPU，M3 之前不碰复杂文本**。收益主要来自双时钟与 Core 内闭环滚动，先把这条主线拿下。
 
@@ -2058,6 +2069,10 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 | **class/伪类导致祖先级重算**               | pointermove 抖动、滚动掉帧       | 首期同节点 selector；状态 declaration 预编译；记录 style recompute 节点数                  |
 | **动画与布局/虚拟测量互相反馈**            | 抖动、错位、每帧全量布局         | 先开放 opacity/transform；layout animation 独立 feature 与 reference oracle                |
 | **Video 帧传输或解码队列无界**             | 内存增长、媒体掉帧、主线程拥塞   | Host 有界帧池、丢旧保新、能力降级、队列/复制/掉帧指标                                      |
+| **Picture 资源时序或陈旧引用**             | 空白帧、错误复用、跨帧资源泄漏   | committed-frame 原子发布；generation；资源硬预算；inline reference 回滚                    |
+| **WASM 仅贴线通过产品上限**                | 正常维护变化导致无法发布         | M9 `≤ 384 KiB` 工程余量门禁；size attribution；可选模块延迟加载                            |
+| **资格证据陈旧、篡改或不可复算**           | 错误平台支持声明                 | 原始样本 + digest；版本/过期策略；失败关闭并保持 unqualified                               |
+| **候选发布检查产生外部副作用**             | 未授权 tag、npm 或线上变更       | 候选门禁只读且凭证无关；实际发布保持独立维护者授权                                         |
 
 ### 回滚路径
 
@@ -2069,6 +2084,9 @@ ABI 是本架构中最危险的耦合面——Rust 与 TS 两侧独立实现编�
 - M6+ 的 CSS resolver、新组件 facade、interaction styles、Core animation 与 Video
   分别受独立 rollout flag 控制；关闭时旧 direct props、intrinsic、事件和 virtualList
   路径保持工作。未知 style/animation 协议必须拒绝，不能降级解释为旧指令。
+- M9 的 Picture 增量合成由 `incrementalPicturesEnabled` 控制；关闭后回到 inline
+  DisplayList，不改变 Scene、公开 API、业务 durable state 或编辑 revision。资格回归时只撤销
+  对应 role 的支持状态并选择安全 capability override，不篡改历史证据。
 
 ---
 
