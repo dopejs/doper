@@ -1,0 +1,10 @@
+@use "../tokens" as t;
+
+// Multiline variant of the .pui-input shell: top-aligned field with a taller
+// minimum height. Everything else (border, padding, colors) comes from
+// .pui-input / .pui-input__field.
+
+.pui-textarea {
+  align-items: flex-start;
+  min-height: t.$textarea-min-height;
+}

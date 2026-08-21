@@ -18,6 +18,7 @@ import { RadioGroup, RadioGroupItem } from "./radio-group";
 import { Skeleton } from "./skeleton";
 import { Switch } from "./switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";
+import { TextArea } from "./text-area";
 
 describe("memoized components", () => {
   it("all presentational components are memo-wrapped", () => {
@@ -47,6 +48,7 @@ describe("memoized components", () => {
       TabsList,
       TabsTrigger,
       TabsContent,
+      TextArea,
     ]) {
       expect(isMemoComponent(component)).toBe(true);
     }
