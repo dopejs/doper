@@ -1,6 +1,6 @@
 # pingo 错误诊断与事故上报
 
-> 状态：M8。面向线上事故排查与灰度看板接入。
+> 状态：M9。面向线上事故排查与灰度看板接入。
 
 ## 1. 身份信息
 
@@ -41,6 +41,9 @@ await verifyWasmIntegrity(await response.arrayBuffer(), manifest);
 ## 4. 可观测面
 
 - `onFrame`：帧阶段耗时、脏域计数、cache 命中率、picture hash。
+- `onFrame.core.pictureDefines/pictureReleases`、`pictureResidentCount/Bytes`、
+  `pictureResourceBytes` 与 `pictureBudgetFallbacks`：immutable Picture 发布、确认、常驻预算与
+  inline 自动回退。持续 resident 增长或 fallback 增长按 Picture 事故处理。
 - `onFrame.style` / `root.styleMetrics()`：Shell style resolution、无变化 cache hit、diagnostic
   与预编译 interaction variant 累计数。
 - `onFrame.core.interactionStateChanges`：Core hover/active/focus/focus-visible 状态变化累计数。

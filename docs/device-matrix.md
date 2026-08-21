@@ -19,7 +19,7 @@ role/device/build 分组，不能跨浏览器比较 batch。
 | `android-mid`      | 默认 Android 能力与 IME                   | 一台主流中端物理 Android             | 待分配       | unqualified |
 | `ios-baseline`     | iOS Safari、输入代理、软键盘              | 一台最低受支持 iOS 物理设备          | 待分配       | unqualified |
 | `ios-current`      | 当前 iOS Safari / EditContext 能力        | 一台当前主力 iPhone                  | 待分配       | unqualified |
-| `desktop-chromium` | PC 性能门禁与 SAB 参考                    | 固定 macOS/Windows 资产              | `dev-mac-01` | 已登记      |
+| `desktop-chromium` | PC 性能门禁与 SAB 参考                    | 固定 macOS/Windows 资产              | `dev-mac-01` | unqualified |
 | `desktop-safari`   | 无 Chromium 假设验证                      | 固定 macOS 资产                      | 待分配       | unqualified |
 | `desktop-firefox`  | postMessage/主线程降级验证                | 固定 macOS/Windows/Linux 资产        | 待分配       | unqualified |
 
@@ -66,6 +66,14 @@ role/device/build 分组，不能跨浏览器比较 batch。
 `characterboundsupdate`。fixture、自动化键盘、事件溢出或本地占位 build/device id
 均不能替代正式矩阵证据。
 
-矩阵中任何“待分配”资产只会让相应平台保持 `unqualified`。机器可读资格登记写入
-`m0-evidence-manifest-v1`，并由 `pnpm platform:qualify` 验证；除角色和资产 ID 外，
-还必须固定上述硬件、环境、输入法、能力快照以及两组正式 batch ID。
+矩阵中任何“待分配”资产只会让相应平台保持 `unqualified`。M9 起，正式机器可读资格登记
+写入 `m9-evidence-manifest-v2`，原始批次使用 `m9-raw-evidence-v2`，并由
+`pnpm platform:qualify:v2` 验证。每个角色必须绑定同一 build、设备、浏览器 major、
+transport、输入路径和视频路径的两组独立 batch；审计器从逐帧原始样本重算 P95/P99、
+掉帧率、峰值内存和冷启动，不接受仅有汇总值的支持声明。
+
+证据超过 manifest 中的 `maximumAgeDays` 后状态自动变为 `expired`。缺失证据为
+`unqualified`；digest 篡改、批次复用、build 漂移、环境串组、伪造汇总或缺少 IME、
+无障碍、媒体生命周期证据会使审计失败并保持 `unqualified`。当前正式 v2 manifest
+没有任何真机 batch，因此七个角色均为 `unqualified`；`dev-mac-01` 只是已登记资产，
+不能据此产生支持声明。旧 `m0-evidence-manifest-v1` 仅保留为历史 M0 探针资格记录。

@@ -6,9 +6,11 @@
 > description 均标注 "internal"，公开契约只有 facade 与 compat 的导出面
 > （迁移扫描器阻止业务 import 内部包）。
 
-> **下一版本发布阻断**：当前 GitHub release workflow 仍只运行 `pnpm m5:check`，不能覆盖
-> 尚未发布的 M6–M8 能力。在 M9-E 把发布工作流升级为 `pnpm m9:check`、完成候选产物与
-> 回滚演练之前，不得为当前 `main` 创建版本 tag 或发布 npm。历史已发布版本不受影响。
+> **下一版本发布阻断**：GitHub release workflow 已升级为 `pnpm m9:check`。在该门禁于
+> clean checkout 全绿并由维护者审阅只读候选报告之前，不得创建版本 tag 或发布 npm。
+> `m9:check` 和 `m9:candidate` 本身不会创建 tag、Release、npm publish 或修改线上配置。
+> 单独运行 `m9:candidate` 只生成 `standalone-report-only`；只有作为成功的 `m9:check`
+> 最后一步运行时，报告才标记 `passed-in-current-m9-check`。
 
 ## 1. 版本策略
 
@@ -28,8 +30,8 @@
 推送 `v*` tag 即触发 `.github/workflows/release.yml`：
 
 1. 校验 tag 与 `ENGINE_VERSION` 一致（不一致直接失败）。
-2. 在发布提交上跑完整 `pnpm m5:check`（M0→M5 全链；CI 无 GPU 时后端差分
-   如实输出 SKIPPED）。
+2. 在发布提交上跑完整 `pnpm m9:check`（M0→M9 全链；CI 无 GPU 时后端差分
+   如实输出 SKIPPED），并生成只读候选报告。
 3. `pnpm npm:release:verify` 校验全部 tarball。
 4. 创建 GitHub Release：自动生成 release notes，附上 11 个包的 tarball 与
    `wasm-manifest.json`（事故时用于 CDN 资产 digest 对照）。
@@ -52,8 +54,8 @@ git tag v0.2.0 && git push origin main v0.2.0
 node scripts/set-release-version.mjs 0.2.0
 pnpm install   # 刷新 lockfile 中的 workspace 版本
 
-# 2. 全量工程门禁（M0→M5 全链）
-pnpm m5:check
+# 2. 全量工程门禁（M0→M9 全链）
+pnpm m9:check
 
 # 3. 发布产物验证（tarball 内容、依赖闭包、workspace 区间重写）
 pnpm npm:release:verify

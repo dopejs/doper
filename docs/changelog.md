@@ -9,9 +9,10 @@ ABI 版本独立管理。
 
 ## Unreleased
 
-- 规划 M9“生产资格、增量合成与发布硬化”：以 immutable Picture/D3 oracle 解决纯滚动
-  DisplayList 重建，恢复产品 Core WASM 至 384 KiB 工程余量，建立可过期的平台资格 v2、
-  无外部副作用的候选发布总门禁和完整回滚演练；M9 当前尚未开始实现。
+- 实施 M9“生产资格、增量合成与发布硬化”：ABI 17 增加事务式 immutable Picture 资源，
+  保留 inline D3 oracle/kill switch；产品 Core 恢复到 384 KiB 工程门禁并固定可复现工具链；
+  新增可复算、会过期、失败关闭的平台资格 v2、加速 soak 和无外部副作用候选发布门禁。
+  缺少正式真机证据的平台继续明确标为 `unqualified`。
 - 完成 M8：ABI 16 增加 Video/VideoFrame 资源契约，Host 提供 HTMLMediaElement 加载、
   CORS、媒体控制/事件与 main-thread/VideoFrame/ImageBitmap 降级；Worker protocol 升至 v11。
   每个视频一帧在途、丢旧保新、资源回收/后台暂停与复制/掉帧诊断均有自动门禁；新增

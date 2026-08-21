@@ -1,0 +1,20 @@
+{
+  "$schema": "https://dopejs.dev/schemas/m9-evidence-manifest-v2.json",
+  "version": 2,
+  "build": {
+    "commit": "2fb4fd47b081f3c65fe4f8eef55ececfa177cf36",
+    "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "abiVersion": 17,
+    "workerProtocolVersion": 12
+  },
+  "policy": {
+    "maximumAgeDays": 30,
+    "minimumFramesPerBatch": 120,
+    "maximumP95Ms": 16.7,
+    "maximumP99Ms": 25,
+    "maximumDroppedFrameRate": 0.005,
+    "maximumColdStartMs": 50,
+    "maximumMemoryGrowthBytes": 16777216
+  },
+  "roles": []
+}

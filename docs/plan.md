@@ -1,6 +1,6 @@
 # pingo 总体实施计划
 
-> 状态：草案 v0.3（M9 已规划）
+> 状态：v0.4（M9 实现已收口，等待最终出口门禁）
 >
 > 依据：[`design.md`](design.md)
 >
@@ -710,8 +710,8 @@ E2E；真实硬件解码、功耗与受版权内容仍属平台资格，不能�
 
 ### M9：生产资格、增量合成与发布硬化
 
-> 当前状态：**已规划，未开始（2026-08-21）**。详细执行方案、阶段出口、失败模式和
-> 回滚路径见 [`m9-production-plan.md`](m9-production-plan.md)。M9 只硬化已交付能力，不把
+> 当前状态：**实现已收口，等待最终出口门禁（2026-08-21）**。详细执行方案、阶段出口、
+> 失败模式和回滚路径见 [`m9-production-plan.md`](m9-production-plan.md)。M9 只硬化已交付能力，不把
 > bidi、二维虚拟化、复杂 CSS、WebGPU 默认启用或 overlay 布局混入本阶段。
 
 目标：把 M0–M8 的工程能力推进到可度量、可审计、可回退的生产准入状态，优先解决
@@ -730,7 +730,7 @@ E2E；真实硬件解码、功耗与受版权内容仍属平台资格，不能�
 - 对 bidi、placeholder/overlay、二维虚拟化、复杂 CSS、WebGPU 和独立 DevTools UI
   形成 Adopt / Defer / Reject 决策，不在 M9 内实现。
 
-M9 工程出口命令规划为 `pnpm m9:check`，必须完整串联 `pnpm m8:check`，并加入 Picture
+M9 工程出口命令为 `pnpm m9:check`，完整串联 `pnpm m8:check`，并加入 Picture
 资源/差分/性能、WASM 384 KiB 余量、资格审计器、加速 soak、发布 tarball 与回滚演练。
 真实设备、IME、屏幕阅读器、媒体功耗和 DRM 证据只决定对应 role 是否 `qualified`，缺失时
 保持 `unqualified`；它们不改变自动化工程里程碑状态，也不得由模拟数据替代。

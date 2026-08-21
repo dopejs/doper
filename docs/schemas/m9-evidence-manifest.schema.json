@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dopejs.dev/schemas/m9-evidence-manifest-v2.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "build", "policy", "roles"],
+  "properties": {
+    "$schema": { "const": "https://dopejs.dev/schemas/m9-evidence-manifest-v2.json" },
+    "version": { "const": 2 },
+    "fixture": { "type": "boolean" },
+    "build": { "$ref": "m9-raw-evidence-v2.json#/$defs/build" },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximumAgeDays",
+        "minimumFramesPerBatch",
+        "maximumP95Ms",
+        "maximumP99Ms",
+        "maximumDroppedFrameRate",
+        "maximumColdStartMs",
+        "maximumMemoryGrowthBytes"
+      ],
+      "properties": {
+        "maximumAgeDays": { "type": "integer", "minimum": 1 },
+        "minimumFramesPerBatch": { "type": "integer", "minimum": 20 },
+        "maximumP95Ms": { "type": "number", "exclusiveMinimum": 0 },
+        "maximumP99Ms": { "type": "number", "exclusiveMinimum": 0 },
+        "maximumDroppedFrameRate": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "maximumColdStartMs": { "type": "number", "exclusiveMinimum": 0 },
+        "maximumMemoryGrowthBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["roleId", "deviceId", "environment", "batches", "limitations"],
+        "properties": {
+          "roleId": { "type": "string", "minLength": 1 },
+          "deviceId": { "type": "string", "minLength": 1 },
+          "environment": { "$ref": "m9-raw-evidence-v2.json#/$defs/environment" },
+          "batches": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["batchId", "path", "sha256", "summary"],
+              "properties": {
+                "batchId": { "type": "string", "format": "uuid" },
+                "path": { "type": "string", "pattern": "^(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$" },
+                "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                "summary": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "p95Ms",
+                    "p99Ms",
+                    "droppedFrameRate",
+                    "peakMemoryBytes",
+                    "coldStartMs"
+                  ],
+                  "properties": {
+                    "p95Ms": { "type": "number", "minimum": 0 },
+                    "p99Ms": { "type": "number", "minimum": 0 },
+                    "droppedFrameRate": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "peakMemoryBytes": { "type": "integer", "minimum": 0 },
+                    "coldStartMs": { "type": "number", "minimum": 0 }
+                  }
+                }
+              }
+            }
+          },
+          "limitations": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  }
+}

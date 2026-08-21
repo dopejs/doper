@@ -1,6 +1,6 @@
 # M9 生产资格、增量合成与发布硬化计划
 
-> 状态：**实施中（2026-08-21）：M9-A/B/C 主链路已落地，完整出口门禁尚未完成**
+> 状态：**实现已收口（2026-08-21）：等待 clean checkout 的最终 `pnpm m9:check` 出口**
 >
 > 前置：M8 工程门禁已完成；开始实现前必须保持 `pnpm m8:check` 全绿
 >
@@ -124,6 +124,8 @@ API、Scene、Mutation Stream 或业务 durable state。
 
 - 固定 Rust/wasm-pack/wasm-opt 工具链，输出 crate/能力维度的 size attribution 和
   release artifact gzip 报告。
+- 固定工具链、section 明细、M8→M9 差值和逐项回滚记录在
+  [`wasm-size-attribution.md`](wasm-size-attribution.md)。
 - 产品 Core 同时执行 `< 400 KiB` 产品硬门禁和 `≤ 384 KiB` M9 工程余量门禁；冷启动
   额外延迟继续 `< 50ms`。
 - 优先移除重复生成代码、未使用泛型实例、重复错误文本和同步入口不需要的可选能力；

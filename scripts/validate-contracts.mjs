@@ -18,6 +18,8 @@ const schemaFiles = [
   "m0-decision.schema.json",
   "m0-evidence-manifest.schema.json",
   "m0-storage-verification.schema.json",
+  "m9-raw-evidence.schema.json",
+  "m9-evidence-manifest.schema.json",
   "platform-probe-report.schema.json",
 ];
 
@@ -111,6 +113,12 @@ validate(
   ajv.getSchema("https://dopejs.dev/schemas/m0-evidence-manifest-v1.json"),
   m0Manifest,
   "evidence-manifest.fixture.v1.json",
+);
+
+validate(
+  ajv.getSchema("https://dopejs.dev/schemas/m9-evidence-manifest-v2.json"),
+  await readJson(path.join(repositoryRoot, "docs/evidence/m9-evidence-manifest.v2.json")),
+  "m9-evidence-manifest.v2.json",
 );
 
 for (const [filename, schemaId] of [

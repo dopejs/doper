@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dopejs.dev/schemas/m9-raw-evidence-v2.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "batchId",
+    "collectedAt",
+    "roleId",
+    "deviceId",
+    "build",
+    "environment",
+    "frames",
+    "coldStartMs",
+    "memory",
+    "ime",
+    "accessibility",
+    "media"
+  ],
+  "properties": {
+    "$schema": { "const": "https://dopejs.dev/schemas/m9-raw-evidence-v2.json" },
+    "version": { "const": 2 },
+    "batchId": { "type": "string", "format": "uuid" },
+    "collectedAt": { "type": "string", "format": "date-time" },
+    "roleId": { "type": "string", "minLength": 1 },
+    "deviceId": { "type": "string", "minLength": 1 },
+    "build": { "$ref": "#/$defs/build" },
+    "environment": { "$ref": "#/$defs/environment" },
+    "frames": {
+      "type": "array",
+      "minItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "coreMs",
+          "encodeMs",
+          "transportMs",
+          "replayMs",
+          "totalMs",
+          "memoryBytes",
+          "dropped"
+        ],
+        "properties": {
+          "coreMs": { "$ref": "#/$defs/nonNegative" },
+          "encodeMs": { "$ref": "#/$defs/nonNegative" },
+          "transportMs": { "$ref": "#/$defs/nonNegative" },
+          "replayMs": { "$ref": "#/$defs/nonNegative" },
+          "totalMs": { "$ref": "#/$defs/nonNegative" },
+          "memoryBytes": { "type": "integer", "minimum": 0 },
+          "dropped": { "type": "boolean" }
+        }
+      }
+    },
+    "coldStartMs": { "$ref": "#/$defs/nonNegative" },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["beforeBytes", "peakBytes", "afterBytes"],
+      "properties": {
+        "beforeBytes": { "type": "integer", "minimum": 0 },
+        "peakBytes": { "type": "integer", "minimum": 0 },
+        "afterBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ime": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["language", "mode", "compositionCommitted", "replayDigest"],
+        "properties": {
+          "language": { "enum": ["zh", "ja", "ko"] },
+          "mode": { "enum": ["edit-context", "textarea-proxy"] },
+          "compositionCommitted": { "const": true },
+          "replayDigest": { "$ref": "#/$defs/digest" }
+        }
+      }
+    },
+    "accessibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["screenReader", "checks", "digest"],
+      "properties": {
+        "screenReader": { "type": "string", "minLength": 1 },
+        "checks": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["events", "createdFrames", "releasedFrames", "maximumInFlight", "digest"],
+      "properties": {
+        "events": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["background", "seek", "loop", "error", "recover"] }
+        },
+        "createdFrames": { "type": "integer", "minimum": 0 },
+        "releasedFrames": { "type": "integer", "minimum": 0 },
+        "maximumInFlight": { "type": "integer", "minimum": 0 },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    }
+  },
+  "$defs": {
+    "nonNegative": { "type": "number", "minimum": 0 },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "digest", "abiVersion", "workerProtocolVersion"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "digest": { "$ref": "#/$defs/digest" },
+        "abiVersion": { "type": "integer", "minimum": 1 },
+        "workerProtocolVersion": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "osVersion",
+        "browser",
+        "browserMajor",
+        "inputMethod",
+        "transport",
+        "inputPath",
+        "videoPath",
+        "capabilities"
+      ],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "osVersion": { "type": "string", "minLength": 1 },
+        "browser": { "type": "string", "minLength": 1 },
+        "browserMajor": { "type": "integer", "minimum": 1 },
+        "inputMethod": { "type": "string", "minLength": 1 },
+        "transport": { "enum": ["main-thread", "post-message", "sab"] },
+        "inputPath": { "enum": ["edit-context", "textarea-proxy"] },
+        "videoPath": { "enum": ["html-media", "image-bitmap", "video-frame", "disabled"] },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": { "type": "boolean" },
+          "minProperties": 1
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "seed": 1597463007,
+  "viewport": [640, 480],
+  "dpr": 1,
+  "frames": 240,
+  "rows": 24,
+  "simpleComplexity": 1,
+  "complexComplexity": 4,
+  "maximumP95Ms": 16.7,
+  "maximumP99Ms": 25,
+  "maximumDroppedFrameRate": 0.005,
+  "maximumPictureResidentBytes": 16777216
+}

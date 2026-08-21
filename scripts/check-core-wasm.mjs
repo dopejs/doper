@@ -7,7 +7,12 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const wasmDirectory = path.join(repositoryRoot, "packages/host/wasm");
 const wasmModule = await import(pathToFileURL(path.join(wasmDirectory, "pingo_core.js")));
 const wasmBytes = await readFile(path.join(wasmDirectory, "pingo_core_bg.wasm"));
+const coldStart = performance.now();
 await wasmModule.default({ module_or_path: wasmBytes });
+const coldStartMs = performance.now() - coldStart;
+if (coldStartMs >= 50) {
+  throw new Error(`Product Core WASM cold start ${coldStartMs.toFixed(3)}ms exceeds 50ms`);
+}
 
 const bundler = await createServer({
   root: repositoryRoot,
@@ -85,4 +90,6 @@ try {
   await bundler.close();
 }
 
-process.stdout.write(`WASM vertical slice: ${String(calls.length)} Canvas calls\n`);
+process.stdout.write(
+  `WASM vertical slice: ${String(calls.length)} Canvas calls, cold start ${coldStartMs.toFixed(3)}ms\n`,
+);

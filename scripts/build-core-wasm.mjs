@@ -165,14 +165,19 @@ async function locatePinnedWasmOpt() {
       if (!entry.isDirectory() || !entry.name.startsWith("wasm-opt-")) continue;
       const candidate = path.join(root, entry.name, "bin", "wasm-opt");
       try {
-        if ((await stat(candidate)).isFile()) return candidate;
+        if (
+          (await stat(candidate)).isFile() &&
+          (await runCapture(candidate, ["--version"])).trim() === expectedWasmOpt
+        ) {
+          return candidate;
+        }
       } catch {
         // Try the next wasm-pack cache entry.
       }
     }
   }
   throw new Error(
-    "wasm-pack Binaryen cache is missing; run wasm-pack once to install wasm-opt 117",
+    `wasm-pack Binaryen cache does not contain ${expectedWasmOpt}; run wasm-pack once to install it`,
   );
 }
 
