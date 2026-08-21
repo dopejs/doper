@@ -28,6 +28,10 @@ export type InputProps = {
   readonly className?: string;
   readonly width?: number;
   readonly semanticLabel?: string;
+  /** Leading adornment, for example an icon or a currency symbol. */
+  readonly prefix?: PingoNode;
+  /** Trailing adornment, for example a unit or a clear affordance. */
+  readonly suffix?: PingoNode;
 };
 
 /** Builds the Input descriptor tree. Pure: safe to call without a component scope. */
@@ -35,6 +39,9 @@ export function inputDescriptor(props: InputProps, controller: TextEditingContro
   const theme = useTheme();
   const disabled = props.disabled === true;
   const readOnly = disabled || props.readOnly === true;
+  // pingo has no descendant selectors, so each themed element carries its own
+  // dark marker, matching the Card sub-element convention.
+  const slotClass = (name: string): string => (theme === "dark" ? `${name} pui-dark` : name);
   return View({
     className: [
       "pui-input",
@@ -45,22 +52,30 @@ export function inputDescriptor(props: InputProps, controller: TextEditingContro
       .filter((part) => part !== undefined && part !== "")
       .join(" "),
     ...(props.width === undefined ? {} : { width: props.width }),
-    children: EngineInput({
-      className: "pui-input__field",
-      controller,
-      readOnly,
-      ...(props.password === undefined ? {} : { password: props.password }),
-      ...(props.inputMode === undefined ? {} : { inputMode: props.inputMode }),
-      ...(props.semanticLabel === undefined ? {} : { semanticLabel: props.semanticLabel }),
-      onTransaction: (transaction) => {
-        // The reconciler applies the transaction to the controller BEFORE
-        // invoking this callback (reconciler.ts controller wiring), so
-        // controller.value is already current here.
-        props.onValueChange?.(controller.value);
-        props.onTransaction?.(transaction);
-      },
-      ...(props.onSubmit === undefined ? {} : { onSubmit: props.onSubmit }),
-    }),
+    children: [
+      props.prefix === undefined
+        ? undefined
+        : View({ className: slotClass("pui-input__prefix"), children: props.prefix }),
+      EngineInput({
+        className: "pui-input__field",
+        controller,
+        readOnly,
+        ...(props.password === undefined ? {} : { password: props.password }),
+        ...(props.inputMode === undefined ? {} : { inputMode: props.inputMode }),
+        ...(props.semanticLabel === undefined ? {} : { semanticLabel: props.semanticLabel }),
+        onTransaction: (transaction) => {
+          // The reconciler applies the transaction to the controller BEFORE
+          // invoking this callback (reconciler.ts controller wiring), so
+          // controller.value is already current here.
+          props.onValueChange?.(controller.value);
+          props.onTransaction?.(transaction);
+        },
+        ...(props.onSubmit === undefined ? {} : { onSubmit: props.onSubmit }),
+      }),
+      props.suffix === undefined
+        ? undefined
+        : View({ className: slotClass("pui-input__suffix"), children: props.suffix }),
+    ].filter((child) => child !== undefined),
   });
 }
 
@@ -71,8 +86,7 @@ export function inputDescriptor(props: InputProps, controller: TextEditingContro
  * plain function throws outside a component scope. Memoized: re-renders only
  * when props change — hits require stable handler references (an inline
  * `onValueChange` defeats memo, same semantics as every memo'd component).
- * Known gaps (tracked in the capability plan): no placeholder, no focus ring,
- * no prefix/suffix slots.
+ * Known gaps (tracked in the capability plan): no placeholder, no focus ring.
  */
 export const Input = memo(function InputImpl(props: InputProps): PingoNode {
   // Deps [] intentionally capture the initial controller/value: a later

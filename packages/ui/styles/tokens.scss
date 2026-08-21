@@ -43,6 +43,10 @@ $card-description-gap: 6px !default;
 $input-height: 36px !default;
 $input-padding-x: 12px !default;
 $input-padding-y: 6px !default;
+$input-gap: 8px !default;
+// Structural tokens: the field absorbs the line, adornments keep their size.
+$input-field-flex: 1 1 0px !default;
+$input-slot-flex: 0 0 auto !default;
 $textarea-min-height: 72px !default;
 $divider-length: 100% !default;
 $alert-padding: 16px !default;

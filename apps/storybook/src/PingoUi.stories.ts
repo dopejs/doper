@@ -125,6 +125,17 @@ const meta: Meta<ShowcaseArgs> = {
                     // Input uses hooks (useMemo) — it MUST be mounted as a
                     // component via createElement, never called directly.
                     createElement(Input, { semanticLabel: "邮箱", width: 360 }),
+                    spacer(8),
+                    createElement(Label, { children: "金额" }),
+                    spacer(8),
+                    // prefix/suffix ride on flexGrow (E5): the field takes the
+                    // line that the adornments leave.
+                    createElement(Input, {
+                      semanticLabel: "金额",
+                      width: 360,
+                      prefix: "¥",
+                      suffix: "CNY",
+                    }),
                   ]),
                 }),
                 createElement(CardFooter, {

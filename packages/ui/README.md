@@ -98,8 +98,9 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
 
 ## 已知缺口
 
-- Input / TextArea 无 placeholder、无 prefix/suffix slot（superset API，待引擎
-  工作包落地后补：E6 memo 已完成，E5 flexGrow/flexShrink/flexBasis 待 oracle）。
+- Input / TextArea 无 placeholder（superset API，待引擎工作包落地后补）。
+  `prefix` / `suffix` slot 已随 E5（flexGrow/flexShrink/flexBasis）落地：
+  field 用 `flex: 1 1 0px` 吃掉装饰件剩下的行宽。TextArea 仍无 slot。
 - 无 focus ring：pingo 没有 `:focus-within`，且边框挂在 shell 上（待选择器能力
   或 E4 shadow 方案落地）。
 - Card 无 boxShadow（E4 shadow 未落地）。
@@ -108,6 +109,9 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
 - Switch thumb 无滑动过渡（同上，thumb 直接跳变）。
 - Checkbox 的 `✓` 与 Accordion 的 `▾` 是文本字形，显示效果依赖字体覆盖，图标
   资产就绪前是占位实现。
-- 引擎行为：`overflow` 非 visible 的容器内，子元素的百分比尺寸会解析为零。
-  Progress 已规避（track 不开 overflow，indicator 宽度由 0–100% clamp 保证不
-  溢出）。
+- 引擎行为（已修复，E5）：`overflow` 非 visible 的容器内子元素百分比尺寸曾解析为
+  零；百分比现在按容器自身 content box 解析。Progress 的规避（track 不开
+  overflow）保留，因为 indicator 宽度本就由 0–100% clamp 保证不溢出。
+- 引擎行为（仍存在）：主轴不确定时百分比解析为 `0` 而不是 CSS 的 `auto`；
+  flex item 没有 CSS 的 automatic minimum size，可被压缩到 0（等价于浏览器里
+  到处写 `min-w-0`）。完整偏差清单见 `docs/style-support.md`。

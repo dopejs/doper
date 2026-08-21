@@ -5,7 +5,9 @@
 // solution lands.
 
 .pui-input {
+  flex-direction: row;
   align-items: center;
+  column-gap: t.$input-gap;
   min-height: t.$input-height;
   padding-left: t.$input-padding-x;
   padding-right: t.$input-padding-x;
@@ -30,6 +32,22 @@
 }
 
 .pui-input__field {
+  // Takes the line remaining after the adornments. Basis 0 rather than auto so
+  // the field never reserves its content width before the split.
+  flex: t.$input-field-flex;
   font-size: t.$font-size-sm;
   line-height: t.$line-height-sm;
+}
+
+// Adornments keep their intrinsic width; only the field absorbs the remainder.
+.pui-input__prefix,
+.pui-input__suffix {
+  flex: t.$input-slot-flex;
+  align-items: center;
+  color: t.$muted-foreground;
+  font-size: t.$font-size-sm;
+  line-height: t.$line-height-sm;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
 }

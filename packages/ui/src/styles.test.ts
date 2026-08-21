@@ -25,6 +25,30 @@ describe("pingo-ui skin", () => {
     expect(style.height).toBe("36px");
   });
 
+  it("gives the input field the remaining line and pins its adornments", () => {
+    const shell = resolve("pui-input");
+    expect(shell.flexDirection).toBe("row");
+    expect(shell.columnGap).toBe("8px");
+
+    const field = resolveStyle({
+      nodeType: "input",
+      className: "pui-input__field",
+      styleSheets,
+    }).style;
+    expect(field.flexGrow).toBe(1);
+    expect(field.flexShrink).toBe(1);
+    expect(field.flexBasis).toBe("0px");
+
+    for (const slot of ["pui-input__prefix", "pui-input__suffix"]) {
+      const style = resolve(slot);
+      expect(style.flexGrow, slot).toBe(0);
+      expect(style.flexShrink, slot).toBe(0);
+      expect(style.flexBasis, slot).toBe("auto");
+      expect(style.color, slot).toBe("#71717aff");
+    }
+    expect(resolve("pui-input__prefix pui-dark").color).toBe("#a1a1aaff");
+  });
+
   it("resolves hover state from the precompiled interaction rules", () => {
     const style = resolve("pui-button pui-button--default", STYLE_INTERACTION_STATES.hover);
     expect(style.backgroundColor).toBe("#18181be6");
