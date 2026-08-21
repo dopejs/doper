@@ -1,0 +1,16 @@
+@use "../tokens" as t;
+
+.pui-avatar {
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  background-color: t.$secondary;
+  &.pui-dark { background-color: t.$dark-secondary; }
+}
+
+.pui-avatar__fallback {
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+  color: t.$muted-foreground;
+  &.pui-dark { color: t.$dark-muted-foreground; }
+}
