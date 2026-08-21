@@ -7,6 +7,14 @@ ABI 版本独立管理。
 
 - 项目许可证从下一次 npm 发布起由 MIT 切换为 Apache-2.0；v0.2.1 及以前
   的已发布版本仍保持 MIT。
+- ABI 17 新增事务化 Picture 资源流；Core 可复用 immutable 子树，Canvas2D 后端原子安装、
+  引用和释放资源，并保留 `incrementalPicturesEnabled` 内联回退开关。
+- M9 增加 rich-scroll 性能/复杂度门禁、optimized/inline 像素差分、native/WASM 生命周期
+  差分、组合 soak、WASM 384 KiB 余量门禁和两次 clean build 可复现检查。
+- 平台资格升级为会过期、从原始证据复算且失败关闭的 v2 审计；当前七个角色均未获得
+  真机资格，因此没有新增平台支持声明。
+- 候选发布检查会验证包、WASM、资格状态、回滚开关和副作用，但不会创建 tag、发布 npm、
+  创建 GitHub Release 或修改线上配置；六类 M10 候选能力均继续 Defer。
 
 ## 0.2.0
 

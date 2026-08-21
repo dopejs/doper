@@ -1,6 +1,6 @@
 # pingo 总体实施计划
 
-> 状态：v0.4（M9 实现已收口，等待最终出口门禁）
+> 状态：v0.4（M9 工程里程碑已完成；平台资格与实际发布继续独立管理）
 >
 > 依据：[`design.md`](design.md)
 >
@@ -710,7 +710,8 @@ E2E；真实硬件解码、功耗与受版权内容仍属平台资格，不能�
 
 ### M9：生产资格、增量合成与发布硬化
 
-> 当前状态：**实现已收口，等待最终出口门禁（2026-08-21）**。详细执行方案、阶段出口、
+> 当前状态：**已完成（2026-08-21）**。clean checkout 的 `pnpm m9:check` 已全绿；产品
+> Core WASM 为 389,844 gzip bytes，比 384 KiB 工程门禁低 3,372 bytes。详细执行方案、阶段出口、
 > 失败模式和回滚路径见 [`m9-production-plan.md`](m9-production-plan.md)。M9 只硬化已交付能力，不把
 > bidi、二维虚拟化、复杂 CSS、WebGPU 默认启用或 overlay 布局混入本阶段。
 
@@ -734,6 +735,8 @@ M9 工程出口命令为 `pnpm m9:check`，完整串联 `pnpm m8:check`，并加
 资源/差分/性能、WASM 384 KiB 余量、资格审计器、加速 soak、发布 tarball 与回滚演练。
 真实设备、IME、屏幕阅读器、媒体功耗和 DRM 证据只决定对应 role 是否 `qualified`，缺失时
 保持 `unqualified`；它们不改变自动化工程里程碑状态，也不得由模拟数据替代。
+完成时七个资格角色均为 `unqualified`，六类 M10 候选均为 Defer；候选报告确认未创建 tag、
+未发布 npm、未创建 GitHub Release，也未修改线上配置。
 
 ## 7. 关键依赖与并行关系
 
