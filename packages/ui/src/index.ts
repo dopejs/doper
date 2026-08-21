@@ -16,6 +16,8 @@ export {
   CardTitle,
 } from "./components/card";
 export type { CardSectionProps, CardTextProps } from "./components/card";
+export { Divider } from "./components/divider";
+export type { DividerProps } from "./components/divider";
 export { IconButton } from "./components/icon-button";
 export type { IconButtonProps, IconButtonSize } from "./components/icon-button";
 export { Input } from "./components/input";
