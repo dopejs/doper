@@ -246,6 +246,7 @@ fixture；届时按 A1 模式写子计划。本文不展开（YAGNI）。
 | E6 memo 与 signal 交互出微妙 bug | 出口门禁含 signal 正交性测试；memo 包装逐组件可回退 |
 | 弹层 API 提前泄露给业务 | A2 启动门前 facade 不导出任何 Overlay 符号 |
 | 皮肤体积随组件数增长 | themed 规则仅皮肤属性；按组件分包 sheet 留作后续优化 |
+| **overflow 容器内百分比尺寸归零**（2026-08-21 实证）：非 visible overflow 使 View 成为滚动容器，内容获得不定 inline basis，子节点百分比宽/高解析为 0 | 组件规避（Progress 轨道已去掉 overflow:hidden）；引擎语义是否修正（clip-only overflow 不应给出不定 inline 约束）列入 E  track 候选，E5 设计门时一并评估 |
 
 ---
 
