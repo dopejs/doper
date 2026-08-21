@@ -157,9 +157,14 @@ detectMediaCapabilities(): MediaCapabilities
 ```ts
 (signal, computed, effect, batch, untracked);
 (useState, useSignal, useMemo, useCallback, useRef, useEffect);
+(createContext, useContext); // Provider 作为元素类型：<ctx.Provider value={...}>
 ```
 
-类型：`Signal`、`ReadonlySignal`、`RefObject`、`Unsubscribe`。
+类型：`Signal`、`ReadonlySignal`、`RefObject`、`Unsubscribe`、`PingoContext`、`ContextProvider`。
+
+`useContext` 沿组件 owner 链读最近 Provider；Provider value 变化只重渲染订阅的消费者，
+并穿透 `memo`（signal 失效路径）。用 hooks 的组件必须经 `createElement`/JSX 使用，
+直接函数调用没有组件作用域。
 
 ## 编辑
 
