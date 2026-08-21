@@ -20,7 +20,10 @@ Track A（组件库，纯 TS，不依赖 Track B 即可交付第一批）
   A3 第三批：产品分子，按需立项（本文不展开）
 
 Track B（引擎工作包，各自独立 feature bit）
-  E6 组件级 memo        纯 Shell runtime  │ 无前置，可立即启动
+  E6 组件级 memo        纯 Shell runtime  │ 已完成（2026-08-21）
+  E7 context（Provider + useContext）     │ 纯 Shell runtime/reconciler，无 ABI；
+                                           复合组件（Tabs/Accordion/RadioGroup/Select/Menu）
+                                           的 shadcn 组合式 API 前置；排在 A1 之前
   E5 flexGrow/Shrink/Basis               │ 前置：flex reference oracle 设计
   E4 boxShadow                           │ 前置：value tag/DisplayList 设计
   E1 keyboard 事件                       │ 前置：协议 Input 指令设计
@@ -184,9 +187,9 @@ descriptor 测试 + 皮肤解析测试 → storybook 展区。**组件模板以 
 | 6 | Progress | `value: number`（0–100）、`max?: number` | `.pui-progress` + `.pui-progress__indicator` | 轨道 height 8、radius 4、background `$secondary`；指示条 width 由 style prop 百分比设置（`width: "${pct}%"`——% 长度已支持，不需要引擎能力） |
 | 7 | Switch | `checked: boolean`、`onCheckedChange?`、`disabled?` | `.pui-switch`(+`--checked`/`--disabled`) + `.pui-switch__thumb` | 轨道 44×24 radius 12；thumb 20×20 radius 10；checked 位移用 margin-left 20px（无 transform 需要）；Pressable 承载交互 |
 | 8 | Checkbox | 同 Switch + `label?: string` | `.pui-checkbox`(+`--checked`) + `.pui-checkbox__indicator` | 16×16 radius 4 border；checked: background `$primary` + 勾选标记用 Text "✓"（字体回退风险→设计时用图片或几何图形评估，子计划定） |
-| 9 | RadioGroup | `options: readonly {value,label}[]`、`value?`、`onValueChange?`、`disabled?` | `.pui-radio`(+`--checked`) + `.pui-radio__indicator` | 16×16 圆形 border；checked 内点 8×8 圆形 `$primary`；组状态由组件内 signal 管理 |
-| 10 | Tabs | `tabs: readonly {value,label}[]`、`value?`、`onValueChange?` | `.pui-tabs` + `.pui-tabs__list` + `.pui-tabs__trigger`(+`--active`) + `.pui-tabs__content` | list: background `$muted`?（无 muted 背景 token → 用 `$secondary`）padding 4 radius；trigger active: background `$background`；pointer 交互，方向键导航等 E1 后升级 |
-| 11 | Accordion | `items: readonly {value,title,content: PingoNode}[]`、`openValue?`、`onValueChange?` | `.pui-accordion__item` / `__trigger`(+`--open`) / `__content` | item border-bottom `$border`；open 状态条件渲染 content（display:none 已支持亦可） |
+| 9 | RadioGroup | **组合式（E7 context）**：`RadioGroup({ value?, onValueChange?, disabled?, children })` + `RadioGroupItem({ value, label? })` | `.pui-radio`(+`--checked`) + `.pui-radio__indicator` | 16×16 圆形 border；checked 内点 8×8 圆形 `$primary`；组状态经 RadioGroupContext 分发 |
+| 10 | Tabs | **组合式（E7 context）**：`Tabs({ value?, onValueChange?, children })` + `TabsList` + `TabsTrigger({ value, children })` + `TabsContent({ value, children })` | `.pui-tabs` + `.pui-tabs__list` + `.pui-tabs__trigger`(+`--active`) + `.pui-tabs__content` | list: background `$secondary` padding 4 radius；trigger active: background `$background`；pointer 交互，方向键导航等 E1 后升级 |
+| 11 | Accordion | **组合式（E7 context）**：`Accordion({ openValue?, onValueChange?, children })` + `AccordionItem({ value, title, children })` | `.pui-accordion__item` / `__trigger`(+`--open`) / `__content` | item border-bottom `$border`；open 状态条件渲染 content |
 | 12 | TextArea 装饰版 | 同 Input（无 slot） | `.pui-input` 复用 + `.pui-textarea` | rows 默认 3；复用 Task 8 Input 的 controller 模式 |
 
 - [ ] **A1 Tasks 1–12**：按上表逐组件实施（皮肤 → 组件 → 测试 → storybook 展区）。
@@ -249,15 +252,16 @@ fixture；届时按 A1 模式写子计划。本文不展开（YAGNI）。
 ## 执行顺序（任务级）
 
 ```
-1. C0（m10 修订）────────── 立即，解锁 E2/E3
-2. A0（11 Tasks）────────── 立即，与 C0 并行
-3. E6 子计划 + 执行 ──────── A0 之后、A1 Task 13 之前
-4. A1（16 Tasks）────────── A0 出口后
-5. E5 设计门 → 子计划 → 执行 │ A1 期间并行（Input slot 前置）
-6. E1 设计门 → 子计划 → 执行 │ C0 后启动
-7. E4 设计门 → 子计划 → 执行 │ 与 E1/E5 并行
-8. E2 设计门 → 子计划 → 执行 │ E1 后
-9. E3 设计门 → 子计划 → 执行 │ E2 后
-10. A2 子计划 → 执行 ─────── E1/E2/E3 出口后
-11. A3 ──────────────────── 按需
+1. C0（m10 修订）────────── 完成（a88dfa9）
+2. A0（11 Tasks）────────── 完成（阶段0 出口全绿）
+3. E6 组件级 memo ───────── 完成（a923e61…abc3d8d）
+4. E7 context 子计划 + 执行  A1 之前（组合式 API 前置）
+5. A1（16 Tasks）────────── E7 出口后；其中 E6 接入（A1 Task 13）已提前完成
+6. E5 设计门 → 子计划 → 执行 │ A1 期间并行（Input slot 前置）
+7. E1 设计门 → 子计划 → 执行 │ C0 后启动
+8. E4 设计门 → 子计划 → 执行 │ 与 E1/E5 并行
+9. E2 设计门 → 子计划 → 执行 │ E1 后
+10. E3 设计门 → 子计划 → 执行 │ E2 后
+11. A2 子计划 → 执行 ─────── E1/E2/E3 出口后
+12. A3 ──────────────────── 按需
 ```
