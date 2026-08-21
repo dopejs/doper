@@ -248,6 +248,73 @@ fixture；届时按 A1 模式写子计划。本文不展开（YAGNI）。
 
 ---
 
+## 验收标准（每步出口的固化门禁）
+
+所有步骤的通用门禁（缺一不可）：`pnpm test:run` 全绿、`pnpm typecheck` 全绿、
+`pnpm api:check` 通过（公开面变更必须按 docs/api/index.md 程序更新快照并说明理由）、
+凡动 `core/` 必须 `pnpm rust:test`（禁止裸 cargo）、凡动 ABI 必须 golden bytes +
+TS/Rust 往返 + malformed-input/fuzz。
+
+### 已完成步骤的验收记录
+
+| 步骤 | 验收标准 | 证据 |
+| --- | --- | --- |
+| C0 | m10 决策行 Defer→Adopt；design.md §12.1 同步 | `a88dfa9` |
+| A0 | cva/theme/皮肤/组件测试 35 全绿；storybook 明暗截图确认；全仓回归绿 | `2addeb3…6a5fa4b` |
+| E6 | memo 5 语义测试 + signal 正交测试；api:check 快照纯增量；全仓 416 绿 | `a923e61…abc3d8d` |
+| E7 | 7 条 context 行为测试（最近者胜/默认回落/卸载回落/细粒度分发/穿透 memo/结构更新）；repo typecheck 绿；全仓 429 绿 | `34145ee…bf81554` |
+| A1 | 17 组件交付；104/104 包测试；全仓 496 绿；明暗 showcase 截图确认；README 覆盖约定/约束/缺口清单 | `a8b8b66…31f8b34` |
+
+### 待执行步骤的验收标准
+
+**E5 flexGrow/Shrink/Basis**
+1. `docs/e5-flex-grow-design.md` 评审通过（含 reference oracle 选型与 overflow 容器
+   百分比语义评估结论）。
+2. flex reference oracle 建立且先于语法开放（css-events-plan 既定节奏）。
+3. 增量↔全量 layout 差分测试通过，失败用例可 shrinking 到最小。
+4. schema/生成代码/style-support.md 文档原子同步；invalidation 域与 flexDirection 一致。
+5. `pnpm rust:test` 绿；帧时预算不回归（m1/m3 性能检查脚本不劣化）。
+6. 出口后补齐 Input `prefix`/`suffix` slot（组件层验收：descriptor 测试 + storybook 展示）。
+
+**E1 keyboard 事件**
+1. `docs/e1-keyboard-events-design.md` 评审通过（与 editing transaction 的边界明确）。
+2. ABI golden bytes + TS/Rust 往返 + malformed/fuzz 绿。
+3. keydown/keyup 跨三 transport 事件顺序一致（契约测试）。
+4. 既有编辑 fixture（IME composition replay）无回归。
+5. `onKeyDown/onKeyUp` 进入 facade 公开面 + api 快照更新。
+6. Tabs/Accordion/RadioGroup 方向键导航升级（组件层验收：键盘导航行为测试）。
+
+**E4 boxShadow**
+1. `docs/e4-boxshadow-design.md` 评审通过（value tag、Canvas2D 映射、缓存失效语义）。
+2. 增量↔全量像素差分一致（含 hover 阴影切换路径）；后端差分在 tolerance 内。
+3. picture cache 失效正确性测试（阴影变化只失效 paintSelf）。
+4. rgba8 半透明阴影渲染正确（shadcn token 对齐）。
+5. ABI/公开面门禁按通用条款。
+
+**E2 zIndex**
+1. `docs/e2-zindex-design.md` 评审通过（排序缓存策略、无障碍顺序方案）。
+2. paint/hit/semantics 顺序的增量↔全量 oracle 一致。
+3. 无每帧排序（性能测试证明排序结果缓存命中）。
+4. 帧时预算不回归。
+
+**E3 position:absolute + inset**
+1. `docs/e3-position-design.md` 评审通过。
+2. m10 决策表全套出口：layout/hit/clip/semantics 增量↔全量 oracle、帧时与节点预算、
+   feature bit 关闭拒绝新值且 flow layout 不变的回滚验证。
+3. 与滚动容器交互的语义测试（设计门定稿后落入子计划）。
+
+**A2 第二批弹层组件**
+1. 启动门达成：E1/E2/E3 出口通过，E4 合并（可 feature-flag）。
+2. `docs/pingo-ui-overlay-components-plan.md` 子计划评审通过（Overlay 基元、锚定 API、
+   焦点陷阱语义）。
+3. 8 组件交付，每组件：descriptor/行为测试 + 语义树 E2E + 像素快照 + 明暗双皮肤。
+4. 弹层专项：层叠顺序、锚点定位、Esc 关闭、焦点导航、滚动中锚点跟随全部有用例。
+5. 通用门禁全绿。
+
+**A3 第三批**：立项时按 A1 模式在本文补充验收标准。
+
+---
+
 ## 验证矩阵（每个阶段出口必过）
 
 | 层 | 命令 / 方式 | 适用 |
