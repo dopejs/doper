@@ -29,6 +29,17 @@ import {
 import { encodeSystemTextMetricBatch } from "./system-text-metrics";
 
 import {
+  FRAME_DIAGNOSTICS_ANIMATION_ACTIVE_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_CANCELS_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_LAYOUT_NODES_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_PHASE_ACTIVE_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_PHASE_AFTER_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_PHASE_BEFORE_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_PRESENTATION_CHANGES_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_RETAINED_BYTES_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_RETARGETS_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_SAMPLED_FRAMES_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_STARTS_INDEX,
   FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX,
   FRAME_DIAGNOSTICS_DIRTY_LAYOUT_NODES_INDEX,
   FRAME_DIAGNOSTICS_DIRTY_PAINT_NODES_INDEX,
@@ -118,6 +129,7 @@ export interface CoreClient {
   free?(): void;
   set_viewport?(width: number, height: number): Uint8Array | undefined;
   set_device_pixel_ratio?(value: number): Uint8Array | undefined;
+  set_reduced_motion?(value: boolean): Uint8Array | undefined;
   set_system_text_metrics?(metrics: Uint8Array): Uint8Array | undefined;
   is_poisoned?(): boolean;
   take_glyph_resources?(): Uint8Array;
@@ -235,6 +247,24 @@ export interface CoreFrameDiagnostics {
   readonly producerAbiVersion: number;
   /** Cumulative Core-owned hover/active/focus mask changes. */
   readonly interactionStateChanges: number;
+  /** Timelines that can change on a future logical clock tick. */
+  readonly animationActive: number;
+  /** Configured timelines currently before their active interval. */
+  readonly animationPhaseBefore: number;
+  /** Configured timelines currently inside their active interval. */
+  readonly animationPhaseActive: number;
+  /** Configured timelines currently after their active interval. */
+  readonly animationPhaseAfter: number;
+  readonly animationStarts: number;
+  readonly animationRetargets: number;
+  readonly animationCancels: number;
+  readonly animationSampledFrames: number;
+  /** Presentation values changed by animation for this rendered frame. */
+  readonly animationPresentationChanges: number;
+  /** Must remain zero while M7 exposes compositor-friendly properties only. */
+  readonly animationLayoutNodes: number;
+  /** Bounded estimated animation payload and controller bytes retained by Core. */
+  readonly animationRetainedBytes: number;
 }
 
 /** Diagnostics emitted after one Core frame and Canvas replay both succeed. */
@@ -775,6 +805,19 @@ export class CanvasFrameSink implements MutationSink {
     });
   }
 
+  /** Applies a live accessibility preference and replays only if presentation changes. */
+  public setReducedMotion(value: boolean): void {
+    const displayList = this.#core.set_reduced_motion?.(value);
+    if (displayList === undefined) return;
+    this.applyDynamicGlyphResources();
+    this.acceptDynamicFrame(displayList, {
+      animationDeltaMs: 0,
+      cause: "animation",
+      inputBytes: 0,
+      mutationBytes: 0,
+    });
+  }
+
   private replay(
     displayList: Uint8Array,
     pictureKey: string | undefined,
@@ -1226,6 +1269,20 @@ function parseCoreFrameDiagnostics(
     skippedInstructions: requiredWord(words, FRAME_DIAGNOSTICS_SKIPPED_INSTRUCTIONS_INDEX),
     producerAbiVersion: requiredWord(words, FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX),
     interactionStateChanges: requiredWord(words, FRAME_DIAGNOSTICS_INTERACTION_STATE_CHANGES_INDEX),
+    animationActive: requiredWord(words, FRAME_DIAGNOSTICS_ANIMATION_ACTIVE_INDEX),
+    animationPhaseBefore: requiredWord(words, FRAME_DIAGNOSTICS_ANIMATION_PHASE_BEFORE_INDEX),
+    animationPhaseActive: requiredWord(words, FRAME_DIAGNOSTICS_ANIMATION_PHASE_ACTIVE_INDEX),
+    animationPhaseAfter: requiredWord(words, FRAME_DIAGNOSTICS_ANIMATION_PHASE_AFTER_INDEX),
+    animationStarts: requiredWord(words, FRAME_DIAGNOSTICS_ANIMATION_STARTS_INDEX),
+    animationRetargets: requiredWord(words, FRAME_DIAGNOSTICS_ANIMATION_RETARGETS_INDEX),
+    animationCancels: requiredWord(words, FRAME_DIAGNOSTICS_ANIMATION_CANCELS_INDEX),
+    animationSampledFrames: requiredWord(words, FRAME_DIAGNOSTICS_ANIMATION_SAMPLED_FRAMES_INDEX),
+    animationPresentationChanges: requiredWord(
+      words,
+      FRAME_DIAGNOSTICS_ANIMATION_PRESENTATION_CHANGES_INDEX,
+    ),
+    animationLayoutNodes: requiredWord(words, FRAME_DIAGNOSTICS_ANIMATION_LAYOUT_NODES_INDEX),
+    animationRetainedBytes: requiredWord(words, FRAME_DIAGNOSTICS_ANIMATION_RETAINED_BYTES_INDEX),
   };
 }
 

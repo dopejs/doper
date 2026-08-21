@@ -11,7 +11,7 @@ import type { HostTransportMode } from "./capabilities";
 import type { RenderClockMetrics } from "./render-clock";
 import type { EditTransaction, EventTransaction } from "@dopejs/pingo-editing";
 
-export const WORKER_PROTOCOL_VERSION = 8 as const;
+export const WORKER_PROTOCOL_VERSION = 10 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
@@ -28,6 +28,7 @@ export interface WorkerActivateMessage {
   readonly kind: "pingo:activate";
   readonly mode: Exclude<HostTransportMode, "main-thread">;
   readonly rasterCache: boolean;
+  readonly reducedMotion: boolean;
   readonly inputRingBuffer?: SharedArrayBuffer;
   readonly ringBuffer?: SharedArrayBuffer;
   readonly sessionId: number;
@@ -66,12 +67,19 @@ export interface WorkerInputWakeMessage {
   readonly sessionId: number;
 }
 
+export interface WorkerReducedMotionMessage {
+  readonly kind: "pingo:reduced-motion";
+  readonly reduced: boolean;
+  readonly sessionId: number;
+}
+
 export type RenderWorkerInboundMessage =
   | WorkerActivateMessage
   | WorkerClockAnchorMessage
   | WorkerInputMessage
   | WorkerInputWakeMessage
   | WorkerPrepareMessage
+  | WorkerReducedMotionMessage
   | WorkerResizeMessage
   | WorkerShutdownMessage;
 
@@ -184,6 +192,7 @@ export function isRenderWorkerInboundMessage(value: unknown): value is RenderWor
         isPositiveFinite(value.height) &&
         isRecord(value.canvas) &&
         typeof value.rasterCache === "boolean" &&
+        typeof value.reducedMotion === "boolean" &&
         (value.mode === "post-message" ||
           (isSharedArrayBuffer(value.ringBuffer) && isSharedArrayBuffer(value.inputRingBuffer)))
       );
@@ -193,6 +202,8 @@ export function isRenderWorkerInboundMessage(value: unknown): value is RenderWor
       return value.bytes instanceof Uint8Array;
     case "pingo:input-wake":
       return true;
+    case "pingo:reduced-motion":
+      return typeof value.reduced === "boolean";
     case "pingo:shutdown":
       return true;
     default:
@@ -209,6 +220,7 @@ export function isRenderWorkerInboundEnvelope(value: unknown): boolean {
     value.kind === "pingo:clock-anchor" ||
     value.kind === "pingo:input" ||
     value.kind === "pingo:input-wake" ||
+    value.kind === "pingo:reduced-motion" ||
     value.kind === "pingo:shutdown"
   );
 }

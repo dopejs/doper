@@ -493,6 +493,7 @@ mod tests {
             kind,
             bytes: Arc::from(bytes),
             computed_style: None,
+            animation: None,
         }
     }
 

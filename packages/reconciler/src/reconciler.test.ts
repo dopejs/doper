@@ -587,6 +587,55 @@ describe("reconciler", () => {
     expect(() => viewRef.current?.scrollTo(Number.NaN, 0)).toThrow("scroll x must be finite");
   });
 
+  it("attaches versioned animation resources without introducing a Core node kind", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    root.render(
+      View({
+        style: { opacity: 0.5 },
+        transition: { property: "opacity", durationMs: 250, easing: "ease-out" },
+        animation: {
+          property: "transform",
+          durationMs: 1_000,
+          fill: "both",
+          keyframes: [
+            { offset: 0, value: [1, 0, 0, 1, 0, 0] },
+            { offset: 1, value: [1, 0, 0, 1, 40, 20] },
+          ],
+        },
+      }),
+    );
+
+    const creates = mutationsOfType(sink.batches[0], "createNode");
+    expect(creates).toHaveLength(2);
+    const resource = mutationsOfType(sink.batches[0], "defineResource").find(
+      (mutation) => mutation.kind === ResourceKind.Animation,
+    );
+    expect(resource?.bytes.slice(0, 4)).toEqual(new Uint8Array([1, 1, 1, 0]));
+    expect(mutationsOfType(sink.batches[0], "setRef")).toContainEqual(
+      expect.objectContaining({ prop: Prop.Animation, resourceId: resource?.resourceId }),
+    );
+  });
+
+  it("rolls back Core animation independently while keeping durable targets", () => {
+    const sink = new RecordingSink();
+    createRoot(sink, { coreAnimationEnabled: false }).render(
+      View({
+        opacity: 0.75,
+        transition: { property: "opacity", durationMs: 250 },
+      }),
+    );
+    expect(
+      mutationsOfType(sink.batches[0], "defineResource").find(
+        (mutation) => mutation.kind === ResourceKind.Animation,
+      ),
+    ).toBeUndefined();
+    expect(resourceForProp(sink.batches[0], Prop.Animation)).toBeUndefined();
+    expect(mutationsOfType(sink.batches[0], "setF32")).toContainEqual(
+      expect.objectContaining({ prop: Prop.Opacity, value: 0.75 }),
+    );
+  });
+
   it("materializes only Core-requested virtual-list windows and reuses overlapping items", () => {
     const sink = new RecordingSink();
     const renderItem = vi.fn((index: number) => createElement("text", { value: `item ${index}` }));

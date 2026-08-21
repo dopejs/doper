@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
-import { format } from "prettier";
+import { format, resolveConfig } from "prettier";
 
 const root = path.resolve(import.meta.dirname, "..");
 const schemaPath = path.join(root, "schemas/protocol.v1.json");
@@ -11,9 +11,10 @@ const check = process.argv.includes("--check");
 const schema = JSON.parse(await readFile(schemaPath, "utf8"));
 validateSchema(schema);
 const rustOutput = renderRust(schema);
+const prettierConfig = (await resolveConfig(schemaPath)) ?? {};
 const typeScriptOutput = await format(
   renderTypeScript(schema).replace("  Semantics = 16,\n}", "  Semantics = 16,\n  Scroll = 32,\n}"),
-  { parser: "typescript" },
+  { ...prettierConfig, parser: "typescript" },
 );
 
 const outputs = new Map([
@@ -41,7 +42,7 @@ for (const [file, contents] of outputs) {
 if (stale) process.exitCode = 1;
 
 function validateSchema(value) {
-  if (value.schemaVersion !== 1 || value.abiVersion !== 14) {
+  if (value.schemaVersion !== 1 || value.abiVersion !== 15) {
     throw new Error("unsupported protocol schema or ABI version");
   }
   if (value.endianness !== "little" || value.alignment !== 4) {

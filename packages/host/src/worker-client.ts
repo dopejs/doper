@@ -20,6 +20,7 @@ import {
   type WorkerResizeMessage,
   type WorkerInputWakeMessage,
   type WorkerPrepareMessage,
+  type WorkerReducedMotionMessage,
   type WorkerShutdownMessage,
 } from "./worker-protocol";
 
@@ -57,6 +58,7 @@ export interface RenderWorkerActivation {
   readonly height: number;
   readonly mode: Exclude<HostTransportMode, "main-thread">;
   readonly rasterCache: boolean;
+  readonly reducedMotion: boolean;
   readonly inputRingBuffer?: SharedArrayBuffer;
   readonly ringBuffer?: SharedArrayBuffer;
   readonly width: number;
@@ -168,6 +170,7 @@ export class RenderWorkerClient {
       kind: "pingo:activate",
       mode: activation.mode,
       rasterCache: activation.rasterCache,
+      reducedMotion: activation.reducedMotion,
       ...(activation.inputRingBuffer === undefined
         ? {}
         : { inputRingBuffer: activation.inputRingBuffer }),
@@ -232,6 +235,17 @@ export class RenderWorkerClient {
     this.requireState("ready");
     const message: WorkerInputWakeMessage = {
       kind: "pingo:input-wake",
+      sessionId: this.#sessionId,
+    };
+    this.#worker.postMessage(message);
+  }
+
+  /** Propagates a live prefers-reduced-motion change to the active Core. */
+  public postReducedMotion(reduced: boolean): void {
+    this.requireState("ready");
+    const message: WorkerReducedMotionMessage = {
+      kind: "pingo:reduced-motion",
+      reduced,
       sessionId: this.#sessionId,
     };
     this.#worker.postMessage(message);

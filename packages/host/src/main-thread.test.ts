@@ -17,6 +17,15 @@ import { CanvasFrameSink, parseSemantics, type CoreClient, type FrameReport } fr
 import {
   EDIT_TRANSACTIONS_MAGIC,
   EVENT_TRANSACTIONS_MAGIC,
+  FRAME_DIAGNOSTICS_ANIMATION_ACTIVE_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_CANCELS_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_LAYOUT_NODES_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_PHASE_ACTIVE_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_PRESENTATION_CHANGES_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_RETAINED_BYTES_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_RETARGETS_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_SAMPLED_FRAMES_INDEX,
+  FRAME_DIAGNOSTICS_ANIMATION_STARTS_INDEX,
   FRAME_DIAGNOSTICS_VERSION,
   FRAME_DIAGNOSTICS_WORDS,
 } from "./generated";
@@ -49,8 +58,40 @@ describe("CanvasFrameSink", () => {
         events.push("core");
         return displayList;
       },
-      frame_diagnostics: () =>
-        diagnostics(3, 1, 2, 2, 2, 0, 2, 2, 2, 2, 7, 1, 1, 0, 2, 0, 0, 0x89ab_cdef, 0x0123_4567, 0),
+      frame_diagnostics: () => {
+        const words = diagnostics(
+          3,
+          1,
+          2,
+          2,
+          2,
+          0,
+          2,
+          2,
+          2,
+          2,
+          7,
+          1,
+          1,
+          0,
+          2,
+          0,
+          0,
+          0x89ab_cdef,
+          0x0123_4567,
+          0,
+        );
+        words[FRAME_DIAGNOSTICS_ANIMATION_ACTIVE_INDEX] = 2;
+        words[FRAME_DIAGNOSTICS_ANIMATION_PHASE_ACTIVE_INDEX] = 2;
+        words[FRAME_DIAGNOSTICS_ANIMATION_STARTS_INDEX] = 4;
+        words[FRAME_DIAGNOSTICS_ANIMATION_RETARGETS_INDEX] = 1;
+        words[FRAME_DIAGNOSTICS_ANIMATION_CANCELS_INDEX] = 1;
+        words[FRAME_DIAGNOSTICS_ANIMATION_SAMPLED_FRAMES_INDEX] = 10;
+        words[FRAME_DIAGNOSTICS_ANIMATION_PRESENTATION_CHANGES_INDEX] = 2;
+        words[FRAME_DIAGNOSTICS_ANIMATION_LAYOUT_NODES_INDEX] = 0;
+        words[FRAME_DIAGNOSTICS_ANIMATION_RETAINED_BYTES_INDEX] = 4096;
+        return words;
+      },
     };
     const onFrame = vi.fn((_report: FrameReport) => events.push("report"));
     const sink = new CanvasFrameSink(fakeContext(calls, events), core, onFrame);
@@ -91,6 +132,15 @@ describe("CanvasFrameSink", () => {
         pictureSubtreeCacheHits: 0,
         overInvalidatedFrames: 0,
         pictureHash: 0x0123_4567_89ab_cdefn,
+        animationActive: 2,
+        animationPhaseActive: 2,
+        animationStarts: 4,
+        animationRetargets: 1,
+        animationCancels: 1,
+        animationSampledFrames: 10,
+        animationPresentationChanges: 2,
+        animationLayoutNodes: 0,
+        animationRetainedBytes: 4096,
       },
     });
     expect(onFrame.mock.calls[0]?.[0].mutationBytes).toBeGreaterThan(0);

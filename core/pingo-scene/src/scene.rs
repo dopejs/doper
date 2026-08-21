@@ -26,8 +26,18 @@ use pingo_abi::{
     TEXT_STYLE_V2_WHITE_SPACE_OFFSET, TEXT_STYLE_VARIANT_OFFSET, TEXT_STYLE_VERSION_OFFSET,
     TEXT_STYLE_WEIGHT_OFFSET, VirtualAxis,
 };
+use pingo_anim::AnimationResource;
 
 use crate::{BitSet, MAX_GENERATION, NodeId, SceneError};
+
+fn transform_operation_is_finite(operation: &StyleTransformOperation) -> bool {
+    match operation {
+        StyleTransformOperation::Matrix(values) => values.iter().all(|value| value.is_finite()),
+        StyleTransformOperation::Translate(x, y) => x.value.is_finite() && y.value.is_finite(),
+        StyleTransformOperation::Scale(values) => values.iter().all(|value| value.is_finite()),
+        StyleTransformOperation::Rotate(value) => value.is_finite(),
+    }
+}
 
 /// A Scene dirty domain backed by a topology-ordered bitmap.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,6 +63,8 @@ pub struct Resource {
     pub bytes: Arc<[u8]>,
     /// Predecoded style payload; present only for [`ResourceKind::ComputedStyle`].
     pub computed_style: Option<Arc<ComputedStyleResource>>,
+    /// Predecoded animation payload; present only for [`ResourceKind::Animation`].
+    pub animation: Option<Arc<AnimationResource>>,
 }
 
 /// Text and style resources attached atomically to a text node.
@@ -124,6 +136,7 @@ pub struct Scene {
     slots: Vec<Slot>,
     resources: BTreeMap<u32, Resource>,
     interaction_states: BTreeMap<NodeId, u8>,
+    presentation_styles: BTreeMap<(NodeId, u16), ComputedStyleValue>,
     dirty_layout: BitSet,
     dirty_paint: BitSet,
     dirty_paint_self: BitSet,
@@ -159,6 +172,7 @@ impl Scene {
             slots: Vec::new(),
             resources: BTreeMap::new(),
             interaction_states: BTreeMap::new(),
+            presentation_styles: BTreeMap::new(),
             dirty_layout: BitSet::default(),
             dirty_paint: BitSet::default(),
             dirty_paint_self: BitSet::default(),
@@ -402,6 +416,20 @@ impl Scene {
         self.resources.get(&resource_id)?.computed_style.as_deref()
     }
 
+    /// Returns the validated immutable animation resource attached to a node.
+    #[must_use]
+    pub fn animation(&self, node: NodeId) -> Option<&AnimationResource> {
+        let resource_id = self.ref_prop(node, Prop::Animation)?;
+        self.resources.get(&resource_id)?.animation.as_deref()
+    }
+
+    /// Returns a shared validated animation resource for retained timeline state.
+    #[must_use]
+    pub fn animation_resource(&self, node: NodeId) -> Option<Arc<AnimationResource>> {
+        let resource_id = self.ref_prop(node, Prop::Animation)?;
+        self.resources.get(&resource_id)?.animation.clone()
+    }
+
     /// Selects one canonical style value for an exact interaction-state mask.
     #[must_use]
     pub fn style_value(
@@ -493,7 +521,110 @@ impl Scene {
         node: NodeId,
         property: StyleProperty,
     ) -> Option<&ComputedStyleValue> {
-        self.style_value(node, property, self.interaction_state(node))
+        self.presentation_styles
+            .get(&(node, property as u16))
+            .or_else(|| self.style_value(node, property, self.interaction_state(node)))
+    }
+
+    /// Returns only the transient animation-owned value, excluding durable style.
+    #[must_use]
+    pub fn presentation_style_value(
+        &self,
+        node: NodeId,
+        property: StyleProperty,
+    ) -> Option<&ComputedStyleValue> {
+        self.resolve(node)?;
+        self.presentation_styles.get(&(node, property as u16))
+    }
+
+    /// Returns only the transient animation-owned scalar value.
+    #[must_use]
+    pub fn presentation_style_f32(&self, node: NodeId, property: StyleProperty) -> Option<f32> {
+        match self.presentation_style_value(node, property)? {
+            ComputedStyleValue::F32(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns only the transient animation-owned transform operations.
+    #[must_use]
+    pub fn presentation_style_transform(&self, node: NodeId) -> Option<&[StyleTransformOperation]> {
+        match self.presentation_style_value(node, StyleProperty::Transform)? {
+            ComputedStyleValue::TransformList(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    /// Sets an animation-owned presentation override without mutating durable style.
+    ///
+    /// Only the M7 compositor-friendly opacity and transform properties are
+    /// accepted. Returns `None` for stale nodes or invalid values and otherwise
+    /// reports whether presentation changed.
+    pub fn set_presentation_style(
+        &mut self,
+        node: NodeId,
+        property: StyleProperty,
+        value: ComputedStyleValue,
+    ) -> Option<bool> {
+        let index = self.resolve(node)?;
+        let valid = match (&property, &value) {
+            (StyleProperty::Opacity, ComputedStyleValue::F32(value)) => {
+                value.is_finite() && (0.0..=1.0).contains(value)
+            }
+            (StyleProperty::Transform, ComputedStyleValue::TransformList(operations)) => {
+                operations.iter().all(transform_operation_is_finite)
+            }
+            _ => false,
+        };
+        if !valid {
+            return None;
+        }
+        let key = (node, property as u16);
+        if self.presentation_styles.get(&key) == Some(&value) {
+            return Some(false);
+        }
+        self.presentation_styles.insert(key, value);
+        self.mark(
+            index,
+            Invalidation::from_bits(Invalidation::PAINT_SELF.bits() | Invalidation::HIT.bits()),
+        );
+        Some(true)
+    }
+
+    /// Removes one animation-owned override, revealing the durable target.
+    pub fn clear_presentation_style(
+        &mut self,
+        node: NodeId,
+        property: StyleProperty,
+    ) -> Option<bool> {
+        let index = self.resolve(node)?;
+        let changed = self
+            .presentation_styles
+            .remove(&(node, property as u16))
+            .is_some();
+        if changed {
+            self.mark(
+                index,
+                Invalidation::from_bits(Invalidation::PAINT_SELF.bits() | Invalidation::HIT.bits()),
+            );
+        }
+        Some(changed)
+    }
+
+    /// Clears every transient presentation override for one live node.
+    pub fn clear_node_presentation_styles(&mut self, node: NodeId) -> Option<usize> {
+        let index = self.resolve(node)?;
+        let before = self.presentation_styles.len();
+        self.presentation_styles
+            .retain(|(candidate, _), _| *candidate != node);
+        let removed = before.saturating_sub(self.presentation_styles.len());
+        if removed > 0 {
+            self.mark(
+                index,
+                Invalidation::from_bits(Invalidation::PAINT_SELF.bits() | Invalidation::HIT.bits()),
+            );
+        }
+        Some(removed)
     }
 
     /// Returns a presented keyword using the node's interaction mask.
@@ -1111,10 +1242,17 @@ impl Resource {
                     .expect("computed style was validated before resource construction"),
             )
         });
+        let animation = (kind == ResourceKind::Animation).then(|| {
+            Arc::new(
+                AnimationResource::decode(&bytes)
+                    .expect("animation was validated before resource construction"),
+            )
+        });
         Self {
             kind,
             bytes: Arc::from(bytes),
             computed_style,
+            animation,
         }
     }
 }
@@ -1320,6 +1458,10 @@ fn validate_resource(resource_id: u32, kind: ResourceKind, bytes: &[u8]) -> Resu
         ResourceKind::Image => validate_image_resource(resource_id, bytes)?,
         ResourceKind::ComputedStyle => {
             ComputedStyleResource::decode(bytes)
+                .map_err(|_| SceneError::InvalidResourceEncoding { resource_id })?;
+        }
+        ResourceKind::Animation => {
+            pingo_anim::AnimationResource::decode(bytes)
                 .map_err(|_| SceneError::InvalidResourceEncoding { resource_id })?;
         }
         ResourceKind::Path | ResourceKind::GlyphSpan => {}
@@ -1757,6 +1899,13 @@ impl Scene {
             .interaction_states
             .iter()
             .filter_map(|(node, state)| next.resolve(*node).map(|_| (*node, *state)))
+            .collect();
+        next.presentation_styles = self
+            .presentation_styles
+            .iter()
+            .filter_map(|(key @ (node, _), value)| {
+                next.resolve(*node).map(|_| (*key, value.clone()))
+            })
             .collect();
         validate_resource_graph(&next.resources, &BTreeMap::new())?;
         next.last_frame_seq = Some(batch.frame_seq);
@@ -2541,6 +2690,90 @@ mod tests {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         bytes
+    }
+
+    #[test]
+    fn presentation_style_is_transient_validated_and_generation_safe() {
+        let root = id(0, 1);
+        let child = id(1, 1);
+        let mut scene = Scene::default();
+        scene
+            .commit(batch(
+                1,
+                vec![
+                    create(root, NodeKind::Root, None),
+                    create(child, NodeKind::Container, Some(root)),
+                    Mutation::SetF32 {
+                        node_id: root.raw(),
+                        prop: Prop::Opacity,
+                        value: 0.8,
+                    },
+                ],
+            ))
+            .expect("initial scene");
+
+        assert_eq!(
+            scene.set_presentation_style(
+                root,
+                StyleProperty::Opacity,
+                ComputedStyleValue::F32(0.4),
+            ),
+            Some(true)
+        );
+        assert_eq!(scene.f32_prop(root, Prop::Opacity), Some(0.8));
+        assert_eq!(
+            scene.presentation_style_f32(root, StyleProperty::Opacity),
+            Some(0.4)
+        );
+        assert_eq!(
+            scene.presented_style_f32(root, StyleProperty::Opacity),
+            Some(0.4)
+        );
+        assert_eq!(
+            scene.set_presentation_style(
+                root,
+                StyleProperty::Opacity,
+                ComputedStyleValue::F32(f32::NAN),
+            ),
+            None
+        );
+        assert_eq!(
+            scene
+                .set_presentation_style(root, StyleProperty::Width, ComputedStyleValue::F32(10.0),),
+            None
+        );
+
+        scene
+            .set_presentation_style(
+                child,
+                StyleProperty::Transform,
+                ComputedStyleValue::TransformList(Arc::from([StyleTransformOperation::Matrix([
+                    1.0, 0.0, 0.0, 1.0, 12.0, 0.0,
+                ])])),
+            )
+            .expect("live child");
+        scene
+            .commit(batch(
+                2,
+                vec![Mutation::RemoveNode {
+                    node_id: child.raw(),
+                }],
+            ))
+            .expect("remove child");
+        assert!(
+            !scene
+                .presentation_styles
+                .keys()
+                .any(|(node, _)| *node == child)
+        );
+        assert_eq!(
+            scene.presentation_style_value(child, StyleProperty::Transform),
+            None
+        );
+        assert_eq!(
+            scene.presented_style_f32(root, StyleProperty::Opacity),
+            Some(0.4)
+        );
     }
 
     fn computed_width(width: f32) -> Vec<u8> {

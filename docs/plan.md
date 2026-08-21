@@ -651,7 +651,11 @@ M6 总出口命令为 `pnpm m6:check`，并继续链入 `pnpm m5:check`。门禁
 
 ### M7：Core 动画与虚拟轴泛化
 
-> 当前状态：**计划中**。M6 schema、状态样式和 View scroll contract 是硬前置。
+> 当前状态：**已完成（2026-08-21）**。ABI 15 的 immutable animation resource、
+> durable/presentation 分层、Core timeline、录制逻辑帧、实时 reduced-motion、x/y
+> virtualizer 与 ViewHandle 已落地。`pnpm m7:check` 串联 M6、协议、native/WASM 差分、
+> 500 动画性能/内存预算及 Core WASM 体积门禁；三 transport 与 200ms stall 由浏览器
+> E2E 验证。layout animation 仍未开放。
 
 目标：让 transition/keyframes 与虚拟滚动都由 Core 渲染时钟推进，并把现有只沿 Y 的
 virtualizer 泛化为显式 x/y 主轴。

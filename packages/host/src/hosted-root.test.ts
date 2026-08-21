@@ -36,6 +36,57 @@ describe("createHostedCanvasRoot", () => {
     expect(onModeChange).toHaveBeenCalledWith("main-thread", expect.any(Object));
   });
 
+  it("tracks live prefers-reduced-motion changes and detaches on close", async () => {
+    installCanvasGlobal();
+    let changeListener: ((event: MediaQueryListEvent) => void) | undefined;
+    const removeEventListener = vi.fn(
+      (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+        if (changeListener === listener) changeListener = undefined;
+      },
+    );
+    vi.stubGlobal("matchMedia", () => ({
+      addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+        changeListener = listener;
+      },
+      matches: true,
+      media: "(prefers-reduced-motion: reduce)",
+      onchange: null,
+      removeEventListener,
+    }));
+    const core = fakeCore();
+    const root = await createHostedCanvasRoot(new FakeCanvas() as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      reducedMotion: "auto",
+      transport: { pageWorkerEnabled: false },
+    });
+    expect(core.reducedMotion).toEqual([true]);
+    root.setReducedMotion(false);
+    expect(core.reducedMotion).toEqual([true, false]);
+    changeListener?.({ matches: true } as MediaQueryListEvent);
+    expect(core.reducedMotion).toEqual([true, false, true]);
+    await root.close();
+    expect(removeEventListener).toHaveBeenCalledOnce();
+    expect(changeListener).toBeUndefined();
+  });
+
+  it("propagates explicit reduced-motion changes over the active Worker protocol", async () => {
+    installCanvasGlobal();
+    const worker = readyWorker();
+    const root = await createHostedCanvasRoot(new FakeCanvas() as unknown as HTMLCanvasElement, {
+      capabilities: { ...allCapabilities(), crossOriginIsolated: false },
+      clockAnchorDriver: null,
+      reducedMotion: false,
+      workerFactory: () => worker as unknown as Worker,
+    });
+    root.setReducedMotion(true);
+    expect(worker.posts.at(-1)).toMatchObject({
+      kind: "pingo:reduced-motion",
+      reduced: true,
+    });
+    await root.close();
+  });
+
   it("encodes high-level scroll samples with monotonic Input Stream sequences", async () => {
     installCanvasGlobal();
     const core = fakeCore();
@@ -886,6 +937,7 @@ class FakeCanvas {
 interface FakeCore extends CoreClient {
   readonly commits: Uint8Array[];
   readonly inputs: Uint8Array[];
+  readonly reducedMotion: boolean[];
   freed: boolean;
 }
 
@@ -917,6 +969,7 @@ function editingGeometry(nodeId: number): Uint32Array {
 function fakeCore(): FakeCore {
   const commits: Uint8Array[] = [];
   const inputs: Uint8Array[] = [];
+  const reducedMotion: boolean[] = [];
   return {
     commit: (bytes) => {
       commits.push(bytes.slice());
@@ -928,6 +981,11 @@ function fakeCore(): FakeCore {
       return undefined;
     },
     inputs,
+    reducedMotion,
+    set_reduced_motion(value) {
+      reducedMotion.push(value);
+      return undefined;
+    },
     free() {
       this.freed = true;
     },

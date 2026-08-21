@@ -354,8 +354,10 @@ offset、composition、滚动采样或路由校验失败都回滚整个批次。
 Mutation/Input 的线上复现使用版本化 Replay Recording（magic `DOPR`）。记录封套沿用
 16 字节 header；每条记录为
 `[kind:u8, flags:u8, reserved:u16, payload_bytes:u32, payload...]`，payload 必须是完整且
-可独立验证的 `DOPM` 或 `DOPI` 流。解码器在返回第一条记录前递归验证全部记录，保证
-headless 回放不会消费半份损坏归档。录制入口必须显式声明数据为 `recordable` 或
+可独立验证的 `DOPM`、`DOPI`、`DOPT` 流，或固定宽度的 Core 逻辑帧微秒增量。帧增量
+把 animation/scroll 使用的可注入时钟纳入同一观察顺序；解码器在返回第一条记录前递归
+验证全部记录，保证 headless 回放不会消费半份损坏归档。二进制业务数据的录制入口必须
+显式声明数据为 `recordable` 或
 `sensitive`；密码与其他敏感流直接跳过，不能依赖日志侧事后脱敏。
 
 成功帧另有 schema 生成的 versioned `u32` 诊断布局，包含各脏域节点数、Scene 节点数、

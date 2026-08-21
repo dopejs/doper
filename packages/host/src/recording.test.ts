@@ -20,6 +20,7 @@ describe("binary replay recording", () => {
       records: [
         { type: "mutation", bytes: mutation },
         { type: "systemTextMetrics", bytes: metrics },
+        { type: "animationFrame", elapsedMicros: 16_667n },
         { type: "input", bytes: input },
       ],
     });
@@ -28,6 +29,7 @@ describe("binary replay recording", () => {
       records: [
         { type: "mutation", bytes: mutation },
         { type: "systemTextMetrics", bytes: metrics },
+        { type: "animationFrame", elapsedMicros: 16_667n },
         { type: "input", bytes: input },
       ],
     });
@@ -36,10 +38,12 @@ describe("binary replay recording", () => {
       mutation: (nested) => events.push(`mutation:${String(nested.byteLength)}`),
       input: (nested) => events.push(`input:${String(nested.byteLength)}`),
       systemTextMetrics: (nested) => events.push(`metrics:${String(nested.byteLength)}`),
+      animationFrame: (elapsed) => events.push(`frame:${String(elapsed)}`),
     });
     expect(events).toEqual([
       `mutation:${String(mutation.byteLength)}`,
       `metrics:${String(metrics.byteLength)}`,
+      "frame:16667",
       `input:${String(input.byteLength)}`,
     ]);
   });
@@ -52,7 +56,12 @@ describe("binary replay recording", () => {
 
     const handler = vi.fn((nested: Uint8Array) => nested.fill(0));
     const archive = recorder.export();
-    replayRecording(archive, { mutation: handler, input: vi.fn(), systemTextMetrics: vi.fn() });
+    replayRecording(archive, {
+      mutation: handler,
+      input: vi.fn(),
+      systemTextMetrics: vi.fn(),
+      animationFrame: vi.fn(),
+    });
     expect(handler).toHaveBeenCalledOnce();
     expect(() => decodeReplayRecording(archive)).not.toThrow();
   });
@@ -66,7 +75,8 @@ describe("binary replay recording", () => {
     ).toThrow(/classification/u);
     expect(recorder.size).toBe(0);
     expect(recorder.captureInput(inputBytes(), "recordable")).toBe(true);
-    expect(recorder.size).toBe(1);
+    expect(recorder.captureAnimationFrame(8_333n)).toBe(true);
+    expect(recorder.size).toBe(2);
     recorder.clear();
     expect(decodeReplayRecording(recorder.export()).records).toEqual([]);
   });

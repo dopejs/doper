@@ -323,6 +323,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
             validateAffine(action.bytes);
             break;
           case ResourceKind.ComputedStyle:
+          case ResourceKind.Animation:
             // Core validated and consumed this immutable resource before the
             // Host transaction is installed. Canvas never reads its payload,
             // but the registry must retain its kind so a later release stays
@@ -358,6 +359,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
               return images.delete(action.id);
             case ResourceKind.Affine:
             case ResourceKind.ComputedStyle:
+            case ResourceKind.Animation:
               return true;
             default:
               return false;

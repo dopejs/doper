@@ -310,7 +310,11 @@ fn build_world_geometry(
             .and_then(|parent| child_spaces.get(parent).copied())
             .unwrap_or(Affine::IDENTITY);
         let mut world = parent_space.multiply(Affine::translation(offset.x, offset.y));
-        if let Some(resource_id) = scene.ref_prop(node, Prop::Transform) {
+        if let Some(transform) = scene.presentation_style_transform(node) {
+            if !transform.is_empty() {
+                world = world.multiply(affine_operations(transform, size.width, size.height));
+            }
+        } else if let Some(resource_id) = scene.ref_prop(node, Prop::Transform) {
             world = world.multiply(decode_affine(scene, resource_id)?);
         } else if let Some(transform) = style_affine(scene, node, size.width, size.height) {
             world = world.multiply(transform);
@@ -407,6 +411,18 @@ fn style_affine(scene: &Scene, node: NodeId, width: f32, height: f32) -> Option<
     let operations = scene
         .presented_style_transform(node)
         .filter(|value| !value.is_empty())?;
+    Some(style_affine_operations(
+        scene, node, operations, width, height,
+    ))
+}
+
+fn style_affine_operations(
+    scene: &Scene,
+    node: NodeId,
+    operations: &[StyleTransformOperation],
+    width: f32,
+    height: f32,
+) -> Affine {
     let origin = scene
         .presented_style_position(node, StyleProperty::TransformOrigin)
         .map_or([width * 0.5, height * 0.5], |position| {
@@ -415,7 +431,13 @@ fn style_affine(scene: &Scene, node: NodeId, width: f32, height: f32) -> Option<
                 resolve_box_length(position[1], height),
             ]
         });
-    let mut result = Affine::translation(origin[0], origin[1]);
+    Affine::translation(origin[0], origin[1])
+        .multiply(affine_operations(operations, width, height))
+        .multiply(Affine::translation(-origin[0], -origin[1]))
+}
+
+fn affine_operations(operations: &[StyleTransformOperation], width: f32, height: f32) -> Affine {
+    let mut result = Affine::IDENTITY;
     for operation in operations {
         let next = match *operation {
             StyleTransformOperation::Matrix(value) => Affine(value),
@@ -430,7 +452,7 @@ fn style_affine(scene: &Scene, node: NodeId, width: f32, height: f32) -> Option<
         };
         result = result.multiply(next);
     }
-    Some(result.multiply(Affine::translation(-origin[0], -origin[1])))
+    result
 }
 
 fn resolve_box_length(length: StyleLength, basis: f32) -> f32 {

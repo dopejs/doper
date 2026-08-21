@@ -31,6 +31,7 @@ JavaScript realm 内是幂等的：并发与后续调用共享第一次成功的
 | `mode`                                                    | 实际传输路径：`sab` / `post-message` / `main-thread` |
 | `beginScroll` / `scrollBy` / `endScroll` / `cancelScroll` | 直接操纵滚动                                         |
 | `setScrollVelocity(target, x, y)`                         | 由 Core 渲染时钟持续按逻辑像素/秒滚动；`0, 0` 停止   |
+| `setReducedMotion(value)`                                 | 实时覆盖 Core animation 的 reduced-motion 策略       |
 | `focusEditable` / `blurEditable`                          | 激活或结束原生编辑会话                               |
 | `updateEditingGeometry`                                   | 手动提供 IME 几何（通常自动完成）                    |
 | `transportMetrics()` / `inputTransportMetrics()`          | 传输与背压快照                                       |
@@ -62,7 +63,9 @@ UnstyledTextArea(props: UnstyledTextAreaProps)
 ```
 
 它们接受既有 direct props 与 `style`/`className`，分别映射到 `container`、`text`、`image`
-和共享的 `editableText` 原语。`View.virtual` 提供 M6 纵向兼容窗口；x/y 轴泛化属于 M7。
+和共享的 `editableText` 原语。`View.virtual.axis` 显式选择 `"x" | "y"` 主轴；ref 使用
+`ViewHandle`，可调用 `scrollTo`、`scrollBy`、`setScrollVelocity` 与 `capture`，旧 root 滚动
+方法继续兼容。
 已发布的 `TextArea` 仍是带边框、padding
 与 rows 布局的 widget，为避免 0.x 静默破坏暂不改名；无装饰基础组件因此使用
 `UnstyledTextArea` 兼容别名。
@@ -88,6 +91,21 @@ computed-value 元数据；失败时抛出带结构化 diagnostics 的 `StyleShe
 
 三个独立回滚选项为 `styleResolverEnabled`、`foundationComponentsEnabled` 与
 `interactionStylesEnabled`；关闭后旧 direct props、intrinsic、事件与 virtualList 仍可工作。
+
+## Core 动画（M7）
+
+`CommonProps.transition` 接受单条或每属性一条 `TransitionSpec`；`animation` 接受
+`KeyframeAnimationSpec`，首期属性严格限于 `opacity` 与六元素 affine `transform`。支持
+delay、duration、CSS easing/cubic-bezier/steps、iteration、direction、fill 与 playState；
+暂停/恢复保持逻辑进度，retarget 从当前 presentation value 继续。Host 默认跟随
+`prefers-reduced-motion` 的实时变化，也可用 `reducedMotion` 初值和
+`root.setReducedMotion()` 覆盖。
+
+`coreAnimationEnabled: false` 是独立回滚开关：Shell 仍提交 durable 最终值，但不定义
+animation resource。它不回退 ABI；旧 Core 必须通过正常 ABI 协商拒绝 ABI 15。
+
+CSS 文本中的 `transition-*` / `animation-*` longhand 尚未加入 subset；M7 公开的是结构化、
+类型安全的组件属性，Core 始终不解析 CSS。
 
 ## 响应式与 hooks
 

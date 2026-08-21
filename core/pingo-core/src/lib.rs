@@ -3,6 +3,7 @@
 
 //! Deterministic top-level orchestration for the pingo rendering Core.
 
+mod animation;
 mod editing;
 mod engine;
 mod error;

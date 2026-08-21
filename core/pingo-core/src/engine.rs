@@ -7,6 +7,12 @@ use pingo_abi::{
     CaretDirection, CaretGranularity, EDITING_GEOMETRY_CHARACTER_WORDS,
     EDITING_GEOMETRY_HEADER_WORDS, EDITING_GEOMETRY_RECT_WORDS, EDITING_GEOMETRY_VERSION,
     EVENT_FLAG_PRECISE_WHEEL, EventTransactionBatch, EventTransactionRecord,
+    FRAME_DIAGNOSTICS_ANIMATION_ACTIVE_INDEX, FRAME_DIAGNOSTICS_ANIMATION_CANCELS_INDEX,
+    FRAME_DIAGNOSTICS_ANIMATION_LAYOUT_NODES_INDEX, FRAME_DIAGNOSTICS_ANIMATION_PHASE_ACTIVE_INDEX,
+    FRAME_DIAGNOSTICS_ANIMATION_PHASE_AFTER_INDEX, FRAME_DIAGNOSTICS_ANIMATION_PHASE_BEFORE_INDEX,
+    FRAME_DIAGNOSTICS_ANIMATION_PRESENTATION_CHANGES_INDEX,
+    FRAME_DIAGNOSTICS_ANIMATION_RETAINED_BYTES_INDEX, FRAME_DIAGNOSTICS_ANIMATION_RETARGETS_INDEX,
+    FRAME_DIAGNOSTICS_ANIMATION_SAMPLED_FRAMES_INDEX, FRAME_DIAGNOSTICS_ANIMATION_STARTS_INDEX,
     FRAME_DIAGNOSTICS_DIRTY_HIT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_LAYOUT_NODES_INDEX,
     FRAME_DIAGNOSTICS_DIRTY_PAINT_NODES_INDEX, FRAME_DIAGNOSTICS_DIRTY_PAINT_SELF_NODES_INDEX,
     FRAME_DIAGNOSTICS_DIRTY_SEMANTICS_NODES_INDEX, FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX,
@@ -35,6 +41,7 @@ use pingo_scroll::ScrollPlatform;
 
 use crate::{
     CoreError, CoreScrollMetrics, CoreTextMetrics,
+    animation::AnimationController,
     editing::{EditableConfiguration, EditingController},
     interaction::{InteractionCommand, InteractionController, PointerEventInput},
     scroll::{ScrollAdvance, ScrollController},
@@ -132,6 +139,28 @@ pub struct FrameDiagnostics {
     pub producer_abi_version: u32,
     /// Cumulative nodes whose Core-owned interaction mask changed.
     pub interaction_state_changes: u64,
+    /// Timelines that can change on a future logical clock tick.
+    pub animation_active: u64,
+    /// Configured timelines currently before their active interval.
+    pub animation_phase_before: u64,
+    /// Configured timelines currently inside their active interval.
+    pub animation_phase_active: u64,
+    /// Configured timelines currently after their active interval.
+    pub animation_phase_after: u64,
+    /// Cumulative transition/keyframe starts.
+    pub animation_starts: u64,
+    /// Cumulative transition retargets from current presentation.
+    pub animation_retargets: u64,
+    /// Cumulative timelines cancelled by configuration or lifecycle changes.
+    pub animation_cancels: u64,
+    /// Cumulative frames whose sampled presentation changed.
+    pub animation_sampled_frames: u64,
+    /// Presentation values changed by animation while producing this frame.
+    pub animation_presentation_changes: u64,
+    /// Layout nodes visited specifically for animation; always zero in M7.
+    pub animation_layout_nodes: u64,
+    /// Bounded estimated animation payload and controller bytes retained by Core.
+    pub animation_retained_bytes: u64,
 }
 
 impl FrameDiagnostics {
@@ -178,6 +207,25 @@ impl FrameDiagnostics {
         words[FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX] = self.producer_abi_version;
         words[FRAME_DIAGNOSTICS_INTERACTION_STATE_CHANGES_INDEX] =
             count_u64_word(self.interaction_state_changes);
+        words[FRAME_DIAGNOSTICS_ANIMATION_ACTIVE_INDEX] = count_u64_word(self.animation_active);
+        words[FRAME_DIAGNOSTICS_ANIMATION_PHASE_BEFORE_INDEX] =
+            count_u64_word(self.animation_phase_before);
+        words[FRAME_DIAGNOSTICS_ANIMATION_PHASE_ACTIVE_INDEX] =
+            count_u64_word(self.animation_phase_active);
+        words[FRAME_DIAGNOSTICS_ANIMATION_PHASE_AFTER_INDEX] =
+            count_u64_word(self.animation_phase_after);
+        words[FRAME_DIAGNOSTICS_ANIMATION_STARTS_INDEX] = count_u64_word(self.animation_starts);
+        words[FRAME_DIAGNOSTICS_ANIMATION_RETARGETS_INDEX] =
+            count_u64_word(self.animation_retargets);
+        words[FRAME_DIAGNOSTICS_ANIMATION_CANCELS_INDEX] = count_u64_word(self.animation_cancels);
+        words[FRAME_DIAGNOSTICS_ANIMATION_SAMPLED_FRAMES_INDEX] =
+            count_u64_word(self.animation_sampled_frames);
+        words[FRAME_DIAGNOSTICS_ANIMATION_PRESENTATION_CHANGES_INDEX] =
+            count_u64_word(self.animation_presentation_changes);
+        words[FRAME_DIAGNOSTICS_ANIMATION_LAYOUT_NODES_INDEX] =
+            count_u64_word(self.animation_layout_nodes);
+        words[FRAME_DIAGNOSTICS_ANIMATION_RETAINED_BYTES_INDEX] =
+            count_u64_word(self.animation_retained_bytes);
         words
     }
 }
@@ -201,6 +249,7 @@ pub struct CoreEngine {
     layout: LayoutEngine,
     paint: PaintEngine,
     scroll: ScrollController,
+    animation: AnimationController,
     text: CoreTextSystem,
     editing: EditingController,
     hit: HitIndex,
@@ -611,6 +660,7 @@ impl CoreEngine {
             layout: LayoutEngine::new(),
             paint: PaintEngine::new(),
             scroll: ScrollController::for_platform(platform),
+            animation: AnimationController::default(),
             text: CoreTextSystem::default(),
             editing: EditingController::default(),
             hit: HitIndex::default(),
@@ -743,6 +793,7 @@ impl CoreEngine {
             &mut geometry.changed,
             &mut geometry.visited,
         )?;
+        self.synchronize_animations()?;
         let text_changed = self.text.has_staged_changes();
         let output =
             self.paint_frame(frame_seq, &geometry.changed, geometry.visited, text_changed)?;
@@ -752,6 +803,44 @@ impl CoreEngine {
         self.metrics.committed_frames += 1;
         self.last_frame_seq = Some(frame_seq);
         Ok(output)
+    }
+
+    fn synchronize_animations(&mut self) -> Result<(), CoreError> {
+        self.animation.begin_frame();
+        if let Err(error) = self
+            .animation
+            .synchronize(&mut self.scene, self.layout.snapshot())
+        {
+            return self.poison(error);
+        }
+        if let Err(error) = self.animation.advance(&mut self.scene, 0.0) {
+            return self.poison(error);
+        }
+        Ok(())
+    }
+
+    /// Overrides the host reduced-motion preference for deterministic testing
+    /// and accessibility changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a paint failure after the first committed frame, or a poisoned
+    /// instance error after a prior derived-state failure.
+    pub fn set_reduced_motion(&mut self, reduced: bool) -> Result<Option<FrameOutput>, CoreError> {
+        if self.poisoned {
+            return Err(CoreError::Poisoned);
+        }
+        self.animation.begin_frame();
+        self.animation.set_reduced_motion(reduced);
+        let (changed, _) = self.animation.advance(&mut self.scene, 0.0)?;
+        if !changed {
+            return Ok(None);
+        }
+        let frame_seq = self
+            .last_frame_seq
+            .ok_or(CoreError::MissingCommittedFrame)?;
+        self.paint_frame(frame_seq, &BitSet::with_len(self.scene.len()), 0, false)
+            .map(Some)
     }
 
     fn reconcile_interaction_after_commit(&mut self) -> Result<(), CoreError> {
@@ -1254,6 +1343,7 @@ impl CoreEngine {
         let mut candidate_scroll = self.scroll.clone();
         let mut candidate_gesture = self.pointer_gesture;
         let mut candidate_interaction = self.interaction.clone();
+        let mut candidate_animation = self.animation.clone();
         let mut scroll_changed = false;
         let mut state_changes = 0_usize;
         let mut records = Vec::with_capacity(event_commands.len());
@@ -1306,11 +1396,21 @@ impl CoreEngine {
         if let Err(error) = candidate_scroll.plan_virtual_frames() {
             return self.poison(error);
         }
+        candidate_animation.begin_frame();
+        if let Err(error) =
+            candidate_animation.synchronize(&mut candidate_scene, self.layout.snapshot())
+        {
+            return self.poison(error);
+        }
+        if let Err(error) = candidate_animation.advance(&mut candidate_scene, 0.0) {
+            return self.poison(error);
+        }
         let interaction_render_changed = interaction_render_changed(&candidate_scene);
         self.scene = candidate_scene;
         self.scroll = candidate_scroll;
         self.pointer_gesture = candidate_gesture;
         self.interaction = candidate_interaction;
+        self.animation = candidate_animation;
         self.last_input_sequence = Some(frame_seq);
         self.metrics.accepted_input_batches = self.metrics.accepted_input_batches.saturating_add(1);
         self.metrics.interaction_state_changes = self
@@ -1538,7 +1638,13 @@ impl CoreEngine {
         if self.text.has_pending_resources() {
             return Err(CoreError::GlyphResourcesNotDrained);
         }
+        self.animation.begin_frame();
         let outcome = self.scroll.advance(&mut self.scene, elapsed_seconds)?;
+        let (animation_changed, _animation_active) =
+            match self.animation.advance(&mut self.scene, elapsed_seconds) {
+                Ok(outcome) => outcome,
+                Err(error) => return self.poison(error),
+            };
         if let Err(error) = self.scroll.plan_virtual_frames() {
             return self.poison(error);
         }
@@ -1551,7 +1657,7 @@ impl CoreEngine {
                 caret_changed = true;
             }
         }
-        if !outcome.changed && !caret_changed {
+        if !outcome.changed && !caret_changed && !animation_changed {
             return Ok(None);
         }
         let frame_seq = self
@@ -1939,6 +2045,7 @@ impl CoreEngine {
             Err(error) => return self.poison(CoreError::Paint(error)),
         };
         let paint_metrics = self.paint.metrics();
+        let animation_metrics = self.animation.metrics();
         let diagnostics = FrameDiagnostics {
             frame_seq,
             scene_nodes,
@@ -1963,6 +2070,17 @@ impl CoreEngine {
             skipped_instructions: self.metrics.skipped_instructions,
             producer_abi_version: self.metrics.producer_abi_version,
             interaction_state_changes: self.metrics.interaction_state_changes,
+            animation_active: animation_metrics.active,
+            animation_phase_before: animation_metrics.phase_before,
+            animation_phase_active: animation_metrics.phase_active,
+            animation_phase_after: animation_metrics.phase_after,
+            animation_starts: animation_metrics.started,
+            animation_retargets: animation_metrics.retargeted,
+            animation_cancels: animation_metrics.cancelled,
+            animation_sampled_frames: animation_metrics.sampled_frames,
+            animation_presentation_changes: animation_metrics.presentation_changes,
+            animation_layout_nodes: animation_metrics.layout_nodes,
+            animation_retained_bytes: animation_metrics.retained_bytes,
         };
         self.scene.clear_dirty();
         Ok(FrameOutput {
@@ -2381,12 +2499,12 @@ mod tests {
         SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
         SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET, SFNT_FONT_VERSION_OFFSET,
         STYLE_ALL_FEATURE_BITS, STYLE_COMPUTED_ENCODING_VARIANT, STYLE_COMPUTED_ENCODING_VERSION,
-        STYLE_VALUE_KEYWORD, StyleKeyword, StyleProperty, SystemTextMetric, SystemTextMetricBatch,
-        SystemTextMetricCommand, SystemTextMetricInstruction,
+        STYLE_VALUE_F32, STYLE_VALUE_KEYWORD, StyleKeyword, StyleProperty, SystemTextMetric,
+        SystemTextMetricBatch, SystemTextMetricCommand, SystemTextMetricInstruction,
     };
     use pingo_edit::{EditConfig, EditSession, Selection};
     use pingo_headless::HeadlessRenderer;
-    use pingo_paint::{SolidPaint, TextStyleResource};
+    use pingo_paint::{AffineResource, SolidPaint, TextStyleResource};
     use pingo_scene::NodeId;
 
     use super::CoreEngine;
@@ -2421,6 +2539,66 @@ mod tests {
         bytes[20..22].copy_from_slice(&4_u16.to_le_bytes());
         bytes[24..26].copy_from_slice(&(keyword as u16).to_le_bytes());
         bytes
+    }
+
+    fn computed_f32(property: StyleProperty, value: f32) -> Vec<u8> {
+        let mut bytes = vec![0_u8; 28];
+        bytes[0] = STYLE_COMPUTED_ENCODING_VERSION;
+        bytes[1] = STYLE_COMPUTED_ENCODING_VARIANT;
+        bytes[4..8].copy_from_slice(&STYLE_ALL_FEATURE_BITS.to_le_bytes());
+        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&12_u32.to_le_bytes());
+        bytes[16..18].copy_from_slice(&(property as u16).to_le_bytes());
+        bytes[19] = STYLE_VALUE_F32;
+        bytes[20..22].copy_from_slice(&4_u16.to_le_bytes());
+        bytes[24..28].copy_from_slice(&value.to_le_bytes());
+        bytes
+    }
+
+    fn opacity_transition_resource(duration_micros: u32) -> Vec<u8> {
+        let mut bytes = vec![0_u8; 36];
+        bytes[0] = 1;
+        bytes[1] = 1;
+        bytes[4..8].copy_from_slice(&36_u32.to_le_bytes());
+        bytes[8] = 1;
+        bytes[9] = 0;
+        bytes[12..16].copy_from_slice(&duration_micros.to_le_bytes());
+        bytes
+    }
+
+    fn opacity_keyframes_resource(duration_micros: u32) -> Vec<u8> {
+        let mut bytes = vec![0_u8; 64];
+        bytes[0] = 1;
+        bytes[2] = 1;
+        bytes[4..8].copy_from_slice(&64_u32.to_le_bytes());
+        bytes[8] = 1;
+        bytes[9] = 0;
+        bytes[11] = 1;
+        bytes[16..20].copy_from_slice(&duration_micros.to_le_bytes());
+        bytes[24..28].copy_from_slice(&1.0_f32.to_le_bytes());
+        bytes[28..30].copy_from_slice(&2_u16.to_le_bytes());
+        bytes[48..52].copy_from_slice(&0.0_f32.to_le_bytes());
+        bytes[52..56].copy_from_slice(&0.0_f32.to_le_bytes());
+        bytes[56..60].copy_from_slice(&1.0_f32.to_le_bytes());
+        bytes[60..64].copy_from_slice(&1.0_f32.to_le_bytes());
+        bytes
+    }
+
+    fn transform_transition_resource(duration_micros: u32) -> Vec<u8> {
+        let mut bytes = opacity_transition_resource(duration_micros);
+        bytes[8] = 2;
+        bytes
+    }
+
+    fn first_alpha(frame: &super::FrameOutput) -> Option<f32> {
+        DisplayList::decode(&frame.display_list)
+            .expect("display list")
+            .instructions
+            .iter()
+            .find_map(|instruction| match instruction.command {
+                DisplayCommand::Alpha(value) => Some(value),
+                _ => None,
+            })
     }
 
     fn painted_tree() -> Vec<u8> {
@@ -5193,6 +5371,501 @@ mod tests {
     }
 
     #[test]
+    fn keyframe_animation_uses_worker_time_and_stops_repainting_after_fill() {
+        let mut engine = CoreEngine::new(100.0, 100.0).expect("Core");
+        let initial = engine
+            .commit(&frame(
+                1,
+                vec![
+                    Mutation::CreateNode {
+                        node_id: id(0),
+                        kind: NodeKind::Root,
+                        parent: NULL_NODE_ID,
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(1),
+                        kind: NodeKind::Container,
+                        parent: id(0),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(1),
+                        prop: Prop::Width,
+                        value: 50.0,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(1),
+                        prop: Prop::Height,
+                        value: 50.0,
+                    },
+                    Mutation::DefineResource {
+                        resource_id: 20,
+                        kind: ResourceKind::Animation,
+                        bytes: opacity_keyframes_resource(1_000_000),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::Animation,
+                        resource_id: 20,
+                    },
+                ],
+            ))
+            .expect("initial animation frame");
+        assert_eq!(first_alpha(&initial), Some(0.0));
+        assert_eq!(initial.diagnostics.animation_active, 1);
+        assert_eq!(initial.diagnostics.animation_phase_active, 1);
+        assert_eq!(initial.diagnostics.animation_layout_nodes, 0);
+        assert!(initial.diagnostics.animation_retained_bytes > 0);
+        assert!(initial.diagnostics.animation_retained_bytes < 128 * 1024);
+
+        let middle = engine.advance(0.5).expect("advance").expect("middle frame");
+        assert_eq!(first_alpha(&middle), Some(0.5));
+        assert_eq!(middle.diagnostics.animation_active, 1);
+        assert_eq!(middle.diagnostics.layout_visited_nodes, 0);
+        let filled = engine.advance(0.5).expect("advance").expect("fill frame");
+        assert_eq!(first_alpha(&filled), Some(1.0));
+        assert_eq!(filled.diagnostics.animation_active, 0);
+        assert_eq!(filled.diagnostics.animation_phase_after, 1);
+        assert_eq!(filled.diagnostics.animation_layout_nodes, 0);
+        assert!(filled.diagnostics.animation_sampled_frames >= 3);
+        assert_eq!(engine.advance(0.1), Ok(None));
+        assert_eq!(engine.metrics().committed_frames, 1);
+    }
+
+    #[test]
+    fn keyframe_play_state_preserves_progress_across_pause_and_resume() {
+        let mut running = opacity_keyframes_resource(1_000_000);
+        let mut paused = running.clone();
+        paused[12] = 1;
+        let mut engine = CoreEngine::new(100.0, 100.0).expect("Core");
+        engine
+            .commit(&frame(
+                1,
+                vec![
+                    Mutation::CreateNode {
+                        node_id: id(0),
+                        kind: NodeKind::Root,
+                        parent: NULL_NODE_ID,
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(1),
+                        kind: NodeKind::Container,
+                        parent: id(0),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::DefineResource {
+                        resource_id: 20,
+                        kind: ResourceKind::Animation,
+                        bytes: running.clone(),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::Animation,
+                        resource_id: 20,
+                    },
+                ],
+            ))
+            .expect("running");
+        assert_eq!(
+            first_alpha(&engine.advance(0.4).expect("tick").expect("frame")),
+            Some(0.4)
+        );
+        let paused_frame = engine
+            .commit(&frame(
+                2,
+                vec![
+                    Mutation::DefineResource {
+                        resource_id: 21,
+                        kind: ResourceKind::Animation,
+                        bytes: paused,
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::Animation,
+                        resource_id: 21,
+                    },
+                ],
+            ))
+            .expect("pause");
+        assert_eq!(first_alpha(&paused_frame), Some(0.4));
+        assert_eq!(paused_frame.diagnostics.animation_active, 0);
+        assert_eq!(engine.advance(0.4), Ok(None));
+
+        let resumed_frame = engine
+            .commit(&frame(
+                3,
+                vec![
+                    Mutation::DefineResource {
+                        resource_id: 22,
+                        kind: ResourceKind::Animation,
+                        bytes: std::mem::take(&mut running),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::Animation,
+                        resource_id: 22,
+                    },
+                ],
+            ))
+            .expect("resume");
+        assert_eq!(first_alpha(&resumed_frame), Some(0.4));
+        assert_eq!(resumed_frame.diagnostics.animation_active, 1);
+        assert_eq!(resumed_frame.diagnostics.animation_starts, 1);
+        assert_eq!(
+            first_alpha(&engine.advance(0.6).expect("tick").expect("final")),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn transition_retargets_from_current_presentation_and_reduced_motion_finishes() {
+        let mut engine = CoreEngine::new(100.0, 100.0).expect("Core");
+        engine
+            .commit(&frame(
+                1,
+                vec![
+                    Mutation::CreateNode {
+                        node_id: id(0),
+                        kind: NodeKind::Root,
+                        parent: NULL_NODE_ID,
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(1),
+                        kind: NodeKind::Container,
+                        parent: id(0),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::DefineResource {
+                        resource_id: 20,
+                        kind: ResourceKind::Animation,
+                        bytes: opacity_transition_resource(1_000_000),
+                    },
+                    Mutation::DefineResource {
+                        resource_id: 21,
+                        kind: ResourceKind::ComputedStyle,
+                        bytes: computed_f32(StyleProperty::Opacity, 0.0),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::Animation,
+                        resource_id: 20,
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::ComputedStyle,
+                        resource_id: 21,
+                    },
+                ],
+            ))
+            .expect("initial");
+        engine
+            .commit(&frame(
+                2,
+                vec![
+                    Mutation::DefineResource {
+                        resource_id: 22,
+                        kind: ResourceKind::ComputedStyle,
+                        bytes: computed_f32(StyleProperty::Opacity, 1.0),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::ComputedStyle,
+                        resource_id: 22,
+                    },
+                ],
+            ))
+            .expect("target one");
+        let started = engine.advance(0.0).expect("zero tick should be valid");
+        assert_eq!(started, None);
+        assert_eq!(
+            first_alpha(&engine.advance(0.5).expect("advance").expect("half")),
+            Some(0.5)
+        );
+        let retarget = engine
+            .commit(&frame(
+                3,
+                vec![
+                    Mutation::DefineResource {
+                        resource_id: 23,
+                        kind: ResourceKind::ComputedStyle,
+                        bytes: computed_f32(StyleProperty::Opacity, 0.25),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::ComputedStyle,
+                        resource_id: 23,
+                    },
+                ],
+            ))
+            .expect("retarget");
+        assert_eq!(first_alpha(&retarget), Some(0.5));
+        assert_eq!(retarget.diagnostics.animation_retargets, 1);
+        assert_eq!(
+            first_alpha(
+                &engine
+                    .advance(0.5)
+                    .expect("advance")
+                    .expect("retarget half")
+            ),
+            Some(0.375)
+        );
+        let reduced = engine
+            .set_reduced_motion(true)
+            .expect("reduce")
+            .expect("final frame");
+        assert_eq!(first_alpha(&reduced), Some(0.25));
+        assert_eq!(engine.advance(1.0), Ok(None));
+    }
+
+    #[test]
+    fn direct_opacity_targets_animate_without_layout_work() {
+        let mut engine = CoreEngine::new(100.0, 100.0).expect("Core");
+        engine
+            .commit(&frame(
+                1,
+                vec![
+                    Mutation::CreateNode {
+                        node_id: id(0),
+                        kind: NodeKind::Root,
+                        parent: NULL_NODE_ID,
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(1),
+                        kind: NodeKind::Container,
+                        parent: id(0),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(1),
+                        prop: Prop::Width,
+                        value: 20.0,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(1),
+                        prop: Prop::Height,
+                        value: 20.0,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(1),
+                        prop: Prop::Opacity,
+                        value: 0.0,
+                    },
+                    Mutation::DefineResource {
+                        resource_id: 20,
+                        kind: ResourceKind::Animation,
+                        bytes: opacity_transition_resource(1_000_000),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::Animation,
+                        resource_id: 20,
+                    },
+                ],
+            ))
+            .expect("initial opacity");
+        engine
+            .commit(&frame(
+                2,
+                vec![Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Opacity,
+                    value: 1.0,
+                }],
+            ))
+            .expect("opacity target");
+        let opacity_half = engine
+            .advance(0.5)
+            .expect("advance")
+            .expect("opacity frame");
+        assert_eq!(first_alpha(&opacity_half), Some(0.5));
+        assert_eq!(opacity_half.diagnostics.layout_visited_nodes, 0);
+        assert_eq!(opacity_half.diagnostics.animation_layout_nodes, 0);
+    }
+
+    #[test]
+    fn direct_transform_targets_update_paint_and_hit_without_layout_work() {
+        let mut transform_engine = CoreEngine::new(100.0, 100.0).expect("Core");
+        let identity = AffineResource {
+            matrix: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        }
+        .encode()
+        .to_vec();
+        let scaled = AffineResource {
+            matrix: [2.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+        }
+        .encode()
+        .to_vec();
+        transform_engine
+            .commit(&frame(
+                1,
+                vec![
+                    Mutation::CreateNode {
+                        node_id: id(0),
+                        kind: NodeKind::Root,
+                        parent: NULL_NODE_ID,
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(1),
+                        kind: NodeKind::Container,
+                        parent: id(0),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(1),
+                        prop: Prop::Width,
+                        value: 20.0,
+                    },
+                    Mutation::SetF32 {
+                        node_id: id(1),
+                        prop: Prop::Height,
+                        value: 20.0,
+                    },
+                    Mutation::DefineResource {
+                        resource_id: 30,
+                        kind: ResourceKind::Affine,
+                        bytes: identity,
+                    },
+                    Mutation::DefineResource {
+                        resource_id: 31,
+                        kind: ResourceKind::Affine,
+                        bytes: scaled,
+                    },
+                    Mutation::DefineResource {
+                        resource_id: 32,
+                        kind: ResourceKind::Animation,
+                        bytes: transform_transition_resource(1_000_000),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::Transform,
+                        resource_id: 30,
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::Animation,
+                        resource_id: 32,
+                    },
+                ],
+            ))
+            .expect("initial transform");
+        transform_engine
+            .commit(&frame(
+                2,
+                vec![Mutation::SetRef {
+                    node_id: id(1),
+                    prop: Prop::Transform,
+                    resource_id: 31,
+                }],
+            ))
+            .expect("transform target");
+        let transform_half = transform_engine
+            .advance(0.5)
+            .expect("advance")
+            .expect("transform frame");
+        let commands = DisplayList::decode(&transform_half.display_list)
+            .expect("display list")
+            .instructions;
+        assert!(commands.iter().any(|instruction| {
+            matches!(
+                instruction.command,
+                DisplayCommand::Transform([x, 0.0, 0.0, y, 0.0, 0.0])
+                    if (x - 1.5).abs() < 0.001 && (y - 1.5).abs() < 0.001
+            )
+        }));
+        assert_eq!(transform_half.diagnostics.layout_visited_nodes, 0);
+        assert_eq!(
+            transform_engine
+                .hit
+                .hit(
+                    transform_engine.scene(),
+                    pingo_hit::HitPoint { x: 28.0, y: 10.0 },
+                )
+                .map(|hit| hit.target.raw()),
+            Some(id(1))
+        );
+    }
+
+    #[test]
+    fn display_none_cancels_animation_and_restore_restarts_from_durable_state() {
+        let mut engine = CoreEngine::new(100.0, 100.0).expect("Core");
+        engine
+            .commit(&frame(
+                1,
+                vec![
+                    Mutation::CreateNode {
+                        node_id: id(0),
+                        kind: NodeKind::Root,
+                        parent: NULL_NODE_ID,
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::CreateNode {
+                        node_id: id(1),
+                        kind: NodeKind::Container,
+                        parent: id(0),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                    Mutation::DefineResource {
+                        resource_id: 20,
+                        kind: ResourceKind::Animation,
+                        bytes: opacity_keyframes_resource(1_000_000),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::Animation,
+                        resource_id: 20,
+                    },
+                ],
+            ))
+            .expect("initial");
+        engine.advance(0.25).expect("advance").expect("frame");
+        let hidden = engine
+            .commit(&frame(
+                2,
+                vec![
+                    Mutation::DefineResource {
+                        resource_id: 21,
+                        kind: ResourceKind::ComputedStyle,
+                        bytes: computed_keyword(StyleProperty::Display, StyleKeyword::None),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::ComputedStyle,
+                        resource_id: 21,
+                    },
+                ],
+            ))
+            .expect("hide");
+        assert_eq!(hidden.diagnostics.animation_active, 0);
+        assert!(hidden.diagnostics.animation_cancels >= 1);
+        assert_eq!(engine.advance(0.25), Ok(None));
+
+        let restored = engine
+            .commit(&frame(
+                3,
+                vec![
+                    Mutation::DefineResource {
+                        resource_id: 22,
+                        kind: ResourceKind::ComputedStyle,
+                        bytes: computed_keyword(StyleProperty::Display, StyleKeyword::Flex),
+                    },
+                    Mutation::SetRef {
+                        node_id: id(1),
+                        prop: Prop::ComputedStyle,
+                        resource_id: 22,
+                    },
+                ],
+            ))
+            .expect("restore");
+        assert_eq!(first_alpha(&restored), Some(0.0));
+        assert_eq!(restored.diagnostics.animation_active, 1);
+    }
+
+    #[test]
     fn constant_scroll_velocity_advances_until_core_is_told_to_stop() {
         let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
         engine.commit(&scroll_tree()).expect("initial frame");
@@ -6053,6 +6726,9 @@ mod tests {
             records: vec![
                 ReplayRecord::Mutation(painted_tree()),
                 ReplayRecord::Input(input),
+                ReplayRecord::AnimationFrame {
+                    elapsed_micros: 16_667,
+                },
                 ReplayRecord::Mutation(frame(3, Vec::new())),
             ],
         }
@@ -6086,6 +6762,14 @@ mod tests {
                         let _ = engine
                             .set_system_text_metrics(&bytes)
                             .expect("replay system text metrics");
+                    }
+                    ReplayRecord::AnimationFrame { elapsed_micros } => {
+                        if let Some(frame) = engine
+                            .advance(std::time::Duration::from_micros(elapsed_micros).as_secs_f64())
+                            .expect("replay logical frame")
+                        {
+                            picture_hashes.push(frame.diagnostics.picture_hash);
+                        }
                     }
                 }
             }

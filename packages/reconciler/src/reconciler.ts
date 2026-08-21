@@ -36,6 +36,7 @@ import {
 } from "@dopejs/pingo-style";
 
 import { MAX_VIRTUAL_ITEMS, NodeKind, Prop, ResourceKind, VirtualAxis } from "./generated";
+import { encodeAnimationResource } from "./animation-resource";
 import { encodeComputedStyleResource } from "./computed-style-resource";
 import { encodeMutationBatch, NULL_NODE_ID, type Mutation } from "./mutation-stream";
 import { NodeIdAllocator } from "./node-id";
@@ -67,6 +68,8 @@ export interface RootOptions {
   readonly interactionStylesEnabled?: boolean;
   /** Independent rollback switch for the M6 foundation component facade. Defaults to enabled. */
   readonly foundationComponentsEnabled?: boolean;
+  /** Independent rollback switch for Core presentation animation. Defaults to enabled. */
+  readonly coreAnimationEnabled?: boolean;
   /** Receives deterministic per-node style diagnostics before commit. */
   readonly onStyleDiagnostics?: (
     diagnostics: readonly StyleDiagnostic[],
@@ -235,6 +238,7 @@ interface NormalizedHostProps {
   readonly eventHandlers: Map<EventHandlerKey, PingoEventHandler>;
   readonly computedStyle: ComputedStyle | undefined;
   readonly computedStyleBytes: Uint8Array | undefined;
+  readonly animationBytes: Uint8Array | undefined;
   readonly styleDiagnostics: readonly StyleDiagnostic[];
 }
 
@@ -269,6 +273,7 @@ interface CallbackEntry {
 
 const COMMON_KEYS = new Set([
   "backgroundColor",
+  "animation",
   "children",
   "className",
   "direction",
@@ -320,6 +325,7 @@ const COMMON_KEYS = new Set([
   "semanticValue",
   "style",
   "transform",
+  "transition",
   "width",
 ]);
 const TEXT_KEYS = new Set([
@@ -360,6 +366,7 @@ const VIRTUAL_ITEM_INDEX = Symbol("pingo.virtualItemIndex");
 const FOUNDATION_COMPONENT = Symbol.for("dopejs.pingo.foundation-component");
 
 interface StyleResolutionContext {
+  readonly coreAnimationEnabled: boolean;
   readonly enabled: boolean;
   readonly foundationComponentsEnabled: boolean;
   readonly interactionStylesEnabled: boolean;
@@ -382,6 +389,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
   readonly #styleResolverEnabled: boolean;
   readonly #interactionStylesEnabled: boolean;
   readonly #foundationComponentsEnabled: boolean;
+  readonly #coreAnimationEnabled: boolean;
   readonly #onStyleDiagnostics:
     | ((
         diagnostics: readonly StyleDiagnostic[],
@@ -425,6 +433,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     this.#styleResolverEnabled = options.styleResolverEnabled ?? true;
     this.#interactionStylesEnabled = options.interactionStylesEnabled ?? true;
     this.#foundationComponentsEnabled = options.foundationComponentsEnabled ?? true;
+    this.#coreAnimationEnabled = options.coreAnimationEnabled ?? true;
     this.#onStyleDiagnostics = options.onStyleDiagnostics;
     this.#onInteractionRequest = options.onInteractionRequest;
   }
@@ -917,6 +926,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
   ): HostInstance {
     const nodeId = this.#allocator.allocate();
     const normalized = normalizeHostProps(type, props, {
+      coreAnimationEnabled: this.#coreAnimationEnabled,
       enabled: this.#styleResolverEnabled,
       foundationComponentsEnabled: this.#foundationComponentsEnabled,
       interactionStylesEnabled: this.#interactionStylesEnabled,
@@ -993,6 +1003,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     const props =
       typeof descriptor === "string" ? ({ value: descriptor } as const) : descriptor.props;
     const normalized = normalizeHostProps(instance.type, props, {
+      coreAnimationEnabled: this.#coreAnimationEnabled,
       enabled: this.#styleResolverEnabled,
       foundationComponentsEnabled: this.#foundationComponentsEnabled,
       interactionStylesEnabled: this.#interactionStylesEnabled,
@@ -1094,6 +1105,13 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       ResourceKind.ComputedStyle,
       next.computedStyleBytes,
     );
+    this.replaceResourceProp(
+      instance,
+      "animation",
+      Prop.Animation,
+      ResourceKind.Animation,
+      next.animationBytes,
+    );
     const inheritedStyleChanged = !equalComputedStyles(instance.computedStyle, next.computedStyle);
     instance.computedStyle = next.computedStyle;
     instance.computedStyleBytes = next.computedStyleBytes;
@@ -1190,6 +1208,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
         continue;
       }
       const normalized = normalizeHostProps(instance.type, instance.props, {
+        coreAnimationEnabled: this.#coreAnimationEnabled,
         enabled: this.#styleResolverEnabled,
         foundationComponentsEnabled: this.#foundationComponentsEnabled,
         interactionStylesEnabled: this.#interactionStylesEnabled,
@@ -1952,6 +1971,9 @@ function normalizeHostProps(
     computedStyle: styleResolution?.style,
     computedStyleBytes:
       styleResolution === undefined ? undefined : encodeComputedStyleResource(styleResolution),
+    animationBytes: styleContext.coreAnimationEnabled
+      ? encodeAnimationResource(common.transition, common.animation)
+      : undefined,
     styleDiagnostics: styleResolution?.diagnostics ?? [],
   };
 }

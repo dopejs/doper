@@ -1,6 +1,6 @@
 # pingo 错误诊断与事故上报
 
-> 状态：M6。面向线上事故排查与灰度看板接入。
+> 状态：M7。面向线上事故排查与灰度看板接入。
 
 ## 1. 身份信息
 
@@ -43,10 +43,15 @@ await verifyWasmIntegrity(await response.arrayBuffer(), manifest);
 - `onFrame.style` / `root.styleMetrics()`：Shell style resolution、无变化 cache hit、diagnostic
   与预编译 interaction variant 累计数。
 - `onFrame.core.interactionStateChanges`：Core hover/active/focus/focus-visible 状态变化累计数。
+- `onFrame.core.animation*`：active 与 before/active/after phase、start/retarget/cancel、
+  sampled frame、presentation change、layout node 与 retained-byte 预算。M7 的
+  `animationLayoutNodes` 必须为 0。
 - `transportMetrics()` / `inputTransportMetrics()`：传输模式与背压。
 - `onSemantics` / `dirtySemanticsNodes`：语义树状态。
-- `DOPR` 录制：Mutation/Input 原序录制，可脱离浏览器确定性回放
+- `DOPR` 录制：Mutation/Input/system-font metric/逻辑帧微秒增量按原序录制，可脱离浏览器
+  确定性回放 animation 与 scroll
   （敏感编辑流显式跳过，密码永不入档）。
 
 样式事故可分别关闭 `styleResolverEnabled`、`foundationComponentsEnabled` 或
-`interactionStylesEnabled`。这些开关不改变 ABI，也不删除旧 intrinsic/direct prop 路径。
+`interactionStylesEnabled`；动画可关闭 `coreAnimationEnabled`。这些开关不删除旧
+intrinsic/direct prop 路径，动画关闭后 durable 最终值仍会提交。

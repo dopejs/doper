@@ -43,9 +43,16 @@ describe("RenderWorkerClient", () => {
       height: 100,
       mode: "post-message",
       rasterCache: true,
+      reducedMotion: false,
       width: 200,
     });
     expect(client.state).toBe("ready");
+    client.postReducedMotion(true);
+    expect(worker.posts.at(-1)).toEqual({
+      kind: "pingo:reduced-motion",
+      reduced: true,
+      sessionId: 9,
+    });
     worker.emitMessage({
       kind: "pingo:frame",
       report: {
@@ -138,6 +145,7 @@ describe("RenderWorkerClient", () => {
         height: 1,
         mode: "sab",
         rasterCache: true,
+        reducedMotion: false,
         width: 1,
       }),
     ).rejects.toThrow(/ring buffer/u);
@@ -163,6 +171,7 @@ describe("RenderWorkerClient", () => {
         height: 1,
         mode: "sab",
         rasterCache: true,
+        reducedMotion: false,
         inputRingBuffer: new SharedArrayBuffer(64),
         ringBuffer: new SharedArrayBuffer(64),
         width: 1,

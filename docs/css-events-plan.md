@@ -1,6 +1,7 @@
 # CSS 子集、原生事件与基础组件演进方案
 
-> 状态：M6 已完成（2026-08-20）；M7 animation/virtual axis 与 M8 media/keyboard 仍按计划延后
+> 状态：M6 已完成（2026-08-20），M7 animation/virtual axis 已完成（2026-08-21）；
+> M8 media/keyboard 仍按计划延后
 > 日期：2026-08-20
 > 关联决策：[`ADR-0007`](./adr/0007-css-events-and-foundation-components.md)
 
@@ -290,6 +291,10 @@ foundation facade、Core computed style、overflow/virtual、事件生命周期�
 7. 同节点 hover/active/focus/focus-visible selector 与状态样式。
 
 ### M7：轴泛化与 Core 动画
+
+M7 已于 2026-08-21 完成工程门禁：x/y 单轴虚拟化、ViewHandle、immutable animation
+resource、transition/keyframes、暂停恢复、reduced motion、逻辑帧录制、三 transport stall
+E2E、native/WASM 字节差分以及性能/内存/包体预算均已落地。
 
 1. x/y 单轴 virtualizer、`estimatedItemSize` 与 ViewHandle 滚动 API。
 2. transition timeline、opacity/transform 插值与 retarget/cancel。

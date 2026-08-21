@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "core/pingo-anim",
   "core/pingo-abi",
   "core/pingo-core",
   "core/pingo-edit",

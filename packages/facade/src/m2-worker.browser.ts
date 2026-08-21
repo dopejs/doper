@@ -76,6 +76,97 @@ describe("M2 production transport matrix", () => {
     }
   });
 
+  it("keeps Core transition output equivalent across all transports without Shell mutations", async () => {
+    const finalHashes: Array<bigint | undefined> = [];
+    for (const preference of ["main-thread", "post-message", "sab"] as const) {
+      const reports: FrameReport[] = [];
+      const root = await createHostedCanvasRoot(createCanvas(), {
+        onFrame: (report) => reports.push(report),
+        transport: { preference, strict: true },
+      });
+      roots.push(root);
+      const animated = (opacity: number) =>
+        createElement("container", {
+          backgroundColor: "#1a73e8",
+          height: 40,
+          opacity,
+          transition: { durationMs: 120, easing: "linear", property: "opacity" },
+          width: 80,
+        });
+      root.render(animated(0));
+      await withTimeout(
+        waitUntil(() => reports.some((report) => report.cause === "mutation")),
+        3_000,
+        `${preference} initial animation target`,
+      );
+      reports.length = 0;
+      root.render(animated(1));
+      await withTimeout(
+        waitUntil(() =>
+          reports.some(
+            (report) => report.cause === "animation" && report.core?.animationActive === 0,
+          ),
+        ),
+        3_000,
+        `${preference} completed transition`,
+      );
+      const animationReports = reports.filter((report) => report.cause === "animation");
+      expect(animationReports.length).toBeGreaterThan(0);
+      expect(animationReports.every((report) => report.mutationBytes === 0)).toBe(true);
+      expect(animationReports.every((report) => report.core?.animationLayoutNodes === 0)).toBe(
+        true,
+      );
+      finalHashes.push(animationReports.at(-1)?.core?.pictureHash);
+      await root.close();
+      roots.pop();
+    }
+    expect(finalHashes[1]).toBe(finalHashes[0]);
+    expect(finalHashes[2]).toBe(finalHashes[0]);
+  });
+
+  it("continues sampling Core animation in the Worker during a 200ms main-thread stall", async () => {
+    for (const preference of ["post-message", "sab"] as const) {
+      const reports: FrameReport[] = [];
+      const root = await createHostedCanvasRoot(createCanvas(), {
+        onFrame: (report) => reports.push(report),
+        transport: { preference, strict: true },
+      });
+      roots.push(root);
+      const animated = (opacity: number) =>
+        createElement("container", {
+          height: 40,
+          opacity,
+          transition: { durationMs: 1_000, easing: "linear", property: "opacity" },
+          width: 80,
+        });
+      root.render(animated(0));
+      await withTimeout(
+        waitUntil(() => reports.some((report) => report.cause === "mutation")),
+        3_000,
+        `${preference} initial target`,
+      );
+      reports.length = 0;
+      root.render(animated(1));
+      await withTimeout(
+        waitUntil(() => reports.some((report) => report.core?.animationActive === 1)),
+        3_000,
+        `${preference} transition start`,
+      );
+      const sampledBefore = reports.at(-1)?.core?.animationSampledFrames ?? 0;
+      busyWait(200);
+      await withTimeout(
+        waitUntil(() =>
+          reports.some((report) => (report.core?.animationSampledFrames ?? 0) >= sampledBefore + 8),
+        ),
+        3_000,
+        `${preference} animation stall continuity`,
+      );
+      expect(root.mode).toBe(preference);
+      await root.close();
+      roots.pop();
+    }
+  });
+
   it("coalesces a burst above the bounded queue without losing the final scene", async () => {
     const finalSequence = 160;
     for (const preference of ["post-message", "sab"] as const) {

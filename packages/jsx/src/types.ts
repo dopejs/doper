@@ -105,6 +105,46 @@ export type Color =
 /** Four logical-pixel edges in top/right/bottom/left order. */
 export type EdgeInsets = number | readonly [number, number, number, number];
 
+/** Timing functions supported by the Core animation timeline. */
+export type AnimationEasing =
+  | "linear"
+  | "ease"
+  | "ease-in"
+  | "ease-out"
+  | "ease-in-out"
+  | { readonly cubicBezier: readonly [number, number, number, number] }
+  | { readonly steps: number; readonly position?: "start" | "end" };
+
+/** Compositor-friendly property supported by M7. */
+export type AnimatedProperty = "opacity" | "transform";
+
+/** Transition declaration; a new durable target retargets from presentation. */
+export interface TransitionSpec {
+  readonly property: AnimatedProperty;
+  readonly durationMs: number;
+  readonly delayMs?: number;
+  readonly easing?: AnimationEasing;
+}
+
+/** One immutable keyframe with a property-compatible value. */
+export interface AnimationKeyframe {
+  readonly offset: number;
+  readonly value: number | readonly [number, number, number, number, number, number];
+}
+
+/** Core-owned immutable keyframe animation. */
+export interface KeyframeAnimationSpec {
+  readonly property: AnimatedProperty;
+  readonly keyframes: readonly AnimationKeyframe[];
+  readonly durationMs: number;
+  readonly delayMs?: number;
+  readonly easing?: AnimationEasing;
+  readonly iterations?: number;
+  readonly direction?: "normal" | "reverse" | "alternate" | "alternate-reverse";
+  readonly fill?: "none" | "forwards" | "backwards" | "both";
+  readonly playState?: "running" | "paused";
+}
+
 /** Shared host properties mapped to generated Scene props. */
 export interface CommonProps {
   readonly key?: Key;
@@ -134,6 +174,8 @@ export interface CommonProps {
   readonly backgroundColor?: Color;
   readonly opacity?: number;
   readonly transform?: readonly [number, number, number, number, number, number];
+  readonly transition?: TransitionSpec | readonly TransitionSpec[];
+  readonly animation?: KeyframeAnimationSpec | readonly KeyframeAnimationSpec[];
   readonly onTap?: () => void;
   readonly onPointerDownCapture?: PingoEventHandler;
   readonly onPointerDown?: PingoEventHandler;

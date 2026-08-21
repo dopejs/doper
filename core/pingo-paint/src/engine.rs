@@ -475,7 +475,9 @@ fn build_node(
         DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, offset.x, offset.y]),
     );
 
-    if let Some(transform_id) = scene.ref_prop(node, Prop::Transform) {
+    if scene.presentation_style_transform(node).is_some() {
+        push_presentation_transform(scene, node, size, &mut instructions);
+    } else if let Some(transform_id) = scene.ref_prop(node, Prop::Transform) {
         let resource = typed_resource(scene, transform_id, ResourceKind::Affine)?;
         let affine = AffineResource::decode(transform_id, resource)?;
         push(&mut instructions, DisplayCommand::Transform(affine.matrix));
@@ -483,7 +485,8 @@ fn build_node(
         push_style_transform(scene, node, size, &mut instructions);
     }
     if let Some(opacity) = scene
-        .f32_prop(node, Prop::Opacity)
+        .presentation_style_f32(node, StyleProperty::Opacity)
+        .or_else(|| scene.f32_prop(node, Prop::Opacity))
         .or_else(|| scene.presented_style_f32(node, StyleProperty::Opacity))
     {
         if !(0.0..=1.0).contains(&opacity) {
@@ -709,6 +712,18 @@ fn build_node(
     Ok(instructions)
 }
 
+fn push_presentation_transform(
+    scene: &Scene,
+    node: NodeId,
+    size: pingo_layout::Size,
+    instructions: &mut Vec<DisplayInstruction>,
+) {
+    let Some(operations) = scene.presentation_style_transform(node) else {
+        return;
+    };
+    push_transform_operations(operations, size, instructions);
+}
+
 fn image_rects(
     scene: &Scene,
     node: NodeId,
@@ -866,6 +881,18 @@ fn push_style_transform(
         instructions,
         DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, origin[0], origin[1]]),
     );
+    push_transform_operations(operations, size, instructions);
+    push(
+        instructions,
+        DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, -origin[0], -origin[1]]),
+    );
+}
+
+fn push_transform_operations(
+    operations: &[StyleTransformOperation],
+    size: pingo_layout::Size,
+    instructions: &mut Vec<DisplayInstruction>,
+) {
     for operation in operations {
         let matrix = match *operation {
             StyleTransformOperation::Matrix(value) => value,
@@ -885,10 +912,6 @@ fn push_style_transform(
         };
         push(instructions, DisplayCommand::Transform(matrix));
     }
-    push(
-        instructions,
-        DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, -origin[0], -origin[1]]),
-    );
 }
 
 fn resolve_box_length(length: StyleLength, basis: f32) -> f32 {

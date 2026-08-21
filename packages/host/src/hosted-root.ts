@@ -120,6 +120,8 @@ export interface HostedCanvasRootOptions extends RootOptions {
    * needs a tile path proven pixel-identical to the direct one.
    */
   readonly rasterCache?: boolean;
+  /** Host reduced-motion preference; `"auto"` reads the active media query. */
+  readonly reducedMotion?: boolean | "auto";
   readonly transport?: HostTransportPolicy;
   readonly workerFactory?: () => Worker;
 }
@@ -149,6 +151,7 @@ export interface HostedCanvasRoot extends PingoRoot {
   updateEditingGeometry(geometry: EditingGeometry): void;
   inputTransportMetrics(): HostInputTransportMetrics;
   resize(width: number, height: number): void;
+  setReducedMotion(reduced: boolean): void;
   transportMetrics(): HostMutationTransportMetrics | undefined;
 }
 
@@ -201,6 +204,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #mainFrameTimestamp: number | undefined;
   #recovery: Promise<void> | undefined;
   #recovering = false;
+  #reducedMotionQuery: MediaQueryList | undefined;
   #root: CoreDrivenPingoRoot | undefined;
   #transferred = false;
   #transport: MutationTransport | undefined;
@@ -345,6 +349,22 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     ]);
   }
 
+  /** Applies a deterministic reduced-motion override to the active Core owner. */
+  public setReducedMotion(reduced: boolean): void {
+    if (typeof reduced !== "boolean") throw new TypeError("reduced motion must be boolean");
+    if (this.#closing || this.#unmounted) throw new Error("hosted root is closed");
+    if (this.#recovering) throw new Error("hosted root is recovering");
+    if (this.#mode === "main-thread") {
+      const sink = this.#frameSink;
+      if (sink === undefined) throw new Error("main-thread Core is not initialized");
+      sink.setReducedMotion(reduced);
+      return;
+    }
+    const client = this.#client;
+    if (client === undefined) throw new Error("render Worker is not initialized");
+    client.postReducedMotion(reduced);
+  }
+
   /** Activates native text services for one mounted EditableText node. */
   public focusEditable(target: ScrollTarget): void {
     this.focusEditableWithOrigin(target, "programmatic");
@@ -385,6 +405,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (this.#root !== undefined) throw new Error("hosted root is already initialized");
     if (this.#decision.mode === "main-thread") {
       await this.initializeMainThread(this.#canvas);
+      this.attachReducedMotionListener();
       this.attachCanvasEventListeners();
       return;
     }
@@ -401,6 +422,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       this.#decision = runtimeFallbackDecision(this.#decision, error);
       await this.initializeMainThread(this.#canvas);
     }
+    this.attachReducedMotionListener();
     this.attachCanvasEventListeners();
   }
 
@@ -514,6 +536,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       height: positiveDimension(this.logicalHeight(), "canvas height"),
       mode: selectedMode,
       rasterCache: this.#options.rasterCache === true,
+      reducedMotion: reducedMotionPreference(this.#options.reducedMotion),
       ...(inputRingBuffer === undefined ? {} : { inputRingBuffer }),
       ...(ringBuffer === undefined ? {} : { ringBuffer }),
       width: positiveDimension(this.logicalWidth(), "canvas width"),
@@ -1148,6 +1171,52 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#eventListenersAttached = false;
   }
 
+  private attachReducedMotionListener(): void {
+    if (
+      typeof this.#options.reducedMotion === "boolean" ||
+      this.#reducedMotionQuery !== undefined
+    ) {
+      return;
+    }
+    const matchMedia = (globalThis as { readonly matchMedia?: unknown }).matchMedia;
+    if (typeof matchMedia !== "function") return;
+    const query = (matchMedia as (query: string) => MediaQueryList)(
+      "(prefers-reduced-motion: reduce)",
+    );
+    this.#reducedMotionQuery = query;
+    if (typeof query.addEventListener === "function") {
+      query.addEventListener("change", this.handleReducedMotionChange);
+      return;
+    }
+    const legacy = query as MediaQueryList & {
+      addListener?: (listener: (event: MediaQueryListEvent) => void) => void;
+    };
+    legacy.addListener?.(this.handleReducedMotionChange);
+  }
+
+  private detachReducedMotionListener(): void {
+    const query = this.#reducedMotionQuery;
+    this.#reducedMotionQuery = undefined;
+    if (query === undefined) return;
+    if (typeof query.removeEventListener === "function") {
+      query.removeEventListener("change", this.handleReducedMotionChange);
+      return;
+    }
+    const legacy = query as MediaQueryList & {
+      removeListener?: (listener: (event: MediaQueryListEvent) => void) => void;
+    };
+    legacy.removeListener?.(this.handleReducedMotionChange);
+  }
+
+  readonly handleReducedMotionChange = (event: MediaQueryListEvent): void => {
+    if (this.#closing || this.#recovering) return;
+    try {
+      this.setReducedMotion(event.matches);
+    } catch (cause) {
+      this.#options.onHostError?.(toError(cause, "reduced-motion update failed"));
+    }
+  };
+
   private async initializeMainThread(canvas: HTMLCanvasElement): Promise<void> {
     const width = positiveDimension(this.logicalWidth(), "canvas width");
     const height = positiveDimension(this.logicalHeight(), "canvas height");
@@ -1155,6 +1224,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (context === null) throw new Error("Canvas2D context is unavailable");
     const core = await (this.#options.coreFactory ?? createWasmCore)(width, height);
     this.#core = core;
+    core.set_reduced_motion?.(reducedMotionPreference(this.#options.reducedMotion));
     const rasterCache =
       this.#options.rasterCache === true
         ? createDefaultRasterCache(context, this.#options.onHostError)
@@ -1460,6 +1530,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
 
   private async closeOnce(): Promise<void> {
     this.#closing = true;
+    this.detachReducedMotionListener();
     this.detachCanvasEventListeners();
     this.stopClockAnchors();
     if (!this.#unmounted && this.#root !== undefined) {
@@ -1736,6 +1807,15 @@ function defaultClockAnchorDriver(): ClockAnchorDriver | null {
 function devicePixelRatioOf(_canvas: HTMLCanvasElement): number {
   const value = (globalThis as { readonly devicePixelRatio?: unknown }).devicePixelRatio;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+function reducedMotionPreference(value: boolean | "auto" | undefined): boolean {
+  if (typeof value === "boolean") return value;
+  const matchMedia = (globalThis as { readonly matchMedia?: unknown }).matchMedia;
+  if (typeof matchMedia !== "function") return false;
+  return (matchMedia as (query: string) => { readonly matches: boolean })(
+    "(prefers-reduced-motion: reduce)",
+  ).matches;
 }
 
 function toError(cause: unknown, message: string): Error {

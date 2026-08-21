@@ -101,6 +101,10 @@ async function handle(message: RenderWorkerInboundMessage): Promise<void> {
       if (!active || message.sessionId !== sessionId) return;
       drainInputRing();
       return;
+    case "pingo:reduced-motion":
+      if (!active || message.sessionId !== sessionId) return;
+      sink?.setReducedMotion(message.reduced);
+      return;
     case "pingo:clock-anchor":
       return;
   }
@@ -114,6 +118,7 @@ async function activate(message: WorkerActivateMessage): Promise<void> {
   const context = message.canvas.getContext("2d", { alpha: true });
   if (context === null) throw new Error("OffscreenCanvas 2D context is unavailable");
   core = await createWasmCore(message.width, message.height);
+  core.set_reduced_motion?.(message.reducedMotion);
   sink = new CanvasFrameSink(
     context,
     core,

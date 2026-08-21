@@ -15,6 +15,11 @@ pub enum ReplayRecord {
     Input(Vec<u8>),
     /// A complete Host-to-Core system-font metric cache delta.
     SystemTextMetrics(Vec<u8>),
+    /// One exact logical frame delta used by Core-owned animation and scrolling.
+    AnimationFrame {
+        /// Elapsed logical time since the preceding recorded frame.
+        elapsed_micros: u64,
+    },
 }
 
 impl ReplayRecord {
@@ -23,12 +28,16 @@ impl ReplayRecord {
             Self::Mutation(_) => RecordingRecordKind::Mutation,
             Self::Input(_) => RecordingRecordKind::Input,
             Self::SystemTextMetrics(_) => RecordingRecordKind::SystemTextMetrics,
+            Self::AnimationFrame { .. } => RecordingRecordKind::AnimationFrame,
         }
     }
 
-    fn bytes(&self) -> &[u8] {
+    fn payload_length(&self) -> usize {
         match self {
-            Self::Mutation(bytes) | Self::Input(bytes) | Self::SystemTextMetrics(bytes) => bytes,
+            Self::Mutation(bytes) | Self::Input(bytes) | Self::SystemTextMetrics(bytes) => {
+                bytes.len()
+            }
+            Self::AnimationFrame { .. } => 8,
         }
     }
 
@@ -37,6 +46,7 @@ impl ReplayRecord {
             Self::Mutation(bytes) => MutationBatch::decode(bytes).map(|_| ()),
             Self::Input(bytes) => InputBatch::decode(bytes).map(|_| ()),
             Self::SystemTextMetrics(bytes) => SystemTextMetricBatch::decode(bytes).map(|_| ()),
+            Self::AnimationFrame { .. } => Ok(()),
         }
     }
 }
@@ -130,6 +140,18 @@ impl ReplayRecording {
                     SystemTextMetricBatch::decode(&payload)?;
                     ReplayRecord::SystemTextMetrics(payload)
                 }
+                RecordingRecordKind::AnimationFrame => {
+                    if payload.len() != 8 {
+                        return Err(AbiError::InvalidValue(
+                            "animation frame payload must be eight bytes",
+                        ));
+                    }
+                    let mut encoded_micros = [0; 8];
+                    encoded_micros.copy_from_slice(&payload);
+                    ReplayRecord::AnimationFrame {
+                        elapsed_micros: u64::from_le_bytes(encoded_micros),
+                    }
+                }
             };
             records.push(record);
         }
@@ -160,12 +182,19 @@ impl ReplayRecording {
         let mut writer = Writer::new(RECORDING_MAGIC);
         for record in &self.records {
             record.validate()?;
-            let payload = record.bytes();
             let payload_length =
-                u32::try_from(payload.len()).map_err(|_| AbiError::ArithmeticOverflow)?;
+                u32::try_from(record.payload_length()).map_err(|_| AbiError::ArithmeticOverflow)?;
             writer.instruction(record.kind() as u8, 0);
             writer.u32(payload_length);
-            writer.bytes(payload);
+            match record {
+                ReplayRecord::Mutation(bytes)
+                | ReplayRecord::Input(bytes)
+                | ReplayRecord::SystemTextMetrics(bytes) => writer.bytes(bytes),
+                ReplayRecord::AnimationFrame { elapsed_micros } => {
+                    writer.u32(*elapsed_micros as u32);
+                    writer.u32((*elapsed_micros >> 32) as u32);
+                }
+            }
         }
         writer.finish(MAX_RECORDING_BYTES)
     }
@@ -240,6 +269,9 @@ mod tests {
                 ReplayRecord::Mutation(mutation(1)),
                 ReplayRecord::SystemTextMetrics(system_metrics()),
                 ReplayRecord::Input(input(2)),
+                ReplayRecord::AnimationFrame {
+                    elapsed_micros: 16_667,
+                },
                 ReplayRecord::Mutation(mutation(3)),
             ],
         };
@@ -281,6 +313,40 @@ mod tests {
             }
             .encode()
             .is_err()
+        );
+
+        let animation_frame = ReplayRecording {
+            records: vec![ReplayRecord::AnimationFrame { elapsed_micros: 1 }],
+        }
+        .encode()
+        .expect("animation frame");
+        let mut wrong_payload_length = animation_frame.clone();
+        wrong_payload_length[20..24].copy_from_slice(&4_u32.to_le_bytes());
+        assert_eq!(
+            ReplayRecording::decode(&wrong_payload_length),
+            Err(AbiError::InvalidValue(
+                "animation frame payload must be eight bytes"
+            ))
+        );
+        let mut misaligned_payload = animation_frame;
+        misaligned_payload[20..24].copy_from_slice(&5_u32.to_le_bytes());
+        assert!(matches!(
+            ReplayRecording::decode(&misaligned_payload),
+            Err(AbiError::Misaligned { .. })
+        ));
+
+        let mut count_mismatch = ReplayRecording {
+            records: vec![ReplayRecord::Mutation(mutation(1))],
+        }
+        .encode()
+        .expect("recording");
+        count_mismatch[12..16].copy_from_slice(&0_u32.to_le_bytes());
+        assert_eq!(
+            ReplayRecording::decode(&count_mismatch),
+            Err(AbiError::InstructionCountMismatch {
+                declared: 0,
+                actual: 1,
+            })
         );
     }
 

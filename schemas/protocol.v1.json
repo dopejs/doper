@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 14,
+  "abiVersion": 15,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -98,11 +98,15 @@
       {
         "name": "SystemTextMetrics",
         "id": 3
+      },
+      {
+        "name": "AnimationFrame",
+        "id": 4
       }
     ]
   },
   "frameDiagnostics": {
-    "version": 6,
+    "version": 7,
     "fields": [
       {
         "name": "version",
@@ -210,6 +214,50 @@
       },
       {
         "name": "interactionStateChanges",
+        "type": "u32"
+      },
+      {
+        "name": "animationActive",
+        "type": "u32"
+      },
+      {
+        "name": "animationPhaseBefore",
+        "type": "u32"
+      },
+      {
+        "name": "animationPhaseActive",
+        "type": "u32"
+      },
+      {
+        "name": "animationPhaseAfter",
+        "type": "u32"
+      },
+      {
+        "name": "animationStarts",
+        "type": "u32"
+      },
+      {
+        "name": "animationRetargets",
+        "type": "u32"
+      },
+      {
+        "name": "animationCancels",
+        "type": "u32"
+      },
+      {
+        "name": "animationSampledFrames",
+        "type": "u32"
+      },
+      {
+        "name": "animationPresentationChanges",
+        "type": "u32"
+      },
+      {
+        "name": "animationLayoutNodes",
+        "type": "u32"
+      },
+      {
+        "name": "animationRetainedBytes",
         "type": "u32"
       }
     ]
@@ -1081,6 +1129,10 @@
     {
       "name": "ComputedStyle",
       "id": 9
+    },
+    {
+      "name": "Animation",
+      "id": 10
     }
   ],
   "resourceLayouts": {
@@ -1504,6 +1556,13 @@
       "valueType": "ref",
       "resourceKind": "ComputedStyle",
       "invalidation": ["layout", "paint", "paintSelf", "hit", "semantics", "scroll"]
+    },
+    {
+      "name": "Animation",
+      "id": 81,
+      "valueType": "ref",
+      "resourceKind": "Animation",
+      "invalidation": ["paintSelf", "hit"]
     }
   ],
   "instructionFlags": {

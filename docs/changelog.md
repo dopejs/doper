@@ -9,16 +9,14 @@ ABI 版本独立管理。
 
 ## Unreleased
 
+- 完成 M7：`View.virtual` 支持 x/y 单轴与 `ViewHandle` 滚动 API；Core 新增 ABI 15
+  immutable animation resource、opacity/transform transition 与 keyframes、retarget/cancel、
+  连续 pause/resume、实时 reduced motion、稳定诊断和逻辑帧录制回放。三 transport 的
+  Worker stall、native/WASM 字节差分、500 动画性能/内存预算与 WASM 体积门禁已自动化。
+- 完成 M6：foundation facade、单源 CSS subset、typed computed style、display/overflow、
+  原生事件状态/伪类、迁移诊断与独立回滚开关全部通过 `pnpm m6:check`。
 - 项目许可证从下一次 npm 发布起由 MIT 切换为 Apache-2.0；v0.2.1 及以前
   的已发布版本仍保持 MIT。
-- 启动 M6-B：新增 `View`、`Text`、`Image`、`Input` 与 `UnstyledTextArea` direct-prop
-  compatibility adapter，并保持旧 intrinsic 和装饰型 `TextArea` widget 的结构与行为。
-  `style`/`className`、display/overflow 和 View.virtual 尚未接入。
-- 启动 M6-A：新增版本化单源 style schema、生成的 TS/Rust 元数据、独立 Shell CSS
-  subset resolver，以及 `createStyleSheet`、`supportsStyle`、`styleCapabilities` 等 facade API。
-  M6-A 还增加了独立 candidate-list reference resolver、seeded parser/cascade 差分、
-  无变化输入缓存、computed-style 变化与失效域指标；当前 capability 明确报告 resolver ready、
-  engine not ready，View/Core 样式集成仍属后续 M6-B。
 
 ## 0.2.1 - 2026-08-20
 

@@ -174,10 +174,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pingo-anim"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "pingo-core"
 version = "0.1.0"
 dependencies = [
  "pingo-abi",
+ "pingo-anim",
  "pingo-edit",
  "pingo-headless",
  "pingo-hit",
@@ -255,6 +263,7 @@ name = "pingo-scene"
 version = "0.1.0"
 dependencies = [
  "pingo-abi",
+ "pingo-anim",
  "proptest",
 ]
 

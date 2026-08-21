@@ -1,6 +1,7 @@
 use core::fmt;
 
 use pingo_abi::AbiError;
+use pingo_anim::AnimationError;
 use pingo_edit::EditError;
 use pingo_hit::HitError;
 use pingo_layout::LayoutError;
@@ -31,6 +32,8 @@ pub enum CoreError {
     Layout(LayoutError),
     /// Paint failed after Scene accepted the transaction; the instance is poisoned.
     Paint(PaintError),
+    /// Animation resource or timeline derivation failed after Scene acceptance.
+    Animation(AnimationError),
     /// World geometry or BVH derivation failed after Scene acceptance.
     Hit(HitError),
     /// Core produced an invalid glyph-resource batch; the instance is poisoned.
@@ -140,6 +143,12 @@ impl From<SceneError> for CoreError {
 impl From<ScrollError> for CoreError {
     fn from(error: ScrollError) -> Self {
         Self::Scroll(error)
+    }
+}
+
+impl From<AnimationError> for CoreError {
+    fn from(error: AnimationError) -> Self {
+        Self::Animation(error)
     }
 }
 

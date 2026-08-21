@@ -259,7 +259,12 @@ mod tests {
 
     #[test]
     fn every_generated_identifier_exposes_complete_metadata() {
-        for kind in [RecordingRecordKind::Mutation, RecordingRecordKind::Input] {
+        for kind in [
+            RecordingRecordKind::Mutation,
+            RecordingRecordKind::Input,
+            RecordingRecordKind::SystemTextMetrics,
+            RecordingRecordKind::AnimationFrame,
+        ] {
             assert_eq!(RecordingRecordKind::from_u8(kind as u8), Some(kind));
         }
         assert_eq!(RecordingRecordKind::from_u8(0), None);

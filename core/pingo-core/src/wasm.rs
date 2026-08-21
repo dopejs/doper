@@ -82,6 +82,17 @@ impl WasmCore {
         }
     }
 
+    /// Applies the host accessibility preference to active and future animations.
+    pub fn set_reduced_motion(&mut self, reduced: bool) -> Result<Option<Vec<u8>>, JsValue> {
+        let output = self.inner.set_reduced_motion(reduced).map_err(js_error)?;
+        if let Some(output) = output {
+            self.last_diagnostics = Some(output.diagnostics);
+            Ok(Some(output.display_list.to_vec()))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Returns versioned u32 diagnostics for the most recently accepted frame.
     pub fn frame_diagnostics(&self) -> Result<Vec<u32>, JsValue> {
         self.last_diagnostics

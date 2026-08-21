@@ -26,6 +26,7 @@ describe("render Worker protocol validation", () => {
         kind: "pingo:activate",
         mode: "sab",
         rasterCache: true,
+        reducedMotion: false,
         ringBuffer: new SharedArrayBuffer(64),
         sessionId: 7,
         width: 100,
@@ -45,6 +46,20 @@ describe("render Worker protocol validation", () => {
       }),
     ).toBe(false);
     expect(isRenderWorkerInboundMessage({ kind: "pingo:input-wake", sessionId: 7 })).toBe(true);
+    expect(
+      isRenderWorkerInboundMessage({
+        kind: "pingo:reduced-motion",
+        reduced: true,
+        sessionId: 7,
+      }),
+    ).toBe(true);
+    expect(
+      isRenderWorkerInboundMessage({
+        kind: "pingo:reduced-motion",
+        reduced: "yes",
+        sessionId: 7,
+      }),
+    ).toBe(false);
     expect(
       isRenderWorkerInboundMessage({
         kind: "pingo:clock-anchor",

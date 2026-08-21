@@ -21,6 +21,7 @@ import {
 const MUTATION_RECORD_KIND = Number(RecordingRecordKind.Mutation);
 const INPUT_RECORD_KIND = Number(RecordingRecordKind.Input);
 const SYSTEM_TEXT_METRICS_RECORD_KIND = Number(RecordingRecordKind.SystemTextMetrics);
+const ANIMATION_FRAME_RECORD_KIND = Number(RecordingRecordKind.AnimationFrame);
 
 /** Explicit privacy classification required before binary data may be retained. */
 export type ReplayDataClassification = "recordable" | "sensitive";
@@ -29,7 +30,8 @@ export type ReplayDataClassification = "recordable" | "sensitive";
 export type ReplayRecord =
   | { readonly type: "mutation"; readonly bytes: Uint8Array }
   | { readonly type: "input"; readonly bytes: Uint8Array }
-  | { readonly type: "systemTextMetrics"; readonly bytes: Uint8Array };
+  | { readonly type: "systemTextMetrics"; readonly bytes: Uint8Array }
+  | { readonly type: "animationFrame"; readonly elapsedMicros: bigint };
 
 /** A recursively validated deterministic replay recording. */
 export interface ReplayRecording {
@@ -51,7 +53,7 @@ export function encodeReplayRecording(recording: ReplayRecording): Uint8Array {
   for (const record of recording.records) {
     validateRecord(record);
     length = checkedAdd(length, RECORD_HEADER_BYTES);
-    length = checkedAdd(length, record.bytes.byteLength);
+    length = checkedAdd(length, payloadLength(record));
     if (length > MAX_RECORDING_BYTES) fail("recording exceeds maximum size");
   }
 
@@ -67,14 +69,19 @@ export function encodeReplayRecording(recording: ReplayRecording): Uint8Array {
     output[offset] = kindFor(record);
     // Records carry their length like every other instruction, so a reader that
     // does not know the kind can step over one instead of refusing the file.
-    const total = RECORD_HEADER_BYTES + record.bytes.byteLength;
+    const payloadBytes = payloadLength(record);
+    const total = RECORD_HEADER_BYTES + payloadBytes;
     const words = total / PROTOCOL_ALIGNMENT;
     if (words >= INSTRUCTION_LENGTH_ESCAPE) fail("recording record is too large to frame");
     view.setUint16(offset + 2, words, true);
-    view.setUint32(offset + 4, record.bytes.byteLength, true);
+    view.setUint32(offset + 4, payloadBytes, true);
     offset += RECORD_HEADER_BYTES;
-    output.set(record.bytes, offset);
-    offset += record.bytes.byteLength;
+    if (record.type === "animationFrame") {
+      view.setBigUint64(offset, record.elapsedMicros, true);
+    } else {
+      output.set(record.bytes, offset);
+    }
+    offset += payloadBytes;
   }
   return output;
 }
@@ -97,6 +104,7 @@ export function decodeReplayRecording(input: Uint8Array): ReplayRecording {
   }
 
   const records: ReplayRecord[] = [];
+  let seenRecords = 0;
   while (reader.remaining > 0) {
     const start = reader.offset;
     const kind = reader.u8();
@@ -109,6 +117,7 @@ export function decodeReplayRecording(input: Uint8Array): ReplayRecording {
     const length = reader.u32();
     if (length % PROTOCOL_ALIGNMENT !== 0) fail("nested stream is not aligned");
     const bytes = reader.bytes(length);
+    seenRecords += 1;
     if (reader.offset !== start + total) fail("record length does not match its payload");
     if (!(kind in RecordingRecordKind)) {
       if ((flags & INSTRUCTION_FLAG_OPTIONAL) === 0) fail("unknown recording record kind");
@@ -118,7 +127,7 @@ export function decodeReplayRecording(input: Uint8Array): ReplayRecording {
     validateRecord(record);
     records.push(record);
   }
-  if (records.length !== declaredCount) fail("record count does not match input");
+  if (seenRecords !== declaredCount) fail("record count does not match input");
   return { records };
 }
 
@@ -127,12 +136,16 @@ export interface ReplayHandlers {
   readonly mutation: (bytes: Uint8Array) => void;
   readonly input: (bytes: Uint8Array) => void;
   readonly systemTextMetrics: (bytes: Uint8Array) => void;
+  readonly animationFrame: (elapsedMicros: bigint) => void;
 }
 
 /** Validates then replays a complete recording in exact observed order. */
 export function replayRecording(input: Uint8Array, handlers: ReplayHandlers): void {
   const recording = decodeReplayRecording(input);
-  for (const record of recording.records) handlers[record.type](record.bytes.slice());
+  for (const record of recording.records) {
+    if (record.type === "animationFrame") handlers.animationFrame(record.elapsedMicros);
+    else handlers[record.type](record.bytes.slice());
+  }
 }
 
 /** Bounded in-memory recorder that never retains explicitly sensitive transactions. */
@@ -163,6 +176,11 @@ export class BinaryReplayRecorder {
     return this.capture({ type: "systemTextMetrics", bytes }, classification);
   }
 
+  /** Captures one exact, non-sensitive Core logical-clock delta. */
+  public captureAnimationFrame(elapsedMicros: bigint): boolean {
+    return this.capture({ type: "animationFrame", elapsedMicros }, "recordable");
+  }
+
   /** Exports a detached versioned archive without exposing retained mutable buffers. */
   public export(): Uint8Array {
     return encodeReplayRecording({ records: this.#records });
@@ -181,10 +199,12 @@ export class BinaryReplayRecorder {
     if (this.#records.length >= MAX_RECORDING_RECORDS) fail("record count exceeds limit");
     const nextBytes = checkedAdd(
       this.#encodedBytes,
-      checkedAdd(RECORD_HEADER_BYTES, record.bytes.byteLength),
+      checkedAdd(RECORD_HEADER_BYTES, payloadLength(record)),
     );
     if (nextBytes > MAX_RECORDING_BYTES) fail("recording exceeds maximum size");
-    this.#records.push({ ...record, bytes: record.bytes.slice() });
+    this.#records.push(
+      record.type === "animationFrame" ? record : { ...record, bytes: record.bytes.slice() },
+    );
     this.#encodedBytes = nextBytes;
     return true;
   }
@@ -250,7 +270,10 @@ function validateRecord(record: ReplayRecord): void {
   try {
     if (record.type === "mutation") decodeMutationBatch(record.bytes);
     else if (record.type === "input") decodeInputBatch(record.bytes);
-    else decodeSystemTextMetricBatch(record.bytes);
+    else if (record.type === "systemTextMetrics") decodeSystemTextMetricBatch(record.bytes);
+    else if (record.elapsedMicros < 0n || record.elapsedMicros > 0xffff_ffff_ffff_ffffn) {
+      fail("animation frame delta is outside u64 range");
+    }
   } catch (cause) {
     throw new ReplayRecordingError(`invalid nested ${record.type} stream`, { cause });
   }
@@ -259,14 +282,29 @@ function validateRecord(record: ReplayRecord): void {
 function kindFor(record: ReplayRecord): RecordingRecordKind {
   if (record.type === "mutation") return RecordingRecordKind.Mutation;
   if (record.type === "input") return RecordingRecordKind.Input;
-  return RecordingRecordKind.SystemTextMetrics;
+  if (record.type === "systemTextMetrics") return RecordingRecordKind.SystemTextMetrics;
+  return RecordingRecordKind.AnimationFrame;
 }
 
 function recordFor(kind: number, bytes: Uint8Array): ReplayRecord {
   if (kind === MUTATION_RECORD_KIND) return { type: "mutation", bytes };
   if (kind === INPUT_RECORD_KIND) return { type: "input", bytes };
   if (kind === SYSTEM_TEXT_METRICS_RECORD_KIND) return { type: "systemTextMetrics", bytes };
+  if (kind === ANIMATION_FRAME_RECORD_KIND) {
+    if (bytes.byteLength !== 8) fail("animation frame payload must be eight bytes");
+    return {
+      type: "animationFrame",
+      elapsedMicros: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(
+        0,
+        true,
+      ),
+    };
+  }
   return fail(`unknown recording record kind ${String(kind)}`);
+}
+
+function payloadLength(record: ReplayRecord): number {
+  return record.type === "animationFrame" ? 8 : record.bytes.byteLength;
 }
 
 function checkedAdd(left: number, right: number): number {
