@@ -222,6 +222,28 @@ importers:
         specifier: 8.2.1
         version: 8.2.1(@types/node@22.20.1)(esbuild@0.28.2)(less@4.9.0)(sass@1.103.1)
 
+  packages/ui:
+    dependencies:
+      '@dopejs/pingo-editing':
+        specifier: workspace:*
+        version: link:../editing
+      '@dopejs/pingo-jsx':
+        specifier: workspace:*
+        version: link:../jsx
+      '@dopejs/pingo-runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@dopejs/pingo-style':
+        specifier: workspace:*
+        version: link:../style
+      '@dopejs/pingo-widgets':
+        specifier: workspace:*
+        version: link:../widgets
+    devDependencies:
+      '@dopejs/pingo-style-preprocess':
+        specifier: workspace:*
+        version: link:../style-preprocess
+
   packages/widgets:
     dependencies:
       '@dopejs/pingo-editing':
