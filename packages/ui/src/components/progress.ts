@@ -13,7 +13,7 @@ export type ProgressProps = {
 function ProgressImpl(props: ProgressProps): PingoNode {
   const theme = useTheme();
   const dark = theme === "dark" ? "pui-dark" : undefined;
-  const max = props.max ?? 100;
+  const max = Math.max(1, props.max ?? 100);
   const pct = Math.min(100, Math.max(0, (props.value / max) * 100));
   const className = ["pui-progress", dark, props.className]
     .filter((part) => part !== undefined && part !== "")

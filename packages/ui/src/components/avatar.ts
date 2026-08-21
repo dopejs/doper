@@ -8,18 +8,14 @@ export type AvatarProps = {
   /** Pre-decoded image resource; falls back to initials when absent. */
   readonly image?: PingoImage;
   readonly fallback: string;
-  /** Square edge length in px; defaults to the $avatar-size token (40). */
+  /** Square edge length in px; when omitted the skin's $avatar-size default applies. */
   readonly size?: number;
   readonly className?: string;
 };
 
-// Mirrors styles/tokens.scss $avatar-size; the runtime cannot read skin
-// tokens, so the default is duplicated here and must move in lockstep.
-const DEFAULT_AVATAR_SIZE = 40;
-
 function AvatarImpl(props: AvatarProps): PingoNode {
   const theme = useTheme();
-  const size = props.size ?? DEFAULT_AVATAR_SIZE;
+  const size = props.size;
   const dark = theme === "dark" ? "pui-dark" : undefined;
   const className = ["pui-avatar", dark, props.className]
     .filter((part) => part !== undefined && part !== "")
@@ -32,12 +28,17 @@ function AvatarImpl(props: AvatarProps): PingoNode {
             .join(" "),
           value: props.fallback,
         })
-      : Image({ source: props.image, width: size, height: size, style: { objectFit: "cover" } });
+      : Image({
+          source: props.image,
+          style: { objectFit: "cover" },
+          ...(size === undefined ? {} : { width: size, height: size }),
+        });
+  // Direct props and the inline style override the skin only when size is
+  // explicit; otherwise the skin's $avatar-size default (40px square, fully
+  // rounded) applies.
   return View({
     className,
-    width: size,
-    height: size,
-    style: { borderRadius: size / 2 },
+    ...(size === undefined ? {} : { width: size, height: size, style: { borderRadius: size / 2 } }),
     children: child,
   });
 }

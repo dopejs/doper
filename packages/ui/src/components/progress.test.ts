@@ -36,6 +36,12 @@ describe("Progress", () => {
     });
   });
 
+  it("guards a non-positive max against NaN width", () => {
+    expect(((render({ value: 0, max: 0 }).props.children as Host).props.style)).toEqual({
+      width: "0%",
+    });
+  });
+
   it("appends dark markers from the theme signal", () => {
     setTheme("dark");
     const node = render({ value: 50 });

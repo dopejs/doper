@@ -3,9 +3,15 @@ import { describe, expect, it } from "vitest";
 import { isMemoComponent } from "@dopejs/pingo-jsx";
 
 import { Badge } from "./badge";
+import { Alert } from "./alert";
+import { Avatar } from "./avatar";
 import { Button } from "./button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./card";
+import { Divider } from "./divider";
+import { IconButton } from "./icon-button";
 import { Label } from "./label";
+import { Progress } from "./progress";
+import { Skeleton } from "./skeleton";
 
 describe("memoized components", () => {
   it("all presentational components are memo-wrapped", () => {
@@ -19,6 +25,12 @@ describe("memoized components", () => {
       CardContent,
       CardFooter,
       Label,
+      IconButton,
+      Divider,
+      Skeleton,
+      Alert,
+      Avatar,
+      Progress,
     ]) {
       expect(isMemoComponent(component)).toBe(true);
     }

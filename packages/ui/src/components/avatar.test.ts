@@ -14,12 +14,13 @@ function render(props: AvatarProps) {
 }
 
 describe("Avatar", () => {
-  it("renders the fallback text at the default size", () => {
+  it("renders the fallback text with skin-default sizing", () => {
     const node = render({ fallback: "JD" });
     expect(node.props.className).toBe("pui-avatar");
-    expect(node.props.width).toBe(40);
-    expect(node.props.height).toBe(40);
-    expect(node.props.style).toEqual({ borderRadius: 20 });
+    // No explicit size: the skin's $avatar-size default (40px, fully rounded) applies.
+    expect(node.props.width).toBeUndefined();
+    expect(node.props.height).toBeUndefined();
+    expect(node.props.style).toBeUndefined();
     const child = node.props.children as Host;
     expect(child.type).toBe("text");
     expect(child.props.className).toBe("pui-avatar__fallback");

@@ -4,6 +4,9 @@
   justify-content: center;
   align-items: center;
   overflow: hidden;
+  width: t.$avatar-size;
+  height: t.$avatar-size;
+  border-radius: t.$avatar-size / 2;
   background-color: t.$secondary;
   &.pui-dark { background-color: t.$dark-secondary; }
 }
