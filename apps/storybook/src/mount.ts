@@ -1,4 +1,4 @@
-import { createHostedCanvasRoot, type PingoNode, type HostedCanvasRoot } from "@dopejs/pingo";
+import { createHostedCanvasRoot, type PingoNode, type HostedCanvasRoot, type PingoStyleSheet } from "@dopejs/pingo";
 
 /**
  * Mounts one pingo scene on its own canvas for a story.
@@ -9,7 +9,7 @@ import { createHostedCanvasRoot, type PingoNode, type HostedCanvasRoot } from "@
  */
 export function mountStory(
   render: () => PingoNode,
-  options: { width?: number; height?: number } = {},
+  options: { width?: number; height?: number; styleSheets?: readonly PingoStyleSheet[] } = {},
 ): HTMLElement {
   const width = options.width ?? 480;
   const height = options.height ?? 220;
@@ -49,6 +49,7 @@ export function mountStory(
     // A cold load over a slow CDN can exceed the default budget and abandon
     // the worker path before the WASM arrives.
     initializationTimeoutMs: 45_000,
+    ...(options.styleSheets === undefined ? {} : { styleSheets: options.styleSheets }),
     onHostError: (error) => {
       const box = document.createElement("pre");
       box.style.cssText = "margin:0;padding:8px;color:#b3261e;font-size:12px";

@@ -12,7 +12,7 @@ type Host = { props: Record<string, unknown> };
 type Tree = Host & { props: { children: { props: Record<string, unknown> } } };
 
 function descriptor(props: Parameters<typeof inputDescriptor>[0]): Tree {
-  return inputDescriptor(props, new TextEditingController({ value: "" })) as Tree;
+  return inputDescriptor(props, new TextEditingController({ value: "" })) as unknown as Tree;
 }
 
 class RecordingSink implements MutationSink {
@@ -53,7 +53,7 @@ describe("Input", () => {
   it("reports the controller-applied value to onValueChange", () => {
     const controller = new TextEditingController({ value: "a" });
     const onValueChange = vi.fn();
-    const node = inputDescriptor({ onValueChange }, controller) as Tree;
+    const node = inputDescriptor({ onValueChange }, controller) as unknown as Tree;
     const transaction: EditTransaction = {
       baseRevision: 0n,
       delta: { range: { start: 1, end: 1 }, text: "b" },

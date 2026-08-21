@@ -42,7 +42,7 @@ describe("Card family", () => {
 
   it("children pass through untouched (slot identity contract)", () => {
     const child = CardTitle({ children: "keep-me" });
-    const node = CardHeader({ children: child }) as {
+    const node = CardHeader({ children: child }) as unknown as {
       props: { children: unknown };
     };
     expect(node.props.children).toBe(child);

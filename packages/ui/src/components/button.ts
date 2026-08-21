@@ -55,7 +55,7 @@ export function Button(props: ButtonProps): PingoNode {
   return Pressable({
     className,
     disabled,
-    onPress: props.onPress,
+    ...(props.onPress === undefined ? {} : { onPress: props.onPress }),
     semanticLabel: props.semanticLabel ?? props.children,
     children: Text({ value: props.children }),
   });

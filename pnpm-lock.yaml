@@ -101,6 +101,9 @@ importers:
       '@dopejs/pingo':
         specifier: workspace:*
         version: link:../../packages/facade
+      '@dopejs/pingo-ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
     devDependencies:
       '@storybook/html-vite':
         specifier: 10.5.8
