@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-## 进度总览（2026-08-21 更新）
+## 进度总览（2026-08-22 更新）
 
 | Track                                                    | 状态      | 证据                                                           |
 | -------------------------------------------------------- | --------- | -------------------------------------------------------------- |
@@ -21,7 +21,21 @@
 
 **接手指引**：引擎工作包按各自设计门启动（设计文档评审 → 写 `docs/pingo-ui-e<N>-implementation-plan.md` 子计划 → subagent 执行）；组件批次按本文件规格表执行。已完成的子计划内 checkbox 状态以本表为准。
 
-**执行期新发现**（影响后续工作）：overflow 容器内子节点百分比尺寸解析为 0（见风险表）；有 hooks 的组件必须经 createElement/JSX 使用（已写入 packages/ui/README.md 与组件 docstring）。
+**执行期新发现**（影响后续工作）：
+
+- overflow 容器内子节点百分比尺寸解析为 0 —— **已在 E5 修复**（`40f06a1`）。
+- 有 hooks 的组件必须经 createElement/JSX 使用（已写入 packages/ui/README.md 与组件 docstring）。
+- **WASM 工程预算是 E4/E2/E3 的新硬约束**：E5+E1 交付后产品 Core WASM 为
+  393,174 gzip bytes，工程上限 393,216（384 KiB），余量 **42 bytes**。
+  `docs/wasm-size-attribution.md` 明文规定"gzip 超过 384 KiB：停止新增 Rust 能力"
+  且"400 KiB 产品上限不得作为日常余量使用"。E4（shadow paint + DisplayList 指令）、
+  E2（paint/hit/semantics 排序）、E3（absolute 布局路径）都是 KB 量级的 Core 新增，
+  在当前余量下无法落地。启动前必须先决定：先做体积归因与回收，还是把三项放在
+  默认关闭的 Cargo feature 后面。
+- `pnpm format:check` 在本轮之前已经对 41 个文件失败（`1d3cdc7` 修复），
+  `pnpm m0:check` 此前无法通过。
+- `packages/ui` 的皮肤生成器产出未经 Prettier 格式化，每次构建都会让
+  `format:check` 变红（`feedf85` 修复）。
 
 ---
 
