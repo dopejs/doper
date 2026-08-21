@@ -2,8 +2,8 @@
   "crate": "pingo-probe-wasm-budget",
   "baselines": {
     "aarch64-apple-darwin": {
-      "gzipBytes": 148458,
-      "rawBytes": 377967
+      "gzipBytes": 148428,
+      "rawBytes": 377807
     },
     "x86_64-unknown-linux-gnu": {
       "gzipBytes": 148456,

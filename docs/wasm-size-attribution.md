@@ -35,6 +35,10 @@ duplicate-function-elimination、vacuum、DAE 和 instruction optimization。没
 解码校验、fallback、inline reference、编辑、无障碍或媒体能力，也没有放宽 fuzz、差分、
 覆盖率或浏览器门禁。
 
+同一依赖清理也让 `pingo-probe-wasm-budget` 的 aarch64 macOS 固定口径从
+377,967/148,458 raw/gzip bytes 变为 377,807/148,428（分别减少 160/30 bytes）；
+`docs/evidence/wasm-budget.v2.json` 已显式重审这一 host baseline，300 KiB 探针上限不变。
+
 ## 失败模式与回滚
 
 - 任一 clean build 不同：拒绝候选，保留两个产物和工具版本做差分，不更新基线掩盖差异；
