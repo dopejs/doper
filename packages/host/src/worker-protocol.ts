@@ -12,7 +12,7 @@ import type { RenderClockMetrics } from "./render-clock";
 import type { EditTransaction, EventTransaction } from "@dopejs/pingo-editing";
 import type { MediaFramePath } from "./media";
 
-export const WORKER_PROTOCOL_VERSION = 11 as const;
+export const WORKER_PROTOCOL_VERSION = 12 as const;
 
 export interface WorkerPrepareMessage {
   readonly abiVersion: number;
@@ -26,6 +26,7 @@ export interface WorkerActivateMessage {
   /** Main-thread device pixel ratio; a worker cannot observe it itself. */
   readonly devicePixelRatio: number;
   readonly height: number;
+  readonly incrementalPicturesEnabled: boolean;
   readonly kind: "pingo:activate";
   readonly mode: Exclude<HostTransportMode, "main-thread">;
   readonly rasterCache: boolean;
@@ -202,6 +203,7 @@ export function isRenderWorkerInboundMessage(value: unknown): value is RenderWor
         isPositiveFinite(value.height) &&
         isRecord(value.canvas) &&
         typeof value.rasterCache === "boolean" &&
+        typeof value.incrementalPicturesEnabled === "boolean" &&
         typeof value.reducedMotion === "boolean" &&
         (value.mode === "post-message" ||
           (isSharedArrayBuffer(value.ringBuffer) && isSharedArrayBuffer(value.inputRingBuffer)))

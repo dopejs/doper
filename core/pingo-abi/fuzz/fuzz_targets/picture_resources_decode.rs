@@ -1,0 +1,8 @@
+#![no_main]
+
+use libfuzzer_sys::fuzz_target;
+use pingo_abi::PictureResourceBatch;
+
+fuzz_target!(|bytes: &[u8]| {
+    let _ = PictureResourceBatch::decode(bytes);
+});

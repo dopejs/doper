@@ -35,4 +35,14 @@ all = "deny"
 pedantic = "deny"
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false
+# Keep the rustc `opt-level=z` layout, which compresses better than Binaryen's
+# full -Oz pipeline for this module, then remove byte-identical functions and
+# dead local structure only. wasm-pack owns the pinned Binaryen download.
+wasm-opt = [
+  "--duplicate-function-elimination",
+  "--vacuum",
+  "--dae-optimizing",
+  "--optimize-instructions",
+  "--enable-bulk-memory",
+  "--enable-nontrapping-float-to-int",
+]

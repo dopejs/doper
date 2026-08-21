@@ -300,7 +300,9 @@ generation（或等价陈旧引用保护）、受字节/资源数预算约束的
 release 服从 committed-frame 顺序，Worker 重启和 transport 切换从完整快照恢复。现有 inline
 DisplayList builder 作为 D3 reference oracle 和运行时回滚路径永久保留。预热后的纯滚动帧只
 允许重组有界 `DrawPicture` 引用及外层 transform/clip；子树内部 command 数增加不能使稳态
-滚动 payload 同比例增长。完整实施与门禁见 [`m9-production-plan.md`](m9-production-plan.md)。
+滚动 payload 同比例增长。ID、事务、ack、预算压力和重启语义由
+[`ADR-0008`](adr/0008-incremental-picture-resources.md) 冻结；完整实施与门禁见
+[`m9-production-plan.md`](m9-production-plan.md)。
 
 **L5 · 过度失效必须可观测**
 
@@ -376,6 +378,10 @@ hash，以及 Picture 整体/子树 build、cache hit 和过度失效计数。Ho
 当前深度、字节数、高水位、ACK、合并、拒绝、超时和最新序列；运行时降级后仍保留
 故障前最后一份快照，供 devtools 和线上诊断使用。
 
+ABI v17 / diagnostics v9 另记录 Picture define/release、常驻资源数/字节、本帧资源事务
+字节和预算回退累计值。`DOPP` 资源事务必须在对应根 DisplayList 回放前完整安装，并由 Host
+使用同一 `frame_seq` 确认；Core 在确认前不产生下一帧。
+
 ### 为什么不用 SharedArrayBuffer 直接共享 Scene
 
 共享可变状态需要跨线程锁，且 JS 侧无法安全地维护 Rust 的不变式。单向 patch 流是更强的隔离：Core 完全拥有 Scene，Shell 完全拥有组件树，两者不共享任何可变对象。这也让 Core 能在 Shell 卡死时继续独立跑帧。
@@ -407,6 +413,11 @@ reserved/padding 或越界资源一律在回放前失败关闭。详细决策见
 | `DrawPicture(picture_id, offset)`                    | 引用缓存的子指令流                |
 
 `DrawPicture` 是缓存复用的关键：item 内容不变时，滚动只需改变 `DrawPicture` 的 offset，指令流本身零重建。
+
+ABI v17 新增 Core→backend `DOPP` Picture resource stream：`DefinePicture(id, bytes)` 发布
+完整、可独立验证的嵌套 DisplayList，`ReleasePicture(id)` 结束 session-generation 生命周期。
+Backend 在候选 registry 验证整张引用图后原子提交，不能边解码边修改 live resources。完整
+时序和 16 MiB 常驻预算见 [`ADR-0008`](adr/0008-incremental-picture-resources.md)。
 
 `DrawTextInlineFallback` 只用于 Core 持有、尚未回写为 Shell intern 资源的活动编辑值。
 它沿用同一条 DisplayList trust boundary，UTF-8 长度受流预算约束，Canvas2D 回放器在

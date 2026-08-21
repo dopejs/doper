@@ -1,5 +1,6 @@
 import {
   RasterTileCache,
+  encodePictureResourceBatch,
   type Canvas2DContext,
   type ReplayStats,
 } from "@dopejs/pingo-backend-canvas2d";
@@ -170,6 +171,43 @@ describe("CanvasFrameSink", () => {
     expect(() => sink.commit(define)).toThrow(/Core rejected/u);
     reject = false;
     expect(() => sink.commit(define)).not.toThrow();
+  });
+
+  it("publishes Picture resources before replay and acknowledges the exact frame", () => {
+    const calls: unknown[][] = [];
+    const events: string[] = [];
+    const acknowledge = vi.fn();
+    const pictureBytes = encodePictureResourceBatch([
+      { type: "define", pictureId: 7, bytes: emptyDisplayList() },
+    ]);
+    const core: CoreClient = {
+      acknowledge_picture_resources: acknowledge,
+      commit: () => drawPictureDisplayList(7),
+      frame_diagnostics: () => diagnostics(8, 1),
+      take_picture_resources: () => pictureBytes,
+    };
+    const sink = new CanvasFrameSink(fakeContext(calls, events), core);
+    sink.commit(mutationFrame([]));
+    expect(acknowledge).toHaveBeenCalledWith(1);
+    expect(events).toContain("canvas");
+  });
+
+  it("does not acknowledge or replay a malformed Picture graph", () => {
+    const calls: unknown[][] = [];
+    const acknowledge = vi.fn();
+    const core: CoreClient = {
+      acknowledge_picture_resources: acknowledge,
+      commit: () => drawPictureDisplayList(7),
+      frame_diagnostics: () => diagnostics(8, 1),
+      take_picture_resources: () =>
+        encodePictureResourceBatch([
+          { type: "define", pictureId: 7, bytes: drawPictureDisplayList(99) },
+        ]),
+    };
+    const sink = new CanvasFrameSink(fakeContext(calls, []), core);
+    expect(() => sink.commit(mutationFrame([]))).toThrow(/missing picture/u);
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
   });
 
   it("preflights malformed and invalid resource lifecycles before Core", () => {
@@ -1082,6 +1120,15 @@ function fillRectDisplayList(paintId: number): Uint8Array {
   view.setFloat32(12, 30, true);
   view.setFloat32(16, 40, true);
   view.setUint32(20, paintId, true);
+  return displayList([command]);
+}
+
+function drawPictureDisplayList(pictureId: number): Uint8Array {
+  const command = new Uint8Array(16);
+  const view = new DataView(command.buffer);
+  command[0] = 35;
+  view.setUint16(2, command.length / 4, true);
+  view.setUint32(4, pictureId, true);
   return displayList([command]);
 }
 

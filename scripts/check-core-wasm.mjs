@@ -41,6 +41,9 @@ const context = {
   transform(...values) {
     calls.push(["transform", ...values]);
   },
+  translate(...values) {
+    calls.push(["translate", ...values]);
+  },
   fillRect(...values) {
     calls.push(["fillRect", ...values, state.fillStyle]);
   },

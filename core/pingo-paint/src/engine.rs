@@ -5,7 +5,8 @@ use std::{
 
 use pingo_abi::{
     DisplayCommand, DisplayInstruction, DisplayList, EditorDecorationKind,
-    IMAGE_BITMAP_HEIGHT_OFFSET, IMAGE_BITMAP_WIDTH_OFFSET, NodeKind, Prop, ResourceKind,
+    IMAGE_BITMAP_HEIGHT_OFFSET, IMAGE_BITMAP_WIDTH_OFFSET, MAX_PICTURE_RESIDENT_BYTES, NodeKind,
+    PictureResourceBatch, PictureResourceCommand, PictureResourceInstruction, Prop, ResourceKind,
     StyleKeyword, StyleLength, StyleLengthUnit, StyleProperty, StyleTransformOperation,
 };
 use pingo_layout::LayoutSnapshot;
@@ -49,6 +50,18 @@ pub struct PaintMetrics {
     pub subtree_builds: u64,
     /// Unchanged child subtree Pictures reused while rebuilding an ancestor.
     pub subtree_cache_hits: u64,
+    /// Cumulative immutable Picture definitions published to the backend.
+    pub picture_defines: u64,
+    /// Cumulative immutable Picture releases published to the backend.
+    pub picture_releases: u64,
+    /// Live immutable Picture objects after the most recent frame.
+    pub picture_resident_count: usize,
+    /// Live immutable Picture payload bytes after the most recent frame.
+    pub picture_resident_bytes: usize,
+    /// Picture resource transaction bytes emitted for the most recent frame.
+    pub picture_resource_bytes: usize,
+    /// Cumulative resident-budget fallbacks to the inline reference path.
+    pub picture_budget_fallbacks: u64,
 }
 
 /// Result of one paint decision.
@@ -58,6 +71,8 @@ pub struct PaintOutcome {
     pub picture: Picture,
     /// Whether the DisplayList was rebuilt.
     pub rebuilt: bool,
+    /// Atomic definitions and releases that must be installed before replay.
+    pub picture_resources: Arc<[u8]>,
 }
 
 /// Core-owned shaped text reference installed before DisplayList replay.
@@ -139,12 +154,15 @@ impl TextPaintResolver for FallbackTextPaint {
 }
 
 /// Deterministic Scene/Layout-to-DisplayList builder.
-#[derive(Default)]
 pub struct PaintEngine {
     current: Option<Picture>,
     subtrees: HashMap<NodeId, Arc<CachedSubtree>>,
     topology: Vec<NodeId>,
     metrics: PaintMetrics,
+    incremental_pictures_enabled: bool,
+    picture_resident_budget_bytes: usize,
+    next_picture_id: u32,
+    retired_picture_ids: Vec<u32>,
 }
 
 #[derive(Debug)]
@@ -158,6 +176,23 @@ struct CachedSubtree {
     child_ids: Arc<[NodeId]>,
     command_count: usize,
     local: Arc<[DisplayInstruction]>,
+    picture_id: Option<u32>,
+    picture_bytes: Arc<[u8]>,
+}
+
+impl Default for PaintEngine {
+    fn default() -> Self {
+        Self {
+            current: None,
+            subtrees: HashMap::new(),
+            topology: Vec::new(),
+            metrics: PaintMetrics::default(),
+            incremental_pictures_enabled: false,
+            picture_resident_budget_bytes: MAX_PICTURE_RESIDENT_BYTES,
+            next_picture_id: 1,
+            retired_picture_ids: Vec::new(),
+        }
+    }
 }
 
 impl PaintEngine {
@@ -165,6 +200,38 @@ impl PaintEngine {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Selects incremental Picture resources or the inline reference builder.
+    ///
+    /// Changing paths invalidates only paint caches. Live Picture generations
+    /// are released with the next successfully produced frame.
+    pub fn set_incremental_pictures_enabled(&mut self, enabled: bool) {
+        if self.incremental_pictures_enabled == enabled {
+            return;
+        }
+        self.incremental_pictures_enabled = enabled;
+        self.retired_picture_ids.extend(
+            self.subtrees
+                .values()
+                .filter_map(|subtree| subtree.picture_id),
+        );
+        self.current = None;
+        self.subtrees.clear();
+        self.topology.clear();
+        self.metrics.picture_resident_count = 0;
+        self.metrics.picture_resident_bytes = 0;
+    }
+
+    /// Whether frames currently use the incremental Picture resource path.
+    #[must_use]
+    pub const fn incremental_pictures_enabled(&self) -> bool {
+        self.incremental_pictures_enabled
+    }
+
+    #[cfg(test)]
+    fn set_picture_resident_budget_bytes(&mut self, bytes: usize) {
+        self.picture_resident_budget_bytes = bytes;
     }
 
     /// Returns cumulative cache/build counters.
@@ -246,17 +313,95 @@ impl PaintEngine {
             return Ok(PaintOutcome {
                 picture,
                 rebuilt: false,
+                picture_resources: Arc::from([]),
             });
         }
 
         let rebuild = rebuild_subtrees(scene, geometry_changed, &self.subtrees, force_full);
-        let (display_list, updates, subtree_builds, subtree_cache_hits) =
-            build_display_list(scene, layout, &self.subtrees, &rebuild, text, virtual_items)?;
-        let command_count = display_list.instructions.len();
+        let mut built = if self.incremental_pictures_enabled {
+            build_picture_graph(
+                scene,
+                layout,
+                &self.subtrees,
+                &rebuild,
+                text,
+                virtual_items,
+                &mut self.next_picture_id,
+            )?
+        } else {
+            build_display_list(scene, layout, &self.subtrees, &rebuild, text, virtual_items)?
+        };
+        let live: HashSet<NodeId> = scene.ids().iter().copied().collect();
+        let mut prospective =
+            built
+                .core
+                .1
+                .values()
+                .chain(self.subtrees.iter().filter_map(|(node, subtree)| {
+                    (live.contains(node) && !built.core.1.contains_key(node)).then_some(subtree)
+                }));
+        let (mut resident_bytes, mut resident_count) = prospective
+            .try_fold((0_usize, 0_usize), |(bytes, count), subtree| {
+                Some((
+                    bytes.checked_add(subtree.picture_bytes.len())?,
+                    count.checked_add(usize::from(subtree.picture_id.is_some()))?,
+                ))
+            })
+            .ok_or_else(overflow)?;
+        let mut budget_fallback = false;
+        if self.incremental_pictures_enabled && resident_bytes > self.picture_resident_budget_bytes
+        {
+            // The Scene remains the source of truth, so resource pressure can
+            // always fall back to the independently-built inline DisplayList.
+            // Discard definitions that were never published, release every
+            // previously live generation, and stay on the reference path until
+            // the host explicitly re-enables Pictures or restarts Core.
+            let rebuild_all = vec![true; scene.len()];
+            built = build_display_list(
+                scene,
+                layout,
+                &HashMap::new(),
+                &rebuild_all,
+                text,
+                virtual_items,
+            )?;
+            built.releases.extend(
+                self.subtrees
+                    .values()
+                    .filter_map(|subtree| subtree.picture_id),
+            );
+            self.incremental_pictures_enabled = false;
+            resident_bytes = 0;
+            resident_count = 0;
+            budget_fallback = true;
+        }
+        let command_count = built.command_count;
+        let (display_list, updates, subtree_builds, subtree_cache_hits) = built.core;
         let bytes = display_list.encode()?;
         let picture = Picture {
             hash: fnv1a64(&bytes),
             bytes: Arc::from(bytes),
+        };
+        let mut release_ids = self.retired_picture_ids.clone();
+        release_ids.extend(built.releases.iter().copied());
+        release_ids.sort_unstable();
+        release_ids.dedup();
+        let mut resource_instructions = built.defines;
+        resource_instructions.extend(release_ids.iter().copied().map(|picture_id| {
+            PictureResourceInstruction {
+                flags: 0,
+                command: PictureResourceCommand::Release { picture_id },
+            }
+        }));
+        let picture_resources: Arc<[u8]> = if resource_instructions.is_empty() {
+            Arc::from([])
+        } else {
+            Arc::from(
+                PictureResourceBatch {
+                    instructions: resource_instructions,
+                }
+                .encode_core_owned()?,
+            )
         };
         if paint_dirty
             && self
@@ -270,7 +415,6 @@ impl PaintEngine {
         self.subtrees.extend(updates);
         if !topology_unchanged {
             // Keep the cache bounded by the live Scene rather than by history.
-            let live: HashSet<NodeId> = scene.ids().iter().copied().collect();
             self.subtrees.retain(|node, _| live.contains(node));
         }
         self.topology.clear();
@@ -282,9 +426,26 @@ impl PaintEngine {
             .metrics
             .subtree_cache_hits
             .saturating_add(subtree_cache_hits);
+        self.metrics.picture_defines = self
+            .metrics
+            .picture_defines
+            .saturating_add(u64::try_from(built.define_count).unwrap_or(u64::MAX));
+        self.metrics.picture_releases = self
+            .metrics
+            .picture_releases
+            .saturating_add(u64::try_from(release_ids.len()).unwrap_or(u64::MAX));
+        self.metrics.picture_resident_count = resident_count;
+        self.metrics.picture_resident_bytes = resident_bytes;
+        self.metrics.picture_resource_bytes = picture_resources.len();
+        self.metrics.picture_budget_fallbacks = self
+            .metrics
+            .picture_budget_fallbacks
+            .saturating_add(u64::from(budget_fallback));
+        self.retired_picture_ids.clear();
         Ok(PaintOutcome {
             picture,
             rebuilt: true,
+            picture_resources,
         })
     }
 }
@@ -342,7 +503,15 @@ fn children_match(scene: &Scene, node: NodeId, cached: &CachedSubtree) -> bool {
     expected.next().is_none()
 }
 
-type SubtreeBuild = (DisplayList, HashMap<NodeId, Arc<CachedSubtree>>, u64, u64);
+type SubtreeCore = (DisplayList, HashMap<NodeId, Arc<CachedSubtree>>, u64, u64);
+
+struct SubtreeBuild {
+    core: SubtreeCore,
+    command_count: usize,
+    defines: Vec<PictureResourceInstruction>,
+    releases: Vec<u32>,
+    define_count: usize,
+}
 
 fn build_display_list(
     scene: &Scene,
@@ -363,7 +532,15 @@ fn build_display_list(
         let local: Arc<[DisplayInstruction]> = if hidden {
             Arc::from([])
         } else {
-            Arc::from(build_node(scene, layout, index, node, text, virtual_items)?)
+            Arc::from(build_node(
+                scene,
+                layout,
+                index,
+                node,
+                text,
+                virtual_items,
+                true,
+            )?)
         };
         let mut children = Vec::new();
         let mut command_count = if hidden {
@@ -408,20 +585,28 @@ fn build_display_list(
                 children: Arc::from(children),
                 command_count,
                 local,
+                picture_id: None,
+                picture_bytes: Arc::from([]),
             }),
         );
         subtree_builds = subtree_builds.saturating_add(1);
     }
 
     let Some(root_id) = scene.ids().first().copied() else {
-        return Ok((
-            DisplayList {
-                instructions: Vec::new(),
-            },
-            updates,
-            subtree_builds,
-            subtree_cache_hits,
-        ));
+        return Ok(SubtreeBuild {
+            core: (
+                DisplayList {
+                    instructions: Vec::new(),
+                },
+                updates,
+                subtree_builds,
+                subtree_cache_hits,
+            ),
+            command_count: 0,
+            defines: Vec::new(),
+            releases: Vec::new(),
+            define_count: 0,
+        });
     };
     let root = updates
         .get(&root_id)
@@ -444,12 +629,184 @@ fn build_display_list(
             FlattenItem::Restore => push(&mut instructions, DisplayCommand::Restore),
         }
     }
-    Ok((
-        DisplayList { instructions },
-        updates,
-        subtree_builds,
-        subtree_cache_hits,
-    ))
+    Ok(SubtreeBuild {
+        command_count: instructions.len(),
+        core: (
+            DisplayList { instructions },
+            updates,
+            subtree_builds,
+            subtree_cache_hits,
+        ),
+        defines: Vec::new(),
+        releases: Vec::new(),
+        define_count: 0,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_picture_graph(
+    scene: &Scene,
+    layout: &LayoutSnapshot,
+    current: &HashMap<NodeId, Arc<CachedSubtree>>,
+    rebuild: &[bool],
+    text: &impl TextPaintResolver,
+    virtual_items: &impl VirtualPaintResolver,
+    next_picture_id: &mut u32,
+) -> Result<SubtreeBuild, PaintError> {
+    let mut updates = HashMap::new();
+    let mut definitions = Vec::new();
+    let mut releases = Vec::new();
+    let mut subtree_builds = 0_u64;
+    let mut subtree_cache_hits = 0_u64;
+    for (index, node) in scene.ids().iter().copied().enumerate().rev() {
+        if !rebuild.get(index).copied().unwrap_or(true) && current.contains_key(&node) {
+            continue;
+        }
+        let hidden = scene.display_none(node);
+        let local: Arc<[DisplayInstruction]> = if hidden {
+            Arc::from([])
+        } else {
+            Arc::from(build_node(
+                scene,
+                layout,
+                index,
+                node,
+                text,
+                virtual_items,
+                false,
+            )?)
+        };
+        let mut children = Vec::new();
+        let mut instructions = Vec::new();
+        let mut command_count = 0_usize;
+        if !hidden {
+            instructions.extend_from_slice(&local);
+            command_count = local.len().checked_add(1).ok_or_else(overflow)?;
+        }
+        let mut child_ids = Vec::new();
+        let mut child = (!hidden).then(|| scene.first_child(node)).flatten();
+        while let Some(child_id) = child {
+            let cached = updates
+                .get(&child_id)
+                .or_else(|| current.get(&child_id))
+                .cloned()
+                .ok_or(PaintError::MissingCachedSubtree { node: child_id })?;
+            if !scene
+                .resolve(child_id)
+                .and_then(|child_index| rebuild.get(child_index))
+                .copied()
+                .unwrap_or(true)
+            {
+                subtree_cache_hits = subtree_cache_hits.saturating_add(1);
+            }
+            if let Some(picture_id) = cached.picture_id {
+                let child_index = scene
+                    .resolve(child_id)
+                    .ok_or(PaintError::MissingCachedSubtree { node: child_id })?;
+                let (offset, _) = layout
+                    .geometry_at(child_index)
+                    .ok_or(PaintError::MissingGeometry { node: child_id })?;
+                push(
+                    &mut instructions,
+                    DisplayCommand::DrawPicture {
+                        picture_id,
+                        offset: [offset.x, offset.y],
+                    },
+                );
+                command_count = command_count
+                    .checked_add(cached.command_count)
+                    .and_then(|count| count.checked_add(1))
+                    .ok_or_else(overflow)?;
+            }
+            child_ids.push(child_id);
+            children.push(cached);
+            child = scene.next_sibling(child_id);
+        }
+        if !hidden {
+            push(&mut instructions, DisplayCommand::Restore);
+        }
+        let (picture_id, picture_bytes) = if hidden {
+            (None, Arc::from([]))
+        } else {
+            let id = allocate_picture_id(next_picture_id)?;
+            let bytes: Arc<[u8]> = Arc::from(DisplayList { instructions }.encode()?);
+            definitions.push(PictureResourceInstruction {
+                flags: 0,
+                command: PictureResourceCommand::Define {
+                    picture_id: id,
+                    bytes: bytes.clone(),
+                },
+            });
+            (Some(id), bytes)
+        };
+        if let Some(old_id) = current.get(&node).and_then(|entry| entry.picture_id) {
+            releases.push(old_id);
+        }
+        updates.insert(
+            node,
+            Arc::new(CachedSubtree {
+                children: Arc::from(children),
+                child_ids: Arc::from(child_ids),
+                command_count,
+                local,
+                picture_id,
+                picture_bytes,
+            }),
+        );
+        subtree_builds = subtree_builds.saturating_add(1);
+    }
+
+    let live: HashSet<NodeId> = scene.ids().iter().copied().collect();
+    releases.extend(current.iter().filter_map(|(node, subtree)| {
+        (!live.contains(node))
+            .then_some(subtree.picture_id)
+            .flatten()
+    }));
+    let root = scene
+        .ids()
+        .first()
+        .and_then(|root_id| updates.get(root_id).or_else(|| current.get(root_id)));
+    let mut instructions = Vec::new();
+    let mut command_count = 0;
+    if let Some(root) = root {
+        command_count = root
+            .command_count
+            .saturating_add(usize::from(root.picture_id.is_some()));
+        if let Some(picture_id) = root.picture_id {
+            let (offset, _) = layout.geometry_at(0).ok_or(PaintError::MissingGeometry {
+                node: scene.ids()[0],
+            })?;
+            push(
+                &mut instructions,
+                DisplayCommand::DrawPicture {
+                    picture_id,
+                    offset: [offset.x, offset.y],
+                },
+            );
+        }
+    }
+    let define_count = definitions.len();
+    Ok(SubtreeBuild {
+        core: (
+            DisplayList { instructions },
+            updates,
+            subtree_builds,
+            subtree_cache_hits,
+        ),
+        command_count,
+        defines: definitions,
+        releases,
+        define_count,
+    })
+}
+
+fn allocate_picture_id(next_picture_id: &mut u32) -> Result<u32, PaintError> {
+    let id = *next_picture_id;
+    if id == 0 {
+        return Err(overflow());
+    }
+    *next_picture_id = next_picture_id.checked_add(1).ok_or_else(overflow)?;
+    Ok(id)
 }
 
 enum FlattenItem<'a> {
@@ -464,16 +821,19 @@ fn build_node(
     node: NodeId,
     text: &impl TextPaintResolver,
     virtual_items: &impl VirtualPaintResolver,
+    include_layout_offset: bool,
 ) -> Result<Vec<DisplayInstruction>, PaintError> {
     let (offset, size) = layout
         .geometry_at(index)
         .ok_or(PaintError::MissingGeometry { node })?;
     let mut instructions = Vec::with_capacity(6);
     push(&mut instructions, DisplayCommand::Save);
-    push(
-        &mut instructions,
-        DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, offset.x, offset.y]),
-    );
+    if include_layout_offset {
+        push(
+            &mut instructions,
+            DisplayCommand::Transform([1.0, 0.0, 0.0, 1.0, offset.x, offset.y]),
+        );
+    }
 
     if scene.presentation_style_transform(node).is_some() {
         push_presentation_transform(scene, node, size, &mut instructions);
@@ -1017,7 +1377,10 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use pingo_abi::{Mutation, MutationBatch, MutationInstruction, NULL_NODE_ID};
+    use pingo_abi::{
+        Mutation, MutationBatch, MutationInstruction, NULL_NODE_ID, PictureResourceBatch,
+        PictureResourceCommand,
+    };
     use pingo_layout::{BoxConstraints, LayoutEngine, Size, ZeroIntrinsicMeasurer};
     use pingo_scene::Scene;
     use proptest::prelude::*;
@@ -1185,6 +1548,144 @@ mod tests {
             .paint(&scene, full_layout.snapshot(), &full_changed.changed, true)
             .expect("full paint");
         assert_eq!(incremental.picture.bytes(), full.picture.bytes());
+    }
+
+    #[test]
+    fn incremental_pictures_publish_before_reference_and_rebuild_only_the_dirty_chain() {
+        let root = id(0);
+        let left = id(1);
+        let right = id(2);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(left, NodeKind::Container, Some(root)),
+                create(right, NodeKind::Container, Some(root)),
+                set_f32(left, Prop::Width, 40.0),
+                set_f32(left, Prop::Height, 20.0),
+                set_f32(right, Prop::Width, 40.0),
+                set_f32(right, Prop::Height, 20.0),
+            ],
+        );
+        let constraints = BoxConstraints::tight(Size::new(320.0, 240.0)).expect("viewport");
+        let mut layout = LayoutEngine::new();
+        let first_layout = layout
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("initial layout");
+        let mut paint = PaintEngine::new();
+        paint.set_incremental_pictures_enabled(true);
+        let first = paint
+            .paint(&scene, layout.snapshot(), &first_layout.changed, false)
+            .expect("incremental paint");
+        let root_list = DisplayList::decode(first.picture.bytes()).expect("root list");
+        assert_eq!(root_list.instructions.len(), 1);
+        assert!(matches!(
+            root_list.instructions[0].command,
+            DisplayCommand::DrawPicture { .. }
+        ));
+        let first_batch =
+            PictureResourceBatch::decode(&first.picture_resources).expect("Picture definitions");
+        assert_eq!(first_batch.instructions.len(), 3);
+        assert!(first_batch.instructions.iter().all(|instruction| matches!(
+            instruction.command,
+            PictureResourceCommand::Define { .. }
+        )));
+        assert_eq!(paint.metrics().picture_resident_count, 3);
+        scene.clear_dirty();
+
+        commit(&mut scene, 2, vec![set_f32(left, Prop::Opacity, 0.5)]);
+        let second_layout = layout
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("incremental layout");
+        let second = paint
+            .paint(&scene, layout.snapshot(), &second_layout.changed, false)
+            .expect("incremental repaint");
+        let second_batch =
+            PictureResourceBatch::decode(&second.picture_resources).expect("Picture delta");
+        let defines = second_batch
+            .instructions
+            .iter()
+            .filter(|instruction| {
+                matches!(instruction.command, PictureResourceCommand::Define { .. })
+            })
+            .count();
+        let releases = second_batch
+            .instructions
+            .iter()
+            .filter(|instruction| {
+                matches!(instruction.command, PictureResourceCommand::Release { .. })
+            })
+            .count();
+        assert_eq!((defines, releases), (2, 2));
+        assert_eq!(paint.metrics().subtree_cache_hits, 1);
+        assert_eq!(paint.metrics().picture_resident_count, 3);
+
+        scene.clear_dirty();
+        let clean = BitSet::with_len(scene.len());
+        let reused = paint
+            .paint(&scene, layout.snapshot(), &clean, false)
+            .expect("clean reuse");
+        assert!(!reused.rebuilt);
+        assert!(reused.picture_resources.is_empty());
+    }
+
+    #[test]
+    fn picture_budget_pressure_releases_live_resources_and_falls_back_inline() {
+        let root = id(0);
+        let child = id(1);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                create(root, NodeKind::Root, None),
+                create(child, NodeKind::Container, Some(root)),
+                set_f32(child, Prop::Width, 40.0),
+                set_f32(child, Prop::Height, 20.0),
+            ],
+        );
+        let constraints = BoxConstraints::tight(Size::new(320.0, 240.0)).expect("viewport");
+        let mut layout = LayoutEngine::new();
+        let first_layout = layout
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("initial layout");
+        let mut paint = PaintEngine::new();
+        paint.set_incremental_pictures_enabled(true);
+        paint
+            .paint(&scene, layout.snapshot(), &first_layout.changed, false)
+            .expect("initial Picture frame");
+        assert_eq!(paint.metrics().picture_resident_count, 2);
+        scene.clear_dirty();
+
+        paint.set_picture_resident_budget_bytes(1);
+        commit(&mut scene, 2, vec![set_f32(child, Prop::Opacity, 0.5)]);
+        let changed = layout
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("incremental layout");
+        let fallback = paint
+            .paint(&scene, layout.snapshot(), &changed.changed, false)
+            .expect("budget fallback");
+
+        assert!(!paint.incremental_pictures_enabled());
+        assert_eq!(paint.metrics().picture_budget_fallbacks, 1);
+        assert_eq!(paint.metrics().picture_resident_count, 0);
+        assert_eq!(paint.metrics().picture_resident_bytes, 0);
+        let root_list = DisplayList::decode(fallback.picture.bytes()).expect("inline list");
+        assert!(
+            root_list.instructions.iter().all(|instruction| !matches!(
+                instruction.command,
+                DisplayCommand::DrawPicture { .. }
+            ))
+        );
+        let releases =
+            PictureResourceBatch::decode(&fallback.picture_resources).expect("release transaction");
+        assert_eq!(releases.instructions.len(), 2);
+        assert!(releases.instructions.iter().all(|instruction| matches!(
+            instruction.command,
+            PictureResourceCommand::Release { .. }
+        )));
     }
 
     #[test]

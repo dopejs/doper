@@ -42,7 +42,7 @@ for (const [file, contents] of outputs) {
 if (stale) process.exitCode = 1;
 
 function validateSchema(value) {
-  if (value.schemaVersion !== 1 || value.abiVersion !== 16) {
+  if (value.schemaVersion !== 1 || value.abiVersion !== 17) {
     throw new Error("unsupported protocol schema or ABI version");
   }
   if (value.endianness !== "little" || value.alignment !== 4) {
@@ -76,6 +76,8 @@ function validateSchema(value) {
     "inputInstructions",
     "displayInstructions",
     "glyphResourceInstructions",
+    "pictureResourceInstructions",
+    "pictureResidentBytes",
     "systemTextMetricInstructions",
     "editTransactionInstructions",
     "eventTransactionInstructions",
@@ -94,6 +96,7 @@ function validateSchema(value) {
   validateEntries(value.streams.input.commands, "input opcode", 0xff);
   validateEntries(value.streams.displayList.commands, "display-list opcode", 0xff);
   validateEntries(value.streams.glyphResources.commands, "glyph-resource opcode", 0xff);
+  validateEntries(value.streams.pictureResources.commands, "picture-resource opcode", 0xff);
   validateEntries(value.streams.systemTextMetrics.commands, "system-text-metric opcode", 0xff);
   validateEntries(value.streams.editTransactions.commands, "edit-transaction opcode", 0xff);
   validateEntries(value.streams.eventTransactions.commands, "event-transaction opcode", 0xff);
@@ -226,6 +229,7 @@ function validateSchema(value) {
     ...value.streams.input.commands,
     ...value.streams.displayList.commands,
     ...value.streams.glyphResources.commands,
+    ...value.streams.pictureResources.commands,
     ...value.streams.systemTextMetrics.commands,
     ...value.streams.editTransactions.commands,
     ...value.streams.eventTransactions.commands,
@@ -336,7 +340,11 @@ function renderRustBase(value) {
 
 function renderRust(value) {
   const instructionHeaderBytes = wireSize(value.instructionHeader.map((field) => field.type));
-  return `${renderRustBase(value)}${renderRustNonPassiveRegionLayout(value.nonPassiveRegionBatch)}
+  return `${renderRustBase(value)}pub const PICTURE_RESOURCES_MAGIC: u32 = ${magicNumber(value.streams.pictureResources.magic)};
+pub const MAX_PICTURE_RESOURCES_BYTES: usize = ${value.streams.pictureResources.maxBytes};
+pub const MAX_PICTURE_RESOURCE_INSTRUCTIONS: u32 = ${value.limits.pictureResourceInstructions};
+pub const MAX_PICTURE_RESIDENT_BYTES: usize = ${value.limits.pictureResidentBytes};
+${renderRustEnum("PictureResourceOpcode", value.streams.pictureResources.commands, "u8", "opcode")}${renderRustLayouts("PictureResourceOpcode", value.streams.pictureResources.commands, instructionHeaderBytes)}${renderRustNonPassiveRegionLayout(value.nonPassiveRegionBatch)}
 ${renderRustEditingGeometryLayout(value.editingGeometryBatch)}
 ${renderRustSemanticsLayout(value.semanticsBatch)}
 pub const EDIT_TRANSACTIONS_MAGIC: u32 = ${magicNumber(value.streams.editTransactions.magic)};
@@ -485,7 +493,11 @@ function renderTypeScriptBase(value) {
 
 function renderTypeScript(value) {
   const instructionHeaderBytes = wireSize(value.instructionHeader.map((field) => field.type));
-  return `${renderTypeScriptBase(value)}${renderTsNonPassiveRegionLayout(value.nonPassiveRegionBatch)}
+  return `${renderTypeScriptBase(value)}export const PICTURE_RESOURCES_MAGIC = ${magicNumber(value.streams.pictureResources.magic)} as const;
+export const MAX_PICTURE_RESOURCES_BYTES = ${value.streams.pictureResources.maxBytes} as const;
+export const MAX_PICTURE_RESOURCE_INSTRUCTIONS = ${value.limits.pictureResourceInstructions} as const;
+export const MAX_PICTURE_RESIDENT_BYTES = ${value.limits.pictureResidentBytes} as const;
+${renderTsEnum("PictureResourceOpcode", value.streams.pictureResources.commands, "opcode")}${renderTsLayouts("PICTURE_RESOURCE_LAYOUTS", "PictureResourceOpcode", value.streams.pictureResources.commands, instructionHeaderBytes)}${renderTsNonPassiveRegionLayout(value.nonPassiveRegionBatch)}
 ${renderTsEditingGeometryLayout(value.editingGeometryBatch)}
 ${renderTsSemanticsLayout(value.semanticsBatch)}
 export const EDIT_TRANSACTIONS_MAGIC = ${magicNumber(value.streams.editTransactions.magic)} as const;

@@ -46,6 +46,10 @@ pub enum CoreError {
     SystemTextMetricsState(&'static str),
     /// The caller requested another resource-producing frame before draining DOPG.
     GlyphResourcesNotDrained,
+    /// A caller started another frame before acknowledging the prior DOPP transaction.
+    PictureResourcesNotAcknowledged,
+    /// The Host acknowledged a Picture transaction with the wrong frame sequence.
+    PictureResourceAcknowledgementMismatch,
     /// A caller started another editable commit before draining the prior reverse batch.
     EditTransactionsNotDrained,
     /// A caller started another commit before draining hit-tested event results.
@@ -118,6 +122,52 @@ pub enum CoreError {
     InvalidScrollPosition(f64),
     /// Input or animation was requested before the first Mutation frame.
     MissingCommittedFrame,
+}
+
+impl CoreError {
+    /// Stable low-cardinality code for browser telemetry and operator logs.
+    ///
+    /// Native callers retain the complete typed error. The WASM boundary uses
+    /// this code instead of formatting nested enums, which is deterministic,
+    /// aggregation-friendly, and avoids shipping a second debug renderer.
+    #[must_use]
+    pub const fn operator_code(&self) -> &'static str {
+        match self {
+            Self::Poisoned => "core.poisoned",
+            Self::InvalidViewport { .. }
+            | Self::InvalidDevicePixelRatio(_)
+            | Self::InvalidFrameDelta(_)
+            | Self::InvalidScrollPosition(_) => "core.invalid_argument",
+            Self::Abi(_) => "core.abi",
+            Self::Scene(_) => "core.scene",
+            Self::Layout(_) => "core.layout",
+            Self::Paint(_) => "core.paint",
+            Self::Animation(_) => "core.animation",
+            Self::Hit(_) => "core.hit",
+            Self::GlyphResources(_) | Self::EditTransactions(_) | Self::EventTransactions(_) => {
+                "core.reverse_stream"
+            }
+            Self::SystemTextMetricsState(_) => "core.text_metrics",
+            Self::GlyphResourcesNotDrained
+            | Self::PictureResourcesNotAcknowledged
+            | Self::PictureResourceAcknowledgementMismatch
+            | Self::EditTransactionsNotDrained
+            | Self::EventTransactionsNotDrained => "core.backpressure",
+            Self::MixedEventInput | Self::MixedEditingGeometryInput => "core.mixed_input",
+            Self::Scroll(_)
+            | Self::InvalidScrollTarget { .. }
+            | Self::MissingScrollGeometry { .. } => "core.scroll",
+            Self::Edit(_)
+            | Self::InvalidEditableConfiguration(_)
+            | Self::InvalidEditableTarget { .. }
+            | Self::InvalidEditableCharacterRange { .. }
+            | Self::EditableReadOnly { .. }
+            | Self::MissingEditableText { .. }
+            | Self::EditableRevisionConflict { .. } => "core.editing",
+            Self::InputSequenceNotNewer { .. } | Self::UnsupportedInputCommand => "core.input",
+            Self::MissingCommittedFrame => "core.missing_committed_frame",
+        }
+    }
 }
 
 impl fmt::Display for CoreError {

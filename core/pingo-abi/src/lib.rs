@@ -16,6 +16,7 @@ mod event_transactions;
 mod glyph_resources;
 mod input;
 mod mutation;
+mod picture_resources;
 mod recording;
 mod system_text_metrics;
 
@@ -60,6 +61,9 @@ pub use input::{
     InputPosition, InputSelection, InteractionResetReason,
 };
 pub use mutation::{Mutation, MutationBatch, MutationInstruction};
+pub use picture_resources::{
+    PictureResourceBatch, PictureResourceCommand, PictureResourceInstruction,
+};
 pub use recording::{ReplayRecord, ReplayRecording};
 pub use style_generated::{
     CSS_SUBSET_VERSION, STYLE_ALL_FEATURE_BITS, STYLE_COMPUTED_ENCODING_VARIANT,

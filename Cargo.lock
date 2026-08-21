@@ -280,7 +280,6 @@ version = "0.1.0"
 dependencies = [
  "fontdue",
  "swash",
- "ttf-parser",
  "unicode-linebreak",
  "unicode-segmentation",
 ]

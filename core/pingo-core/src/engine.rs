@@ -19,8 +19,11 @@ use pingo_abi::{
     FRAME_DIAGNOSTICS_FRAME_SEQ_INDEX, FRAME_DIAGNOSTICS_INTERACTION_STATE_CHANGES_INDEX,
     FRAME_DIAGNOSTICS_LAYOUT_CHANGED_NODES_INDEX, FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX,
     FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX, FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX,
-    FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX, FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_BUDGET_FALLBACKS_INDEX, FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_PICTURE_DEFINES_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX, FRAME_DIAGNOSTICS_PICTURE_HASH_LOW_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_RELEASES_INDEX, FRAME_DIAGNOSTICS_PICTURE_RESIDENT_BYTES_INDEX,
+    FRAME_DIAGNOSTICS_PICTURE_RESIDENT_COUNT_INDEX, FRAME_DIAGNOSTICS_PICTURE_RESOURCE_BYTES_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX,
     FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX, FRAME_DIAGNOSTICS_SCENE_NODES_INDEX,
@@ -161,6 +164,18 @@ pub struct FrameDiagnostics {
     pub animation_layout_nodes: u64,
     /// Bounded estimated animation payload and controller bytes retained by Core.
     pub animation_retained_bytes: u64,
+    /// Cumulative immutable Picture definitions published by Core.
+    pub picture_defines: u64,
+    /// Cumulative immutable Picture releases published by Core.
+    pub picture_releases: u64,
+    /// Live Picture count after this frame.
+    pub picture_resident_count: usize,
+    /// Live Picture payload bytes after this frame.
+    pub picture_resident_bytes: usize,
+    /// Picture resource batch bytes emitted for this frame.
+    pub picture_resource_bytes: usize,
+    /// Cumulative resident-budget fallbacks to the inline reference path.
+    pub picture_budget_fallbacks: u64,
 }
 
 impl FrameDiagnostics {
@@ -226,6 +241,16 @@ impl FrameDiagnostics {
             count_u64_word(self.animation_layout_nodes);
         words[FRAME_DIAGNOSTICS_ANIMATION_RETAINED_BYTES_INDEX] =
             count_u64_word(self.animation_retained_bytes);
+        words[FRAME_DIAGNOSTICS_PICTURE_DEFINES_INDEX] = count_u64_word(self.picture_defines);
+        words[FRAME_DIAGNOSTICS_PICTURE_RELEASES_INDEX] = count_u64_word(self.picture_releases);
+        words[FRAME_DIAGNOSTICS_PICTURE_RESIDENT_COUNT_INDEX] =
+            count_word(self.picture_resident_count);
+        words[FRAME_DIAGNOSTICS_PICTURE_RESIDENT_BYTES_INDEX] =
+            count_word(self.picture_resident_bytes);
+        words[FRAME_DIAGNOSTICS_PICTURE_RESOURCE_BYTES_INDEX] =
+            count_word(self.picture_resource_bytes);
+        words[FRAME_DIAGNOSTICS_PICTURE_BUDGET_FALLBACKS_INDEX] =
+            count_u64_word(self.picture_budget_fallbacks);
         words
     }
 }
@@ -254,6 +279,8 @@ pub struct CoreEngine {
     editing: EditingController,
     hit: HitIndex,
     pending_events: Vec<u8>,
+    pending_picture_resources: Arc<[u8]>,
+    pending_picture_frame_seq: Option<u32>,
     pointer_gesture: Option<PointerGesture>,
     interaction: InteractionController,
     caret_desired_x: Option<(NodeId, f32)>,
@@ -665,6 +692,8 @@ impl CoreEngine {
             editing: EditingController::default(),
             hit: HitIndex::default(),
             pending_events: Vec::new(),
+            pending_picture_resources: Arc::from([]),
+            pending_picture_frame_seq: None,
             pointer_gesture: None,
             interaction: InteractionController::default(),
             caret_desired_x: None,
@@ -1810,6 +1839,41 @@ impl CoreEngine {
         self.text.take_glyph_resources()
     }
 
+    /// Selects incremental Picture resources or the inline rollback builder.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a path change while a previous Picture transaction awaits Host
+    /// acknowledgement, preserving publish/release ordering.
+    pub fn set_incremental_pictures_enabled(&mut self, enabled: bool) -> Result<(), CoreError> {
+        if !self.pending_picture_resources.is_empty() {
+            return Err(CoreError::PictureResourcesNotAcknowledged);
+        }
+        self.paint.set_incremental_pictures_enabled(enabled);
+        Ok(())
+    }
+
+    /// Returns the pending Picture resource transaction without acknowledging it.
+    #[must_use]
+    pub fn take_picture_resources(&self) -> Vec<u8> {
+        self.pending_picture_resources.to_vec()
+    }
+
+    /// Acknowledges successful backend installation of the pending Picture transaction.
+    ///
+    /// # Errors
+    ///
+    /// Rejects absent or stale frame sequences so delayed acknowledgements cannot
+    /// release a newer generation.
+    pub fn acknowledge_picture_resources(&mut self, frame_seq: u32) -> Result<(), CoreError> {
+        if self.pending_picture_frame_seq != Some(frame_seq) {
+            return Err(CoreError::PictureResourceAcknowledgementMismatch);
+        }
+        self.pending_picture_resources = Arc::from([]);
+        self.pending_picture_frame_seq = None;
+        Ok(())
+    }
+
     /// Drains the versioned reverse transactions emitted by the latest edit operation.
     ///
     /// # Errors
@@ -2084,7 +2148,17 @@ impl CoreEngine {
             animation_presentation_changes: animation_metrics.presentation_changes,
             animation_layout_nodes: animation_metrics.layout_nodes,
             animation_retained_bytes: animation_metrics.retained_bytes,
+            picture_defines: paint_metrics.picture_defines,
+            picture_releases: paint_metrics.picture_releases,
+            picture_resident_count: paint_metrics.picture_resident_count,
+            picture_resident_bytes: paint_metrics.picture_resident_bytes,
+            picture_resource_bytes: paint_metrics.picture_resource_bytes,
+            picture_budget_fallbacks: paint_metrics.picture_budget_fallbacks,
         };
+        if !painted.picture_resources.is_empty() {
+            self.pending_picture_resources = painted.picture_resources.clone();
+            self.pending_picture_frame_seq = Some(frame_seq);
+        }
         self.scene.clear_dirty();
         Ok(FrameOutput {
             frame_seq,
@@ -2173,6 +2247,9 @@ impl CoreEngine {
         }
         if self.text.has_pending_resources() {
             return Err(CoreError::GlyphResourcesNotDrained);
+        }
+        if !self.pending_picture_resources.is_empty() {
+            return Err(CoreError::PictureResourcesNotAcknowledged);
         }
         if self.editing.has_pending_transactions() {
             return Err(CoreError::EditTransactionsNotDrained);
@@ -2498,12 +2575,13 @@ mod tests {
         NON_PASSIVE_REGION_RECORD_BOTTOM_BITS_INDEX, NON_PASSIVE_REGION_RECORD_FLAGS_INDEX,
         NON_PASSIVE_REGION_RECORD_LEFT_BITS_INDEX, NON_PASSIVE_REGION_RECORD_RIGHT_BITS_INDEX,
         NON_PASSIVE_REGION_RECORD_TOP_BITS_INDEX, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID,
-        NodeKind, Prop, RESOURCE_ENCODING_VERSION, ReplayRecord, ReplayRecording, ResourceKind,
-        SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET, SFNT_FONT_FACE_INDEX_OFFSET,
-        SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET, SFNT_FONT_VERSION_OFFSET,
-        STYLE_ALL_FEATURE_BITS, STYLE_COMPUTED_ENCODING_VARIANT, STYLE_COMPUTED_ENCODING_VERSION,
-        STYLE_VALUE_F32, STYLE_VALUE_KEYWORD, StyleKeyword, StyleProperty, SystemTextMetric,
-        SystemTextMetricBatch, SystemTextMetricCommand, SystemTextMetricInstruction,
+        NodeKind, PictureResourceBatch, Prop, RESOURCE_ENCODING_VERSION, ReplayRecord,
+        ReplayRecording, ResourceKind, SFNT_FONT_DATA_BYTES_OFFSET, SFNT_FONT_DATA_OFFSET,
+        SFNT_FONT_FACE_INDEX_OFFSET, SFNT_FONT_RESOURCE_VARIANT, SFNT_FONT_VARIANT_OFFSET,
+        SFNT_FONT_VERSION_OFFSET, STYLE_ALL_FEATURE_BITS, STYLE_COMPUTED_ENCODING_VARIANT,
+        STYLE_COMPUTED_ENCODING_VERSION, STYLE_VALUE_F32, STYLE_VALUE_KEYWORD, StyleKeyword,
+        StyleProperty, SystemTextMetric, SystemTextMetricBatch, SystemTextMetricCommand,
+        SystemTextMetricInstruction,
     };
     use pingo_edit::{EditConfig, EditSession, Selection};
     use pingo_headless::HeadlessRenderer;
@@ -5316,6 +5394,39 @@ mod tests {
         assert_eq!(second.diagnostics.picture_cache_hits, 1);
         assert_eq!(second.diagnostics.picture_subtree_builds, 2);
         assert_eq!(second.diagnostics.picture_subtree_cache_hits, 0);
+    }
+
+    #[test]
+    fn picture_transactions_block_new_frames_until_the_exact_frame_is_acknowledged() {
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        engine
+            .set_incremental_pictures_enabled(true)
+            .expect("enable Pictures");
+        let first = engine.commit(&painted_tree()).expect("first frame");
+        assert!(matches!(
+            DisplayList::decode(&first.display_list)
+                .expect("root list")
+                .instructions[0]
+                .command,
+            DisplayCommand::DrawPicture { .. }
+        ));
+        let resources = engine.take_picture_resources();
+        assert!(!resources.is_empty());
+        PictureResourceBatch::decode(&resources).expect("Picture transaction");
+        assert_eq!(
+            engine.commit(&frame(2, Vec::new())),
+            Err(CoreError::PictureResourcesNotAcknowledged)
+        );
+        assert_eq!(
+            engine.acknowledge_picture_resources(2),
+            Err(CoreError::PictureResourceAcknowledgementMismatch)
+        );
+        engine
+            .acknowledge_picture_resources(1)
+            .expect("acknowledge exact frame");
+        let clean = engine.commit(&frame(2, Vec::new())).expect("clean frame");
+        assert!(!clean.rebuilt);
+        assert!(engine.take_picture_resources().is_empty());
     }
 
     #[test]

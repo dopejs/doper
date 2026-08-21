@@ -54,8 +54,14 @@ import {
   FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX,
   FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
+  FRAME_DIAGNOSTICS_PICTURE_BUDGET_FALLBACKS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX,
+  FRAME_DIAGNOSTICS_PICTURE_DEFINES_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
+  FRAME_DIAGNOSTICS_PICTURE_RELEASES_INDEX,
+  FRAME_DIAGNOSTICS_PICTURE_RESIDENT_BYTES_INDEX,
+  FRAME_DIAGNOSTICS_PICTURE_RESIDENT_COUNT_INDEX,
+  FRAME_DIAGNOSTICS_PICTURE_RESOURCE_BYTES_INDEX,
   FRAME_DIAGNOSTICS_PRODUCER_ABI_VERSION_INDEX,
   FRAME_DIAGNOSTICS_SKIPPED_INSTRUCTIONS_INDEX,
   FRAME_DIAGNOSTICS_VIRTUAL_MATERIALIZED_END_INDEX,
@@ -134,6 +140,9 @@ export interface CoreClient {
   set_system_text_metrics?(metrics: Uint8Array): Uint8Array | undefined;
   is_poisoned?(): boolean;
   take_glyph_resources?(): Uint8Array;
+  set_incremental_pictures_enabled?(enabled: boolean): void;
+  take_picture_resources?(): Uint8Array;
+  acknowledge_picture_resources?(frameSeq: number): void;
   take_edit_transactions?(): Uint8Array;
   take_event_transactions?(): Uint8Array;
   non_passive_regions?(): Uint32Array;
@@ -213,6 +222,13 @@ export interface CoreFrameDiagnostics {
   readonly pictureCacheHits: number;
   readonly pictureSubtreeBuilds: number;
   readonly pictureSubtreeCacheHits: number;
+  readonly pictureDefines: number;
+  readonly pictureReleases: number;
+  readonly pictureResidentCount: number;
+  readonly pictureResidentBytes: number;
+  readonly pictureResourceBytes: number;
+  /** Cumulative resident-budget fallbacks to the inline reference path. */
+  readonly pictureBudgetFallbacks: number;
   readonly overInvalidatedFrames: number;
   readonly pictureHash: bigint;
   /**
@@ -293,6 +309,8 @@ export interface FrameReport extends ReplayStats {
 
 /** Main-thread M1 root configuration and observability callbacks. */
 export interface CanvasRootOptions extends RootOptions {
+  /** Uses immutable Picture resources; false is the production rollback path. */
+  readonly incrementalPicturesEnabled?: boolean;
   readonly onFrame?: (report: FrameReport) => void;
   readonly onEditTransaction?: (transaction: EditTransaction) => void;
   readonly onEventTransaction?: (transaction: EventTransaction) => void;
@@ -410,6 +428,7 @@ export class CanvasFrameSink implements MutationSink {
     onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void,
     onEditingGeometry?: (frame: EditingGeometryFrame) => void,
     onSemantics?: (nodes: readonly SemanticNode[]) => void,
+    incrementalPicturesEnabled = true,
   ) {
     this.#context = context;
     this.#core = core;
@@ -424,6 +443,7 @@ export class CanvasFrameSink implements MutationSink {
     this.#onSemantics = onSemantics;
     this.#resources = new Canvas2DResourceRegistry();
     this.#replayer = new Canvas2DReplayer();
+    this.#core.set_incremental_pictures_enabled?.(incrementalPicturesEnabled);
     this.#fontSet = runtimeFontSet();
     this.#fontLoadingDone =
       this.#fontSet === undefined || this.#core.set_system_text_metrics === undefined
@@ -487,6 +507,7 @@ export class CanvasFrameSink implements MutationSink {
     if (actions.length > 0 || glyphResources !== undefined) {
       this.#resources.applyResourceTransaction(actions, glyphResources);
     }
+    this.applyPictureResources(frameSeq);
     this.#resourceKinds.clear();
     for (const [id, kind] of nextKinds) this.#resourceKinds.set(id, kind);
     replaceMap(this.#nodeParents, nextParents);
@@ -565,15 +586,22 @@ export class CanvasFrameSink implements MutationSink {
       // while a reverse stream is still pending, so a batch whose first
       // transaction produced one would make the second fail.
       this.emitEditTransactions(this.takeEditTransactions());
+      this.applyDynamicGlyphResources();
       // The final transaction of a burst can be one that draws nothing, such as
       // the end of a drag, so keep the newest picture rather than the newest
       // transaction.
-      if (displayList !== undefined) latest = displayList;
+      if (displayList !== undefined) {
+        const diagnostics =
+          core.frame_diagnostics === undefined
+            ? undefined
+            : parseCoreFrameDiagnostics(core.frame_diagnostics());
+        this.applyPictureResources(diagnostics?.frameSeq);
+        latest = displayList;
+      }
     }
     this.#coreMs = coreMs;
     // No trailing drain: the loop already drained after the final transaction.
     if (latest === undefined) return null;
-    this.applyDynamicGlyphResources();
     return this.acceptDynamicFrame(latest, {
       cause: "input",
       inputBytes,
@@ -899,10 +927,10 @@ export class CanvasFrameSink implements MutationSink {
       throw new TypeError("Core dynamic frame must return Uint8Array DisplayList bytes");
     }
     const coreDiagnostics =
-      (this.#onFrame === undefined && this.#rasterCache === undefined) ||
       this.#core.frame_diagnostics === undefined
         ? undefined
         : parseCoreFrameDiagnostics(this.#core.frame_diagnostics());
+    this.applyPictureResources(coreDiagnostics?.frameSeq);
     const pictureKey =
       coreDiagnostics === undefined
         ? undefined
@@ -1065,6 +1093,26 @@ export class CanvasFrameSink implements MutationSink {
     const bytes = this.takeGlyphResources();
     if (bytes === undefined) return;
     this.#resources.applyResourceTransaction([], bytes);
+    this.#resourceRevision = nextSequence(this.#resourceRevision);
+    this.#rasterCache?.clear();
+  }
+
+  private applyPictureResources(frameSeq?: number): void {
+    const core = this.#core;
+    if (core.take_picture_resources === undefined) return;
+    const bytes = core.take_picture_resources();
+    if (!(bytes instanceof Uint8Array)) {
+      throw new TypeError("Core Picture resources must be Uint8Array bytes");
+    }
+    if (bytes.byteLength === 0) return;
+    if (frameSeq === undefined) {
+      throw new Error("Core Picture transaction requires frame diagnostics");
+    }
+    if (core.acknowledge_picture_resources === undefined) {
+      throw new Error("Core Picture transaction requires acknowledgement support");
+    }
+    this.#resources.applyPictureResourceBatch(bytes);
+    core.acknowledge_picture_resources(frameSeq);
     this.#resourceRevision = nextSequence(this.#resourceRevision);
     this.#rasterCache?.clear();
   }
@@ -1281,6 +1329,12 @@ function parseCoreFrameDiagnostics(
       words,
       FRAME_DIAGNOSTICS_PICTURE_SUBTREE_CACHE_HITS_INDEX,
     ),
+    pictureDefines: requiredWord(words, FRAME_DIAGNOSTICS_PICTURE_DEFINES_INDEX),
+    pictureReleases: requiredWord(words, FRAME_DIAGNOSTICS_PICTURE_RELEASES_INDEX),
+    pictureResidentCount: requiredWord(words, FRAME_DIAGNOSTICS_PICTURE_RESIDENT_COUNT_INDEX),
+    pictureResidentBytes: requiredWord(words, FRAME_DIAGNOSTICS_PICTURE_RESIDENT_BYTES_INDEX),
+    pictureResourceBytes: requiredWord(words, FRAME_DIAGNOSTICS_PICTURE_RESOURCE_BYTES_INDEX),
+    pictureBudgetFallbacks: requiredWord(words, FRAME_DIAGNOSTICS_PICTURE_BUDGET_FALLBACKS_INDEX),
     overInvalidatedFrames: requiredWord(words, FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX),
     pictureHash: BigInt(low) | (BigInt(high) << 32n),
     visiblePlaceholders: requiredWord(words, FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX),
@@ -1535,6 +1589,7 @@ export function createCanvasRoot(
     options.onNonPassiveRegions,
     options.onEditingGeometry,
     options.onSemantics,
+    options.incrementalPicturesEnabled ?? true,
   );
   const mediaPipeline = (): MediaPipeline => {
     media ??= new MediaPipeline({

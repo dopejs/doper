@@ -22,6 +22,7 @@ describe("render Worker protocol validation", () => {
         canvas: {},
         height: 100,
         inputRingBuffer: new SharedArrayBuffer(64),
+        incrementalPicturesEnabled: true,
         devicePixelRatio: 2,
         kind: "pingo:activate",
         mode: "sab",
@@ -36,6 +37,7 @@ describe("render Worker protocol validation", () => {
       isRenderWorkerInboundMessage({
         canvas: {},
         height: 100,
+        incrementalPicturesEnabled: true,
         devicePixelRatio: 2,
         kind: "pingo:activate",
         mode: "sab",

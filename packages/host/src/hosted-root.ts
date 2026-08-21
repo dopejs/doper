@@ -88,6 +88,8 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly clockAnchorDriver?: ClockAnchorDriver | null;
   readonly coreFactory?: (width: number, height: number) => Promise<CoreClient>;
   readonly initializationTimeoutMs?: number;
+  /** Uses immutable Picture resources; false is the production rollback path. */
+  readonly incrementalPicturesEnabled?: boolean;
   readonly mutationAcknowledgementTimeoutMs?: number;
   readonly mutationBufferBytes?: number;
   /** Forces the centralized textarea fallback for qualification or known-bad EditContext builds. */
@@ -557,6 +559,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       canvas: offscreen,
       devicePixelRatio: devicePixelRatioOf(this.#canvas),
       height: positiveDimension(this.logicalHeight(), "canvas height"),
+      incrementalPicturesEnabled: this.#options.incrementalPicturesEnabled ?? true,
       mode: selectedMode,
       rasterCache: this.#options.rasterCache === true,
       reducedMotion: reducedMotionPreference(this.#options.reducedMotion),
@@ -1323,6 +1326,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       (regions) => this.handleNonPassiveRegions(regions),
       (frame) => this.handleEditingGeometry(frame),
       (nodes) => this.handleSemantics(nodes),
+      this.#options.incrementalPicturesEnabled ?? true,
     );
     this.#frameSink = sink;
     this.#recoverableSink.install(sink);

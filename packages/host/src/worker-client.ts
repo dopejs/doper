@@ -57,6 +57,7 @@ export interface RenderWorkerActivation {
   readonly canvas: OffscreenCanvas;
   readonly devicePixelRatio: number;
   readonly height: number;
+  readonly incrementalPicturesEnabled?: boolean;
   readonly mode: Exclude<HostTransportMode, "main-thread">;
   readonly rasterCache: boolean;
   readonly reducedMotion: boolean;
@@ -168,6 +169,7 @@ export class RenderWorkerClient {
       canvas: activation.canvas,
       devicePixelRatio: positiveFinite(activation.devicePixelRatio, "Worker device pixel ratio"),
       height,
+      incrementalPicturesEnabled: activation.incrementalPicturesEnabled ?? true,
       kind: "pingo:activate",
       mode: activation.mode,
       rasterCache: activation.rasterCache,

@@ -39,8 +39,6 @@ impl FontFace {
         if !is_sfnt(&bytes) {
             return Err(TextError::UnsupportedFontContainer);
         }
-        ttf_parser::Face::parse(&bytes, face_index)
-            .map_err(|_| TextError::InvalidFont { face_index })?;
         let swash_index =
             usize::try_from(face_index).map_err(|_| TextError::InvalidFont { face_index })?;
         let face = swash::FontRef::from_index(&bytes, swash_index)

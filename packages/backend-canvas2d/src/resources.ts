@@ -1,5 +1,7 @@
 import type { Canvas2DContext, Canvas2DResources, CanvasTextStyle } from "./replayer";
+import { decodeDisplayList } from "./display-list";
 import { decodeGlyphResourceBatch, type CanvasGlyphSpan } from "./glyph-resources";
+import { decodePictureResourceBatch } from "./picture-resources";
 import {
   AFFINE_A_OFFSET,
   AFFINE_RESOURCE_FIXED_BYTES,
@@ -58,6 +60,7 @@ import {
   TEXT_STYLE_V2_WEIGHT_OFFSET,
   TEXT_STYLE_V2_WHITE_SPACE_OFFSET,
   MAX_SYSTEM_TEXT_LINES,
+  MAX_PICTURE_RESIDENT_BYTES,
   VIDEO_FRAME_HEIGHT_OFFSET,
   VIDEO_FRAME_POSTER_PIXEL_BYTES_OFFSET,
   VIDEO_FRAME_POSTER_PIXELS_OFFSET,
@@ -248,6 +251,32 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
   /** Defines a copied immutable picture payload exactly once. */
   public definePicture(id: number, value: Uint8Array): void {
     define(this.#pictures, id, value.slice(), "picture");
+  }
+
+  /** Atomically installs a validated Picture graph before its frame is replayed. */
+  public applyPictureResourceBatch(bytes: Uint8Array): void {
+    const pictures = new Map(this.#pictures);
+    for (const delta of decodePictureResourceBatch(bytes)) {
+      if (delta.type === "define") {
+        define(pictures, delta.pictureId, delta.bytes, "picture");
+      } else if (!pictures.delete(delta.pictureId)) {
+        throw new Error(`picture ${String(delta.pictureId)} is not defined`);
+      }
+    }
+    let residentBytes = 0;
+    for (const payload of pictures.values()) residentBytes += payload.byteLength;
+    if (residentBytes > MAX_PICTURE_RESIDENT_BYTES) {
+      throw new Error("Picture registry exceeds its resident-byte budget");
+    }
+    validatePictureGraph(pictures);
+    replaceMap(this.#pictures, pictures);
+  }
+
+  /** Current immutable Picture residency for frame diagnostics and leak checks. */
+  public pictureResidency(): { readonly count: number; readonly bytes: number } {
+    let bytes = 0;
+    for (const picture of this.#pictures.values()) bytes += picture.byteLength;
+    return { count: this.#pictures.size, bytes };
   }
 
   /** Decodes a portable Core resource whose Canvas representation is deterministic. */
@@ -1165,6 +1194,26 @@ function requiredByte(bytes: Uint8Array, offset: number): number {
   const value = bytes[offset];
   if (value === undefined) throw new Error("solid paint resource is truncated");
   return value;
+}
+
+function validatePictureGraph(pictures: ReadonlyMap<number, Uint8Array>): void {
+  const complete = new Set<number>();
+  const active = new Set<number>();
+  const visit = (pictureId: number, depth: number): void => {
+    if (depth > 64) throw new Error("Picture graph exceeds the maximum depth");
+    if (complete.has(pictureId)) return;
+    if (active.has(pictureId)) throw new Error("Picture graph contains a cycle");
+    const bytes = pictures.get(pictureId);
+    if (bytes === undefined)
+      throw new Error(`Picture graph references missing picture ${String(pictureId)}`);
+    active.add(pictureId);
+    for (const command of decodeDisplayList(bytes).commands) {
+      if (command.type === "drawPicture") visit(command.pictureId, depth + 1);
+    }
+    active.delete(pictureId);
+    complete.add(pictureId);
+  };
+  for (const pictureId of pictures.keys()) visit(pictureId, 0);
 }
 
 function define<T>(map: Map<number, T>, id: number, value: T, kind: string): void {

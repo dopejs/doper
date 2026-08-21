@@ -39,4 +39,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "picture_resources_decode"
+path = "fuzz_targets/picture_resources_decode.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

@@ -39,6 +39,7 @@ async function checkAbiRoundtrip() {
   const inputGolden = await readGolden("input-stream.v1.json");
   const displayGolden = await readGolden("display-list.v1.json");
   const glyphGolden = await readGolden("glyph-resources.v1.json");
+  const pictureGolden = await readGolden("picture-resources.v1.json");
   const textMetricsGolden = await readGolden("system-text-metrics.v1.json");
   const recordingGolden = await readGolden("replay-recording.v1.json");
   const eventGolden = await readGolden("event-transactions.v1.json");
@@ -261,6 +262,18 @@ async function checkAbiRoundtrip() {
     roundTripInRust("glyph", glyphHex),
     glyphHex,
     "TypeScript to Rust glyph resource round trip",
+  );
+
+  const pictureBytes = backend.encodePictureResourceBatch([
+    { type: "define", pictureId: 11, bytes: decodeHex(displayGolden) },
+    { type: "release", pictureId: 12 },
+  ]);
+  const pictureHex = encodeHex(pictureBytes);
+  assertEqual(pictureHex, pictureGolden, "TypeScript Picture resource encoder vs golden");
+  assertEqual(
+    roundTripInRust("pictures", pictureHex),
+    pictureHex,
+    "TypeScript to Rust Picture resource round trip",
   );
 
   console.log("ABI cross-language round trips passed");

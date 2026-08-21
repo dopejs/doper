@@ -22,6 +22,12 @@ export {
   type CanvasGlyphSpan,
   type GlyphResourceDelta,
 } from "./glyph-resources";
+export {
+  PictureResourceError,
+  decodePictureResourceBatch,
+  encodePictureResourceBatch,
+  type PictureResourceDelta,
+} from "./picture-resources";
 export { ResourceKind } from "./generated";
 export {
   RasterTileCache,

@@ -127,6 +127,25 @@ impl WasmCore {
         self.inner.take_glyph_resources()
     }
 
+    /// Enables the incremental Picture path or the inline runtime rollback path.
+    pub fn set_incremental_pictures_enabled(&mut self, enabled: bool) -> Result<(), JsValue> {
+        self.inner
+            .set_incremental_pictures_enabled(enabled)
+            .map_err(js_error)
+    }
+
+    /// Returns a pending immutable Picture transaction without acknowledging it.
+    pub fn take_picture_resources(&self) -> Vec<u8> {
+        self.inner.take_picture_resources()
+    }
+
+    /// Confirms that the backend atomically installed a Picture transaction.
+    pub fn acknowledge_picture_resources(&mut self, frame_seq: u32) -> Result<(), JsValue> {
+        self.inner
+            .acknowledge_picture_resources(frame_seq)
+            .map_err(js_error)
+    }
+
     /// Drains revisioned Core-to-Host editing transactions.
     pub fn take_edit_transactions(&mut self) -> Result<Vec<u8>, JsValue> {
         self.inner.take_edit_transactions().map_err(js_error)
@@ -187,6 +206,6 @@ impl WasmCore {
     }
 }
 
-fn js_error(error: impl std::fmt::Display) -> JsValue {
-    JsValue::from_str(&error.to_string())
+fn js_error(error: crate::CoreError) -> JsValue {
+    JsValue::from_str(error.operator_code())
 }

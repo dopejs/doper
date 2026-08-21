@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 16,
+  "abiVersion": 17,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -73,6 +73,8 @@
     "inputInstructions": 262144,
     "displayInstructions": 1048576,
     "glyphResourceInstructions": 262144,
+    "pictureResourceInstructions": 262144,
+    "pictureResidentBytes": 16777216,
     "systemTextMetricInstructions": 262144,
     "editTransactionInstructions": 262144,
     "eventTransactionInstructions": 262144,
@@ -106,7 +108,7 @@
     ]
   },
   "frameDiagnostics": {
-    "version": 7,
+    "version": 9,
     "fields": [
       {
         "name": "version",
@@ -258,6 +260,30 @@
       },
       {
         "name": "animationRetainedBytes",
+        "type": "u32"
+      },
+      {
+        "name": "pictureDefines",
+        "type": "u32"
+      },
+      {
+        "name": "pictureReleases",
+        "type": "u32"
+      },
+      {
+        "name": "pictureResidentCount",
+        "type": "u32"
+      },
+      {
+        "name": "pictureResidentBytes",
+        "type": "u32"
+      },
+      {
+        "name": "pictureResourceBytes",
+        "type": "u32"
+      },
+      {
+        "name": "pictureBudgetFallbacks",
         "type": "u32"
       }
     ]
@@ -873,6 +899,41 @@
           "fields": [
             {
               "name": "spanId",
+              "type": "u32"
+            }
+          ]
+        }
+      ]
+    },
+    "pictureResources": {
+      "magic": "DOPP",
+      "maxBytes": 16777216,
+      "commands": [
+        {
+          "name": "DefinePicture",
+          "opcode": 1,
+          "fields": [
+            {
+              "name": "pictureId",
+              "type": "u32"
+            },
+            {
+              "name": "payloadBytes",
+              "type": "u32"
+            },
+            {
+              "name": "payload",
+              "type": "bytes"
+            },
+            "align4"
+          ]
+        },
+        {
+          "name": "ReleasePicture",
+          "opcode": 2,
+          "fields": [
+            {
+              "name": "pictureId",
               "type": "u32"
             }
           ]

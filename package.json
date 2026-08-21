@@ -97,6 +97,7 @@
     "m8:check:run": "pnpm m7:check && pnpm protocol:check && pnpm api:check && pnpm m8:contracts && pnpm m8:memory && pnpm core:wasm:check",
     "core:wasm": "node scripts/run-with-rust-target-cleanup.mjs pnpm core:wasm:run",
     "core:wasm:run": "node scripts/build-core-wasm.mjs",
+    "core:wasm:repro": "node scripts/build-core-wasm.mjs --verify-reproducible && node scripts/check-core-wasm.mjs",
     "core:wasm:check": "node scripts/check-core-wasm.mjs",
     "wasm:build": "node scripts/run-with-rust-target-cleanup.mjs pnpm wasm:build:run",
     "wasm:build:run": "node scripts/build-wasm.mjs && node scripts/measure-wasm-budget.mjs",

@@ -11,6 +11,8 @@ pub enum StreamKind {
     DisplayList,
     /// Core-to-backend glyph-span resource deltas.
     GlyphResources,
+    /// Core-to-backend immutable Picture lifecycle deltas.
+    PictureResources,
     /// Host-to-Core system-font measurement cache deltas.
     SystemTextMetrics,
     /// Core-to-Host revisioned edit transactions.
