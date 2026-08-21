@@ -1,0 +1,42 @@
+{
+  "name": "@dopejs/pingo-ui",
+  "version": "0.0.0",
+  "description": "shadcn-style component library for the pingo canvas engine",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dopejs/pingo.git",
+    "directory": "packages/ui"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "LICENSE",
+    "NOTICE",
+    "dist",
+    "styles"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build-styles.mjs && tsc -p tsconfig.build.json",
+    "typecheck": "node scripts/build-styles.mjs && tsc --noEmit"
+  },
+  "dependencies": {
+    "@dopejs/pingo-editing": "workspace:*",
+    "@dopejs/pingo-jsx": "workspace:*",
+    "@dopejs/pingo-runtime": "workspace:*",
+    "@dopejs/pingo-style": "workspace:*",
+    "@dopejs/pingo-widgets": "workspace:*"
+  },
+  "devDependencies": {
+    "@dopejs/pingo-style-preprocess": "workspace:*"
+  }
+}
