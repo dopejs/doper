@@ -93,6 +93,33 @@ computed-value 元数据；失败时抛出带结构化 diagnostics 的 `StyleShe
 三个独立回滚选项为 `styleResolverEnabled`、`foundationComponentsEnabled` 与
 `interactionStylesEnabled`；关闭后旧 direct props、intrinsic、事件与 virtualList 仍可工作。
 
+### SCSS / Less 构建期预处理
+
+SCSS/Less 不进入 facade 或浏览器运行时。需要生成 pingo stylesheet 的 Vite 应用安装
+`@dopejs/pingo-style-preprocess`，并启用独立的 Node-only 插件：
+
+```ts
+// vite.config.ts
+import { pingoStylePreprocess } from "@dopejs/pingo-style-preprocess/vite";
+import { defineConfig } from "vite";
+
+export default defineConfig({ plugins: [pingoStylePreprocess()] });
+```
+
+然后用显式 query 区分 pingo stylesheet 与普通 DOM CSS：
+
+```ts
+/// <reference types="@dopejs/pingo-style-preprocess/client" />
+
+import buttonSheet from "./button.scss?pingo-style"; // PingoStyleSheet，不注入 DOM
+import "./site.less"; // 普通 Vite DOM CSS
+```
+
+`?pingo-style` 在构建期完成 Sass/Less 编译、依赖边界检查、source-map 诊断和 pingo CSS
+subset 校验；partial/import 会加入 Vite watch graph。Node API 还提供
+`compileScssString`、`compileLessString` 与 `compilePingoStyleFile`。完整约束和回滚方式见
+[SCSS / Less 支持设计](/scss-less-support)。
+
 ## Core 动画（M7）
 
 `CommonProps.transition` 接受单条或每属性一条 `TransitionSpec`；`animation` 接受

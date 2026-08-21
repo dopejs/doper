@@ -2,7 +2,7 @@
 
 # CSS subset support
 
-Subset version: **1.0.0**
+Subset version: **1.1.0**
 
 The Shell parses and computes the declarations below and the M6 Core consumes their canonical
 typed values. CSS text and selector matching remain outside Core.

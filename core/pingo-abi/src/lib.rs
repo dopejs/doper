@@ -229,7 +229,7 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, STYLE_PROPERTY_COUNT);
-        assert_eq!(CSS_SUBSET_VERSION, "1.0.0");
+        assert_eq!(CSS_SUBSET_VERSION, "1.1.0");
         assert_eq!(STYLE_ALL_FEATURE_BITS, STYLE_FEATURE_M6_FOUNDATION);
         assert_eq!(STYLE_INVALIDATION_LAYOUT, Invalidation::LAYOUT.bits());
         assert_eq!(STYLE_INVALIDATION_PAINT, Invalidation::PAINT.bits());

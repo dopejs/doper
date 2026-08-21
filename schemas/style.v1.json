@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "cssSubsetVersion": "1.0.0",
+  "cssSubsetVersion": "1.1.0",
   "propertyIdBits": 16,
   "reservedPropertyIds": [17],
   "reservedPropertyIdReasons": {

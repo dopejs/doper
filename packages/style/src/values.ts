@@ -266,18 +266,159 @@ function parseFiniteNumber(rawValue: unknown): number | null {
 
 function parseColor(rawValue: unknown, allowCurrent: boolean): string | null {
   if (typeof rawValue !== "string") return null;
-  const value = rawValue.toLowerCase();
+  const value = rawValue.trim().toLowerCase();
   if (value === "transparent") return "#00000000";
   if (allowCurrent && value === "currentcolor") return "currentColor";
   const match = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/u.exec(value);
-  if (match === null) return null;
-  const digits = match[1];
-  if (digits === undefined) return null;
-  if (digits.length === 3 || digits.length === 4) {
-    const expanded = [...digits].map((digit) => `${digit}${digit}`).join("");
-    return `#${expanded}${digits.length === 3 ? "ff" : ""}`;
+  if (match !== null) {
+    const digits = match[1];
+    if (digits === undefined) return null;
+    if (digits.length === 3 || digits.length === 4) {
+      const expanded = [...digits].map((digit) => `${digit}${digit}`).join("");
+      return `#${expanded}${digits.length === 3 ? "ff" : ""}`;
+    }
+    return `#${digits}${digits.length === 6 ? "ff" : ""}`;
   }
-  return `#${digits}${digits.length === 6 ? "ff" : ""}`;
+  return parseFunctionalColor(value);
+}
+
+const cssNumberPattern = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/u;
+
+function parseFunctionalColor(value: string): string | null {
+  const match = /^(rgb|rgba|hsl|hsla)\(([\s\S]*)\)$/u.exec(value);
+  if (match === null) return null;
+  const name = match[1];
+  const body = match[2];
+  if (name === undefined || body === undefined || /[()]/u.test(body)) return null;
+  const arguments_ = parseColorArguments(body);
+  if (arguments_ === null) return null;
+  const alpha = arguments_.alpha === undefined ? 1 : parseAlpha(arguments_.alpha);
+  if (alpha === null) return null;
+
+  let channels: readonly [number, number, number] | null;
+  if (name === "rgb" || name === "rgba") {
+    channels = parseRgbChannels(arguments_.channels);
+  } else {
+    channels = parseHslChannels(arguments_.channels);
+  }
+  if (channels === null) return null;
+  return rgba8(channels[0], channels[1], channels[2], alpha);
+}
+
+function parseColorArguments(
+  body: string,
+): { readonly channels: readonly string[]; readonly alpha?: string } | null {
+  const trimmed = body.trim();
+  if (trimmed === "") return null;
+  if (trimmed.includes(",")) {
+    if (trimmed.includes("/")) return null;
+    const parts = trimmed.split(",").map((part) => part.trim());
+    if (parts.some((part) => part === "") || (parts.length !== 3 && parts.length !== 4)) {
+      return null;
+    }
+    return {
+      channels: parts.slice(0, 3),
+      ...(parts[3] === undefined ? {} : { alpha: parts[3] }),
+    };
+  }
+
+  const slashParts = trimmed.split("/").map((part) => part.trim());
+  if (slashParts.length > 2 || slashParts.some((part) => part === "")) return null;
+  const channels = (slashParts[0] ?? "").split(/\s+/u);
+  if (channels.length !== 3) return null;
+  const alphaParts = slashParts[1]?.split(/\s+/u);
+  if (alphaParts !== undefined && alphaParts.length !== 1) return null;
+  return {
+    channels,
+    ...(alphaParts?.[0] === undefined ? {} : { alpha: alphaParts[0] }),
+  };
+}
+
+function parseRgbChannels(tokens: readonly string[]): readonly [number, number, number] | null {
+  const channels = tokens.map(parseRgbChannel);
+  if (channels.some((channel) => channel === null)) return null;
+  return channels as [number, number, number];
+}
+
+function parseRgbChannel(token: string): number | null {
+  if (token.endsWith("%")) {
+    const percentage = parseCssNumber(token.slice(0, -1));
+    return percentage === null ? null : (clamp(percentage, 0, 100) * 255) / 100;
+  }
+  const number = parseCssNumber(token);
+  return number === null ? null : clamp(number, 0, 255);
+}
+
+function parseHslChannels(tokens: readonly string[]): readonly [number, number, number] | null {
+  const hue = parseHue(tokens[0] ?? "");
+  const saturation = parsePercentage(tokens[1] ?? "");
+  const lightness = parsePercentage(tokens[2] ?? "");
+  if (hue === null || saturation === null || lightness === null) return null;
+
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const sector = hue / 60;
+  const secondary = chroma * (1 - Math.abs((sector % 2) - 1));
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  if (sector < 1) [red, green] = [chroma, secondary];
+  else if (sector < 2) [red, green] = [secondary, chroma];
+  else if (sector < 3) [green, blue] = [chroma, secondary];
+  else if (sector < 4) [green, blue] = [secondary, chroma];
+  else if (sector < 5) [red, blue] = [secondary, chroma];
+  else [red, blue] = [chroma, secondary];
+  const minimum = lightness - chroma / 2;
+  return [(red + minimum) * 255, (green + minimum) * 255, (blue + minimum) * 255];
+}
+
+function parseHue(token: string): number | null {
+  const match = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(deg|grad|rad|turn)?$/u.exec(token);
+  if (match === null) return null;
+  const number = parseCssNumber(match[1] ?? "");
+  if (number === null) return null;
+  const unit = match[2] ?? "deg";
+  const degrees =
+    unit === "turn"
+      ? number * 360
+      : unit === "grad"
+        ? number * 0.9
+        : unit === "rad"
+          ? (number * 180) / Math.PI
+          : number;
+  if (!Number.isFinite(degrees)) return null;
+  return ((degrees % 360) + 360) % 360;
+}
+
+function parsePercentage(token: string): number | null {
+  if (!token.endsWith("%")) return null;
+  const number = parseCssNumber(token.slice(0, -1));
+  return number === null ? null : clamp(number, 0, 100) / 100;
+}
+
+function parseAlpha(token: string): number | null {
+  if (token.endsWith("%")) return parsePercentage(token);
+  const number = parseCssNumber(token);
+  return number === null ? null : clamp(number, 0, 1);
+}
+
+function parseCssNumber(token: string): number | null {
+  if (!cssNumberPattern.test(token)) return null;
+  const number = Number(token);
+  return Number.isFinite(number) ? number : null;
+}
+
+function rgba8(red: number, green: number, blue: number, alpha: number): string {
+  return `#${[red, green, blue, alpha * 255]
+    .map((channel) =>
+      Math.round(clamp(channel, 0, 255))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function parsePosition(rawValue: unknown): string | null {

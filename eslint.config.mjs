@@ -66,4 +66,20 @@ export default tseslint.config(
       globals: globals.node,
     },
   },
+  {
+    // This package is executed directly by Node ESM, so emitted relative imports need the
+    // explicit .js extension. Component-library packages retain extensionless specifiers.
+    files: ["packages/style-preprocess/src/**/*.ts"],
+    rules: {
+      "no-restricted-imports": "off",
+    },
+  },
+  {
+    // Wildcard ambient modules must remain in a script declaration file; a top-level type
+    // import would turn them into invalid module augmentations.
+    files: ["packages/style-preprocess/client.d.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-imports": "off",
+    },
+  },
 );

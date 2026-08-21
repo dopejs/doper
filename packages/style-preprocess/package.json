@@ -1,0 +1,63 @@
+{
+  "name": "@dopejs/pingo-style-preprocess",
+  "version": "0.2.1",
+  "description": "pingo Node-only SCSS/Less compiler and Vite integration",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dopejs/pingo.git",
+    "directory": "packages/style-preprocess"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.12"
+  },
+  "files": [
+    "LICENSE",
+    "NOTICE",
+    "client.d.ts",
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "node": "./dist/index.js",
+      "import": "./dist/index.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "node": "./dist/vite.js",
+      "import": "./dist/vite.js"
+    },
+    "./client": {
+      "types": "./client.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json --emitDeclarationOnly",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dopejs/pingo-style": "workspace:*",
+    "@jridgewell/trace-mapping": "0.3.31",
+    "less": "4.9.0",
+    "sass": "1.103.1"
+  },
+  "devDependencies": {
+    "@types/less": "3.0.8",
+    "@types/node": "22.20.1",
+    "vite": "8.2.1"
+  },
+  "peerDependencies": {
+    "vite": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  }
+}

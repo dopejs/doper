@@ -205,6 +205,31 @@ describe("computed style resolver", () => {
     });
   });
 
+  it("canonicalizes legacy and modern RGB/HSL color functions to rgba8", () => {
+    const style = resolveStyle({
+      nodeType: "view",
+      inlineStyle: {
+        color: "rgb(255, 0, 127)",
+        backgroundColor: "rgb(100% 0% 50% / 25%)",
+        borderTopColor: "hsl(120, 100%, 50%)",
+        borderRightColor: "hsla(0.5turn 100% 25% / 0.5)",
+        borderBottomColor: "rgba(300, -1, 0, 2)",
+      },
+    }).style;
+    expect(style).toMatchObject({
+      color: "#ff007fff",
+      backgroundColor: "#ff008040",
+      borderTopColor: "#00ff00ff",
+      borderRightColor: "#00808080",
+      borderBottomColor: "#ff0000ff",
+    });
+    expect(supportsStyle("color", "hsl(-120deg 100% 50%)")).toBe(true);
+    expect(supportsStyle("color", "rgb(1, 2 3)")).toBe(false);
+    expect(supportsStyle("color", "hsl(10 20 30)")).toBe(false);
+    expect(supportsStyle("color", "hsl(1e308turn 100% 50%)")).toBe(false);
+    expect(supportsStyle("color", "color(display-p3 1 0 0)")).toBe(false);
+  });
+
   it("implements inheritance/global keywords and resolves currentColor", () => {
     const parent = resolveStyle({
       nodeType: "view",

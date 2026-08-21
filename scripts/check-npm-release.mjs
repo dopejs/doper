@@ -10,11 +10,12 @@ const run = promisify(execFile);
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PROJECT_LICENSE = "Apache-2.0";
 
-/** Publish set: the facade, the migration shim, and their dependency closure. */
+/** Publish set: browser packages, migration shim, and the optional Node build tools. */
 export const RELEASE_PACKAGES = [
   "runtime",
   "editing",
   "style",
+  "style-preprocess",
   "jsx",
   "backend-canvas2d",
   "a11y",
@@ -61,12 +62,14 @@ export async function checkNpmRelease() {
     if (manifest.license !== PROJECT_LICENSE) {
       problems.push(`${name} must declare license ${PROJECT_LICENSE}`);
     }
-    for (const [dependency, range] of Object.entries(manifest.dependencies ?? {})) {
-      if (dependency.startsWith("@dopejs/") && !manifests.has(dependency)) {
-        problems.push(`${name} depends on ${dependency} which is outside the publish set`);
-      }
-      if (!dependency.startsWith("@dopejs/") && range.startsWith("workspace:")) {
-        problems.push(`${name} external dependency ${dependency} uses a workspace range`);
+    for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+      for (const [dependency, range] of Object.entries(manifest[field] ?? {})) {
+        if (dependency.startsWith("@dopejs/") && !manifests.has(dependency)) {
+          problems.push(`${name} ${field} includes ${dependency} which is outside the publish set`);
+        }
+        if (!dependency.startsWith("@dopejs/") && range.startsWith("workspace:")) {
+          problems.push(`${name} external ${field} ${dependency} uses a workspace range`);
+        }
       }
     }
   }
@@ -111,6 +114,17 @@ async function checkTarball(name, directory, staging, legalFiles) {
   }
   if (directory === "facade") {
     required.push("package/dist/backend-canvas2d.js", "package/dist/jsx-runtime.js");
+  }
+  if (directory === "style-preprocess") {
+    required.push(
+      "package/client.d.ts",
+      "package/dist/vite.js",
+      "package/dist/vite.js.map",
+      "package/dist/vite.d.ts",
+    );
+    if (!files.some((file) => /^package\/dist\/chunks\/[^/]+\.js\.map$/u.test(file))) {
+      problems.push(`${name}: tarball is missing the compiler implementation source map`);
+    }
   }
   for (const file of required) {
     if (!files.includes(file)) problems.push(`${name}: tarball is missing ${file}`);

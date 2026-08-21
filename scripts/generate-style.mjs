@@ -350,7 +350,13 @@ ${keywordIds}
 export const STYLE_GRAMMAR_KEYWORDS = ${JSON.stringify(value.keywordGrammars)} as const;
 export type PingoStyleNodeType = ${nodeType};
 export type PingoStyleLength = number | \`\${number}px\` | \`\${number}%\`;
-export type PingoStyleColor = \`#\${string}\` | "transparent";
+export type PingoStyleColor =
+  | \`#\${string}\`
+  | \`rgb(\${string})\`
+  | \`rgba(\${string})\`
+  | \`hsl(\${string})\`
+  | \`hsla(\${string})\`
+  | "transparent";
 export type PingoGlobalStyleKeyword = "inherit" | "initial" | "unset";
 
 /** Supported M6 declaration syntax. Shorthands are expanded in the Shell. */

@@ -1862,6 +1862,14 @@ layout、失效域、动画类型、适用节点与 feature bit 的单一来源�
 computed value，只改 Shell；只有新增 Core property 语义才版本化 ABI。CSS 子集版本
 独立于 npm engine version 和 ABI，并公开 capability/diagnostic 查询。
 
+CSS subset 1.1（2026-08-21）在 Shell 中把 `rgb()` / `rgba()` / `hsl()` / `hsla()`
+归一为既有 `rgba8`，不增加 Core value tag 或 ABI。SCSS/Less 只作为 Node 构建期作者工具：
+`@dopejs/pingo-style-preprocess` 先预处理并用现有 subset 校验，Vite 的显式
+`?pingo-style` query 生成只依赖公开 facade 的 stylesheet 模块；普通无 query import 仍走
+Vite DOM CSS pipeline。Sass/Less、文件依赖解析与 source map 不得进入 facade、浏览器、Worker
+或 Core，完整安全边界、发布门禁和回滚见
+[`scss-less-support.md`](./scss-less-support.md)。
+
 首期 selector 只支持同节点 class/compound class 与 `:hover`、`:active`、`:focus`、
 `:focus-visible`。Shell 预编译基础与状态 declarations；Core 根据 pointer/focus 状态位
 选择目标值，不做 selector matching。视觉状态与默认滚动不等待业务回调，业务事件仍按
