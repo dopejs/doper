@@ -1,0 +1,45 @@
+@use "../tokens" as t;
+
+// shadcn Tabs: trigger list above content panels. Panels use display:none
+// when inactive (preserves state; no mount/unmount).
+
+.pui-tabs {
+  flex-direction: column;
+}
+
+.pui-tabs__list {
+  align-items: center;
+  padding: t.$tabs-list-padding;
+  border-radius: t.$radius-md;
+  background-color: t.$secondary;
+  &.pui-dark { background-color: t.$dark-secondary; }
+}
+
+.pui-tabs__trigger {
+  justify-content: center;
+  align-items: center;
+  padding-left: t.$tabs-trigger-padding-x;
+  padding-right: t.$tabs-trigger-padding-x;
+  padding-top: t.$tabs-trigger-padding-y;
+  padding-bottom: t.$tabs-trigger-padding-y;
+  border-radius: t.$radius-md;
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+  color: t.$muted-foreground;
+  cursor: pointer;
+  &.pui-dark { color: t.$dark-muted-foreground; }
+}
+
+.pui-tabs__trigger--active {
+  background-color: t.$background;
+  color: t.$foreground;
+  &.pui-dark {
+    background-color: t.$dark-background;
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-tabs__content {
+  flex-direction: column;
+  margin-top: t.$control-label-gap;
+}

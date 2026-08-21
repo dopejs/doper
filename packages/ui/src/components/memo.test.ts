@@ -15,6 +15,7 @@ import { Progress } from "./progress";
 import { RadioGroup, RadioGroupItem } from "./radio-group";
 import { Skeleton } from "./skeleton";
 import { Switch } from "./switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";
 
 describe("memoized components", () => {
   it("all presentational components are memo-wrapped", () => {
@@ -38,6 +39,10 @@ describe("memoized components", () => {
       Checkbox,
       RadioGroup,
       RadioGroupItem,
+      Tabs,
+      TabsList,
+      TabsTrigger,
+      TabsContent,
     ]) {
       expect(isMemoComponent(component)).toBe(true);
     }
