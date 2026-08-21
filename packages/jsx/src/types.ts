@@ -2,6 +2,7 @@ import type { PingoFont } from "./font";
 import type { PingoImage } from "./image";
 import type { MemoComponent } from "./memo";
 import type { EditTransaction, TextEditingController } from "@dopejs/pingo-editing";
+import type { ContextProvider } from "@dopejs/pingo-runtime";
 import type { PingoStyle } from "@dopejs/pingo-style";
 
 /** Stable list identity used by localized reconciliation. */
@@ -337,14 +338,23 @@ export type FunctionComponent<Props = Record<string, never>> = (props: Props) =>
 /** Fragment marker accepted as an element type. */
 export const Fragment: unique symbol = Symbol.for("dopejs.pingo.fragment");
 
-/** Host, component, memo component, or Fragment element type. */
+/** Host, component, memo component, context provider, or Fragment element type. */
 export type ElementType<Props = Record<string, unknown>> =
-  HostType | FunctionComponent<Props> | MemoComponent<Props> | typeof Fragment;
+  | HostType
+  | FunctionComponent<Props>
+  | MemoComponent<Props>
+  | ContextProvider<Props>
+  | typeof Fragment;
 
 /** Erased immutable descriptor used in heterogeneous child collections. */
 export interface AnyPingoElement {
   readonly $$typeof: symbol;
-  readonly type: HostType | FunctionComponent<never> | MemoComponent<never> | typeof Fragment;
+  readonly type:
+    | HostType
+    | FunctionComponent<never>
+    | MemoComponent<never>
+    | ContextProvider<unknown>
+    | typeof Fragment;
   readonly key: Key | null;
   readonly props: Readonly<Record<string, unknown>>;
 }

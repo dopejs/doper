@@ -39,6 +39,7 @@
   "dependencies": {
     "@dopejs/pingo-editing": "workspace:*",
     "@dopejs/pingo-style": "workspace:*",
-    "woff2-encoder": "2.0.0"
+    "woff2-encoder": "2.0.0",
+    "@dopejs/pingo-runtime": "workspace:*"
   }
 }
