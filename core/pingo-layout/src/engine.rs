@@ -273,6 +273,7 @@ impl LayoutEngine {
                     scene,
                     boundary,
                     boundary_constraints,
+                    PercentBasis::from_constraints(boundary_constraints),
                     measurer,
                     virtual_layout,
                     &mut self.back,
@@ -295,6 +296,7 @@ impl LayoutEngine {
                 scene,
                 root,
                 constraints,
+                PercentBasis::from_constraints(constraints),
                 measurer,
                 virtual_layout,
                 &mut self.back,
@@ -455,17 +457,20 @@ impl LayoutEngine {
             .ok_or(LayoutError::SceneInvariant(
                 "virtual item parent has no prior geometry",
             ))?;
+        let parent_constraints = BoxConstraints::tight(parent_size)?;
         let parent_frame = make_frame(
             scene,
             parent,
-            BoxConstraints::tight(parent_size)?,
+            parent_constraints,
+            PercentBasis::from_constraints(parent_constraints),
             virtual_layout,
         )?;
-        let child_constraints = constraints_for_child(scene, &parent_frame, node)?;
+        let (child_constraints, child_basis) = constraints_for_child(scene, &parent_frame, node)?;
         compute_subtree(
             scene,
             node,
             child_constraints,
+            child_basis,
             measurer,
             virtual_layout,
             &mut self.back,
@@ -605,6 +610,32 @@ struct Margins {
 /// type; anything other than exactly this value keeps the default column flow.
 const DIRECTION_ROW: f32 = 1.0;
 
+/// Definite content-box extents used to resolve child percentage lengths.
+///
+/// This is deliberately not the same quantity as `Frame::child_constraints`. A
+/// scroll container measures its children against an infinite axis so content
+/// can overflow, but CSS resolves percentages against the containing block's
+/// content box, not against the scrollable extent. Folding the two together
+/// made every percentage inside `overflow: hidden`/`auto`/`scroll` resolve to
+/// zero.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PercentBasis {
+    /// Definite inline content extent, or infinity when indefinite.
+    pub(crate) width: f32,
+    /// Definite block content extent, or infinity when indefinite.
+    pub(crate) height: f32,
+}
+
+impl PercentBasis {
+    /// Derives a basis from constraints for callers that have no parent frame.
+    fn from_constraints(constraints: BoxConstraints) -> Self {
+        Self {
+            width: constraints.max_width,
+            height: constraints.max_height,
+        }
+    }
+}
+
 struct Frame {
     node: NodeId,
     index: usize,
@@ -632,12 +663,16 @@ struct Frame {
     gap: f32,
     /// Whether a child has been placed, so `gap` applies from the second on.
     placed: bool,
+    /// Percentage basis handed to children, unaffected by scroll relaxation.
+    percent: PercentBasis,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compute_subtree(
     scene: &Scene,
     root: NodeId,
     constraints: BoxConstraints,
+    basis: PercentBasis,
     measurer: &mut impl IntrinsicMeasurer,
     virtual_layout: &impl VirtualLayoutProvider,
     output: &mut LayoutSnapshot,
@@ -652,7 +687,7 @@ fn compute_subtree(
     }
 
     stack.clear();
-    stack.push(make_frame(scene, root, constraints, virtual_layout)?);
+    stack.push(make_frame(scene, root, constraints, basis, virtual_layout)?);
     while let Some(frame) = stack.last_mut() {
         if let Some(child) = frame.next_child {
             frame.next_child = scene.next_sibling(child);
@@ -660,8 +695,9 @@ fn compute_subtree(
                 zero_subtree(scene, child, output)?;
                 continue;
             }
-            let child_constraints = constraints_for_child(scene, frame, child)?;
-            let child_frame = make_frame(scene, child, child_constraints, virtual_layout)?;
+            let (child_constraints, child_basis) = constraints_for_child(scene, frame, child)?;
+            let child_frame =
+                make_frame(scene, child, child_constraints, child_basis, virtual_layout)?;
             stack.push(child_frame);
             continue;
         }
@@ -784,16 +820,51 @@ fn zero_subtree(
     Ok(())
 }
 
+/// Percentage-resolved inputs that would read a parent basis this pass does not have.
+///
+/// An incremental pass restarts at the boundary with `BoxConstraints::tight`, so
+/// the boundary's own percentage basis becomes its own box instead of its
+/// parent's content box. Any node whose geometry reads that basis therefore lays
+/// out differently incrementally than it does in a full pass, so it cannot be a
+/// containment boundary.
+const PERCENTAGE_SENSITIVE_PROPERTIES: [StyleProperty; 16] = [
+    StyleProperty::MinWidth,
+    StyleProperty::MinHeight,
+    StyleProperty::MaxWidth,
+    StyleProperty::MaxHeight,
+    StyleProperty::PaddingTop,
+    StyleProperty::PaddingRight,
+    StyleProperty::PaddingBottom,
+    StyleProperty::PaddingLeft,
+    StyleProperty::BorderTopWidth,
+    StyleProperty::BorderRightWidth,
+    StyleProperty::BorderBottomWidth,
+    StyleProperty::BorderLeftWidth,
+    StyleProperty::MarginTop,
+    StyleProperty::MarginRight,
+    StyleProperty::MarginBottom,
+    StyleProperty::MarginLeft,
+];
+
 fn is_fixed_boundary(scene: &Scene, node: NodeId) -> bool {
     has_fixed_dimension(scene, node, Prop::Width, StyleProperty::Width)
         && has_fixed_dimension(scene, node, Prop::Height, StyleProperty::Height)
+        && !reads_parent_percentage_basis(scene, node)
+}
+
+fn reads_parent_percentage_basis(scene: &Scene, node: NodeId) -> bool {
+    PERCENTAGE_SENSITIVE_PROPERTIES.iter().any(|property| {
+        scene
+            .style_length(node, *property, 0)
+            .is_some_and(|length| length.unit == StyleLengthUnit::Percent)
+    })
 }
 
 fn has_fixed_dimension(scene: &Scene, node: NodeId, direct: Prop, property: StyleProperty) -> bool {
     scene.f32_prop(node, direct).is_some()
-        || scene.style_length(node, property, 0).is_some_and(|length| {
-            matches!(length.unit, StyleLengthUnit::Px | StyleLengthUnit::Percent)
-        })
+        || scene
+            .style_length(node, property, 0)
+            .is_some_and(|length| length.unit == StyleLengthUnit::Px)
 }
 
 fn is_ancestor(scene: &Scene, ancestor: NodeId, node: NodeId) -> bool {
@@ -843,13 +914,14 @@ fn make_frame(
     scene: &Scene,
     node: NodeId,
     incoming: BoxConstraints,
+    basis: PercentBasis,
     virtual_layout: &impl VirtualLayoutProvider,
 ) -> Result<Frame, LayoutError> {
     let index = scene.resolve(node).ok_or(LayoutError::SceneInvariant(
         "layout encountered a stale node",
     ))?;
-    let width_basis = percentage_basis(incoming.max_width, incoming.min_width);
-    let height_basis = percentage_basis(incoming.max_height, incoming.min_height);
+    let width_basis = percentage_basis(basis.width, incoming.min_width);
+    let height_basis = percentage_basis(basis.height, incoming.min_height);
     let padding = style_padding(scene, node, width_basis)?;
     let border = style_border(scene, node, width_basis)?;
     let insets = padding.add(border);
@@ -971,6 +1043,15 @@ fn make_frame(
             .width;
         child_constraints.max_width = subtract_insets(outer_width, insets.horizontal());
     }
+    // The percentage basis is this container's available content box on each
+    // axis. It is deliberately independent of `child_constraints`, which relaxes
+    // the block axis in column flow so children can be measured naturally, and
+    // relaxes a scrollable axis so content can overflow. Folding the two
+    // together resolved every percentage inside those containers to zero.
+    let percent = PercentBasis {
+        width: child_constraints.max_width,
+        height: subtract_insets(outer_height, insets.vertical()),
+    };
     if scene.scrollable_axis(node, true) {
         child_constraints.max_width = f32::INFINITY;
     }
@@ -1030,6 +1111,7 @@ fn make_frame(
             .unwrap_or(StyleKeyword::FlexStart),
         gap,
         placed: false,
+        percent,
     })
 }
 
@@ -1037,15 +1119,17 @@ fn constraints_for_child(
     scene: &Scene,
     parent: &Frame,
     child: NodeId,
-) -> Result<BoxConstraints, LayoutError> {
-    let percentage_basis = percentage_basis(
-        parent.child_constraints.max_width,
-        parent.child_constraints.min_width,
-    );
+) -> Result<(BoxConstraints, PercentBasis), LayoutError> {
+    let percentage_basis =
+        percentage_basis(parent.percent.width, parent.child_constraints.min_width);
     let margin = style_margin(scene, child, percentage_basis)?.values;
     let mut constraints = parent.child_constraints;
     constraints.max_width = subtract_insets(constraints.max_width, margin.horizontal());
     constraints.max_height = subtract_insets(constraints.max_height, margin.vertical());
+    let basis = PercentBasis {
+        width: subtract_insets(parent.percent.width, margin.horizontal()),
+        height: subtract_insets(parent.percent.height, margin.vertical()),
+    };
     if parent.align == StyleKeyword::Stretch {
         if parent.row {
             if !has_requested_dimension(scene, child, Prop::Height, StyleProperty::Height)
@@ -1059,7 +1143,7 @@ fn constraints_for_child(
             constraints.min_width = constraints.max_width;
         }
     }
-    Ok(constraints)
+    Ok((constraints, basis))
 }
 
 fn arrange_children(
@@ -2304,6 +2388,157 @@ mod tests {
         assert_eq!(incremental.snapshot(), reference.snapshot());
         assert_eq!(incremental.metrics().incremental_passes, 1);
         assert_eq!(incremental.metrics().boundary_subtrees, 1);
+    }
+
+    #[test]
+    fn percentage_children_resolve_against_the_content_box_of_scroll_and_column_containers() {
+        // Regression: a non-visible overflow makes the axis scrollable, which
+        // relaxes the child measuring constraint to infinity. Deriving the
+        // percentage basis from that constraint resolved every percentage
+        // inside the container to zero.
+        let root = id(0);
+        let scroller = id(1);
+        let scrolled_child = id(2);
+        let column = id(3);
+        let column_child = id(4);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[
+                        (StyleProperty::PaddingTop, STYLE_VALUE_LENGTH, px(10.0)),
+                        (StyleProperty::PaddingRight, STYLE_VALUE_LENGTH, px(10.0)),
+                        (StyleProperty::PaddingBottom, STYLE_VALUE_LENGTH, px(10.0)),
+                        (StyleProperty::PaddingLeft, STYLE_VALUE_LENGTH, px(10.0)),
+                        (
+                            StyleProperty::OverflowY,
+                            STYLE_VALUE_KEYWORD,
+                            keyword(StyleKeyword::Hidden),
+                        ),
+                    ]),
+                },
+                Mutation::DefineResource {
+                    resource_id: 2,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[
+                        (StyleProperty::Width, STYLE_VALUE_LENGTH, percent(50.0)),
+                        (StyleProperty::Height, STYLE_VALUE_LENGTH, percent(25.0)),
+                    ]),
+                },
+                create(root, NodeKind::Root, None),
+                create(scroller, NodeKind::Container, Some(root)),
+                create(scrolled_child, NodeKind::Container, Some(scroller)),
+                create(column, NodeKind::Container, Some(root)),
+                create(column_child, NodeKind::Container, Some(column)),
+                Mutation::SetRef {
+                    node_id: scroller.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 1,
+                },
+                Mutation::SetRef {
+                    node_id: scrolled_child.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 2,
+                },
+                Mutation::SetRef {
+                    node_id: column_child.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 2,
+                },
+                set_f32(scroller, Prop::Width, 200.0),
+                set_f32(scroller, Prop::Height, 100.0),
+                set_f32(column, Prop::Width, 200.0),
+                set_f32(column, Prop::Height, 100.0),
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(200.0, 400.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+
+        // 200x100 box minus 10px padding on each edge leaves a 180x80 content box.
+        assert_eq!(
+            engine.snapshot().geometry(scrolled_child),
+            Some((Point::new(10.0, 10.0), Size::new(90.0, 20.0)))
+        );
+        // Column flow relaxes the block measuring axis, but the container's own
+        // height is definite, so percentages still resolve.
+        assert_eq!(
+            engine.snapshot().geometry(column_child),
+            Some((Point::ZERO, Size::new(100.0, 25.0)))
+        );
+    }
+
+    #[test]
+    fn a_percentage_sized_node_is_not_treated_as_a_relayout_boundary() {
+        // A boundary restarts with tight constraints, so its own percentage
+        // basis would become its own box instead of its parent's content box.
+        let root = id(0);
+        let outer = id(1);
+        let inner = id(2);
+        let leaf = id(3);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[
+                        (StyleProperty::Width, STYLE_VALUE_LENGTH, px(200.0)),
+                        (StyleProperty::Height, STYLE_VALUE_LENGTH, px(200.0)),
+                        (
+                            StyleProperty::PaddingLeft,
+                            STYLE_VALUE_LENGTH,
+                            percent(10.0),
+                        ),
+                    ]),
+                },
+                create(root, NodeKind::Root, None),
+                create(outer, NodeKind::Container, Some(root)),
+                create(inner, NodeKind::Container, Some(outer)),
+                create(leaf, NodeKind::Container, Some(inner)),
+                Mutation::SetRef {
+                    node_id: inner.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 1,
+                },
+                set_f32(outer, Prop::Width, 400.0),
+                set_f32(outer, Prop::Height, 400.0),
+                set_f32(leaf, Prop::Width, 10.0),
+                set_f32(leaf, Prop::Height, 10.0),
+            ],
+        );
+        let constraints = BoxConstraints::tight(Size::new(500.0, 500.0)).expect("viewport");
+        let mut incremental = LayoutEngine::new();
+        incremental
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("initial");
+        scene.clear_dirty();
+
+        commit(&mut scene, 2, vec![set_f32(leaf, Prop::Height, 20.0)]);
+        incremental
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("incremental");
+        let mut reference = LayoutEngine::new();
+        reference
+            .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+            .expect("reference");
+        assert_eq!(incremental.snapshot(), reference.snapshot());
+        // The 10% padding is 40px, resolved from the 400px parent content box.
+        assert_eq!(
+            reference.snapshot().geometry(leaf),
+            Some((Point::new(40.0, 0.0), Size::new(10.0, 20.0)))
+        );
     }
 
     proptest! {
