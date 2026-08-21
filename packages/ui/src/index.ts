@@ -16,6 +16,8 @@ export {
   CardTitle,
 } from "./components/card";
 export type { CardSectionProps, CardTextProps } from "./components/card";
+export { IconButton } from "./components/icon-button";
+export type { IconButtonProps, IconButtonSize } from "./components/icon-button";
 export { Input } from "./components/input";
 export type { InputProps } from "./components/input";
 export { Label } from "./components/label";
