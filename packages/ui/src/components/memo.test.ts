@@ -7,6 +7,7 @@ import { Alert } from "./alert";
 import { Avatar } from "./avatar";
 import { Button } from "./button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./card";
+import { Checkbox } from "./checkbox";
 import { Divider } from "./divider";
 import { IconButton } from "./icon-button";
 import { Label } from "./label";
@@ -33,6 +34,7 @@ describe("memoized components", () => {
       Avatar,
       Progress,
       Switch,
+      Checkbox,
     ]) {
       expect(isMemoComponent(component)).toBe(true);
     }

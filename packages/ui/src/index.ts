@@ -20,6 +20,8 @@ export {
   CardTitle,
 } from "./components/card";
 export type { CardSectionProps, CardTextProps } from "./components/card";
+export { Checkbox } from "./components/checkbox";
+export type { CheckboxProps } from "./components/checkbox";
 export { Divider } from "./components/divider";
 export type { DividerProps } from "./components/divider";
 export { IconButton } from "./components/icon-button";
