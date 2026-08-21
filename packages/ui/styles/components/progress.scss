@@ -1,10 +1,16 @@
 @use "../tokens" as t;
 
+// No overflow:hidden on the track: non-visible overflow makes the View a
+// scroll container whose content gets an indefinite inline basis, which
+// resolves the indicator's percentage width to zero (engine behavior
+// verified 2026-08-21; percent-inside-overflow pending engine decision).
+// Safe without it: the indicator is clamped to 0–100% and shares the
+// track's border-radius, so it can never paint outside.
+
 .pui-progress {
   height: t.$progress-height;
   border-radius: t.$progress-radius;
   background-color: t.$secondary;
-  overflow: hidden;
   &.pui-dark { background-color: t.$dark-secondary; }
 }
 
