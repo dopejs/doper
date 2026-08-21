@@ -30,6 +30,13 @@ import {
   type VirtualViewProps,
 } from "@dopejs/pingo-jsx";
 import { ComponentScope } from "@dopejs/pingo-runtime/internal";
+import {
+  isContextProvider,
+  signal,
+  type ContextProvider,
+  type PingoContext,
+  type Signal,
+} from "@dopejs/pingo-runtime";
 import type { EditTransaction, EventTransaction, InputEventKind } from "@dopejs/pingo-editing";
 import {
   STYLE_KEYWORD_IDS,
@@ -227,10 +234,12 @@ interface HostInstance extends BaseInstance {
 
 interface ComponentInstance extends BaseInstance {
   readonly kind: "component";
-  readonly type: FunctionComponent<never> | MemoComponent<never>;
+  readonly type: FunctionComponent<never> | MemoComponent<never> | ContextProvider<unknown>;
   props: Readonly<Record<string, unknown>>;
   children: Instance[];
   readonly scope: ComponentScope;
+  /** Present when this instance is a context provider element. */
+  contextValue: { context: PingoContext<unknown>; signal: Signal<unknown> } | undefined;
 }
 
 type Instance = HostInstance | ComponentInstance;
@@ -1034,8 +1043,14 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       parent: owner,
       props: descriptor.props,
       children: [],
-      scope: new ComponentScope(() => this.enqueueComponent(instance)),
+      scope: new ComponentScope(
+        () => this.enqueueComponent(instance),
+        (context) => this.lookupContext(instance, context),
+      ),
       mounted: true,
+      contextValue: isContextProvider(descriptor.type)
+        ? { context: descriptor.type.context, signal: signal(descriptor.props.value) }
+        : undefined,
     };
     this.#liveScopes.add(instance.scope);
     this.renderComponent(instance, coreParent);
@@ -1125,6 +1140,14 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       if (typeof descriptor === "string" || !isPingoElement(descriptor)) {
         throw new Error("component descriptor changed unexpectedly");
       }
+      if (isContextProvider(instance.type) && instance.contextValue !== undefined) {
+        // Providers never bail out: children structure must reconcile, and the
+        // value signal delivers fine-grained updates to subscribed consumers.
+        const next = descriptor.props.value;
+        if (!Object.is(instance.contextValue.signal.peek(), next)) {
+          instance.contextValue.signal.set(next);
+        }
+      }
       const compare = isMemoComponent(instance.type)
         ? ((instance.type.compare ?? shallowEqual) as PropsAreEqual<Record<string, unknown>>)
         : undefined;
@@ -1190,13 +1213,32 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     this.#dirtyComponents.delete(instance);
     const output = instance.scope.render(() => {
       const type = instance.type;
-      const component = (isMemoComponent(type) ? type.component : type) as FunctionComponent<
-        Record<string, unknown>
-      >;
+      const component = (
+        isMemoComponent(type)
+          ? type.component
+          : isContextProvider(type)
+            ? (props: { readonly children?: PingoNode }) => props.children ?? null
+            : type
+      ) as FunctionComponent<Record<string, unknown>>;
       return component(instance.props);
     });
     instance.children = this.reconcileChildren(instance, coreParent, instance.children, output);
     this.#renderedScopes.add(instance.scope);
+  }
+
+  /** Walks the owner chain (components and hosts) to the nearest provider of `context`. */
+  private lookupContext(
+    instance: ComponentInstance,
+    context: PingoContext<unknown>,
+  ): Signal<unknown> | undefined {
+    let owner: Owner = instance.parent;
+    while (owner.kind !== "root") {
+      if (owner.kind === "component" && owner.contextValue !== undefined) {
+        if (owner.contextValue.context === context) return owner.contextValue.signal;
+      }
+      owner = owner.parent;
+    }
+    return undefined;
   }
 
   private applyHostProps(instance: HostInstance, next: NormalizedHostProps): void {

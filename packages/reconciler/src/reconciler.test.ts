@@ -15,7 +15,7 @@ import {
   type ViewHandle,
   type VideoHandle,
 } from "@dopejs/pingo-jsx";
-import { signal, useEffect } from "@dopejs/pingo-runtime";
+import { createContext, signal, useContext, useEffect } from "@dopejs/pingo-runtime";
 import { createStyleSheet } from "@dopejs/pingo-style";
 import type { EventTransaction } from "@dopejs/pingo-editing";
 import { describe, expect, it, vi } from "vitest";
@@ -1082,6 +1082,148 @@ describe("memo", () => {
     count.set(1);
     root.flushSync();
     expect(renders).toBeGreaterThan(afterMount);
+  });
+});
+
+describe("context", () => {
+  const Theme = createContext("light");
+
+  interface Observed {
+    readonly value?: string;
+  }
+  type ConsumerProps = {
+    readonly observed: { value?: string };
+    readonly counter?: { count: number };
+  };
+  const Consumer = (props: ConsumerProps): PingoNode => {
+    const value = useContext(Theme);
+    props.observed.value = value;
+    if (props.counter !== undefined) props.counter.count += 1;
+    return createElement("text", { value });
+  };
+
+  it("delivers the provider value through non-consuming layers", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    const observed: { value?: string } = {};
+    const Middle = (props: { readonly children: PingoNode }): PingoNode => props.children;
+    root.render(
+      createElement(Theme.Provider, {
+        value: "dark",
+        children: createElement("container", {
+          children: createElement(Middle, {
+            children: createElement(Consumer, { observed }),
+          }),
+        }),
+      }),
+    );
+    expect(observed.value).toBe("dark");
+  });
+
+  it("returns the default without a provider", () => {
+    const sink = new RecordingSink();
+    const observed: Observed = {};
+    createRoot(sink).render(
+      createElement("container", { children: createElement(Consumer, { observed }) }),
+    );
+    expect(observed.value).toBe("light");
+  });
+
+  it("nearest provider wins", () => {
+    const sink = new RecordingSink();
+    const observed: Observed = {};
+    createRoot(sink).render(
+      createElement(Theme.Provider, {
+        value: "outer",
+        children: createElement(Theme.Provider, {
+          value: "inner",
+          children: createElement(Consumer, { observed }),
+        }),
+      }),
+    );
+    expect(observed.value).toBe("inner");
+  });
+
+  it("signal delivery re-renders the consumer without touching siblings", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    const consumerRenders = { count: 0 };
+    const siblingRenders = { count: 0 };
+    const Sibling = (): PingoNode => {
+      siblingRenders.count += 1;
+      return createElement("text", { value: "sibling" });
+    };
+    // Identical children reference across renders: provider updates deliver the
+    // new value through the signal while the subtree bails out on identity.
+    const children = createElement("container", {
+      children: [
+        createElement(Consumer, { observed: {}, counter: consumerRenders }),
+        createElement(Sibling, {}),
+      ],
+    });
+    const tree = (theme: string): PingoNode =>
+      createElement(Theme.Provider, { value: theme, children });
+    root.render(tree("a"));
+    const consumerAfterMount = consumerRenders.count;
+    const siblingAfterMount = siblingRenders.count;
+    root.render(tree("b"));
+    root.flushSync();
+    expect(consumerRenders.count).toBeGreaterThan(consumerAfterMount);
+    expect(siblingRenders.count).toBe(siblingAfterMount);
+  });
+
+  it("memo-wrapped consumers still re-render on context change", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    let renders = 0;
+    const MemoConsumer = memo((): PingoNode => {
+      renders += 1;
+      return createElement("text", { value: useContext(Theme) });
+    });
+    const tree = (theme: string): PingoNode =>
+      createElement(Theme.Provider, { value: theme, children: createElement(MemoConsumer, {}) });
+    root.render(tree("a"));
+    const afterMount = renders;
+    root.render(tree("b"));
+    root.flushSync();
+    expect(renders).toBeGreaterThan(afterMount);
+  });
+
+  it("provider children structure still reconciles on update", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    let childRenders = 0;
+    const Child = (props: { readonly label: string }): PingoNode => {
+      childRenders += 1;
+      return createElement("text", { value: props.label });
+    };
+    const tree = (label: string): PingoNode =>
+      createElement(Theme.Provider, {
+        value: "dark",
+        children: createElement(Child, { label }),
+      });
+    root.render(tree("a"));
+    const afterMount = childRenders;
+    root.render(tree("b"));
+    root.flushSync();
+    expect(childRenders).toBeGreaterThan(afterMount);
+  });
+
+  it("falls back to the default after the provider unmounts", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    const observed: Observed = {};
+    const tree = (withProvider: boolean): PingoNode =>
+      withProvider
+        ? createElement(Theme.Provider, {
+            value: "dark",
+            children: createElement(Consumer, { observed }),
+          })
+        : createElement("container", { children: createElement(Consumer, { observed }) });
+    root.render(tree(true));
+    expect(observed.value).toBe("dark");
+    root.render(tree(false));
+    expect(observed.value).toBe("light");
   });
 });
 
