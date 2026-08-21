@@ -7,7 +7,7 @@ afterEach(() => setTheme("light"));
 
 function render(props: ButtonProps) {
   // Components evaluate to host descriptors without a root.
-  return Button(props) as { type: unknown; props: Record<string, unknown> };
+  return Button.component(props) as { type: unknown; props: Record<string, unknown> };
 }
 
 describe("Button", () => {

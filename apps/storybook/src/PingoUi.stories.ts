@@ -54,45 +54,45 @@ const meta: Meta<ShowcaseArgs> = {
           backgroundColor: args.theme === "dark" ? "#09090bff" : "#ffffffff",
           children: [
             row([
-              Button({ children: "Default", onPress: () => {} }),
-              Button({ children: "Secondary", variant: "secondary", onPress: () => {} }),
-              Button({ children: "Outline", variant: "outline", onPress: () => {} }),
+              createElement(Button, { children: "Default", onPress: () => {} }),
+              createElement(Button, { children: "Secondary", variant: "secondary", onPress: () => {} }),
+              createElement(Button, { children: "Outline", variant: "outline", onPress: () => {} }),
             ]),
             createElement("container", { height: 12 }),
             row([
-              Button({ children: "Ghost", variant: "ghost", onPress: () => {} }),
-              Button({ children: "Destructive", variant: "destructive", onPress: () => {} }),
-              Button({ children: "Disabled", disabled: true }),
+              createElement(Button, { children: "Ghost", variant: "ghost", onPress: () => {} }),
+              createElement(Button, { children: "Destructive", variant: "destructive", onPress: () => {} }),
+              createElement(Button, { children: "Disabled", disabled: true }),
             ]),
             createElement("container", { height: 12 }),
             row([
-              Badge({ children: "Default" }),
-              Badge({ children: "Secondary", variant: "secondary" }),
-              Badge({ children: "Destructive", variant: "destructive" }),
-              Badge({ children: "Outline", variant: "outline" }),
+              createElement(Badge, { children: "Default" }),
+              createElement(Badge, { children: "Secondary", variant: "secondary" }),
+              createElement(Badge, { children: "Destructive", variant: "destructive" }),
+              createElement(Badge, { children: "Outline", variant: "outline" }),
             ]),
             createElement("container", { height: 16 }),
-            Card({
+            createElement(Card, {
               children: column([
-                CardHeader({
+                createElement(CardHeader, {
                   children: column([
-                    CardTitle({ children: "账户设置" }),
-                    CardDescription({ children: "管理你的账户偏好与通知。" }),
+                    createElement(CardTitle, { children: "账户设置" }),
+                    createElement(CardDescription, { children: "管理你的账户偏好与通知。" }),
                   ]),
                 }),
-                CardContent({
+                createElement(CardContent, {
                   children: column([
-                    Label({ children: "邮箱" }),
+                    createElement(Label, { children: "邮箱" }),
                     createElement("container", { height: 8 }),
                     // Input uses hooks (useMemo) — it MUST be mounted as a
                     // component via createElement, never called directly.
                     createElement(Input, { semanticLabel: "邮箱", width: 360 }),
                   ]),
                 }),
-                CardFooter({
+                createElement(CardFooter, {
                   children: row([
-                    Button({ children: "保存", onPress: () => {} }),
-                    Button({ children: "取消", variant: "outline", onPress: () => {} }),
+                    createElement(Button, { children: "保存", onPress: () => {} }),
+                    createElement(Button, { children: "取消", variant: "outline", onPress: () => {} }),
                   ]),
                 }),
               ]),

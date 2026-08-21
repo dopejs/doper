@@ -1,16 +1,18 @@
-import { Text, View, type PingoNode } from "@dopejs/pingo-jsx";
+import { memo, Text, View, type PingoNode } from "@dopejs/pingo-jsx";
 
 import { cva } from "../cva";
 import { useTheme } from "../theme";
 
 export type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 
-export interface BadgeProps {
+// Type alias (not interface) so the implicit index signature satisfies
+// memo's Props extends Record<string, unknown> constraint.
+export type BadgeProps = {
   readonly children: string;
   readonly variant?: BadgeVariant;
   readonly className?: string;
   readonly semanticLabel?: string;
-}
+};
 
 const badgeClass = cva({
   base: "pui-badge",
@@ -26,8 +28,7 @@ const badgeClass = cva({
   defaultVariants: { variant: "default" },
 });
 
-/** shadcn-style badge: non-interactive status label. */
-export function Badge(props: BadgeProps): PingoNode {
+function BadgeImpl(props: BadgeProps): PingoNode {
   const theme = useTheme();
   const className = [badgeClass({ variant: props.variant, theme }), props.className]
     .filter((part) => part !== undefined && part !== "")
@@ -38,3 +39,6 @@ export function Badge(props: BadgeProps): PingoNode {
     children: Text({ value: props.children }),
   });
 }
+
+/** shadcn-style badge: non-interactive status label. Memoized: re-renders only when props change. */
+export const Badge = memo(BadgeImpl);

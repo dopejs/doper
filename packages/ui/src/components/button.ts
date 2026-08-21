@@ -1,4 +1,4 @@
-import { Text, type PingoNode } from "@dopejs/pingo-jsx";
+import { memo, Text, type PingoNode } from "@dopejs/pingo-jsx";
 import { Pressable } from "@dopejs/pingo-widgets";
 
 import { cva } from "../cva";
@@ -7,7 +7,9 @@ import { useTheme } from "../theme";
 export type ButtonVariant = "default" | "secondary" | "outline" | "ghost" | "destructive";
 export type ButtonSize = "default" | "sm" | "lg" | "icon";
 
-export interface ButtonProps {
+// Type alias (not interface) so the implicit index signature satisfies
+// memo's Props extends Record<string, unknown> constraint.
+export type ButtonProps = {
   readonly children: string;
   readonly variant?: ButtonVariant;
   readonly size?: ButtonSize;
@@ -15,7 +17,7 @@ export interface ButtonProps {
   readonly onPress?: () => void;
   readonly className?: string;
   readonly semanticLabel?: string;
-}
+};
 
 const buttonClass = cva({
   base: "pui-button",
@@ -39,11 +41,7 @@ const buttonClass = cva({
   defaultVariants: { variant: "default", size: "default" },
 });
 
-/**
- * shadcn-style button. Visuals come entirely from the skin classes; text
- * color and font inherit from the View into the inner Text node.
- */
-export function Button(props: ButtonProps): PingoNode {
+function ButtonImpl(props: ButtonProps): PingoNode {
   const theme = useTheme();
   const disabled = props.disabled === true;
   const className = [
@@ -60,3 +58,10 @@ export function Button(props: ButtonProps): PingoNode {
     children: Text({ value: props.children }),
   });
 }
+
+/**
+ * shadcn-style button. Visuals come entirely from the skin classes; text
+ * color and font inherit from the View into the inner Text node. Memoized:
+ * re-renders only when props change.
+ */
+export const Button = memo(ButtonImpl);

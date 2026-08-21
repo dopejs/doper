@@ -1,16 +1,18 @@
-import { Text, View, type PingoNode } from "@dopejs/pingo-jsx";
+import { memo, Text, View, type PingoNode } from "@dopejs/pingo-jsx";
 
 import { useTheme } from "../theme";
 
-export interface CardSectionProps {
+// Type aliases (not interfaces) so the implicit index signature satisfies
+// memo's Props extends Record<string, unknown> constraint.
+export type CardSectionProps = {
   readonly children: PingoNode;
   readonly className?: string;
-}
+};
 
-export interface CardTextProps {
+export type CardTextProps = {
   readonly children: string;
   readonly className?: string;
-}
+};
 
 function join(...parts: readonly (string | undefined)[]): string {
   return parts.filter((part) => part !== undefined && part !== "").join(" ");
@@ -32,27 +34,37 @@ function text(base: string, props: CardTextProps, themed: boolean): PingoNode {
   });
 }
 
-/** shadcn-style Card composition family. Slots pass through untouched. */
-export function Card(props: CardSectionProps): PingoNode {
+function CardImpl(props: CardSectionProps): PingoNode {
   return section("pui-card", props, true);
 }
 
-export function CardHeader(props: CardSectionProps): PingoNode {
+function CardHeaderImpl(props: CardSectionProps): PingoNode {
   return section("pui-card-header", props, false);
 }
 
-export function CardTitle(props: CardTextProps): PingoNode {
+function CardTitleImpl(props: CardTextProps): PingoNode {
   return text("pui-card-title", props, false);
 }
 
-export function CardDescription(props: CardTextProps): PingoNode {
+function CardDescriptionImpl(props: CardTextProps): PingoNode {
   return text("pui-card-description", props, true);
 }
 
-export function CardContent(props: CardSectionProps): PingoNode {
+function CardContentImpl(props: CardSectionProps): PingoNode {
   return section("pui-card-content", props, false);
 }
 
-export function CardFooter(props: CardSectionProps): PingoNode {
+function CardFooterImpl(props: CardSectionProps): PingoNode {
   return section("pui-card-footer", props, false);
 }
+
+/**
+ * shadcn-style Card composition family. Slots pass through untouched.
+ * Memoized: re-renders only when props change.
+ */
+export const Card = memo(CardImpl);
+export const CardHeader = memo(CardHeaderImpl);
+export const CardTitle = memo(CardTitleImpl);
+export const CardDescription = memo(CardDescriptionImpl);
+export const CardContent = memo(CardContentImpl);
+export const CardFooter = memo(CardFooterImpl);
