@@ -1,5 +1,7 @@
 # pingo-ui 阶段 0 实现计划
 
+> **状态：已全部执行完成（2026-08-21）。** 进度权威记录见 `pingo-ui-implementation-plan.md` 进度总览；本文件 checkbox 不再维护。实施偏差：signal API 为 get()/set()/peek()（非 .value）；compilePingoStyleFile 无 sourceName 选项；Input controller 经 useMemo 稳定化（评审 P1 修复，随后 memo 包装）；尺寸全部 token 化。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 建立 `@dopejs/pingo-ui` 包骨架、cva-lite、theme signal、SCSS 皮肤管线（shadcn 默认 preset），交付 Button/Badge/Card/Input/Label 五个样板组件并在 storybook 走通明暗切换。

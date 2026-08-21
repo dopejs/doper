@@ -1,5 +1,7 @@
 # E6 组件级 memo 实现计划
 
+> **状态：已全部执行完成（2026-08-21，`a923e61…abc3d8d`）。** 进度权威记录见 `pingo-ui-implementation-plan.md` 进度总览。实施偏差：isMemoComponent 用 in-narrowing（repo lint 规则）；AnyPingoElement 擦除字段一并拓宽；组件 props interface 改 type alias（memo 泛型约束）；facade API 快照按 docs/api/index.md 程序更新。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use checkbox syntax.
 
 **Goal:** 为 pingo 增加 React.memo 同构的组件级 props bailout，挡住"父渲染但 props 未变"的级联重渲染，使 pingo-ui 的 slot/闭包契约（§6.2.1）真正生效。

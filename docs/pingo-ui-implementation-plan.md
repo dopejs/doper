@@ -2,6 +2,29 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## 进度总览（2026-08-21 更新）
+
+| Track | 状态 | 证据 |
+| --- | --- | --- |
+| C0 m10 决策修订 | ✅ 完成 | `a88dfa9` |
+| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成 | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试 |
+| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖） | ✅ 完成 | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证 |
+| E6 组件级 memo | ✅ 完成 | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md` |
+| E7 context（Provider+useContext） | ✅ 完成 | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md` |
+| E5 flexGrow/Shrink/Basis | ⬜ 未启动 | 设计门：`docs/e5-flex-grow-design.md` 待写待评审 |
+| E1 keyboard 事件 | ⬜ 未启动 | 设计门：`docs/e1-keyboard-events-design.md` 待写待评审 |
+| E4 boxShadow | ⬜ 未启动 | 设计门：`docs/e4-boxshadow-design.md` 待写待评审 |
+| E2 zIndex | ⬜ 未启动 | 前置：E1；设计门待写 |
+| E3 position/inset | ⬜ 未启动 | 前置：E2 |
+| A2 第二批弹层组件 | ⬜ 未启动 | 启动门：E1/E2/E3 出口 + E4 合并 |
+| A3 第三批产品分子 | ⬜ 未启动 | 按需立项 |
+
+**接手指引**：引擎工作包按各自设计门启动（设计文档评审 → 写 `docs/pingo-ui-e<N>-implementation-plan.md` 子计划 → subagent 执行）；组件批次按本文件规格表执行。已完成的子计划内 checkbox 状态以本表为准。
+
+**执行期新发现**（影响后续工作）：overflow 容器内子节点百分比尺寸解析为 0（见风险表）；有 hooks 的组件必须经 createElement/JSX 使用（已写入 packages/ui/README.md 与组件 docstring）。
+
+---
+
 **Goal:** 交付 `@dopejs/pingo-ui` 组件库全量：三批组件（17 静态 + 8 弹层 + 产品分子按需）、六个引擎工作包（E1–E6）、m10 决策修订，全部过既有工程门禁。
 
 **Spec:** [`docs/pingo-ui-capability-plan.md`](./pingo-ui-capability-plan.md)。本文件是执行总控；各 Track 的子计划在启动门前单独成文，本文只维护索引与接口契约。
@@ -192,16 +215,18 @@ descriptor 测试 + 皮肤解析测试 → storybook 展区。**组件模板以 
 | 11 | Accordion | **组合式（E7 context）**：`Accordion({ openValue?, onValueChange?, children })` + `AccordionItem({ value, title, children })` | `.pui-accordion__item` / `__trigger`(+`--open`) / `__content` | item border-bottom `$border`；open 状态条件渲染 content |
 | 12 | TextArea 装饰版 | 同 Input（无 slot） | `.pui-input` 复用 + `.pui-textarea` | rows 默认 3；复用 Task 8 Input 的 controller 模式 |
 
-- [ ] **A1 Tasks 1–12**：按上表逐组件实施（皮肤 → 组件 → 测试 → storybook 展区）。
+- [x] **A1 Tasks 1–12**：按上表逐组件实施（皮肤 → 组件 → 测试 → storybook 展区）。
   每组件 commit 一次。token 缺口（如 muted 背景）在 tokens.scss 追加并记录。
-- [ ] **A1 Task 13**：E6 接入——全部展示组件用 `memo` 包装；补 memo 行为测试。
-- [ ] **A1 Task 14**：暗色全覆盖审查——storybook 每组件 light/dark 双 story；
-  像素快照（补充断言，语义树 E2E 为主）。
-- [ ] **A1 Task 15**：覆盖约定文档化——`packages/ui/README.md`：sheet 注册顺序
+  **已完成（Batch A/B/C，2026-08-21）**：12 组件全部交付，组合式 API 经 E7 context 落地。
+- [x] **A1 Task 13**：E6 接入——全部展示组件用 `memo` 包装；补 memo 行为测试。
+  **提前完成**（E6-4 随 memo 落地一并接入；Input 在 A1-D 补齐一致性包装）。
+- [x] **A1 Task 14**：暗色全覆盖审查——storybook 每组件 light/dark 双 story；
+  像素快照（补充断言，语义树 E2E 为主）。**已完成**：showcase 明暗双 story + browser 截图验证。
+- [x] **A1 Task 15**：覆盖约定文档化——`packages/ui/README.md`：sheet 注册顺序
   （用户 sheet 必须在 pingo-ui sheet 之后）、token-only 约束、preset 定制方法
-  （`@use ... with`）、已知视觉缺口清单。
-- [ ] **A1 Task 16**：门禁——`npx vitest run packages/ui` 全绿、`pnpm test:run`
-  全仓回归、storybook build。Commit。
+  （`@use ... with`）、已知视觉缺口清单。**已完成**（1fd7af4 + 31f8b34 评审修正）。
+- [x] **A1 Task 16**：门禁——`npx vitest run packages/ui` 全绿、`pnpm test:run`
+  全仓回归、storybook build。**已完成**（104/104、496/496、typecheck/api:check 全绿）。
 
 ### A2 阶段3：第二批弹层组件（硬依赖 E1/E2/E3，视觉完整依赖 E4）
 
@@ -256,10 +281,10 @@ fixture；届时按 A1 模式写子计划。本文不展开（YAGNI）。
 1. C0（m10 修订）────────── 完成（a88dfa9）
 2. A0（11 Tasks）────────── 完成（阶段0 出口全绿）
 3. E6 组件级 memo ───────── 完成（a923e61…abc3d8d）
-4. E7 context 子计划 + 执行  A1 之前（组合式 API 前置）
-5. A1（16 Tasks）────────── E7 出口后；其中 E6 接入（A1 Task 13）已提前完成
-6. E5 设计门 → 子计划 → 执行 │ A1 期间并行（Input slot 前置）
-7. E1 设计门 → 子计划 → 执行 │ C0 后启动
+4. E7 context ──────────── 完成（34145ee…bf81554）
+5. A1（12 组件 + README + 门禁）  完成（104/104，明暗截图验证）
+6. E5 设计门 → 子计划 → 执行 │ 下一优先（Input slot 前置；overflow-percent 语义一并评估）
+7. E1 设计门 → 子计划 → 执行 │ 可与 E5 并行
 8. E4 设计门 → 子计划 → 执行 │ 与 E1/E5 并行
 9. E2 设计门 → 子计划 → 执行 │ E1 后
 10. E3 设计门 → 子计划 → 执行 │ E2 后

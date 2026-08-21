@@ -1,5 +1,7 @@
 # E7 context（Provider + useContext）实现计划
 
+> **状态：已全部执行完成（2026-08-21，`34145ee…bf81554`）。** 进度权威记录见 `pingo-ui-implementation-plan.md` 进度总览。实施偏差：ContextLookup 用 `PingoContext<unknown>`/`Signal<unknown>`（never 的 variance 不可行）；ElementType 的 Provider 擦除为 `ContextProvider<unknown>`（终审 P0 修复，`bf81554`）。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use checkbox syntax.
 
 **Goal:** 为 pingo 增加 React-context 同构能力：`createContext` / `Provider` / `useContext`，
