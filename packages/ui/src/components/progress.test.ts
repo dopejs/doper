@@ -22,22 +22,22 @@ describe("Progress", () => {
   });
 
   it("clamps out-of-range values to 0..100", () => {
-    expect(((render({ value: 150 }).props.children as Host).props.style)).toEqual({
+    expect((render({ value: 150 }).props.children as Host).props.style).toEqual({
       width: "100%",
     });
-    expect(((render({ value: -5 }).props.children as Host).props.style)).toEqual({
+    expect((render({ value: -5 }).props.children as Host).props.style).toEqual({
       width: "0%",
     });
   });
 
   it("respects max", () => {
-    expect(((render({ value: 50, max: 200 }).props.children as Host).props.style)).toEqual({
+    expect((render({ value: 50, max: 200 }).props.children as Host).props.style).toEqual({
       width: "25%",
     });
   });
 
   it("guards a non-positive max against NaN width", () => {
-    expect(((render({ value: 0, max: 0 }).props.children as Host).props.style)).toEqual({
+    expect((render({ value: 0, max: 0 }).props.children as Host).props.style).toEqual({
       width: "0%",
     });
   });

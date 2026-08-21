@@ -23,9 +23,7 @@ function AvatarImpl(props: AvatarProps): PingoNode {
   const child =
     props.image === undefined
       ? Text({
-          className: ["pui-avatar__fallback", dark]
-            .filter((part) => part !== undefined)
-            .join(" "),
+          className: ["pui-avatar__fallback", dark].filter((part) => part !== undefined).join(" "),
           value: props.fallback,
         })
       : Image({

@@ -85,13 +85,21 @@ const meta: Meta<ShowcaseArgs> = {
           children: [
             row([
               createElement(Button, { children: "Default", onPress: () => {} }),
-              createElement(Button, { children: "Secondary", variant: "secondary", onPress: () => {} }),
+              createElement(Button, {
+                children: "Secondary",
+                variant: "secondary",
+                onPress: () => {},
+              }),
               createElement(Button, { children: "Outline", variant: "outline", onPress: () => {} }),
             ]),
             spacer(12),
             row([
               createElement(Button, { children: "Ghost", variant: "ghost", onPress: () => {} }),
-              createElement(Button, { children: "Destructive", variant: "destructive", onPress: () => {} }),
+              createElement(Button, {
+                children: "Destructive",
+                variant: "destructive",
+                onPress: () => {},
+              }),
               createElement(Button, { children: "Disabled", disabled: true }),
             ]),
             spacer(12),
@@ -122,7 +130,11 @@ const meta: Meta<ShowcaseArgs> = {
                 createElement(CardFooter, {
                   children: row([
                     createElement(Button, { children: "保存", onPress: () => {} }),
-                    createElement(Button, { children: "取消", variant: "outline", onPress: () => {} }),
+                    createElement(Button, {
+                      children: "取消",
+                      variant: "outline",
+                      onPress: () => {},
+                    }),
                   ]),
                 }),
               ]),
@@ -134,7 +146,8 @@ const meta: Meta<ShowcaseArgs> = {
                   children: column([
                     createElement(CardTitle, { children: "组件总览" }),
                     createElement(CardDescription, {
-                      children: "Batch A/B 全部组件。Switch/Checkbox 为受控组件，此处以静态开/关对展示；交互由组件测试覆盖。",
+                      children:
+                        "Batch A/B 全部组件。Switch/Checkbox 为受控组件，此处以静态开/关对展示；交互由组件测试覆盖。",
                     }),
                   ]),
                 }),
@@ -181,11 +194,23 @@ const meta: Meta<ShowcaseArgs> = {
                     field(
                       "Checkbox",
                       column([
-                        createElement(Checkbox, { checked: true, label: "已启用通知", onCheckedChange: () => {} }),
+                        createElement(Checkbox, {
+                          checked: true,
+                          label: "已启用通知",
+                          onCheckedChange: () => {},
+                        }),
                         spacer(8),
-                        createElement(Checkbox, { checked: false, label: "接收营销邮件", onCheckedChange: () => {} }),
+                        createElement(Checkbox, {
+                          checked: false,
+                          label: "接收营销邮件",
+                          onCheckedChange: () => {},
+                        }),
                         spacer(8),
-                        createElement(Checkbox, { checked: false, label: "禁用项", disabled: true }),
+                        createElement(Checkbox, {
+                          checked: false,
+                          label: "禁用项",
+                          disabled: true,
+                        }),
                       ]),
                     ),
                     spacer(16),
@@ -241,12 +266,16 @@ const meta: Meta<ShowcaseArgs> = {
                           createElement(AccordionItem, {
                             value: "one",
                             title: "什么是 pingo-ui？",
-                            children: createElement("text", { value: "一套 shadcn 风格的 pingo 组件皮肤。" }),
+                            children: createElement("text", {
+                              value: "一套 shadcn 风格的 pingo 组件皮肤。",
+                            }),
                           }),
                           createElement(AccordionItem, {
                             value: "two",
                             title: "支持暗色主题吗？",
-                            children: createElement("text", { value: "支持，右上角切换 light/dark。" }),
+                            children: createElement("text", {
+                              value: "支持，右上角切换 light/dark。",
+                            }),
                           }),
                         ]),
                       }),

@@ -4,20 +4,20 @@
 
 ## 进度总览（2026-08-21 更新）
 
-| Track | 状态 | 证据 |
-| --- | --- | --- |
-| C0 m10 决策修订 | ✅ 完成 | `a88dfa9` |
-| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成 | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试 |
-| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖） | ✅ 完成 | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证 |
-| E6 组件级 memo | ✅ 完成 | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md` |
-| E7 context（Provider+useContext） | ✅ 完成 | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md` |
-| E5 flexGrow/Shrink/Basis | ⬜ 未启动 | 设计门：`docs/e5-flex-grow-design.md` 待写待评审 |
-| E1 keyboard 事件 | ⬜ 未启动 | 设计门：`docs/e1-keyboard-events-design.md` 待写待评审 |
-| E4 boxShadow | ⬜ 未启动 | 设计门：`docs/e4-boxshadow-design.md` 待写待评审 |
-| E2 zIndex | ⬜ 未启动 | 前置：E1；设计门待写 |
-| E3 position/inset | ⬜ 未启动 | 前置：E2 |
-| A2 第二批弹层组件 | ⬜ 未启动 | 启动门：E1/E2/E3 出口 + E4 合并 |
-| A3 第三批产品分子 | ⬜ 未启动 | 按需立项 |
+| Track                                                    | 状态      | 证据                                                           |
+| -------------------------------------------------------- | --------- | -------------------------------------------------------------- |
+| C0 m10 决策修订                                          | ✅ 完成   | `a88dfa9`                                                      |
+| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成   | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试    |
+| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成   | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证    |
+| E6 组件级 memo                                           | ✅ 完成   | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md` |
+| E7 context（Provider+useContext）                        | ✅ 完成   | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md` |
+| E5 flexGrow/Shrink/Basis                                 | ⬜ 未启动 | 设计门：`docs/e5-flex-grow-design.md` 待写待评审               |
+| E1 keyboard 事件                                         | ⬜ 未启动 | 设计门：`docs/e1-keyboard-events-design.md` 待写待评审         |
+| E4 boxShadow                                             | ⬜ 未启动 | 设计门：`docs/e4-boxshadow-design.md` 待写待评审               |
+| E2 zIndex                                                | ⬜ 未启动 | 前置：E1；设计门待写                                           |
+| E3 position/inset                                        | ⬜ 未启动 | 前置：E2                                                       |
+| A2 第二批弹层组件                                        | ⬜ 未启动 | 启动门：E1/E2/E3 出口 + E4 合并                                |
+| A3 第三批产品分子                                        | ⬜ 未启动 | 按需立项                                                       |
 
 **接手指引**：引擎工作包按各自设计门启动（设计文档评审 → 写 `docs/pingo-ui-e<N>-implementation-plan.md` 子计划 → subagent 执行）；组件批次按本文件规格表执行。已完成的子计划内 checkbox 状态以本表为准。
 
@@ -71,6 +71,7 @@ Input slot 补齐前落地；C0 是 E2/E3 的唯一解锁点，**最早启动**�
 ### Task C0: 修订 overlay/absolute positioning Defer 决策
 
 **Files:**
+
 - Modify: `docs/m10-capability-decisions.md`
 - Modify: `docs/design.md`（§12.1 支持表段落）
 
@@ -177,7 +178,7 @@ git commit -m "docs(m10): adopt overlay positioning for pingo-ui fixture"
   arePropsEqual、key 变化绕过 memo。
 - **预估分解**（4 个任务，子计划 `docs/pingo-ui-e6-implementation-plan.md`）：
   1. memo wrapper + 类型；2. reconciler bailout 接入；3. signal 正交性测试；
-  4. pingo-ui 组件接入（Button/Badge/Card 等纯展示组件包 memo）+ 门禁。
+  2. pingo-ui 组件接入（Button/Badge/Card 等纯展示组件包 memo）+ 门禁。
 
 ---
 
@@ -200,33 +201,33 @@ descriptor 测试 + 皮肤解析测试 → storybook 展区。**组件模板以 
 通用 props：`className?`（追加最后）、`semanticLabel?`、theme 经 `useTheme()` 内部
 注入。所有组件在 E6 落地后用 `memo` 包装（A1 Task 13）。
 
-| # | 组件 | props（除通用） | variants / 皮肤类 | 关键皮肤值（引用 token） |
-| --- | --- | --- | --- | --- |
-| 1 | IconButton | `icon: PingoNode`、`onPress?`、`disabled?` | variant 同 Button（复用 `.pui-button--*` + `.pui-button--icon`） | 36×36；icon slot 透传（§6.2.1 契约） |
-| 2 | Divider | `orientation?: "horizontal"\|"vertical"` | `.pui-divider` / `.pui-divider--vertical` | horizontal: height 1px、background `$border`；vertical: width 1px、stretch |
-| 3 | Skeleton | `width?`、`height?` | `.pui-skeleton` | background `$accent`（dark `$dark-accent`）、radius `$radius-md`；无动画（CSS 动画不在子集） |
-| 4 | Alert | `title: string`、`children: string`、`variant?: "default"\|"destructive"` | `.pui-alert` / `.pui-alert--destructive` + `.pui-alert__title` / `.pui-alert__description` | padding 16、radius `$radius-lg`、border `$border`；destructive: border `$destructive`、title color `$destructive` |
-| 5 | Avatar | `src?: string`、`fallback: string`、`size?: number`（默认 40） | `.pui-avatar` + `.pui-avatar__fallback` | 圆形 radius = size/2；无 src 时显示 fallback 文本（conditional render，不需要引擎能力） |
-| 6 | Progress | `value: number`（0–100）、`max?: number` | `.pui-progress` + `.pui-progress__indicator` | 轨道 height 8、radius 4、background `$secondary`；指示条 width 由 style prop 百分比设置（`width: "${pct}%"`——% 长度已支持，不需要引擎能力） |
-| 7 | Switch | `checked: boolean`、`onCheckedChange?`、`disabled?` | `.pui-switch`(+`--checked`/`--disabled`) + `.pui-switch__thumb` | 轨道 44×24 radius 12；thumb 20×20 radius 10；checked 位移用 margin-left 20px（无 transform 需要）；Pressable 承载交互 |
-| 8 | Checkbox | 同 Switch + `label?: string` | `.pui-checkbox`(+`--checked`) + `.pui-checkbox__indicator` | 16×16 radius 4 border；checked: background `$primary` + 勾选标记用 Text "✓"（字体回退风险→设计时用图片或几何图形评估，子计划定） |
-| 9 | RadioGroup | **组合式（E7 context）**：`RadioGroup({ value?, onValueChange?, disabled?, children })` + `RadioGroupItem({ value, label? })` | `.pui-radio`(+`--checked`) + `.pui-radio__indicator` | 16×16 圆形 border；checked 内点 8×8 圆形 `$primary`；组状态经 RadioGroupContext 分发 |
-| 10 | Tabs | **组合式（E7 context）**：`Tabs({ value?, onValueChange?, children })` + `TabsList` + `TabsTrigger({ value, children })` + `TabsContent({ value, children })` | `.pui-tabs` + `.pui-tabs__list` + `.pui-tabs__trigger`(+`--active`) + `.pui-tabs__content` | list: background `$secondary` padding 4 radius；trigger active: background `$background`；pointer 交互，方向键导航等 E1 后升级 |
-| 11 | Accordion | **组合式（E7 context）**：`Accordion({ openValue?, onValueChange?, children })` + `AccordionItem({ value, title, children })` | `.pui-accordion__item` / `__trigger`(+`--open`) / `__content` | item border-bottom `$border`；open 状态条件渲染 content |
-| 12 | TextArea 装饰版 | 同 Input（无 slot） | `.pui-input` 复用 + `.pui-textarea` | rows 默认 3；复用 Task 8 Input 的 controller 模式 |
+| #   | 组件            | props（除通用）                                                                                                                                               | variants / 皮肤类                                                                          | 关键皮肤值（引用 token）                                                                                                                    |
+| --- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | IconButton      | `icon: PingoNode`、`onPress?`、`disabled?`                                                                                                                    | variant 同 Button（复用 `.pui-button--*` + `.pui-button--icon`）                           | 36×36；icon slot 透传（§6.2.1 契约）                                                                                                        |
+| 2   | Divider         | `orientation?: "horizontal"\|"vertical"`                                                                                                                      | `.pui-divider` / `.pui-divider--vertical`                                                  | horizontal: height 1px、background `$border`；vertical: width 1px、stretch                                                                  |
+| 3   | Skeleton        | `width?`、`height?`                                                                                                                                           | `.pui-skeleton`                                                                            | background `$accent`（dark `$dark-accent`）、radius `$radius-md`；无动画（CSS 动画不在子集）                                                |
+| 4   | Alert           | `title: string`、`children: string`、`variant?: "default"\|"destructive"`                                                                                     | `.pui-alert` / `.pui-alert--destructive` + `.pui-alert__title` / `.pui-alert__description` | padding 16、radius `$radius-lg`、border `$border`；destructive: border `$destructive`、title color `$destructive`                           |
+| 5   | Avatar          | `src?: string`、`fallback: string`、`size?: number`（默认 40）                                                                                                | `.pui-avatar` + `.pui-avatar__fallback`                                                    | 圆形 radius = size/2；无 src 时显示 fallback 文本（conditional render，不需要引擎能力）                                                     |
+| 6   | Progress        | `value: number`（0–100）、`max?: number`                                                                                                                      | `.pui-progress` + `.pui-progress__indicator`                                               | 轨道 height 8、radius 4、background `$secondary`；指示条 width 由 style prop 百分比设置（`width: "${pct}%"`——% 长度已支持，不需要引擎能力） |
+| 7   | Switch          | `checked: boolean`、`onCheckedChange?`、`disabled?`                                                                                                           | `.pui-switch`(+`--checked`/`--disabled`) + `.pui-switch__thumb`                            | 轨道 44×24 radius 12；thumb 20×20 radius 10；checked 位移用 margin-left 20px（无 transform 需要）；Pressable 承载交互                       |
+| 8   | Checkbox        | 同 Switch + `label?: string`                                                                                                                                  | `.pui-checkbox`(+`--checked`) + `.pui-checkbox__indicator`                                 | 16×16 radius 4 border；checked: background `$primary` + 勾选标记用 Text "✓"（字体回退风险→设计时用图片或几何图形评估，子计划定）            |
+| 9   | RadioGroup      | **组合式（E7 context）**：`RadioGroup({ value?, onValueChange?, disabled?, children })` + `RadioGroupItem({ value, label? })`                                 | `.pui-radio`(+`--checked`) + `.pui-radio__indicator`                                       | 16×16 圆形 border；checked 内点 8×8 圆形 `$primary`；组状态经 RadioGroupContext 分发                                                        |
+| 10  | Tabs            | **组合式（E7 context）**：`Tabs({ value?, onValueChange?, children })` + `TabsList` + `TabsTrigger({ value, children })` + `TabsContent({ value, children })` | `.pui-tabs` + `.pui-tabs__list` + `.pui-tabs__trigger`(+`--active`) + `.pui-tabs__content` | list: background `$secondary` padding 4 radius；trigger active: background `$background`；pointer 交互，方向键导航等 E1 后升级              |
+| 11  | Accordion       | **组合式（E7 context）**：`Accordion({ openValue?, onValueChange?, children })` + `AccordionItem({ value, title, children })`                                 | `.pui-accordion__item` / `__trigger`(+`--open`) / `__content`                              | item border-bottom `$border`；open 状态条件渲染 content                                                                                     |
+| 12  | TextArea 装饰版 | 同 Input（无 slot）                                                                                                                                           | `.pui-input` 复用 + `.pui-textarea`                                                        | rows 默认 3；复用 Task 8 Input 的 controller 模式                                                                                           |
 
 - [x] **A1 Tasks 1–12**：按上表逐组件实施（皮肤 → 组件 → 测试 → storybook 展区）。
-  每组件 commit 一次。token 缺口（如 muted 背景）在 tokens.scss 追加并记录。
-  **已完成（Batch A/B/C，2026-08-21）**：12 组件全部交付，组合式 API 经 E7 context 落地。
+      每组件 commit 一次。token 缺口（如 muted 背景）在 tokens.scss 追加并记录。
+      **已完成（Batch A/B/C，2026-08-21）**：12 组件全部交付，组合式 API 经 E7 context 落地。
 - [x] **A1 Task 13**：E6 接入——全部展示组件用 `memo` 包装；补 memo 行为测试。
-  **提前完成**（E6-4 随 memo 落地一并接入；Input 在 A1-D 补齐一致性包装）。
+      **提前完成**（E6-4 随 memo 落地一并接入；Input 在 A1-D 补齐一致性包装）。
 - [x] **A1 Task 14**：暗色全覆盖审查——storybook 每组件 light/dark 双 story；
-  像素快照（补充断言，语义树 E2E 为主）。**已完成**：showcase 明暗双 story + browser 截图验证。
+      像素快照（补充断言，语义树 E2E 为主）。**已完成**：showcase 明暗双 story + browser 截图验证。
 - [x] **A1 Task 15**：覆盖约定文档化——`packages/ui/README.md`：sheet 注册顺序
-  （用户 sheet 必须在 pingo-ui sheet 之后）、token-only 约束、preset 定制方法
-  （`@use ... with`）、已知视觉缺口清单。**已完成**（1fd7af4 + 31f8b34 评审修正）。
+      （用户 sheet 必须在 pingo-ui sheet 之后）、token-only 约束、preset 定制方法
+      （`@use ... with`）、已知视觉缺口清单。**已完成**（1fd7af4 + 31f8b34 评审修正）。
 - [x] **A1 Task 16**：门禁——`npx vitest run packages/ui` 全绿、`pnpm test:run`
-  全仓回归、storybook build。**已完成**（104/104、496/496、typecheck/api:check 全绿）。
+      全仓回归、storybook build。**已完成**（104/104、496/496、typecheck/api:check 全绿）。
 
 ### A2 阶段3：第二批弹层组件（硬依赖 E1/E2/E3，视觉完整依赖 E4）
 
@@ -257,17 +258,18 @@ TS/Rust 往返 + malformed-input/fuzz。
 
 ### 已完成步骤的验收记录
 
-| 步骤 | 验收标准 | 证据 |
-| --- | --- | --- |
-| C0 | m10 决策行 Defer→Adopt；design.md §12.1 同步 | `a88dfa9` |
-| A0 | cva/theme/皮肤/组件测试 35 全绿；storybook 明暗截图确认；全仓回归绿 | `2addeb3…6a5fa4b` |
-| E6 | memo 5 语义测试 + signal 正交测试；api:check 快照纯增量；全仓 416 绿 | `a923e61…abc3d8d` |
-| E7 | 7 条 context 行为测试（最近者胜/默认回落/卸载回落/细粒度分发/穿透 memo/结构更新）；repo typecheck 绿；全仓 429 绿 | `34145ee…bf81554` |
-| A1 | 17 组件交付；104/104 包测试；全仓 496 绿；明暗 showcase 截图确认；README 覆盖约定/约束/缺口清单 | `a8b8b66…31f8b34` |
+| 步骤 | 验收标准                                                                                                          | 证据              |
+| ---- | ----------------------------------------------------------------------------------------------------------------- | ----------------- |
+| C0   | m10 决策行 Defer→Adopt；design.md §12.1 同步                                                                      | `a88dfa9`         |
+| A0   | cva/theme/皮肤/组件测试 35 全绿；storybook 明暗截图确认；全仓回归绿                                               | `2addeb3…6a5fa4b` |
+| E6   | memo 5 语义测试 + signal 正交测试；api:check 快照纯增量；全仓 416 绿                                              | `a923e61…abc3d8d` |
+| E7   | 7 条 context 行为测试（最近者胜/默认回落/卸载回落/细粒度分发/穿透 memo/结构更新）；repo typecheck 绿；全仓 429 绿 | `34145ee…bf81554` |
+| A1   | 17 组件交付；104/104 包测试；全仓 496 绿；明暗 showcase 截图确认；README 覆盖约定/约束/缺口清单                   | `a8b8b66…31f8b34` |
 
 ### 待执行步骤的验收标准
 
 **E5 flexGrow/Shrink/Basis**
+
 1. `docs/e5-flex-grow-design.md` 评审通过（含 reference oracle 选型与 overflow 容器
    百分比语义评估结论）。
 2. flex reference oracle 建立且先于语法开放（css-events-plan 既定节奏）。
@@ -277,6 +279,7 @@ TS/Rust 往返 + malformed-input/fuzz。
 6. 出口后补齐 Input `prefix`/`suffix` slot（组件层验收：descriptor 测试 + storybook 展示）。
 
 **E1 keyboard 事件**
+
 1. `docs/e1-keyboard-events-design.md` 评审通过（与 editing transaction 的边界明确）。
 2. ABI golden bytes + TS/Rust 往返 + malformed/fuzz 绿。
 3. keydown/keyup 跨三 transport 事件顺序一致（契约测试）。
@@ -285,6 +288,7 @@ TS/Rust 往返 + malformed-input/fuzz。
 6. Tabs/Accordion/RadioGroup 方向键导航升级（组件层验收：键盘导航行为测试）。
 
 **E4 boxShadow**
+
 1. `docs/e4-boxshadow-design.md` 评审通过（value tag、Canvas2D 映射、缓存失效语义）。
 2. 增量↔全量像素差分一致（含 hover 阴影切换路径）；后端差分在 tolerance 内。
 3. picture cache 失效正确性测试（阴影变化只失效 paintSelf）。
@@ -292,18 +296,21 @@ TS/Rust 往返 + malformed-input/fuzz。
 5. ABI/公开面门禁按通用条款。
 
 **E2 zIndex**
+
 1. `docs/e2-zindex-design.md` 评审通过（排序缓存策略、无障碍顺序方案）。
 2. paint/hit/semantics 顺序的增量↔全量 oracle 一致。
 3. 无每帧排序（性能测试证明排序结果缓存命中）。
 4. 帧时预算不回归。
 
 **E3 position:absolute + inset**
+
 1. `docs/e3-position-design.md` 评审通过。
 2. m10 决策表全套出口：layout/hit/clip/semantics 增量↔全量 oracle、帧时与节点预算、
    feature bit 关闭拒绝新值且 flow layout 不变的回滚验证。
 3. 与滚动容器交互的语义测试（设计门定稿后落入子计划）。
 
 **A2 第二批弹层组件**
+
 1. 启动门达成：E1/E2/E3 出口通过，E4 合并（可 feature-flag）。
 2. `docs/pingo-ui-overlay-components-plan.md` 子计划评审通过（Overlay 基元、锚定 API、
    焦点陷阱语义）。
@@ -317,28 +324,28 @@ TS/Rust 往返 + malformed-input/fuzz。
 
 ## 验证矩阵（每个阶段出口必过）
 
-| 层 | 命令 / 方式 | 适用 |
-| --- | --- | --- |
-| 组件单元 | `npx vitest run packages/ui` | A0/A1/A2 每 Task |
-| 皮肤解析 | `packages/ui/src/styles.test.ts`（resolveStyle 断言） | 每皮肤变更 |
-| 全仓回归 | `pnpm test:run` | 每阶段出口 |
-| Rust | `pnpm rust:test`（不用裸 cargo） | E1–E5 每 Task |
-| ABI | golden bytes + TS/Rust 往返 + fuzz | E1/E4/E5（凡 ABI 变更） |
-| 差分 oracle | 增量↔全量 layout/paint/hit/semantics | E2/E3/E4/E5 |
-| 像素 | 后端差分（tolerance 内） | E4、A2 弹层 |
-| storybook | build + 明暗人工/browser 截图验证 | A0/A1/A2 出口 |
-| 边界 | `check-style-preprocess-boundary.mjs` 等既有脚本 | 全仓回归内含 |
+| 层          | 命令 / 方式                                           | 适用                    |
+| ----------- | ----------------------------------------------------- | ----------------------- |
+| 组件单元    | `npx vitest run packages/ui`                          | A0/A1/A2 每 Task        |
+| 皮肤解析    | `packages/ui/src/styles.test.ts`（resolveStyle 断言） | 每皮肤变更              |
+| 全仓回归    | `pnpm test:run`                                       | 每阶段出口              |
+| Rust        | `pnpm rust:test`（不用裸 cargo）                      | E1–E5 每 Task           |
+| ABI         | golden bytes + TS/Rust 往返 + fuzz                    | E1/E4/E5（凡 ABI 变更） |
+| 差分 oracle | 增量↔全量 layout/paint/hit/semantics                  | E2/E3/E4/E5             |
+| 像素        | 后端差分（tolerance 内）                              | E4、A2 弹层             |
+| storybook   | build + 明暗人工/browser 截图验证                     | A0/A1/A2 出口           |
+| 边界        | `check-style-preprocess-boundary.mjs` 等既有脚本      | 全仓回归内含            |
 
 ## 风险与回滚
 
-| 风险 | 缓解 |
-| --- | --- |
-| E2/E3 周期拖累 A2 | A0/A1 独立交付 17 组件；弹层不阻塞 |
-| m10 修订后 oracle 不达标 | feature bit 关闭即回滚，flow layout 不变（决策表原边界） |
-| E6 memo 与 signal 交互出微妙 bug | 出口门禁含 signal 正交性测试；memo 包装逐组件可回退 |
-| 弹层 API 提前泄露给业务 | A2 启动门前 facade 不导出任何 Overlay 符号 |
-| 皮肤体积随组件数增长 | themed 规则仅皮肤属性；按组件分包 sheet 留作后续优化 |
-| **overflow 容器内百分比尺寸归零**（2026-08-21 实证）：非 visible overflow 使 View 成为滚动容器，内容获得不定 inline basis，子节点百分比宽/高解析为 0 | 组件规避（Progress 轨道已去掉 overflow:hidden）；引擎语义是否修正（clip-only overflow 不应给出不定 inline 约束）列入 E  track 候选，E5 设计门时一并评估 |
+| 风险                                                                                                                                                 | 缓解                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| E2/E3 周期拖累 A2                                                                                                                                    | A0/A1 独立交付 17 组件；弹层不阻塞                                                                                                                     |
+| m10 修订后 oracle 不达标                                                                                                                             | feature bit 关闭即回滚，flow layout 不变（决策表原边界）                                                                                               |
+| E6 memo 与 signal 交互出微妙 bug                                                                                                                     | 出口门禁含 signal 正交性测试；memo 包装逐组件可回退                                                                                                    |
+| 弹层 API 提前泄露给业务                                                                                                                              | A2 启动门前 facade 不导出任何 Overlay 符号                                                                                                             |
+| 皮肤体积随组件数增长                                                                                                                                 | themed 规则仅皮肤属性；按组件分包 sheet 留作后续优化                                                                                                   |
+| **overflow 容器内百分比尺寸归零**（2026-08-21 实证）：非 visible overflow 使 View 成为滚动容器，内容获得不定 inline basis，子节点百分比宽/高解析为 0 | 组件规避（Progress 轨道已去掉 overflow:hidden）；引擎语义是否修正（clip-only overflow 不应给出不定 inline 约束）列入 E track 候选，E5 设计门时一并评估 |
 
 ---
 

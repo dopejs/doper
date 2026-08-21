@@ -1,4 +1,11 @@
-import { createElement, memo, Text, View, type PingoEvent, type PingoNode } from "@dopejs/pingo-jsx";
+import {
+  createElement,
+  memo,
+  Text,
+  View,
+  type PingoEvent,
+  type PingoNode,
+} from "@dopejs/pingo-jsx";
 import { createContext, useContext, useSignal } from "@dopejs/pingo-runtime";
 
 import { useTheme } from "../theme";
@@ -100,8 +107,6 @@ export function accordionItemDescriptor(
 }
 
 /** shadcn-style accordion item. JSX-only: reads the root via context. */
-export const AccordionItem = memo(function AccordionItemImpl(
-  props: AccordionItemProps,
-): PingoNode {
+export const AccordionItem = memo(function AccordionItemImpl(props: AccordionItemProps): PingoNode {
   return accordionItemDescriptor(props, useContext(AccordionContext));
 });

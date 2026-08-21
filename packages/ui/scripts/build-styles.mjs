@@ -26,7 +26,9 @@ for (const file of await readdir(componentsDir)) {
   for (const match of source.matchAll(declarationPattern)) {
     const value = (match[1] ?? "").trim();
     if (value.includes("t.$") || value === "0" || keywordOnlyPattern.test(value)) continue;
-    console.error(`[pingo-ui] ${file}: literal value "${value}" — use a token from styles/tokens.scss`);
+    console.error(
+      `[pingo-ui] ${file}: literal value "${value}" — use a token from styles/tokens.scss`,
+    );
     rejected = true;
   }
 }
@@ -38,9 +40,7 @@ if (rejected) process.exit(1);
 const result = await compilePingoStyleFile(entry);
 if (result.styleSheet === null || result.cssText === null) {
   for (const diagnostic of result.diagnostics) {
-    console.error(
-      `[pingo-ui] ${diagnostic.stage}/${diagnostic.code}: ${diagnostic.message}`,
-    );
+    console.error(`[pingo-ui] ${diagnostic.stage}/${diagnostic.code}: ${diagnostic.message}`);
   }
   process.exit(1);
 }

@@ -12,7 +12,9 @@
   border-bottom-width: t.$border-width;
   border-bottom-style: solid;
   border-bottom-color: t.$border;
-  &.pui-dark { border-bottom-color: t.$dark-border; }
+  &.pui-dark {
+    border-bottom-color: t.$dark-border;
+  }
 }
 
 .pui-accordion__trigger {
@@ -24,7 +26,9 @@
   font-weight: t.$font-weight-medium;
   color: t.$foreground;
   cursor: pointer;
-  &.pui-dark { color: t.$dark-foreground; }
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
 }
 
 .pui-accordion__content {
@@ -32,5 +36,7 @@
   padding-bottom: t.$accordion-content-padding-bottom;
   font-size: t.$font-size-sm;
   color: t.$muted-foreground;
-  &.pui-dark { color: t.$dark-muted-foreground; }
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
 }

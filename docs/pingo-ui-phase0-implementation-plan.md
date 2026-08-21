@@ -54,6 +54,7 @@ apps/storybook/
 ### Task 1: 包骨架
 
 **Files:**
+
 - Create: `packages/ui/package.json`
 - Create: `packages/ui/tsconfig.json`
 - Create: `packages/ui/tsconfig.build.json`
@@ -78,12 +79,7 @@ apps/storybook/
   },
   "type": "module",
   "sideEffects": false,
-  "files": [
-    "LICENSE",
-    "NOTICE",
-    "dist",
-    "styles"
-  ],
+  "files": ["LICENSE", "NOTICE", "dist", "styles"],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -161,6 +157,7 @@ git add packages/ui && git commit -m "feat(ui): scaffold @dopejs/pingo-ui packag
 ### Task 2: cva-lite
 
 **Files:**
+
 - Create: `packages/ui/src/cva.ts`
 - Test: `packages/ui/src/cva.test.ts`
 
@@ -303,6 +300,7 @@ git commit -m "feat(ui): add cva-lite class variance composer"
 ### Task 3: theme signal
 
 **Files:**
+
 - Create: `packages/ui/src/theme.ts`
 - Test: `packages/ui/src/theme.test.ts`
 
@@ -391,6 +389,7 @@ git commit -m "feat(ui): add module-level theme signal"
 ### Task 4: SCSS 皮肤管线 + shadcn 默认 preset
 
 **Files:**
+
 - Create: `packages/ui/styles/tokens.scss`
 - Create: `packages/ui/styles/presets/shadcn-default.scss`
 - Create: `packages/ui/styles/index.scss`
@@ -529,22 +528,30 @@ $dark-ring: #52525b !default;
 .pui-button--default {
   background-color: t.$primary;
   color: t.$primary-foreground;
-  &:hover { background-color: t.$primary-hover; }
+  &:hover {
+    background-color: t.$primary-hover;
+  }
   &.pui-dark {
     background-color: t.$dark-primary;
     color: t.$dark-primary-foreground;
-    &:hover { background-color: t.$dark-primary-hover; }
+    &:hover {
+      background-color: t.$dark-primary-hover;
+    }
   }
 }
 
 .pui-button--secondary {
   background-color: t.$secondary;
   color: t.$secondary-foreground;
-  &:hover { background-color: t.$secondary-hover; }
+  &:hover {
+    background-color: t.$secondary-hover;
+  }
   &.pui-dark {
     background-color: t.$dark-secondary;
     color: t.$dark-secondary-foreground;
-    &:hover { background-color: t.$dark-secondary-hover; }
+    &:hover {
+      background-color: t.$dark-secondary-hover;
+    }
   }
 }
 
@@ -554,32 +561,48 @@ $dark-ring: #52525b !default;
   border-width: 1px;
   border-style: solid;
   border-color: t.$border;
-  &:hover { background-color: t.$accent; color: t.$accent-foreground; }
+  &:hover {
+    background-color: t.$accent;
+    color: t.$accent-foreground;
+  }
   &.pui-dark {
     background-color: t.$dark-background;
     color: t.$dark-foreground;
     border-color: t.$dark-border;
-    &:hover { background-color: t.$dark-accent; color: t.$dark-accent-foreground; }
+    &:hover {
+      background-color: t.$dark-accent;
+      color: t.$dark-accent-foreground;
+    }
   }
 }
 
 .pui-button--ghost {
   color: t.$foreground;
-  &:hover { background-color: t.$accent; color: t.$accent-foreground; }
+  &:hover {
+    background-color: t.$accent;
+    color: t.$accent-foreground;
+  }
   &.pui-dark {
     color: t.$dark-foreground;
-    &:hover { background-color: t.$dark-accent; color: t.$dark-accent-foreground; }
+    &:hover {
+      background-color: t.$dark-accent;
+      color: t.$dark-accent-foreground;
+    }
   }
 }
 
 .pui-button--destructive {
   background-color: t.$destructive;
   color: t.$destructive-foreground;
-  &:hover { background-color: t.$destructive-hover; }
+  &:hover {
+    background-color: t.$destructive-hover;
+  }
   &.pui-dark {
     background-color: t.$dark-destructive;
     color: t.$dark-destructive-foreground;
-    &:hover { background-color: t.$dark-destructive-hover; }
+    &:hover {
+      background-color: t.$dark-destructive-hover;
+    }
   }
 }
 ```
@@ -607,19 +630,28 @@ $dark-ring: #52525b !default;
 .pui-badge--default {
   background-color: t.$primary;
   color: t.$primary-foreground;
-  &.pui-dark { background-color: t.$dark-primary; color: t.$dark-primary-foreground; }
+  &.pui-dark {
+    background-color: t.$dark-primary;
+    color: t.$dark-primary-foreground;
+  }
 }
 
 .pui-badge--secondary {
   background-color: t.$secondary;
   color: t.$secondary-foreground;
-  &.pui-dark { background-color: t.$dark-secondary; color: t.$dark-secondary-foreground; }
+  &.pui-dark {
+    background-color: t.$dark-secondary;
+    color: t.$dark-secondary-foreground;
+  }
 }
 
 .pui-badge--destructive {
   background-color: t.$destructive;
   color: t.$destructive-foreground;
-  &.pui-dark { background-color: t.$dark-destructive; color: t.$dark-destructive-foreground; }
+  &.pui-dark {
+    background-color: t.$dark-destructive;
+    color: t.$dark-destructive-foreground;
+  }
 }
 
 .pui-badge--outline {
@@ -672,7 +704,9 @@ $dark-ring: #52525b !default;
   margin-top: 6px;
   font-size: 14px;
   color: t.$muted-foreground;
-  &.pui-dark { color: t.$dark-muted-foreground; }
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
 }
 
 .pui-card-content {
@@ -737,7 +771,9 @@ $dark-ring: #52525b !default;
   font-size: 14px;
   font-weight: 500;
   color: t.$foreground;
-  &.pui-dark { color: t.$dark-foreground; }
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
 }
 ```
 
@@ -797,10 +833,7 @@ Expected: 输出 `[pingo-ui] generated src/generated/styles.ts`；产物含 `.pu
 ```ts
 import { describe, expect, it } from "vitest";
 
-import {
-  STYLE_INTERACTION_STATES,
-  resolveStyle,
-} from "@dopejs/pingo-style";
+import { STYLE_INTERACTION_STATES, resolveStyle } from "@dopejs/pingo-style";
 
 import { createPingoUiStyleSheet, pingoUiCssText } from "./generated/styles";
 
@@ -873,7 +906,9 @@ for (const file of await readdir(componentsDir)) {
   for (const match of source.matchAll(declarationPattern)) {
     const value = match[1] ?? "";
     if (!value.includes("t.$")) {
-      console.error(`[pingo-ui] ${file}: literal value "${value.trim()}" — use a token from styles/tokens.scss`);
+      console.error(
+        `[pingo-ui] ${file}: literal value "${value.trim()}" — use a token from styles/tokens.scss`,
+      );
       process.exit(1);
     }
   }
@@ -919,6 +954,7 @@ git commit -m "feat(ui): add scss skin pipeline with shadcn default preset"
 ### Task 5: Button 组件
 
 **Files:**
+
 - Create: `packages/ui/src/components/button.ts`
 - Test: `packages/ui/src/components/button.test.ts`
 
@@ -960,9 +996,7 @@ describe("Button", () => {
 
   it("appends user className last and marks disabled", () => {
     const node = render({ children: "x", disabled: true, className: "mine" });
-    expect(node.props.className).toBe(
-      "pui-button pui-button--default pui-button--disabled mine",
-    );
+    expect(node.props.className).toBe("pui-button pui-button--default pui-button--disabled mine");
     expect(node.props.semanticValue).toBe("disabled");
     expect(node.props.onTap).toBeUndefined();
     expect(node.props.onClick).toBeUndefined();
@@ -1071,6 +1105,7 @@ git commit -m "feat(ui): add Button component"
 ### Task 6: Badge 组件
 
 **Files:**
+
 - Create: `packages/ui/src/components/badge.ts`
 - Test: `packages/ui/src/components/badge.test.ts`
 
@@ -1174,6 +1209,7 @@ git commit -m "feat(ui): add Badge component"
 ### Task 7: Card 组件族
 
 **Files:**
+
 - Create: `packages/ui/src/components/card.ts`
 - Test: `packages/ui/src/components/card.test.ts`
 
@@ -1303,6 +1339,7 @@ git commit -m "feat(ui): add Card composition family"
 ### Task 8: Input 组件（无 slot、无 placeholder）
 
 **Files:**
+
 - Create: `packages/ui/src/components/input.ts`
 - Test: `packages/ui/src/components/input.test.ts`
 
@@ -1450,6 +1487,7 @@ git commit -m "feat(ui): add decorated Input component"
 ### Task 9: Label 组件
 
 **Files:**
+
 - Create: `packages/ui/src/components/label.ts`
 - Test: `packages/ui/src/components/label.test.ts`
 
@@ -1529,6 +1567,7 @@ git commit -m "feat(ui): add Label component"
 ### Task 10: 公开导出 + storybook 走通
 
 **Files:**
+
 - Modify: `packages/ui/src/index.ts`
 - Modify: `apps/storybook/package.json`
 - Modify: `apps/storybook/src/mount.ts`
@@ -1716,6 +1755,7 @@ export const Dark: Story = { args: { theme: "dark" } };
 
 Run: `pnpm packages:build && pnpm storybook:build`
 Expected: 构建成功。然后 `pnpm storybook:dev`，浏览器打开 `http://localhost:6006/?path=/story/pingo-ui-showcase--light` 与 `--dark`：
+
 - 五个 Button variant 视觉区分正确；hover 变色；
 - dark 下全套组件切换暗色；
 - Input 可聚焦输入。

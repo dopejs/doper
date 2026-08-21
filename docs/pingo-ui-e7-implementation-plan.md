@@ -46,6 +46,7 @@
 ### Task E7-1: runtime context 核心
 
 **Files:**
+
 - Create: `packages/runtime/src/context.ts`
 - Test: `packages/runtime/src/context.test.ts`
 - Modify: `packages/runtime/src/hooks.ts`（ComponentScope 增加 context lookup 桥）
@@ -56,12 +57,7 @@
 ```ts
 import { describe, expect, it } from "vitest";
 
-import {
-  PINGO_PROVIDER_TYPE,
-  createContext,
-  isContextProvider,
-  useContext,
-} from "./context";
+import { PINGO_PROVIDER_TYPE, createContext, isContextProvider, useContext } from "./context";
 import { ComponentScope } from "./hooks";
 import { signal } from "./signal";
 
@@ -79,7 +75,10 @@ describe("createContext", () => {
 describe("useContext", () => {
   it("returns the default value when no provider is on the chain", () => {
     const context = createContext("fallback");
-    const scope = new ComponentScope(() => undefined, () => undefined);
+    const scope = new ComponentScope(
+      () => undefined,
+      () => undefined,
+    );
     const value = scope.render(() => useContext(context));
     expect(value).toBe("fallback");
   });
@@ -221,6 +220,7 @@ git commit -m "feat(runtime): add createContext/useContext with scope lookup bri
 ### Task E7-2: jsx 类型拓宽
 
 **Files:**
+
 - Modify: `packages/jsx/package.json`（+ `@dopejs/pingo-runtime` 依赖）
 - Modify: `packages/jsx/src/types.ts`（ElementType / AnyPingoElement 擦除字段加 ContextProvider）
 - Modify: `packages/jsx/src/index.ts`（如 jsx 需要 re-export context 类型则追加，否则不动）
@@ -248,6 +248,7 @@ git commit -m "feat(jsx): accept context providers as element types"
 ### Task E7-3: reconciler 接线
 
 **Files:**
+
 - Modify: `packages/reconciler/src/reconciler.ts`
 - Test: `packages/reconciler/src/reconciler.test.ts`（追加 describe("context")）
 
@@ -260,9 +261,13 @@ describe("context", () => {
     // 断言 sink 最后批次中消费者文本 value 为 "dark"
   });
 
-  it("returns the default without a provider", () => { /* 消费者无 Provider → "fallback" */ });
+  it("returns the default without a provider", () => {
+    /* 消费者无 Provider → "fallback" */
+  });
 
-  it("nearest provider wins", () => { /* Provider("outer") > Provider("inner") > consumer → "inner" */ });
+  it("nearest provider wins", () => {
+    /* Provider("outer") > Provider("inner") > consumer → "inner" */
+  });
 
   it("re-renders only subscribed consumers on value change", () => {
     // Provider value "a"→"b"；consumer A（读 context）重渲染；consumer B（不读）renders 不变；
@@ -360,13 +365,14 @@ git commit -m "feat(reconciler): wire context providers through the owner chain"
 ### Task E7-4: facade 导出 + 门禁
 
 **Files:**
+
 - Modify: `packages/facade/src/index.ts`
 - Modify: `benchmarks/api/facade.v1.d.ts`（按 docs/api/index.md 程序更新快照）
 
 - [ ] **Step 1: facade 导出** createContext/useContext/isContextProvider + 类型
-  （PingoContext/ContextProvider/ContextProviderProps），放既有 runtime re-export 块。
+      （PingoContext/ContextProvider/ContextProviderProps），放既有 runtime re-export 块。
 - [ ] **Step 2: 门禁** `pnpm --filter @dopejs/pingo build`、`pnpm api:check`（快照按
-  程序更新）、`pnpm test:run` 全绿。
+      程序更新）、`pnpm test:run` 全绿。
 - [ ] **Step 3: Commit** `feat(facade): export context API`
 
 ---

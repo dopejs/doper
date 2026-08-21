@@ -14,10 +14,16 @@ describe("Card family", () => {
   });
 
   it("each section carries its own skin class", () => {
-    expect((CardHeader.component({ children: null }) as Host).props.className).toBe("pui-card-header");
+    expect((CardHeader.component({ children: null }) as Host).props.className).toBe(
+      "pui-card-header",
+    );
     expect((CardTitle.component({ children: "t" }) as Host).props.className).toBe("pui-card-title");
-    expect((CardContent.component({ children: null }) as Host).props.className).toBe("pui-card-content");
-    expect((CardFooter.component({ children: null }) as Host).props.className).toBe("pui-card-footer");
+    expect((CardContent.component({ children: null }) as Host).props.className).toBe(
+      "pui-card-content",
+    );
+    expect((CardFooter.component({ children: null }) as Host).props.className).toBe(
+      "pui-card-footer",
+    );
   });
 
   it("description picks up the dark marker and user className goes last", () => {

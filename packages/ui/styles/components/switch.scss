@@ -9,12 +9,16 @@
   border-radius: t.$switch-radius;
   background-color: t.$input-border;
   cursor: pointer;
-  &.pui-dark { background-color: t.$dark-input-border; }
+  &.pui-dark {
+    background-color: t.$dark-input-border;
+  }
 }
 
 .pui-switch--checked {
   background-color: t.$primary;
-  &.pui-dark { background-color: t.$dark-primary; }
+  &.pui-dark {
+    background-color: t.$dark-primary;
+  }
 }
 
 .pui-switch--disabled {
@@ -29,7 +33,9 @@
   margin-left: t.$switch-thumb-offset;
   margin-top: t.$switch-thumb-offset;
   background-color: t.$switch-thumb;
-  &.pui-dark { background-color: t.$dark-switch-thumb; }
+  &.pui-dark {
+    background-color: t.$dark-switch-thumb;
+  }
 }
 
 .pui-switch__thumb--checked {

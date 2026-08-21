@@ -11,12 +11,16 @@
   height: t.$progress-height;
   border-radius: t.$progress-radius;
   background-color: t.$secondary;
-  &.pui-dark { background-color: t.$dark-secondary; }
+  &.pui-dark {
+    background-color: t.$dark-secondary;
+  }
 }
 
 .pui-progress__indicator {
   height: t.$progress-height;
   border-radius: t.$progress-radius;
   background-color: t.$primary;
-  &.pui-dark { background-color: t.$dark-primary; }
+  &.pui-dark {
+    background-color: t.$dark-primary;
+  }
 }

@@ -37,7 +37,10 @@ class RecordingSink implements MutationSink {
 
 describe("tabsTriggerDescriptor", () => {
   it("renders an inactive tab trigger", () => {
-    const node = tabsTriggerDescriptor({ value: "a", children: "甲" }, context("b")) as unknown as Host;
+    const node = tabsTriggerDescriptor(
+      { value: "a", children: "甲" },
+      context("b"),
+    ) as unknown as Host;
     expect(node.props.className).toBe("pui-tabs__trigger");
     expect(node.props.semanticRole).toBe("tab");
     expect(node.props.semanticValue).toBe("inactive");
@@ -45,24 +48,33 @@ describe("tabsTriggerDescriptor", () => {
   });
 
   it("renders the active variant when the tab is selected", () => {
-    const node = tabsTriggerDescriptor({ value: "a", children: "甲" }, context("a")) as unknown as Host;
+    const node = tabsTriggerDescriptor(
+      { value: "a", children: "甲" },
+      context("a"),
+    ) as unknown as Host;
     expect(node.props.className).toBe("pui-tabs__trigger pui-tabs__trigger--active");
     expect(node.props.semanticValue).toBe("active");
   });
 
   it("forwards the trigger value to onSelect", () => {
     const onSelect = vi.fn();
-    const node = tabsTriggerDescriptor({ value: "b", children: "乙" }, {
-      value: "a",
-      onSelect,
-    }) as unknown as Host;
+    const node = tabsTriggerDescriptor(
+      { value: "b", children: "乙" },
+      {
+        value: "a",
+        onSelect,
+      },
+    ) as unknown as Host;
     (node.props.onTap as () => void)();
     expect(onSelect).toHaveBeenCalledWith("b");
   });
 
   it("appends the dark marker and keeps the user className last", () => {
     setTheme("dark");
-    const node = tabsTriggerDescriptor({ value: "a", children: "甲", className: "mine" }, context("a")) as unknown as Host;
+    const node = tabsTriggerDescriptor(
+      { value: "a", children: "甲", className: "mine" },
+      context("a"),
+    ) as unknown as Host;
     expect(node.props.className).toBe("pui-tabs__trigger pui-tabs__trigger--active pui-dark mine");
   });
 });
@@ -83,7 +95,10 @@ describe("tabsContentDescriptor", () => {
 
   it("appends the dark marker and keeps the user className last", () => {
     setTheme("dark");
-    const node = tabsContentDescriptor({ ...props, className: "mine" }, context("a")) as unknown as Host;
+    const node = tabsContentDescriptor(
+      { ...props, className: "mine" },
+      context("a"),
+    ) as unknown as Host;
     expect(node.props.className).toBe("pui-tabs__content pui-dark mine");
   });
 });

@@ -4,7 +4,9 @@
   height: t.$border-width;
   width: t.$divider-length;
   background-color: t.$border;
-  &.pui-dark { background-color: t.$dark-border; }
+  &.pui-dark {
+    background-color: t.$dark-border;
+  }
 }
 
 .pui-divider--vertical {

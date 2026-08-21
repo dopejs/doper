@@ -26,7 +26,7 @@ const encoder = new TextEncoder();
 const featureBitByPropertyId = new Map<number, number>(
   Object.values(STYLE_PROPERTIES).map((metadata) => [
     metadata.id,
-    STYLE_FEATURE_BITS[metadata.feature as keyof typeof STYLE_FEATURE_BITS],
+    STYLE_FEATURE_BITS[metadata.feature],
   ]),
 );
 

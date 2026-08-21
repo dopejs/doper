@@ -1,4 +1,9 @@
-import { createHostedCanvasRoot, type PingoNode, type HostedCanvasRoot, type PingoStyleSheet } from "@dopejs/pingo";
+import {
+  createHostedCanvasRoot,
+  type PingoNode,
+  type HostedCanvasRoot,
+  type PingoStyleSheet,
+} from "@dopejs/pingo";
 
 /**
  * Mounts one pingo scene on its own canvas for a story.

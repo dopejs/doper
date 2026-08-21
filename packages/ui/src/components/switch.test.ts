@@ -25,7 +25,9 @@ describe("Switch", () => {
     const node = render({ checked: true });
     expect(node.props.className).toBe("pui-switch pui-switch--checked");
     expect(node.props.semanticValue).toBe("on");
-    expect(node.props.children.props.className).toBe("pui-switch__thumb pui-switch__thumb--checked");
+    expect(node.props.children.props.className).toBe(
+      "pui-switch__thumb pui-switch__thumb--checked",
+    );
   });
 
   it("forwards the negated checked value on tap and click", () => {

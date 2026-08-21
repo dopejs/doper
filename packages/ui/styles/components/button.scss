@@ -43,22 +43,30 @@
 .pui-button--default {
   background-color: t.$primary;
   color: t.$primary-foreground;
-  &:hover { background-color: t.$primary-hover; }
+  &:hover {
+    background-color: t.$primary-hover;
+  }
   &.pui-dark {
     background-color: t.$dark-primary;
     color: t.$dark-primary-foreground;
-    &:hover { background-color: t.$dark-primary-hover; }
+    &:hover {
+      background-color: t.$dark-primary-hover;
+    }
   }
 }
 
 .pui-button--secondary {
   background-color: t.$secondary;
   color: t.$secondary-foreground;
-  &:hover { background-color: t.$secondary-hover; }
+  &:hover {
+    background-color: t.$secondary-hover;
+  }
   &.pui-dark {
     background-color: t.$dark-secondary;
     color: t.$dark-secondary-foreground;
-    &:hover { background-color: t.$dark-secondary-hover; }
+    &:hover {
+      background-color: t.$dark-secondary-hover;
+    }
   }
 }
 
@@ -68,31 +76,47 @@
   border-width: t.$border-width;
   border-style: solid;
   border-color: t.$border;
-  &:hover { background-color: t.$accent; color: t.$accent-foreground; }
+  &:hover {
+    background-color: t.$accent;
+    color: t.$accent-foreground;
+  }
   &.pui-dark {
     background-color: t.$dark-background;
     color: t.$dark-foreground;
     border-color: t.$dark-border;
-    &:hover { background-color: t.$dark-accent; color: t.$dark-accent-foreground; }
+    &:hover {
+      background-color: t.$dark-accent;
+      color: t.$dark-accent-foreground;
+    }
   }
 }
 
 .pui-button--ghost {
   color: t.$foreground;
-  &:hover { background-color: t.$accent; color: t.$accent-foreground; }
+  &:hover {
+    background-color: t.$accent;
+    color: t.$accent-foreground;
+  }
   &.pui-dark {
     color: t.$dark-foreground;
-    &:hover { background-color: t.$dark-accent; color: t.$dark-accent-foreground; }
+    &:hover {
+      background-color: t.$dark-accent;
+      color: t.$dark-accent-foreground;
+    }
   }
 }
 
 .pui-button--destructive {
   background-color: t.$destructive;
   color: t.$destructive-foreground;
-  &:hover { background-color: t.$destructive-hover; }
+  &:hover {
+    background-color: t.$destructive-hover;
+  }
   &.pui-dark {
     background-color: t.$dark-destructive;
     color: t.$dark-destructive-foreground;
-    &:hover { background-color: t.$dark-destructive-hover; }
+    &:hover {
+      background-color: t.$dark-destructive-hover;
+    }
   }
 }

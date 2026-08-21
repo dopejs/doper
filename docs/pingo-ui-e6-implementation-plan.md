@@ -30,6 +30,7 @@
 ### Task E6-1: memo wrapper 与类型（jsx 包）
 
 **Files:**
+
 - Create: `packages/jsx/src/memo.ts`
 - Test: `packages/jsx/src/memo.test.ts`
 - Modify: `packages/jsx/src/types.ts`（ElementType 联合加 MemoComponent）
@@ -94,10 +95,7 @@ import type { FunctionComponent } from "./types";
 /** Stable memo brand shared across package copies and realms. */
 export const PINGO_MEMO_TYPE: symbol = Symbol.for("dopejs.pingo.memo");
 
-export type PropsAreEqual<Props> = (
-  previous: Readonly<Props>,
-  next: Readonly<Props>,
-) => boolean;
+export type PropsAreEqual<Props> = (previous: Readonly<Props>, next: Readonly<Props>) => boolean;
 
 /**
  * Component wrapper produced by `memo`. The wrapper is a singleton object:
@@ -167,6 +165,7 @@ git commit -m "feat(jsx): add memo component wrapper and shallowEqual"
 ### Task E6-2: reconciler bailout 接入
 
 **Files:**
+
 - Modify: `packages/reconciler/src/reconciler.ts`（updateInstance 组件路径 + renderComponent 解包 + ComponentInstance.type 类型放宽）
 - Test: `packages/reconciler/src/reconciler.test.ts`（追加 describe 块；RecordingSink 已在文件中）
 
@@ -226,33 +225,35 @@ reconciler.ts 中（行号为参考，以实际为准）：
 3. `updateInstance` 组件路径改为：
 
 ```ts
-    if (instance.kind === "component") {
-      if (typeof descriptor === "string" || !isPingoElement(descriptor)) {
-        throw new Error("component descriptor changed unexpectedly");
-      }
-      const compare = isMemoComponent(instance.type)
-        ? (instance.type.compare ?? shallowEqual)
-        : undefined;
-      if (compare !== undefined && compare(instance.props, descriptor.props)) {
-        // Props equal: keep the previous subtree and its closures; store the
-        // fresh props for the next comparison (React memo semantics).
-        instance.props = descriptor.props;
-        return instance;
-      }
-      instance.props = descriptor.props;
-      this.renderComponent(instance, coreParent);
-      return instance;
-    }
+if (instance.kind === "component") {
+  if (typeof descriptor === "string" || !isPingoElement(descriptor)) {
+    throw new Error("component descriptor changed unexpectedly");
+  }
+  const compare = isMemoComponent(instance.type)
+    ? (instance.type.compare ?? shallowEqual)
+    : undefined;
+  if (compare !== undefined && compare(instance.props, descriptor.props)) {
+    // Props equal: keep the previous subtree and its closures; store the
+    // fresh props for the next comparison (React memo semantics).
+    instance.props = descriptor.props;
+    return instance;
+  }
+  instance.props = descriptor.props;
+  this.renderComponent(instance, coreParent);
+  return instance;
+}
 ```
 
 4. `renderComponent` 解包：
 
 ```ts
-    const output = instance.scope.render(() => {
-      const type = instance.type;
-      const component = (isMemoComponent(type) ? type.component : type) as FunctionComponent<Record<string, unknown>>;
-      return component(instance.props);
-    });
+const output = instance.scope.render(() => {
+  const type = instance.type;
+  const component = (isMemoComponent(type) ? type.component : type) as FunctionComponent<
+    Record<string, unknown>
+  >;
+  return component(instance.props);
+});
 ```
 
 - [ ] **Step 4: 跑测试确认通过 + reconciler 全量**
@@ -272,27 +273,28 @@ git commit -m "feat(reconciler): add memo props bailout for component updates"
 ### Task E6-3: signal 正交性测试
 
 **Files:**
+
 - Test: `packages/reconciler/src/reconciler.test.ts`（追加）
 
 - [ ] **Step 1: 写测试**
 
 ```ts
-  it("memo never blocks signal-driven re-renders", () => {
-    const sink = new RecordingSink();
-    const root = createRoot(sink);
-    const count = signal(0);
-    let renders = 0;
-    const Leaf = (): PingoNode => {
-      renders += 1;
-      return createElement("text", { value: String(count.get()) });
-    };
-    const MemoLeaf = memo(Leaf);
-    root.render(createElement("container", { children: createElement(MemoLeaf, {}) }));
-    const afterMount = renders;
-    count.set(1); // signal write must re-render despite unchanged props
-    // flush per the file's existing pattern
-    expect(renders).toBeGreaterThan(afterMount);
-  });
+it("memo never blocks signal-driven re-renders", () => {
+  const sink = new RecordingSink();
+  const root = createRoot(sink);
+  const count = signal(0);
+  let renders = 0;
+  const Leaf = (): PingoNode => {
+    renders += 1;
+    return createElement("text", { value: String(count.get()) });
+  };
+  const MemoLeaf = memo(Leaf);
+  root.render(createElement("container", { children: createElement(MemoLeaf, {}) }));
+  const afterMount = renders;
+  count.set(1); // signal write must re-render despite unchanged props
+  // flush per the file's existing pattern
+  expect(renders).toBeGreaterThan(afterMount);
+});
 ```
 
 `signal` import 自 `@dopejs/pingo-runtime`（确认 reconciler 测试对 runtime 的既有 import 形式；reconciler 依赖 runtime —— ComponentScope 即来自 runtime，测试文件应已有 import 路径先例）。
@@ -307,6 +309,7 @@ Expected: 通过。Commit: `test(reconciler): prove memo is orthogonal to signal
 ### Task E6-4: facade 导出 + pingo-ui 组件接入 + 门禁
 
 **Files:**
+
 - Modify: `packages/facade/src/index.ts`（re-export memo/isMemoComponent/shallowEqual 或按 facade 既有 jsx re-export 形式追加）
 - Modify: `packages/ui/src/components/{button,badge,card,label}.ts`（memo 包装）
 - Test: `packages/ui/src/components/memo.test.ts`（新增：memo 包装后 descriptor 行为不变 + wrapper 语义）
@@ -326,13 +329,16 @@ Expected: 成功。若 facade 有 public API 检查（`scripts/check-public-api.
 ```ts
 import { memo } from "@dopejs/pingo-jsx";
 
-function ButtonImpl(props: ButtonProps): PingoNode { /* 原实现不变 */ }
+function ButtonImpl(props: ButtonProps): PingoNode {
+  /* 原实现不变 */
+}
 
 /** shadcn-style button. Memoized: re-renders only when props change. */
 export const Button = memo(ButtonImpl);
 ```
 
 Card 族每个导出（Card/CardHeader/...）分别 memo 包装。类型：memo 后导出类型从函数变为 MemoComponent——pingo-ui 的 index.ts 无需改（`export { Button }` 对 const 同样有效）；组件测试现状是直接调用 `Button(props)`——memo 后 Button 是对象不可调用！**因此组件测试改为**：
+
 - 直接调用测试目标改为 `ButtonImpl`？不导出 Impl。改为从组件模块导出被包装前的函数为内部名（如 `buttonView`），测试调它；或对 memo wrapper 用 `Button.component(props)` 调用。选后者：测试改为 `Button.component(props)`（不新增导出面）。每个组件测试文件相应调整调用点。
 
 - [ ] **Step 3: 新增 `packages/ui/src/components/memo.test.ts`**
@@ -349,7 +355,17 @@ import { Label } from "./label";
 
 describe("memoized components", () => {
   it("all presentational components are memo-wrapped", () => {
-    for (const component of [Button, Badge, Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, Label]) {
+    for (const component of [
+      Button,
+      Badge,
+      Card,
+      CardHeader,
+      CardTitle,
+      CardDescription,
+      CardContent,
+      CardFooter,
+      Label,
+    ]) {
       expect(isMemoComponent(component)).toBe(true);
     }
   });

@@ -1,4 +1,11 @@
-import { createElement, memo, Text, View, type PingoEvent, type PingoNode } from "@dopejs/pingo-jsx";
+import {
+  createElement,
+  memo,
+  Text,
+  View,
+  type PingoEvent,
+  type PingoNode,
+} from "@dopejs/pingo-jsx";
 import { createContext, useContext, useSignal } from "@dopejs/pingo-runtime";
 
 import { useTheme } from "../theme";

@@ -18,7 +18,10 @@ describe("createContext", () => {
 describe("useContext", () => {
   it("returns the default value when no provider is on the chain", () => {
     const context = createContext("fallback");
-    const scope = new ComponentScope(() => undefined, () => undefined);
+    const scope = new ComponentScope(
+      () => undefined,
+      () => undefined,
+    );
     const value = scope.render(() => useContext(context));
     expect(value).toBe("fallback");
   });

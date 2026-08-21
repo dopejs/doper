@@ -20,10 +20,7 @@ afterEach(() => setTheme("light"));
 
 type Host = { props: Record<string, unknown> };
 
-function descriptor(
-  props: RadioGroupItemProps,
-  context: RadioGroupContextValue | undefined,
-): Host {
+function descriptor(props: RadioGroupItemProps, context: RadioGroupContextValue | undefined): Host {
   return radioGroupItemDescriptor(props, context) as unknown as Host;
 }
 

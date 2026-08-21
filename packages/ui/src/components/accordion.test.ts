@@ -20,10 +20,7 @@ afterEach(() => setTheme("light"));
 
 type Host = { props: Record<string, unknown> };
 
-function descriptor(
-  props: AccordionItemProps,
-  context: AccordionContextValue | undefined,
-): Host {
+function descriptor(props: AccordionItemProps, context: AccordionContextValue | undefined): Host {
   return accordionItemDescriptor(props, context) as unknown as Host;
 }
 
@@ -66,10 +63,13 @@ describe("accordionItemDescriptor", () => {
 
   it("forwards the item value to onToggle", () => {
     const onToggle = vi.fn();
-    const node = descriptor({ value: "b", title: "t", children: "body" }, {
-      openValue: "a",
-      onToggle,
-    });
+    const node = descriptor(
+      { value: "b", title: "t", children: "body" },
+      {
+        openValue: "a",
+        onToggle,
+      },
+    );
     const [trigger] = node.props.children as [Host, Host];
     (trigger.props.onTap as () => void)();
     expect(onToggle).toHaveBeenCalledWith("b");

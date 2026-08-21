@@ -6,5 +6,7 @@
 .pui-skeleton {
   background-color: t.$accent;
   border-radius: t.$radius-md;
-  &.pui-dark { background-color: t.$dark-accent; }
+  &.pui-dark {
+    background-color: t.$dark-accent;
+  }
 }

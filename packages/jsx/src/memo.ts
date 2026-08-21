@@ -3,10 +3,7 @@ import type { FunctionComponent } from "./types";
 /** Stable memo brand shared across package copies and realms. */
 export const PINGO_MEMO_TYPE: symbol = Symbol.for("dopejs.pingo.memo");
 
-export type PropsAreEqual<Props> = (
-  previous: Readonly<Props>,
-  next: Readonly<Props>,
-) => boolean;
+export type PropsAreEqual<Props> = (previous: Readonly<Props>, next: Readonly<Props>) => boolean;
 
 /**
  * Component wrapper produced by `memo`. The wrapper is a singleton object:

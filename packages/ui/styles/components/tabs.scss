@@ -12,7 +12,9 @@
   padding: t.$tabs-list-padding;
   border-radius: t.$radius-md;
   background-color: t.$secondary;
-  &.pui-dark { background-color: t.$dark-secondary; }
+  &.pui-dark {
+    background-color: t.$dark-secondary;
+  }
 }
 
 .pui-tabs__trigger {
@@ -27,7 +29,9 @@
   font-weight: t.$font-weight-medium;
   color: t.$muted-foreground;
   cursor: pointer;
-  &.pui-dark { color: t.$dark-muted-foreground; }
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
 }
 
 .pui-tabs__trigger--active {

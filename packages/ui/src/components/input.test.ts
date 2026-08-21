@@ -1,6 +1,11 @@
 import { TextEditingController, type EditTransaction } from "@dopejs/pingo-editing";
 import { createElement } from "@dopejs/pingo-jsx";
-import { createRoot, decodeMutationBatch, type MutationBatch, type MutationSink } from "@dopejs/pingo-reconciler";
+import {
+  createRoot,
+  decodeMutationBatch,
+  type MutationBatch,
+  type MutationSink,
+} from "@dopejs/pingo-reconciler";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { setTheme } from "../theme";

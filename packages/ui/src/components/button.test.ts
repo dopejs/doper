@@ -31,9 +31,7 @@ describe("Button", () => {
 
   it("appends user className last and marks disabled", () => {
     const node = render({ children: "x", disabled: true, className: "mine" });
-    expect(node.props.className).toBe(
-      "pui-button pui-button--default pui-button--disabled mine",
-    );
+    expect(node.props.className).toBe("pui-button pui-button--default pui-button--disabled mine");
     expect(node.props.semanticValue).toBe("disabled");
     expect(node.props.onTap).toBeUndefined();
     expect(node.props.onClick).toBeUndefined();

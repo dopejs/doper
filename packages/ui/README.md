@@ -18,13 +18,9 @@ const root = await createHostedCanvasRoot(canvas, {
   styleSheets: [createPingoUiStyleSheet()],
 });
 
-root.render(
-  createElement(Button, { children: "保存", onPress: () => save() }),
-);
+root.render(createElement(Button, { children: "保存", onPress: () => save() }));
 // 输入框：受控/非受控皆可，onValueChange 回报 controller 应用后的当前值
-root.render(
-  createElement(Input, { value: "", onValueChange: (v) => console.log(v) }),
-);
+root.render(createElement(Input, { value: "", onValueChange: (v) => console.log(v) }));
 ```
 
 `createPingoUiStyleSheet()` 为每个 root 创建一份独立的不可变 sheet；零配置路径
@@ -44,8 +40,8 @@ root.render(
 ```ts
 import { setTheme, useTheme } from "@dopejs/pingo-ui";
 
-setTheme("dark");   // 所有订阅组件自动重渲染
-useTheme();         // 在组件 render 内读取并订阅
+setTheme("dark"); // 所有订阅组件自动重渲染
+useTheme(); // 在组件 render 内读取并订阅
 ```
 
 主题是一个模块级 signal；组件 render 中 `useTheme()` 由 reconciler 的 observer
@@ -77,25 +73,25 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
 
 17 个组件（27 个导出值）：
 
-| 组件 | 导出 |
-| --- | --- |
-| Button | `Button` |
-| IconButton | `IconButton` |
-| Badge | `Badge` |
-| Card 族 | `Card` `CardHeader` `CardTitle` `CardDescription` `CardContent` `CardFooter` |
-| Input | `Input` |
-| TextArea | `TextArea` |
-| Label | `Label` |
-| Divider | `Divider` |
-| Skeleton | `Skeleton` |
-| Alert | `Alert` |
-| Avatar | `Avatar` |
-| Progress | `Progress` |
-| Switch | `Switch` |
-| Checkbox | `Checkbox` |
-| RadioGroup | `RadioGroup` `RadioGroupItem` |
-| Tabs 族 | `Tabs` `TabsList` `TabsTrigger` `TabsContent` |
-| Accordion 族 | `Accordion` `AccordionItem` |
+| 组件         | 导出                                                                         |
+| ------------ | ---------------------------------------------------------------------------- |
+| Button       | `Button`                                                                     |
+| IconButton   | `IconButton`                                                                 |
+| Badge        | `Badge`                                                                      |
+| Card 族      | `Card` `CardHeader` `CardTitle` `CardDescription` `CardContent` `CardFooter` |
+| Input        | `Input`                                                                      |
+| TextArea     | `TextArea`                                                                   |
+| Label        | `Label`                                                                      |
+| Divider      | `Divider`                                                                    |
+| Skeleton     | `Skeleton`                                                                   |
+| Alert        | `Alert`                                                                      |
+| Avatar       | `Avatar`                                                                     |
+| Progress     | `Progress`                                                                   |
+| Switch       | `Switch`                                                                     |
+| Checkbox     | `Checkbox`                                                                   |
+| RadioGroup   | `RadioGroup` `RadioGroupItem`                                                |
+| Tabs 族      | `Tabs` `TabsList` `TabsTrigger` `TabsContent`                                |
+| Accordion 族 | `Accordion` `AccordionItem`                                                  |
 
 另有 `cva`（class-variance 工具）、`setTheme` / `getTheme` / `useTheme`、
 `createPingoUiStyleSheet` / `pingoUiCssText` 从包根导出。

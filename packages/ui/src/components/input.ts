@@ -1,5 +1,11 @@
 import { TextEditingController, type EditTransaction } from "@dopejs/pingo-editing";
-import { Input as EngineInput, memo, View, type EditableInputMode, type PingoNode } from "@dopejs/pingo-jsx";
+import {
+  Input as EngineInput,
+  memo,
+  View,
+  type EditableInputMode,
+  type PingoNode,
+} from "@dopejs/pingo-jsx";
 import { useMemo } from "@dopejs/pingo-runtime";
 
 import { useTheme } from "../theme";

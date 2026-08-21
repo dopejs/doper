@@ -18,19 +18,28 @@
 .pui-badge--default {
   background-color: t.$primary;
   color: t.$primary-foreground;
-  &.pui-dark { background-color: t.$dark-primary; color: t.$dark-primary-foreground; }
+  &.pui-dark {
+    background-color: t.$dark-primary;
+    color: t.$dark-primary-foreground;
+  }
 }
 
 .pui-badge--secondary {
   background-color: t.$secondary;
   color: t.$secondary-foreground;
-  &.pui-dark { background-color: t.$dark-secondary; color: t.$dark-secondary-foreground; }
+  &.pui-dark {
+    background-color: t.$dark-secondary;
+    color: t.$dark-secondary-foreground;
+  }
 }
 
 .pui-badge--destructive {
   background-color: t.$destructive;
   color: t.$destructive-foreground;
-  &.pui-dark { background-color: t.$dark-destructive; color: t.$dark-destructive-foreground; }
+  &.pui-dark {
+    background-color: t.$dark-destructive;
+    color: t.$dark-destructive-foreground;
+  }
 }
 
 .pui-badge--outline {
