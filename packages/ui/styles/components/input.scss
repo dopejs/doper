@@ -1,0 +1,35 @@
+@use "../tokens" as t;
+
+// Focus ring intentionally absent: pingo has no :focus-within and the border
+// lives on the shell; tracked as a known gap until a selector or E4 shadow
+// solution lands.
+
+.pui-input {
+  align-items: center;
+  min-height: t.$input-height;
+  padding-left: t.$input-padding-x;
+  padding-right: t.$input-padding-x;
+  padding-top: t.$input-padding-y;
+  padding-bottom: t.$input-padding-y;
+  background-color: t.$background;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$input-border;
+  border-radius: t.$radius-md;
+  color: t.$foreground;
+  &.pui-dark {
+    background-color: t.$dark-background;
+    border-color: t.$dark-input-border;
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-input--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}
+
+.pui-input__field {
+  font-size: t.$font-size-sm;
+  line-height: t.$line-height-sm;
+}

@@ -1,0 +1,98 @@
+@use "../tokens" as t;
+
+// shadcn new-york Button. Text color/font inherit from the View skin class
+// into the inner Text node (no descendant selectors in pingo).
+// Rule order matters: light, light:hover, dark, dark:hover — later wins at
+// equal specificity.
+
+.pui-button {
+  justify-content: center;
+  align-items: center;
+  height: t.$button-height;
+  padding-left: t.$button-padding-x;
+  padding-right: t.$button-padding-x;
+  border-radius: t.$radius-md;
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+  cursor: pointer;
+}
+
+.pui-button--sm {
+  height: t.$button-height-sm;
+  padding-left: t.$button-padding-x-sm;
+  padding-right: t.$button-padding-x-sm;
+  font-size: t.$font-size-xs;
+}
+
+.pui-button--lg {
+  height: t.$button-height-lg;
+  padding-left: t.$button-padding-x-lg;
+  padding-right: t.$button-padding-x-lg;
+}
+
+.pui-button--icon {
+  width: t.$button-height;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.pui-button--disabled {
+  cursor: default;
+}
+
+.pui-button--default {
+  background-color: t.$primary;
+  color: t.$primary-foreground;
+  &:hover { background-color: t.$primary-hover; }
+  &.pui-dark {
+    background-color: t.$dark-primary;
+    color: t.$dark-primary-foreground;
+    &:hover { background-color: t.$dark-primary-hover; }
+  }
+}
+
+.pui-button--secondary {
+  background-color: t.$secondary;
+  color: t.$secondary-foreground;
+  &:hover { background-color: t.$secondary-hover; }
+  &.pui-dark {
+    background-color: t.$dark-secondary;
+    color: t.$dark-secondary-foreground;
+    &:hover { background-color: t.$dark-secondary-hover; }
+  }
+}
+
+.pui-button--outline {
+  background-color: t.$background;
+  color: t.$foreground;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$border;
+  &:hover { background-color: t.$accent; color: t.$accent-foreground; }
+  &.pui-dark {
+    background-color: t.$dark-background;
+    color: t.$dark-foreground;
+    border-color: t.$dark-border;
+    &:hover { background-color: t.$dark-accent; color: t.$dark-accent-foreground; }
+  }
+}
+
+.pui-button--ghost {
+  color: t.$foreground;
+  &:hover { background-color: t.$accent; color: t.$accent-foreground; }
+  &.pui-dark {
+    color: t.$dark-foreground;
+    &:hover { background-color: t.$dark-accent; color: t.$dark-accent-foreground; }
+  }
+}
+
+.pui-button--destructive {
+  background-color: t.$destructive;
+  color: t.$destructive-foreground;
+  &:hover { background-color: t.$destructive-hover; }
+  &.pui-dark {
+    background-color: t.$dark-destructive;
+    color: t.$dark-destructive-foreground;
+    &:hover { background-color: t.$dark-destructive-hover; }
+  }
+}

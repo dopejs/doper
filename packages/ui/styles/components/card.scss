@@ -1,0 +1,49 @@
+@use "../tokens" as t;
+
+// boxShadow intentionally absent until engine work package E4 lands.
+
+.pui-card {
+  flex-direction: column;
+  background-color: t.$card;
+  color: t.$card-foreground;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$border;
+  border-radius: t.$radius-lg;
+  &.pui-dark {
+    background-color: t.$dark-card;
+    color: t.$dark-card-foreground;
+    border-color: t.$dark-border;
+  }
+}
+
+.pui-card-header {
+  flex-direction: column;
+  padding-top: t.$card-padding;
+  padding-left: t.$card-padding;
+  padding-right: t.$card-padding;
+}
+
+.pui-card-title {
+  font-size: t.$font-size-xl;
+  font-weight: t.$font-weight-semibold;
+}
+
+.pui-card-description {
+  margin-top: t.$card-description-gap;
+  font-size: t.$font-size-sm;
+  color: t.$muted-foreground;
+  &.pui-dark { color: t.$dark-muted-foreground; }
+}
+
+.pui-card-content {
+  flex-direction: column;
+  padding: t.$card-padding;
+}
+
+.pui-card-footer {
+  align-items: center;
+  padding-left: t.$card-padding;
+  padding-right: t.$card-padding;
+  padding-bottom: t.$card-padding;
+}

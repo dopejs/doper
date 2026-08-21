@@ -1,0 +1,4 @@
+// Default preset: selects the shadcn default theme shipped as token
+// defaults. A future in-house theme is a sibling file overriding tokens via
+// `@use "../tokens" with (...)`; component skins never change.
+@use "../tokens";

@@ -1,0 +1,8 @@
+@use "../tokens" as t;
+
+.pui-label {
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+  color: t.$foreground;
+  &.pui-dark { color: t.$dark-foreground; }
+}

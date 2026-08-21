@@ -1,0 +1,72 @@
+// Semantic token contract for pingo-ui skins. Names follow shadcn semantics;
+// defaults are the shadcn default theme (zinc). Presets override via
+// `@use "../tokens" with (...)`. Values must be hex — color keywords and
+// non-hex functions are rejected by compileStyleSheet.
+//
+// dark-* mirrors drive `.pui-dark` compound rules in component skins.
+
+$background: #ffffff !default;
+$foreground: #09090b !default;
+$card: #ffffff !default;
+$card-foreground: #09090b !default;
+$primary: #18181b !default;
+$primary-foreground: #fafafa !default;
+$primary-hover: #18181be6 !default; // primary / 90%
+$secondary: #f4f4f5 !default;
+$secondary-foreground: #18181b !default;
+$secondary-hover: #f4f4f5cc !default; // secondary / 80%
+$muted-foreground: #71717a !default;
+$accent: #f4f4f5 !default;
+$accent-foreground: #18181b !default;
+$destructive: #ef4444 !default;
+$destructive-foreground: #fafafa !default;
+$destructive-hover: #ef4444e6 !default;
+$border: #e4e4e7 !default;
+$input-border: #e4e4e7 !default;
+$ring: #a1a1aa !default;
+
+$radius-md: 6px !default;
+$radius-lg: 8px !default;
+$border-width: 1px !default;
+$disabled-opacity: 0.5 !default;
+
+$button-height: 36px !default;
+$button-height-sm: 32px !default;
+$button-height-lg: 40px !default;
+$button-padding-x: 16px !default;
+$button-padding-x-sm: 12px !default;
+$button-padding-x-lg: 32px !default;
+$badge-padding-x: 10px !default;
+$badge-padding-y: 2px !default;
+$card-padding: 24px !default;
+$card-description-gap: 6px !default;
+$input-height: 36px !default;
+$input-padding-x: 12px !default;
+$input-padding-y: 6px !default;
+
+$font-size-xs: 12px !default;
+$font-size-sm: 14px !default;
+$font-size-xl: 20px !default;
+$line-height-sm: 20px !default;
+$font-weight-medium: 500 !default;
+$font-weight-semibold: 600 !default;
+
+$dark-background: #09090b !default;
+$dark-foreground: #fafafa !default;
+$dark-card: #09090b !default;
+$dark-card-foreground: #fafafa !default;
+$dark-primary: #fafafa !default;
+$dark-primary-foreground: #18181b !default;
+$dark-primary-hover: #fafafae6 !default;
+$dark-secondary: #27272a !default;
+$dark-secondary-foreground: #fafafa !default;
+$dark-secondary-hover: #27272acc !default;
+$dark-muted-foreground: #a1a1aa !default;
+$dark-accent: #27272a !default;
+$dark-accent-foreground: #fafafa !default;
+$dark-destructive: #7f1d1d !default;
+$dark-destructive-foreground: #fafafa !default;
+$dark-destructive-hover: #7f1d1de6 !default;
+$dark-border: #27272a !default;
+$dark-input-border: #27272a !default;
+$dark-ring: #52525b !default;
