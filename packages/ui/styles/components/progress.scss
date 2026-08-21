@@ -1,0 +1,16 @@
+@use "../tokens" as t;
+
+.pui-progress {
+  height: t.$progress-height;
+  border-radius: t.$progress-radius;
+  background-color: t.$secondary;
+  overflow: hidden;
+  &.pui-dark { background-color: t.$dark-secondary; }
+}
+
+.pui-progress__indicator {
+  height: t.$progress-height;
+  border-radius: t.$progress-radius;
+  background-color: t.$primary;
+  &.pui-dark { background-color: t.$dark-primary; }
+}

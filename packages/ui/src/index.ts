@@ -28,5 +28,7 @@ export { Input } from "./components/input";
 export type { InputProps } from "./components/input";
 export { Label } from "./components/label";
 export type { LabelProps } from "./components/label";
+export { Progress } from "./components/progress";
+export type { ProgressProps } from "./components/progress";
 export { Skeleton } from "./components/skeleton";
 export type { SkeletonProps } from "./components/skeleton";
