@@ -1066,6 +1066,23 @@ describe("memo", () => {
     root.render(createElement("container", { children: createElement(MemoLeaf, {}, "k2") }));
     expect(renders).toBe(2);
   });
+
+  it("memo never blocks signal-driven re-renders", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    const count = signal(0);
+    let renders = 0;
+    const Leaf = (): PingoNode => {
+      renders += 1;
+      return createElement("text", { value: String(count.get()) });
+    };
+    const MemoLeaf = memo(Leaf);
+    root.render(createElement("container", { children: createElement(MemoLeaf, {}) }));
+    const afterMount = renders;
+    count.set(1);
+    root.flushSync();
+    expect(renders).toBeGreaterThan(afterMount);
+  });
 });
 
 interface StyleDiagnosticRecord {
