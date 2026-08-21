@@ -1,4 +1,5 @@
 import { ReactiveObserver, signal, type Signal, type Unsubscribe } from "./signal";
+import type { ContextLookup, PingoContext } from "./context";
 
 /** Mutable stable reference returned by `useRef`. */
 export interface RefObject<T> {
@@ -57,10 +58,17 @@ export class ComponentScope {
   #disposed = false;
   readonly #observer: ReactiveObserver;
   readonly #invalidate: () => void;
+  readonly #lookupContext: ContextLookup | undefined;
 
-  public constructor(invalidate: () => void) {
+  public constructor(invalidate: () => void, lookupContext?: ContextLookup) {
     this.#invalidate = invalidate;
     this.#observer = new ReactiveObserver(invalidate);
+    this.#lookupContext = lookupContext;
+  }
+
+  /** Finds the nearest provider signal for one context along the owner chain. */
+  public lookupContext(context: PingoContext<unknown>): Signal<unknown> | undefined {
+    return this.#lookupContext?.(context);
   }
 
   /** Runs one component render with transactional hook bookkeeping. */
@@ -262,6 +270,20 @@ export function useEffect(create: () => void | Unsubscribe, dependencies?: Depen
 function requireScope(): ComponentScope {
   if (activeScope === undefined) throw new Error("hooks may only run in a function component");
   return activeScope;
+}
+
+/**
+ * Reads the nearest provider's value for `context`, subscribing the rendering
+ * component to later changes. Without a provider on the owner chain, returns
+ * the context default. Provider value changes re-render only subscribed
+ * consumers and bypass memo (signal invalidation path).
+ */
+export function useContext<T>(context: PingoContext<T>): T {
+  const scope = requireScope();
+  const provided = scope.lookupContext(context);
+  if (provided === undefined) return context.defaultValue;
+  // The bridge is variance-erased; the provider for this context carries T.
+  return provided.get() as T;
 }
 
 function setActiveScope(scope: ComponentScope | undefined): void {

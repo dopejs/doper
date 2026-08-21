@@ -1,5 +1,16 @@
 export {
+  PINGO_CONTEXT_TYPE,
+  PINGO_PROVIDER_TYPE,
+  createContext,
+  isContextProvider,
+  type ContextLookup,
+  type ContextProvider,
+  type ContextProviderProps,
+  type PingoContext,
+} from "./context";
+export {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
