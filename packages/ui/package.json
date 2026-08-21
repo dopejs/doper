@@ -37,6 +37,7 @@
     "@dopejs/pingo-widgets": "workspace:*"
   },
   "devDependencies": {
+    "@dopejs/pingo-reconciler": "workspace:*",
     "@dopejs/pingo-style-preprocess": "workspace:*"
   }
 }

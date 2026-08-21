@@ -1,5 +1,6 @@
 import { TextEditingController, type EditTransaction } from "@dopejs/pingo-editing";
 import { Input as EngineInput, View, type EditableInputMode, type PingoNode } from "@dopejs/pingo-jsx";
+import { useMemo } from "@dopejs/pingo-runtime";
 
 import { useTheme } from "../theme";
 
@@ -21,26 +22,20 @@ export interface InputProps {
   readonly semanticLabel?: string;
 }
 
-/**
- * shadcn-style decorated input. Known gaps (no hacks, tracked in the
- * capability plan): no placeholder (engine capability), no focus ring
- * (needs :focus-within or E4), no prefix/suffix slots (needs E5/E6).
- */
-export function Input(props: InputProps): PingoNode {
+/** Builds the Input descriptor tree. Pure: safe to call without a component scope. */
+export function inputDescriptor(props: InputProps, controller: TextEditingController): PingoNode {
   const theme = useTheme();
   const disabled = props.disabled === true;
-  const controller = props.controller ?? new TextEditingController({ value: props.value ?? "" });
   const readOnly = disabled || props.readOnly === true;
-  const className = [
-    "pui-input",
-    disabled ? "pui-input--disabled" : undefined,
-    theme === "dark" ? "pui-dark" : undefined,
-    props.className,
-  ]
-    .filter((part) => part !== undefined && part !== "")
-    .join(" ");
   return View({
-    className,
+    className: [
+      "pui-input",
+      disabled ? "pui-input--disabled" : undefined,
+      theme === "dark" ? "pui-dark" : undefined,
+      props.className,
+    ]
+      .filter((part) => part !== undefined && part !== "")
+      .join(" "),
     ...(props.width === undefined ? {} : { width: props.width }),
     children: EngineInput({
       className: "pui-input__field",
@@ -50,12 +45,31 @@ export function Input(props: InputProps): PingoNode {
       ...(props.inputMode === undefined ? {} : { inputMode: props.inputMode }),
       ...(props.semanticLabel === undefined ? {} : { semanticLabel: props.semanticLabel }),
       onTransaction: (transaction) => {
-        // The reconciler applies the transaction to the controller before
-        // invoking this callback, so controller.value is already current.
+        // The reconciler applies the transaction to the controller BEFORE
+        // invoking this callback (reconciler.ts controller wiring), so
+        // controller.value is already current here.
         props.onValueChange?.(controller.value);
         props.onTransaction?.(transaction);
       },
       ...(props.onSubmit === undefined ? {} : { onSubmit: props.onSubmit }),
     }),
   });
+}
+
+/**
+ * shadcn-style decorated input. MUST be used as a JSX component
+ * (createElement(Input, props) / <Input />) — it uses hooks to keep the
+ * editing controller stable across renders; calling it as a plain function
+ * throws outside a component scope. Known gaps (tracked in the capability
+ * plan): no placeholder, no focus ring, no prefix/suffix slots.
+ */
+export function Input(props: InputProps): PingoNode {
+  // Deps [] intentionally capture the initial controller/value: a later
+  // `controller` prop change is ignored — callers owning a controller should
+  // keep passing the same instance for the component's lifetime.
+  const controller = useMemo(
+    () => props.controller ?? new TextEditingController({ value: props.value ?? "" }),
+    [],
+  );
+  return inputDescriptor(props, controller);
 }

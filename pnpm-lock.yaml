@@ -240,6 +240,9 @@ importers:
         specifier: workspace:*
         version: link:../widgets
     devDependencies:
+      '@dopejs/pingo-reconciler':
+        specifier: workspace:*
+        version: link:../reconciler
       '@dopejs/pingo-style-preprocess':
         specifier: workspace:*
         version: link:../style-preprocess
