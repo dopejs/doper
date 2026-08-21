@@ -313,7 +313,7 @@ fn validate_instruction_size(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DisplayCommand, DisplayInstruction};
+    use crate::{ABI_VERSION, DisplayCommand, DisplayInstruction, INSTRUCTION_FLAG_OPTIONAL};
 
     fn list() -> Arc<[u8]> {
         Arc::from(
@@ -384,5 +384,189 @@ mod tests {
             }],
         };
         assert!(malformed.encode().is_err());
+    }
+
+    #[test]
+    fn reports_future_versions_and_skips_only_optional_unknown_commands() {
+        let canonical = PictureResourceBatch {
+            instructions: vec![PictureResourceInstruction {
+                flags: 0,
+                command: PictureResourceCommand::Release { picture_id: 7 },
+            }],
+        }
+        .encode()
+        .expect("release batch");
+        let build = |flags: u8| {
+            let mut bytes = canonical.clone();
+            bytes[4..6].copy_from_slice(&(ABI_VERSION + 1).to_le_bytes());
+            bytes[16] = 0xfe;
+            bytes[17] = flags;
+            bytes
+        };
+        let (batch, report) =
+            PictureResourceBatch::decode_with_report(&build(INSTRUCTION_FLAG_OPTIONAL))
+                .expect("optional future command");
+        assert!(batch.instructions.is_empty());
+        assert_eq!(report.skipped_instructions, 1);
+        assert_eq!(report.producer_abi_version, ABI_VERSION + 1);
+        assert!(matches!(
+            PictureResourceBatch::decode(&build(0)),
+            Err(AbiError::UnknownOpcode { opcode: 0xfe, .. })
+        ));
+    }
+
+    #[test]
+    fn decoder_rejects_hostile_counts_ids_lengths_and_nested_payloads() {
+        let release = PictureResourceBatch {
+            instructions: vec![PictureResourceInstruction {
+                flags: 0,
+                command: PictureResourceCommand::Release { picture_id: 7 },
+            }],
+        }
+        .encode()
+        .expect("release batch");
+        for corrupt in [
+            |bytes: &mut Vec<u8>| bytes[12..16].copy_from_slice(&u32::MAX.to_le_bytes()),
+            |bytes: &mut Vec<u8>| bytes[12..16].copy_from_slice(&2_u32.to_le_bytes()),
+            |bytes: &mut Vec<u8>| bytes[20..24].copy_from_slice(&0_u32.to_le_bytes()),
+            |bytes: &mut Vec<u8>| bytes[17] = 2,
+            |bytes: &mut Vec<u8>| bytes[18..20].copy_from_slice(&1_u16.to_le_bytes()),
+        ] {
+            let mut bytes = release.clone();
+            corrupt(&mut bytes);
+            assert!(PictureResourceBatch::decode(&bytes).is_err());
+        }
+
+        let mut count_mismatch = release.clone();
+        count_mismatch[12..16].copy_from_slice(&0_u32.to_le_bytes());
+        assert!(matches!(
+            PictureResourceBatch::decode(&count_mismatch),
+            Err(AbiError::InstructionCountMismatch { .. })
+        ));
+
+        let mut declared_too_long = release.clone();
+        declared_too_long.extend_from_slice(&[0; 4]);
+        declared_too_long[8..12].copy_from_slice(&28_u32.to_le_bytes());
+        declared_too_long[18..20].copy_from_slice(&3_u16.to_le_bytes());
+        assert!(matches!(
+            PictureResourceBatch::decode(&declared_too_long),
+            Err(AbiError::InstructionLengthMismatch { .. })
+        ));
+
+        let duplicate = PictureResourceBatch {
+            instructions: vec![
+                PictureResourceInstruction {
+                    flags: 0,
+                    command: PictureResourceCommand::Release { picture_id: 7 },
+                },
+                PictureResourceInstruction {
+                    flags: 0,
+                    command: PictureResourceCommand::Release { picture_id: 8 },
+                },
+            ],
+        }
+        .encode()
+        .expect("unique releases");
+        let mut duplicate = duplicate;
+        duplicate[28..32].copy_from_slice(&7_u32.to_le_bytes());
+        assert!(PictureResourceBatch::decode(&duplicate).is_err());
+
+        let defined = PictureResourceBatch {
+            instructions: vec![PictureResourceInstruction {
+                flags: 0,
+                command: PictureResourceCommand::Define {
+                    picture_id: 9,
+                    bytes: list(),
+                },
+            }],
+        }
+        .encode()
+        .expect("defined picture");
+        let mut oversized = defined.clone();
+        oversized[24..28].copy_from_slice(
+            &(u32::try_from(MAX_RESOURCE_BYTES).expect("limit") + 1).to_le_bytes(),
+        );
+        assert!(matches!(
+            PictureResourceBatch::decode(&oversized),
+            Err(AbiError::ResourceTooLarge { .. })
+        ));
+        let mut malformed_nested = defined;
+        malformed_nested[28] ^= 0xff;
+        assert!(PictureResourceBatch::decode(&malformed_nested).is_err());
+
+        assert!(validate_instruction_size(PictureResourceOpcode::ReleasePicture, 0, 12).is_err());
+        assert!(validate_instruction_size(PictureResourceOpcode::DefinePicture, 0, 8).is_err());
+    }
+
+    #[test]
+    fn encoders_reject_invalid_flags_ids_counts_and_core_owned_budgets() {
+        let command = |flags, picture_id| PictureResourceBatch {
+            instructions: vec![PictureResourceInstruction {
+                flags,
+                command: PictureResourceCommand::Release { picture_id },
+            }],
+        };
+        for batch in [command(1, 1), command(0, 0)] {
+            assert!(batch.encode().is_err());
+            assert!(batch.encode_core_owned().is_err());
+        }
+
+        let too_many = PictureResourceBatch {
+            instructions: (0..=MAX_PICTURE_RESOURCE_INSTRUCTIONS)
+                .map(|index| PictureResourceInstruction {
+                    flags: 0,
+                    command: PictureResourceCommand::Release {
+                        picture_id: index.saturating_add(1),
+                    },
+                })
+                .collect(),
+        };
+        assert!(too_many.encode().is_err());
+        assert!(too_many.encode_core_owned().is_err());
+
+        let oversized = PictureResourceBatch {
+            instructions: vec![PictureResourceInstruction {
+                flags: 0,
+                command: PictureResourceCommand::Define {
+                    picture_id: 1,
+                    bytes: Arc::from(vec![0; MAX_RESOURCE_BYTES + 1]),
+                },
+            }],
+        };
+        assert!(matches!(
+            oversized.encode_core_owned(),
+            Err(AbiError::ResourceTooLarge { .. })
+        ));
+
+        let maximum = Arc::<[u8]>::from(vec![0; MAX_RESOURCE_BYTES]);
+        let over_resident = PictureResourceBatch {
+            instructions: vec![
+                PictureResourceInstruction {
+                    flags: 0,
+                    command: PictureResourceCommand::Define {
+                        picture_id: 1,
+                        bytes: maximum.clone(),
+                    },
+                },
+                PictureResourceInstruction {
+                    flags: 0,
+                    command: PictureResourceCommand::Define {
+                        picture_id: 2,
+                        bytes: maximum,
+                    },
+                },
+                PictureResourceInstruction {
+                    flags: 0,
+                    command: PictureResourceCommand::Define {
+                        picture_id: 3,
+                        bytes: Arc::from([0_u8; 4]),
+                    },
+                },
+            ],
+        };
+        assert!(matches!(
+            over_resident.encode_core_owned(),
+            Err(AbiError::ResourceTooLarge { .. })
+        ));
     }
 }
