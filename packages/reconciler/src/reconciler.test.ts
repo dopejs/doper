@@ -8,6 +8,7 @@ import {
   createImage,
   createElement,
   createFont,
+  memo,
   type PingoEvent,
   type PingoNode,
   type NodeHandle,
@@ -984,6 +985,86 @@ describe("reconciler", () => {
     expect(mutationsOfType(sink.batches[1], "removeNode")).toHaveLength(2);
     expect(mutationsOfType(sink.batches[1], "releaseResource")).toHaveLength(3);
     expect(() => root.render(null)).toThrow(/unmounted/u);
+  });
+});
+
+describe("memo", () => {
+  it("skips re-render when props are shallowly equal", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    let renders = 0;
+    const Leaf = (props: { readonly label: string }): PingoNode => {
+      renders += 1;
+      return createElement("text", { value: props.label });
+    };
+    const MemoLeaf = memo(Leaf);
+    const tree = (label: string): PingoNode =>
+      createElement("container", { children: createElement(MemoLeaf, { label }) });
+    root.render(tree("a"));
+    const afterFirst = renders;
+    root.render(tree("a"));
+    expect(renders).toBe(afterFirst);
+  });
+
+  it("re-renders when a prop changes", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    let renders = 0;
+    const Leaf = (props: { readonly label: string }): PingoNode => {
+      renders += 1;
+      return createElement("text", { value: props.label });
+    };
+    const MemoLeaf = memo(Leaf);
+    const tree = (label: string): PingoNode =>
+      createElement("container", { children: createElement(MemoLeaf, { label }) });
+    root.render(tree("a"));
+    root.render(tree("b"));
+    expect(renders).toBe(2);
+  });
+
+  it("re-renders on inline handler identity change", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    let renders = 0;
+    const Leaf = (props: { readonly onTap: () => void }): PingoNode => {
+      renders += 1;
+      return createElement("container", { onTap: props.onTap });
+    };
+    const MemoLeaf = memo(Leaf);
+    root.render(createElement(MemoLeaf, { onTap: () => {} }));
+    root.render(createElement(MemoLeaf, { onTap: () => {} }));
+    expect(renders).toBe(2);
+  });
+
+  it("honors a custom compare", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    let renders = 0;
+    const Leaf = (props: { readonly label: string }): PingoNode => {
+      renders += 1;
+      return createElement("text", { value: props.label });
+    };
+    const MemoLeaf = memo(Leaf, () => true);
+    const tree = (label: string): PingoNode =>
+      createElement("container", { children: createElement(MemoLeaf, { label }) });
+    root.render(tree("a"));
+    const afterFirst = renders;
+    root.render(tree("b"));
+    expect(renders).toBe(afterFirst);
+  });
+
+  it("remounts when key changes even under memo", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    let renders = 0;
+    const Leaf = (): PingoNode => {
+      renders += 1;
+      return createElement("text", { value: "x" });
+    };
+    const MemoLeaf = memo(Leaf);
+    root.render(createElement("container", { children: createElement(MemoLeaf, {}, "k1") }));
+    root.render(createElement("container", { children: createElement(MemoLeaf, {}, "k2") }));
+    expect(renders).toBe(2);
   });
 });
 

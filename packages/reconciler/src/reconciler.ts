@@ -2,8 +2,10 @@ import {
   Fragment,
   PingoFont,
   createElement,
+  isMemoComponent,
   isPingoElement,
   normalizeChildren,
+  shallowEqual,
   type AnyPingoElement,
   type Color,
   type CommonProps,
@@ -18,7 +20,9 @@ import {
   type HostType,
   type ImageProps,
   type Key,
+  type MemoComponent,
   type NodeHandle,
+  type PropsAreEqual,
   type ViewHandle,
   type VideoProps,
   type Ref,
@@ -223,7 +227,7 @@ interface HostInstance extends BaseInstance {
 
 interface ComponentInstance extends BaseInstance {
   readonly kind: "component";
-  readonly type: FunctionComponent<never>;
+  readonly type: FunctionComponent<never> | MemoComponent<never>;
   props: Readonly<Record<string, unknown>>;
   children: Instance[];
   readonly scope: ComponentScope;
@@ -1121,6 +1125,15 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       if (typeof descriptor === "string" || !isPingoElement(descriptor)) {
         throw new Error("component descriptor changed unexpectedly");
       }
+      const compare = isMemoComponent(instance.type)
+        ? ((instance.type.compare ?? shallowEqual) as PropsAreEqual<Record<string, unknown>>)
+        : undefined;
+      if (compare !== undefined && compare(instance.props, descriptor.props)) {
+        // Props equal: keep the previous subtree and its closures; store the
+        // fresh props for the next comparison (React memo semantics).
+        instance.props = descriptor.props;
+        return instance;
+      }
       instance.props = descriptor.props;
       this.renderComponent(instance, coreParent);
       return instance;
@@ -1176,7 +1189,10 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
   private renderComponent(instance: ComponentInstance, coreParent: number): void {
     this.#dirtyComponents.delete(instance);
     const output = instance.scope.render(() => {
-      const component = instance.type as FunctionComponent<Record<string, unknown>>;
+      const type = instance.type;
+      const component = (isMemoComponent(type) ? type.component : type) as FunctionComponent<
+        Record<string, unknown>
+      >;
       return component(instance.props);
     });
     instance.children = this.reconcileChildren(instance, coreParent, instance.children, output);
