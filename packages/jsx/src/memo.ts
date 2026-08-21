@@ -50,7 +50,7 @@ export function shallowEqual(
   const rightKeys = Object.keys(right);
   if (leftKeys.length !== rightKeys.length) return false;
   for (const key of leftKeys) {
-    if (!Object.is(left[key], right[key])) return false;
+    if (!Object.hasOwn(right, key) || !Object.is(left[key], right[key])) return false;
   }
   return true;
 }

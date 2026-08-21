@@ -33,6 +33,10 @@ describe("shallowEqual", () => {
     expect(shallowEqual({}, {})).toBe(true);
   });
 
+  it("rejects renamed keys holding undefined", () => {
+    expect(shallowEqual({ a: undefined }, { b: undefined })).toBe(false);
+  });
+
   it("compares function props by reference", () => {
     const handler = (): void => {};
     expect(shallowEqual({ f: handler }, { f: handler })).toBe(true);
