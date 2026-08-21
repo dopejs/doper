@@ -12,6 +12,7 @@ import {
   resolveStyle,
   styleCapabilities,
   supportsStyle,
+  type PingoStyle,
 } from "./index";
 import { sha256 } from "./hash";
 
@@ -42,6 +43,7 @@ describe("style schema capabilities", () => {
       borderColor: "#abc #1234",
       borderStyle: "solid",
       borderWidth: "1px 2px 3px 4px",
+      flex: "1 1 auto",
       gap: "8px 12px",
       margin: "auto 2px",
       overflow: "hidden auto",
@@ -179,6 +181,33 @@ describe("computed style resolver", () => {
     ]);
     expect(result.style.color).toBe("#444444ff");
     expect(result.style.width).toBe("40px");
+  });
+
+  it("expands every documented flex shorthand form and rejects the rest", () => {
+    const expand = (value: unknown): Record<string, unknown> => {
+      const result = resolveStyle({ nodeType: "view", inlineStyle: { flex: value } as PingoStyle });
+      expect(result.diagnostics, JSON.stringify(value)).toEqual([]);
+      return {
+        flexGrow: result.style.flexGrow,
+        flexShrink: result.style.flexShrink,
+        flexBasis: result.style.flexBasis,
+      };
+    };
+    expect(expand("none")).toEqual({ flexGrow: 0, flexShrink: 0, flexBasis: "auto" });
+    expect(expand("auto")).toEqual({ flexGrow: 1, flexShrink: 1, flexBasis: "auto" });
+    expect(expand(2)).toEqual({ flexGrow: 2, flexShrink: 1, flexBasis: "0px" });
+    expect(expand("2 3")).toEqual({ flexGrow: 2, flexShrink: 3, flexBasis: "0px" });
+    expect(expand("2 40px")).toEqual({ flexGrow: 2, flexShrink: 1, flexBasis: "40px" });
+    expect(expand("2 3 25%")).toEqual({ flexGrow: 2, flexShrink: 3, flexBasis: "25%" });
+    expect(expand("2 3 auto")).toEqual({ flexGrow: 2, flexShrink: 3, flexBasis: "auto" });
+    expect(expand("30px")).toEqual({ flexGrow: 1, flexShrink: 1, flexBasis: "30px" });
+
+    for (const invalid of ["-1", "1 -1", "1 2 3 4", "1 2 nope", "", "1 solid"]) {
+      expect(supportsStyle("flex", invalid), invalid).toBe(false);
+    }
+    expect(supportsStyle("flexGrow", -1)).toBe(false);
+    expect(supportsStyle("flexShrink", "2")).toBe(true);
+    expect(supportsStyle("flexBasis", "auto")).toBe(true);
   });
 
   it("expands box/gap/border shorthands and canonicalizes colors and numbers", () => {

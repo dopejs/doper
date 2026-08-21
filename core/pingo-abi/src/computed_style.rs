@@ -208,6 +208,14 @@ impl ComputedStyleResource {
             if bytes[value_end..aligned_end].iter().any(|byte| *byte != 0) {
                 return Err(AbiError::NonZeroReserved { offset: value_end });
             }
+            // The header declares which schema features this resource needs. A
+            // property whose feature is not declared cannot be interpreted, so
+            // it is rejected here rather than silently ignored.
+            if property.feature_bits() & feature_bits != property.feature_bits() {
+                return Err(AbiError::InvalidValue(
+                    "computed style entry uses a feature the resource does not declare",
+                ));
+            }
             let value = decode_value(property, tag, &bytes[value_start..value_end])?;
             if state_mask != 0 && !crate::STYLE_STATE_PROPERTY_IDS.contains(&(property as u16)) {
                 return Err(AbiError::InvalidValue(
@@ -906,7 +914,7 @@ mod tests {
         assert!(ComputedStyleResource::decode(&reserved).is_err());
 
         let mut unsupported_feature = resource(&[]);
-        unsupported_feature[4..8].copy_from_slice(&2_u32.to_le_bytes());
+        unsupported_feature[4..8].copy_from_slice(&(1_u32 << 31).to_le_bytes());
         assert!(ComputedStyleResource::decode(&unsupported_feature).is_err());
 
         let mut too_many_entries = resource(&[]);
@@ -954,7 +962,51 @@ mod tests {
     }
 
     #[test]
+    fn an_entry_whose_feature_is_not_declared_is_rejected_whole() {
+        use crate::{STYLE_FEATURE_FLEX_SIZING, STYLE_FEATURE_M6_FOUNDATION};
+
+        let entries = [
+            entry(
+                StyleProperty::Width,
+                0,
+                STYLE_VALUE_LENGTH,
+                &length(STYLE_LENGTH_PX, 12.0),
+            ),
+            entry(
+                StyleProperty::FlexGrow,
+                0,
+                STYLE_VALUE_F32,
+                &1.0_f32.to_le_bytes(),
+            ),
+        ];
+
+        let mut declared = resource(&entries);
+        declared[4..8].copy_from_slice(
+            &(STYLE_FEATURE_M6_FOUNDATION | STYLE_FEATURE_FLEX_SIZING).to_le_bytes(),
+        );
+        assert_eq!(
+            ComputedStyleResource::decode(&declared)
+                .expect("declared features decode")
+                .entries()
+                .len(),
+            2
+        );
+
+        // Same bytes, but the header no longer claims the flex feature. The
+        // decode fails as a whole rather than dropping the entry.
+        let mut undeclared = resource(&entries);
+        undeclared[4..8].copy_from_slice(&STYLE_FEATURE_M6_FOUNDATION.to_le_bytes());
+        assert!(ComputedStyleResource::decode(&undeclared).is_err());
+
+        // A resource that stays inside the base feature still decodes with only
+        // the base bit declared, so an older Core keeps working.
+        let mut base_only = resource(&entries[..1]);
+        base_only[4..8].copy_from_slice(&STYLE_FEATURE_M6_FOUNDATION.to_le_bytes());
+        assert!(ComputedStyleResource::decode(&base_only).is_ok());
+    }
+
+    #[test]
     fn subset_version_is_explicit_for_contract_reports() {
-        assert_eq!(crate::CSS_SUBSET_VERSION, "1.1.0");
+        assert_eq!(crate::CSS_SUBSET_VERSION, "1.2.0");
     }
 }

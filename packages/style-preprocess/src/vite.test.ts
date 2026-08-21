@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { build } from "vite";
+import { CSS_SUBSET_VERSION } from "@dopejs/pingo-style";
 
 import { pingoStylePreprocess } from "./vite.js";
 
@@ -34,7 +35,7 @@ describe("pingo Vite stylesheet integration", () => {
     expect(code).toContain('from "@dopejs/pingo"');
     expect(code).toContain(".scss-button:hover");
     expect(code).toContain(".less-button:hover");
-    expect(code).toContain('expectedVersion = "1.1.0"');
+    expect(code).toContain(`expectedVersion = ${JSON.stringify(CSS_SUBSET_VERSION)}`);
     expect(
       output.output.some((item) => item.type === "asset" && item.fileName.endsWith(".css")),
     ).toBe(false);

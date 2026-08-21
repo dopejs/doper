@@ -2,7 +2,7 @@
 
 # CSS subset support
 
-Subset version: **1.1.0**
+Subset version: **1.2.0**
 
 The Shell parses and computes the declarations below and the M6 Core consumes their canonical
 typed values. CSS text and selector matching remain outside Core.
@@ -66,3 +66,48 @@ typed values. CSS text and selector matching remain outside Core.
 | `touch-action`        | `touchAction`        | `touch-action`               | no        | hit, scroll                           | discrete  | M6 Core       |
 | `object-fit`          | `objectFit`          | `object-fit`                 | no        | layout, paint, hit                    | discrete  | M6 Core       |
 | `object-position`     | `objectPosition`     | `position`                   | no        | paint, hit                            | number    | M6 Core       |
+| `flex-grow`           | `flexGrow`           | `non-negative-number`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `flex-shrink`         | `flexShrink`         | `non-negative-number`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `flex-basis`          | `flexBasis`          | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+
+## Shorthands
+
+Shorthands are expanded in the Shell and never reach the ABI.
+
+| CSS property   | TypeScript name | grammar                           | expands to                                                                                                                                                                                                                               |
+| -------------- | --------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `margin`       | `margin`        | `box-length-auto`                 | `marginTop`, `marginRight`, `marginBottom`, `marginLeft`                                                                                                                                                                                 |
+| `padding`      | `padding`       | `box-non-negative-length`         | `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`                                                                                                                                                                             |
+| `gap`          | `gap`           | `pair-non-negative-length-normal` | `rowGap`, `columnGap`                                                                                                                                                                                                                    |
+| `overflow`     | `overflow`      | `pair-overflow`                   | `overflowX`, `overflowY`                                                                                                                                                                                                                 |
+| `border-width` | `borderWidth`   | `box-non-negative-length`         | `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`                                                                                                                                                             |
+| `border-color` | `borderColor`   | `box-color-current`               | `borderTopColor`, `borderRightColor`, `borderBottomColor`, `borderLeftColor`                                                                                                                                                             |
+| `border-style` | `borderStyle`   | `box-border-style`                | `borderTopStyle`, `borderRightStyle`, `borderBottomStyle`, `borderLeftStyle`                                                                                                                                                             |
+| `border`       | `border`        | `border`                          | `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderTopColor`, `borderRightColor`, `borderBottomColor`, `borderLeftColor`, `borderTopStyle`, `borderRightStyle`, `borderBottomStyle`, `borderLeftStyle` |
+| `flex`         | `flex`          | `flex`                            | `flexGrow`, `flexShrink`, `flexBasis`                                                                                                                                                                                                    |
+
+## Known deviations from CSS
+
+### Flex item automatic minimum size
+
+CSS resolves `min-width`/`min-height` of a flex item to `auto`, which is its min-content size. This subset has no intrinsic min-content measurement and the initial value stays `0px`, so a flex item can be shrunk to zero. Layouts that need a floor must state `min-width`/`min-height` explicitly. This is the same behaviour a browser gives once you write `min-width: 0`.
+
+### `flex: <number>` uses a `0px` basis
+
+CSS expands `flex: 1` to `1 1 0%`. This subset expands it to `1 1 0px`. A `0%` basis is indefinite when the container's main size is indefinite, whereas `0px` is always definite; both resolve to the same number inside a definite container.
+
+### Percentage lengths in an indefinite axis resolve to zero
+
+CSS treats a percentage against an indefinite containing block as `auto`. This subset resolves it to `0`. The container's own content box is used whenever it is definite, including inside `overflow: hidden`/`auto`/`scroll` containers and along the block axis of column flow.
+
+### Percentage margins use one inline basis for the whole frame
+
+A child's percentage margins are resolved once by its parent, against the parent's available inline content box, and the same values are used for measuring and for placement.
+
+### `flex-shrink` does not apply along a scrollable main axis
+
+When a flex container scrolls along its main axis, overflowing content becomes scroll extent instead of a space deficit, so items are not shrunk. Growing still applies when the line is shorter than the viewport.
+
+### No `flex-wrap`
+
+Flex containers are single-line. `flex-wrap` is not part of the subset, so main-axis overflow is clipped or scrolled rather than wrapped.

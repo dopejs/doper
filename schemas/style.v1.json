@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "cssSubsetVersion": "1.1.0",
+  "cssSubsetVersion": "1.2.0",
   "propertyIdBits": 16,
   "reservedPropertyIds": [17],
   "reservedPropertyIdReasons": {
@@ -135,9 +135,38 @@
     "visibility": ["hidden", "visible"],
     "white-space": ["normal", "nowrap", "pre", "pre-line", "pre-wrap"]
   },
+  "subsetNotes": [
+    {
+      "topic": "Flex item automatic minimum size",
+      "note": "CSS resolves `min-width`/`min-height` of a flex item to `auto`, which is its min-content size. This subset has no intrinsic min-content measurement and the initial value stays `0px`, so a flex item can be shrunk to zero. Layouts that need a floor must state `min-width`/`min-height` explicitly. This is the same behaviour a browser gives once you write `min-width: 0`."
+    },
+    {
+      "topic": "`flex: <number>` uses a `0px` basis",
+      "note": "CSS expands `flex: 1` to `1 1 0%`. This subset expands it to `1 1 0px`. A `0%` basis is indefinite when the container's main size is indefinite, whereas `0px` is always definite; both resolve to the same number inside a definite container."
+    },
+    {
+      "topic": "Percentage lengths in an indefinite axis resolve to zero",
+      "note": "CSS treats a percentage against an indefinite containing block as `auto`. This subset resolves it to `0`. The container's own content box is used whenever it is definite, including inside `overflow: hidden`/`auto`/`scroll` containers and along the block axis of column flow."
+    },
+    {
+      "topic": "Percentage margins use one inline basis for the whole frame",
+      "note": "A child's percentage margins are resolved once by its parent, against the parent's available inline content box, and the same values are used for measuring and for placement."
+    },
+    {
+      "topic": "`flex-shrink` does not apply along a scrollable main axis",
+      "note": "When a flex container scrolls along its main axis, overflowing content becomes scroll extent instead of a space deficit, so items are not shrunk. Growing still applies when the line is shorter than the viewport."
+    },
+    {
+      "topic": "No `flex-wrap`",
+      "note": "Flex containers are single-line. `flex-wrap` is not part of the subset, so main-axis overflow is clipped or scrolled rather than wrapped."
+    }
+  ],
   "invalidationDomains": ["layout", "paint", "paintSelf", "hit", "semantics", "scroll"],
   "animationTypes": ["none", "discrete", "number", "color", "transform"],
-  "features": [{ "name": "m6-foundation", "bit": 0 }],
+  "features": [
+    { "name": "m6-foundation", "bit": 0 },
+    { "name": "flex-sizing", "bit": 1 }
+  ],
   "properties": [
     {
       "id": 1,
@@ -993,6 +1022,51 @@
       "feature": "m6-foundation",
       "affects": ["paint", "hit"],
       "percentageReference": "content-box"
+    },
+    {
+      "id": 59,
+      "cssName": "flex-grow",
+      "jsName": "flexGrow",
+      "initial": 0,
+      "inherited": false,
+      "grammar": "non-negative-number",
+      "canonical": "f32",
+      "invalidation": ["layout", "paint", "hit", "scroll"],
+      "animation": "number",
+      "appliesTo": ["view", "text", "image", "input", "textArea", "video"],
+      "feature": "flex-sizing",
+      "affects": ["layout", "hit", "scroll"],
+      "percentageReference": "none"
+    },
+    {
+      "id": 60,
+      "cssName": "flex-shrink",
+      "jsName": "flexShrink",
+      "initial": 1,
+      "inherited": false,
+      "grammar": "non-negative-number",
+      "canonical": "f32",
+      "invalidation": ["layout", "paint", "hit", "scroll"],
+      "animation": "number",
+      "appliesTo": ["view", "text", "image", "input", "textArea", "video"],
+      "feature": "flex-sizing",
+      "affects": ["layout", "hit", "scroll"],
+      "percentageReference": "none"
+    },
+    {
+      "id": 61,
+      "cssName": "flex-basis",
+      "jsName": "flexBasis",
+      "initial": "auto",
+      "inherited": false,
+      "grammar": "length-auto",
+      "canonical": "length",
+      "invalidation": ["layout", "paint", "hit", "scroll"],
+      "animation": "number",
+      "appliesTo": ["view", "text", "image", "input", "textArea", "video"],
+      "feature": "flex-sizing",
+      "affects": ["layout", "hit", "scroll"],
+      "percentageReference": "containing-main-size"
     }
   ],
   "shorthands": [
@@ -1056,6 +1130,12 @@
         "borderBottomStyle",
         "borderLeftStyle"
       ]
+    },
+    {
+      "cssName": "flex",
+      "jsName": "flex",
+      "grammar": "flex",
+      "longhands": ["flexGrow", "flexShrink", "flexBasis"]
     }
   ]
 }

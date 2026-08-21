@@ -112,6 +112,17 @@ pub struct LayoutMetrics {
     pub node_visits: u64,
     /// Total nodes whose committed geometry changed.
     pub geometry_changes: u64,
+    /// Flex containers that needed a second main-axis pass.
+    pub flex_resolutions: u64,
+    /// Subtrees re-laid out by a second main-axis pass.
+    pub flex_relayouts: u64,
+}
+
+/// Second-pass counters gathered while a subtree is being laid out.
+#[derive(Clone, Copy, Debug, Default)]
+struct FlexCounters {
+    resolutions: u64,
+    relayouts: u64,
 }
 
 /// Summary of one committed layout decision.
@@ -237,6 +248,7 @@ impl LayoutEngine {
         let window_shift =
             !topology_unchanged && constraints_unchanged && self.only_virtual_items_changed(scene);
         let can_increment = topology_unchanged && constraints_unchanged;
+        let mut flex = FlexCounters::default();
         let (full, visited, boundary_count) = if window_shift {
             let added = self.remap_for_window_shift(scene);
             let mut visited = 0;
@@ -247,7 +259,8 @@ impl LayoutEngine {
                 if scene.virtual_item_index(node).is_none() {
                     continue;
                 }
-                visited += self.layout_new_virtual_item(scene, node, measurer, virtual_layout)?;
+                visited +=
+                    self.layout_new_virtual_item(scene, node, measurer, virtual_layout, &mut flex)?;
                 self.boundary_roots.push(node);
             }
             (false, visited, self.boundary_roots.len())
@@ -280,6 +293,7 @@ impl LayoutEngine {
                     virtual_layout,
                     &mut self.back,
                     &mut self.stack,
+                    &mut flex,
                 )?;
                 visited += subtree_len(scene, boundary)?;
             }
@@ -305,6 +319,7 @@ impl LayoutEngine {
                 virtual_layout,
                 &mut self.back,
                 &mut self.stack,
+                &mut flex,
             )?;
             (true, scene.len(), 0)
         };
@@ -323,6 +338,8 @@ impl LayoutEngine {
         }
         self.metrics.node_visits += visited as u64;
         self.metrics.geometry_changes += change_count as u64;
+        self.metrics.flex_resolutions += flex.resolutions;
+        self.metrics.flex_relayouts += flex.relayouts;
         Ok(LayoutOutcome {
             changed,
             full,
@@ -451,6 +468,7 @@ impl LayoutEngine {
         node: NodeId,
         measurer: &mut impl IntrinsicMeasurer,
         virtual_layout: &impl VirtualLayoutProvider,
+        flex: &mut FlexCounters,
     ) -> Result<usize, LayoutError> {
         let parent = scene
             .parent(node)
@@ -469,6 +487,7 @@ impl LayoutEngine {
             parent_constraints,
             parent_basis,
             percentage_basis(parent_basis.width, parent_constraints.min_width),
+            None,
             virtual_layout,
         )?;
         let input = constraints_for_child(scene, &parent_frame, node)?;
@@ -482,6 +501,7 @@ impl LayoutEngine {
             virtual_layout,
             &mut self.back,
             &mut self.stack,
+            flex,
         )?;
         let index = scene.resolve(node).ok_or(LayoutError::SceneInvariant(
             "layout encountered a stale node",
@@ -672,6 +692,22 @@ struct Frame {
     placed: bool,
     /// Percentage basis handed to children, unaffected by scroll relaxation.
     percent: PercentBasis,
+    /// Whether this frame is running its second, main-axis-resolving pass.
+    flex_pass: bool,
+    /// Children whose main-axis size the second pass tightens, and to what.
+    ///
+    /// Only children that actually change appear here; every other child keeps
+    /// its first-pass geometry and is never re-descended.
+    flex_targets: Vec<(NodeId, f32)>,
+}
+
+impl Frame {
+    fn flex_target(&self, child: NodeId) -> Option<f32> {
+        self.flex_targets
+            .iter()
+            .find(|(node, _)| *node == child)
+            .map(|(_, target)| *target)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -685,6 +721,7 @@ fn compute_subtree(
     virtual_layout: &impl VirtualLayoutProvider,
     output: &mut LayoutSnapshot,
     stack: &mut Vec<Frame>,
+    flex: &mut FlexCounters,
 ) -> Result<(), LayoutError> {
     if scene.parent(root).is_none() && scene.kind(root) != Some(NodeKind::Root) {
         return Err(LayoutError::SceneInvariant("first node is not the root"));
@@ -701,6 +738,7 @@ fn compute_subtree(
         constraints,
         basis,
         margin_basis,
+        None,
         virtual_layout,
     )?);
     while let Some(frame) = stack.last_mut() {
@@ -710,6 +748,22 @@ fn compute_subtree(
                 zero_subtree(scene, child, output)?;
                 continue;
             }
+            // The second pass only re-measures the children whose main extent
+            // actually changed. Everything else keeps its first-pass subtree and
+            // just re-contributes its box, so a container with one flexible
+            // child among many costs one extra subtree, not all of them.
+            if frame.flex_pass && frame.flex_target(child).is_none() {
+                let index = scene.resolve(child).ok_or(LayoutError::SceneInvariant(
+                    "layout encountered a stale node",
+                ))?;
+                let size = *output.sizes.get(index).ok_or(LayoutError::SceneInvariant(
+                    "layout child has no computed size",
+                ))?;
+                let margin = style_margin(scene, child, child_margin_basis(frame))?.values;
+                open_child_slot(frame);
+                accumulate_child(frame, size, margin);
+                continue;
+            }
             let input = constraints_for_child(scene, frame, child)?;
             let child_frame = make_frame(
                 scene,
@@ -717,13 +771,14 @@ fn compute_subtree(
                 input.constraints,
                 input.basis,
                 input.margin_basis,
+                Some(input.flex_axis_row),
                 virtual_layout,
             )?;
             stack.push(child_frame);
             continue;
         }
 
-        let frame = stack.pop().expect("last frame exists");
+        let mut frame = stack.pop().expect("last frame exists");
         let has_children = scene.first_child(frame.node).is_some();
         let intrinsic = if has_children {
             Size::ZERO
@@ -755,6 +810,21 @@ fn compute_subtree(
         );
         let size = frame.constraints.constrain(requested);
         output.sizes[frame.index] = size;
+        if !frame.flex_pass {
+            let targets = resolve_flex(scene, &frame, size, output)?;
+            if !targets.is_empty() {
+                flex.resolutions = flex.resolutions.saturating_add(1);
+                flex.relayouts = flex.relayouts.saturating_add(targets.len() as u64);
+                frame.flex_pass = true;
+                frame.flex_targets = targets;
+                frame.next_child = scene.first_child(frame.node);
+                frame.main = 0.0;
+                frame.cross = 0.0;
+                frame.placed = false;
+                stack.push(frame);
+                continue;
+            }
+        }
         arrange_children(scene, &frame, size, output)?;
 
         if let Some(parent) = stack.last_mut() {
@@ -781,36 +851,316 @@ fn compute_subtree(
                 };
                 parent.cross = parent.cross.max(cross);
             } else {
-                if parent.placed {
-                    parent.main += parent.gap;
-                }
-                parent.placed = true;
+                open_child_slot(parent);
                 let parent_insets = parent.padding.add(parent.border);
-                if parent.row {
-                    output.offsets[frame.index] = Point::new(
+                output.offsets[frame.index] = if parent.row {
+                    Point::new(
                         parent_insets.left + parent.main + frame.margin.values.left,
                         parent_insets.top + frame.margin.values.top,
-                    );
-                    parent.main +=
-                        frame.margin.values.left + size.width + frame.margin.values.right;
-                    parent.cross = parent
-                        .cross
-                        .max(frame.margin.values.top + size.height + frame.margin.values.bottom);
+                    )
                 } else {
-                    output.offsets[frame.index] = Point::new(
+                    Point::new(
                         parent_insets.left + frame.margin.values.left,
                         parent_insets.top + parent.main + frame.margin.values.top,
-                    );
-                    parent.main +=
-                        frame.margin.values.top + size.height + frame.margin.values.bottom;
-                    parent.cross = parent
-                        .cross
-                        .max(frame.margin.values.left + size.width + frame.margin.values.right);
-                }
+                    )
+                };
+                accumulate_child(parent, size, frame.margin.values);
             }
         }
     }
     Ok(())
+}
+
+/// Main-axis distribution is treated as settled below this many pixels.
+const FLEX_EPSILON: f32 = 1.0 / 1024.0;
+
+/// Applies the inter-child gap before the next child takes its slot.
+fn open_child_slot(parent: &mut Frame) {
+    if parent.placed {
+        parent.main += parent.gap;
+    }
+    parent.placed = true;
+}
+
+/// Adds one child's outer box to its parent's running main and cross extents.
+fn accumulate_child(parent: &mut Frame, size: Size, margin: EdgeInsets) {
+    if parent.row {
+        parent.main += margin.horizontal() + size.width;
+        parent.cross = parent.cross.max(margin.vertical() + size.height);
+    } else {
+        parent.main += margin.vertical() + size.height;
+        parent.cross = parent.cross.max(margin.horizontal() + size.width);
+    }
+}
+
+/// One in-flow child's inputs to main-axis distribution, in border-box units.
+struct FlexItem {
+    node: NodeId,
+    base: f32,
+    min: f32,
+    max: f32,
+    grow: f32,
+    shrink: f32,
+    target: f32,
+    frozen: bool,
+}
+
+/// Decides which children need a different main extent than the first pass gave.
+///
+/// This is CSS Flexbox "resolve the flexible lengths" for a single line: freeze
+/// the inflexible items, distribute the free space by grow or shrink factors,
+/// clamp against min/max, and freeze whichever side violated. Each round freezes
+/// at least one item, so it terminates in at most one round per child.
+///
+/// Returned targets are outer border-box main extents. Children already at their
+/// target are omitted, which is what keeps the second pass proportional to the
+/// work that actually changed.
+fn resolve_flex(
+    scene: &Scene,
+    frame: &Frame,
+    size: Size,
+    output: &LayoutSnapshot,
+) -> Result<Vec<(NodeId, f32)>, LayoutError> {
+    // Virtual items take their extent from Core's height index, not from
+    // sibling distribution.
+    if scene.virtual_list(frame.node).is_some() {
+        return Ok(Vec::new());
+    }
+    let insets = frame.padding.add(frame.border);
+    let content_main = if frame.row {
+        size.width - insets.horizontal()
+    } else {
+        size.height - insets.vertical()
+    }
+    .max(0.0);
+
+    let mut items: Vec<FlexItem> = Vec::new();
+    let mut margins_main = 0.0_f32;
+    let mut child = scene.first_child(frame.node);
+    while let Some(node) = child {
+        child = scene.next_sibling(node);
+        if scene.display_none(node) {
+            continue;
+        }
+        let index = scene.resolve(node).ok_or(LayoutError::SceneInvariant(
+            "layout encountered a stale node",
+        ))?;
+        let child_size = *output.sizes.get(index).ok_or(LayoutError::SceneInvariant(
+            "layout child has no computed size",
+        ))?;
+        let input = constraints_for_child(scene, frame, node)?;
+        let (min, max, margin_main) = flex_item_bounds(scene, node, &input, frame.row)?;
+        margins_main += margin_main;
+        let base = if frame.row {
+            child_size.width
+        } else {
+            child_size.height
+        };
+        items.push(FlexItem {
+            node,
+            base,
+            min,
+            max,
+            grow: scene
+                .style_f32(node, StyleProperty::FlexGrow, 0)
+                .unwrap_or(0.0)
+                .max(0.0),
+            // The Shell resolves every property, so a styled node always
+            // carries an explicit flex-shrink of at least its initial 1. A node
+            // with no computed style at all is on the legacy direct-prop path,
+            // never opted into CSS box sizing, and stays inflexible.
+            shrink: scene
+                .style_f32(node, StyleProperty::FlexShrink, 0)
+                .unwrap_or(0.0)
+                .max(0.0),
+            target: base,
+            frozen: false,
+        });
+    }
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let gaps = frame.gap * (items.len() - 1) as f32;
+    let available = content_main - gaps - margins_main;
+    let base_total = items.iter().map(|item| item.base).sum::<f32>();
+    let initial_free = available - base_total;
+    if !initial_free.is_finite() || initial_free.abs() <= FLEX_EPSILON {
+        return Ok(Vec::new());
+    }
+    let growing = initial_free > 0.0;
+    // A scrollable main axis has no space deficit: the overflow becomes scroll
+    // extent, which is why children are measured against an infinite axis in the
+    // first place. Shrinking there would collapse exactly the content the
+    // viewport exists to scroll.
+    if !growing && scene.scrollable_axis(frame.node, frame.row) {
+        return Ok(Vec::new());
+    }
+    let factor = |item: &FlexItem| if growing { item.grow } else { item.shrink };
+    if items.iter().all(|item| factor(item) <= 0.0) {
+        return Ok(Vec::new());
+    }
+
+    for item in &mut items {
+        let inflexible = if growing {
+            item.grow <= 0.0 || item.base >= item.max
+        } else {
+            item.shrink <= 0.0 || item.base <= item.min
+        };
+        if inflexible {
+            item.target = item.base.clamp(item.min, item.max);
+            item.frozen = true;
+        }
+    }
+
+    let rounds = items.len();
+    for _ in 0..=rounds {
+        if items.iter().all(|item| item.frozen) {
+            break;
+        }
+        let frozen_total = items
+            .iter()
+            .filter(|item| item.frozen)
+            .map(|item| item.target)
+            .sum::<f32>();
+        let unfrozen_base = items
+            .iter()
+            .filter(|item| !item.frozen)
+            .map(|item| item.base)
+            .sum::<f32>();
+        let factor_sum = items
+            .iter()
+            .filter(|item| !item.frozen)
+            .map(&factor)
+            .sum::<f32>();
+        if factor_sum <= 0.0 {
+            for item in items.iter_mut().filter(|item| !item.frozen) {
+                item.target = item.base;
+                item.frozen = true;
+            }
+            break;
+        }
+        let mut remaining = available - frozen_total - unfrozen_base;
+        // A total grow factor below one only distributes that fraction of the
+        // original free space, which is what keeps `flex-grow: 0.5` from filling
+        // the line on its own.
+        if growing && factor_sum < 1.0 {
+            let magnitude = initial_free * factor_sum;
+            if magnitude.abs() < remaining.abs() {
+                remaining = magnitude;
+            }
+        }
+        let scaled_sum = items
+            .iter()
+            .filter(|item| !item.frozen)
+            .map(|item| item.shrink * item.base)
+            .sum::<f32>();
+        for item in items.iter_mut().filter(|item| !item.frozen) {
+            item.target = if growing {
+                item.base + remaining * (item.grow / factor_sum)
+            } else if scaled_sum > 0.0 {
+                item.base - remaining.abs() * ((item.shrink * item.base) / scaled_sum)
+            } else {
+                item.base
+            };
+        }
+        let mut total_violation = 0.0_f32;
+        let mut violations = Vec::with_capacity(items.len());
+        for item in &mut items {
+            if item.frozen {
+                violations.push(0.0);
+                continue;
+            }
+            let clamped = item.target.clamp(item.min, item.max).max(0.0);
+            let violation = clamped - item.target;
+            item.target = clamped;
+            total_violation += violation;
+            violations.push(violation);
+        }
+        let settled = total_violation.abs() <= FLEX_EPSILON;
+        for (item, violation) in items.iter_mut().zip(violations) {
+            if item.frozen {
+                continue;
+            }
+            if settled
+                || (total_violation > 0.0 && violation > 0.0)
+                || (total_violation < 0.0 && violation < 0.0)
+            {
+                item.frozen = true;
+            }
+        }
+    }
+    if items.iter().any(|item| !item.frozen) {
+        return Err(LayoutError::SceneInvariant(
+            "flex main-axis distribution did not converge",
+        ));
+    }
+    Ok(items
+        .into_iter()
+        .filter(|item| (item.target - item.base).abs() > FLEX_EPSILON)
+        .map(|item| (item.node, item.target))
+        .collect())
+}
+
+/// Resolves one child's main-axis bounds and margin overhead in border-box units.
+fn flex_item_bounds(
+    scene: &Scene,
+    node: NodeId,
+    input: &ChildInput,
+    row: bool,
+) -> Result<(f32, f32, f32), LayoutError> {
+    let width_basis = percentage_basis(input.basis.width, input.constraints.min_width);
+    let height_basis = percentage_basis(input.basis.height, input.constraints.min_height);
+    let insets =
+        style_padding(scene, node, width_basis)?.add(style_border(scene, node, width_basis)?);
+    let border_box =
+        scene.style_keyword(node, StyleProperty::BoxSizing, 0) == Some(StyleKeyword::BorderBox);
+    let (min_prop, max_prop, min_direct, max_direct, basis, axis_insets) = if row {
+        (
+            StyleProperty::MinWidth,
+            StyleProperty::MaxWidth,
+            Prop::MinWidth,
+            Prop::MaxWidth,
+            width_basis,
+            insets.horizontal(),
+        )
+    } else {
+        (
+            StyleProperty::MinHeight,
+            StyleProperty::MaxHeight,
+            Prop::MinHeight,
+            Prop::MaxHeight,
+            height_basis,
+            insets.vertical(),
+        )
+    };
+    let min = outer_dimension(
+        scene,
+        node,
+        min_direct,
+        min_prop,
+        basis,
+        axis_insets,
+        border_box,
+    )?
+    .unwrap_or(0.0);
+    let max = outer_dimension(
+        scene,
+        node,
+        max_direct,
+        max_prop,
+        basis,
+        axis_insets,
+        border_box,
+    )?
+    .unwrap_or(f32::INFINITY);
+    let margins = style_margin(scene, node, input.margin_basis)?.values;
+    let margin_main = if row {
+        margins.horizontal()
+    } else {
+        margins.vertical()
+    };
+    Ok((min, max.max(min), margin_main))
 }
 
 fn zero_subtree(
@@ -937,6 +1287,7 @@ fn make_frame(
     incoming: BoxConstraints,
     basis: PercentBasis,
     margin_basis: f32,
+    flex_axis_row: Option<bool>,
     virtual_layout: &impl VirtualLayoutProvider,
 ) -> Result<Frame, LayoutError> {
     let index = scene.resolve(node).ok_or(LayoutError::SceneInvariant(
@@ -1008,24 +1359,48 @@ fn make_frame(
         });
     }
     let constraints = intersect_constraints(incoming, min_width, max_width, min_height, max_height);
-    let fixed_width = outer_dimension(
-        scene,
-        node,
-        Prop::Width,
-        StyleProperty::Width,
-        width_basis,
-        insets.horizontal(),
-        border_box,
-    )?;
-    let fixed_height = outer_dimension(
-        scene,
-        node,
-        Prop::Height,
-        StyleProperty::Height,
-        height_basis,
-        insets.vertical(),
-        border_box,
-    )?;
+    // A definite flex-basis replaces the main-axis size property, which is what
+    // makes `flex: 1 1 0` collapse an item to its share of the line instead of
+    // to its declared width.
+    let flex_basis = flex_axis_row.and_then(|row| {
+        flex_basis_main(
+            scene,
+            node,
+            row,
+            if row { width_basis } else { height_basis },
+            if row {
+                insets.horizontal()
+            } else {
+                insets.vertical()
+            },
+            border_box,
+        )
+        .map(|value| (row, value))
+    });
+    let fixed_width = match flex_basis {
+        Some((true, value)) => Some(value),
+        _ => outer_dimension(
+            scene,
+            node,
+            Prop::Width,
+            StyleProperty::Width,
+            width_basis,
+            insets.horizontal(),
+            border_box,
+        )?,
+    };
+    let fixed_height = match flex_basis {
+        Some((false, value)) => Some(value),
+        _ => outer_dimension(
+            scene,
+            node,
+            Prop::Height,
+            StyleProperty::Height,
+            height_basis,
+            insets.vertical(),
+            border_box,
+        )?,
+    };
     // Virtual items use Core's axis-neutral extent index rather than sibling accumulation.
     let virtual_list = scene.virtual_list(node);
     let direction = scene
@@ -1047,8 +1422,18 @@ fn make_frame(
             direction,
             StyleKeyword::RowReverse | StyleKeyword::ColumnReverse
         );
-    let outer_width = fixed_width.unwrap_or(constraints.max_width);
-    let outer_height = fixed_height.unwrap_or(constraints.max_height);
+    // A declared extent still has to satisfy the incoming constraints before it
+    // can bound children or resolve their percentages.
+    let outer_width = fixed_width.map_or(constraints.max_width, |width| {
+        constraints
+            .constrain(Size::new(width, constraints.min_height))
+            .width
+    });
+    let outer_height = fixed_height.map_or(constraints.max_height, |height| {
+        constraints
+            .constrain(Size::new(constraints.min_width, height))
+            .height
+    });
     let mut child_constraints = BoxConstraints {
         min_width: 0.0,
         max_width: subtract_insets(outer_width, insets.horizontal()),
@@ -1059,12 +1444,6 @@ fn make_frame(
             f32::INFINITY
         },
     };
-    if let Some(width) = fixed_width {
-        let outer_width = constraints
-            .constrain(Size::new(width, constraints.min_height))
-            .width;
-        child_constraints.max_width = subtract_insets(outer_width, insets.horizontal());
-    }
     // The percentage basis is this container's available content box on each
     // axis. It is deliberately independent of `child_constraints`, which relaxes
     // the block axis in column flow so children can be measured naturally, and
@@ -1134,6 +1513,8 @@ fn make_frame(
         gap,
         placed: false,
         percent,
+        flex_pass: false,
+        flex_targets: Vec::new(),
     })
 }
 
@@ -1142,6 +1523,8 @@ struct ChildInput {
     constraints: BoxConstraints,
     basis: PercentBasis,
     margin_basis: f32,
+    /// Whether the parent flows children along the inline axis.
+    flex_axis_row: bool,
 }
 
 fn constraints_for_child(
@@ -1171,10 +1554,46 @@ fn constraints_for_child(
             constraints.min_width = constraints.max_width;
         }
     }
+    // Second pass: the child's share of the line is already decided, so it is
+    // re-measured against exactly that main extent.
+    if let Some(target) = parent.flex_target(child) {
+        if parent.row {
+            constraints.min_width = target;
+            constraints.max_width = target;
+        } else {
+            constraints.min_height = target;
+            constraints.max_height = target;
+        }
+    }
     Ok(ChildInput {
         constraints,
         basis,
         margin_basis,
+        flex_axis_row: parent.row,
+    })
+}
+
+/// Resolves a definite `flex-basis` into an outer main extent.
+pub(crate) fn flex_basis_main(
+    scene: &Scene,
+    node: NodeId,
+    _row: bool,
+    percentage_basis: f32,
+    content_box_insets: f32,
+    border_box: bool,
+) -> Option<f32> {
+    let length = scene.style_length(node, StyleProperty::FlexBasis, 0)?;
+    if length.unit != StyleLengthUnit::Px && length.unit != StyleLengthUnit::Percent {
+        return None;
+    }
+    let value = resolve_style_length(Some(length), percentage_basis)?;
+    if !value.is_finite() || value < 0.0 {
+        return None;
+    }
+    Some(if border_box {
+        value
+    } else {
+        value + content_box_insets
     })
 }
 
@@ -1678,8 +2097,8 @@ mod tests {
     use pingo_abi::{
         Mutation, MutationBatch, MutationInstruction, NULL_NODE_ID, ResourceKind,
         STYLE_ALL_FEATURE_BITS, STYLE_COMPUTED_ENCODING_VARIANT, STYLE_COMPUTED_ENCODING_VERSION,
-        STYLE_LENGTH_AUTO, STYLE_LENGTH_PERCENT, STYLE_LENGTH_PX, STYLE_VALUE_KEYWORD,
-        STYLE_VALUE_LENGTH,
+        STYLE_LENGTH_AUTO, STYLE_LENGTH_PERCENT, STYLE_LENGTH_PX, STYLE_VALUE_F32,
+        STYLE_VALUE_KEYWORD, STYLE_VALUE_LENGTH,
     };
     use proptest::prelude::*;
 
@@ -2586,6 +3005,258 @@ mod tests {
         );
     }
 
+    fn number(value: f32) -> Vec<u8> {
+        value.to_le_bytes().to_vec()
+    }
+
+    /// Builds `root > container > children`, with the container laid out in a row.
+    fn flex_row_scene(
+        container_style: &[(StyleProperty, u8, Vec<u8>)],
+        children: &[Vec<(StyleProperty, u8, Vec<u8>)>],
+    ) -> (Scene, NodeId, Vec<NodeId>) {
+        let root = id(0);
+        let container = id(1);
+        let mut scene = Scene::new();
+        let mut mutations = vec![
+            create(root, NodeKind::Root, None),
+            create(container, NodeKind::Container, Some(root)),
+        ];
+        let mut style = container_style.to_vec();
+        style.push((
+            StyleProperty::FlexDirection,
+            STYLE_VALUE_KEYWORD,
+            keyword(StyleKeyword::Row),
+        ));
+        style.sort_by_key(|(property, _, _)| *property as u16);
+        mutations.push(Mutation::DefineResource {
+            resource_id: 1,
+            kind: ResourceKind::ComputedStyle,
+            bytes: computed_style(&style),
+        });
+        mutations.push(Mutation::SetRef {
+            node_id: container.raw(),
+            prop: Prop::ComputedStyle,
+            resource_id: 1,
+        });
+        let mut nodes = Vec::new();
+        for (index, entries) in children.iter().enumerate() {
+            let node = id(index as u32 + 2);
+            nodes.push(node);
+            mutations.push(create(node, NodeKind::Container, Some(container)));
+            let mut sorted = entries.clone();
+            sorted.sort_by_key(|(property, _, _)| *property as u16);
+            let resource_id = index as u32 + 2;
+            mutations.push(Mutation::DefineResource {
+                resource_id,
+                kind: ResourceKind::ComputedStyle,
+                bytes: computed_style(&sorted),
+            });
+            mutations.push(Mutation::SetRef {
+                node_id: node.raw(),
+                prop: Prop::ComputedStyle,
+                resource_id,
+            });
+        }
+        commit(&mut scene, 1, mutations);
+        (scene, container, nodes)
+    }
+
+    fn widths(engine: &LayoutEngine, nodes: &[NodeId]) -> Vec<f32> {
+        nodes
+            .iter()
+            .map(|node| engine.snapshot().geometry(*node).expect("geometry").1.width)
+            .collect()
+    }
+
+    #[test]
+    fn flex_grow_splits_the_remaining_main_axis_space() {
+        let (scene, _, nodes) = flex_row_scene(
+            &[
+                (StyleProperty::Width, STYLE_VALUE_LENGTH, px(300.0)),
+                (StyleProperty::Height, STYLE_VALUE_LENGTH, px(50.0)),
+                (StyleProperty::ColumnGap, STYLE_VALUE_LENGTH, px(10.0)),
+            ],
+            &[
+                vec![(StyleProperty::Width, STYLE_VALUE_LENGTH, px(40.0))],
+                vec![
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(20.0)),
+                    (StyleProperty::FlexGrow, STYLE_VALUE_F32, number(1.0)),
+                ],
+                vec![
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(20.0)),
+                    (StyleProperty::FlexGrow, STYLE_VALUE_F32, number(3.0)),
+                ],
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(300.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        // 300 content - 20 gap - (40 + 20 + 20) base = 200 free, split 1:3.
+        assert_eq!(widths(&engine, &nodes), vec![40.0, 70.0, 170.0]);
+        assert_eq!(engine.metrics().flex_resolutions, 1);
+        assert_eq!(engine.metrics().flex_relayouts, 2);
+    }
+
+    #[test]
+    fn a_total_grow_factor_below_one_leaves_the_rest_of_the_line_empty() {
+        let (scene, _, nodes) = flex_row_scene(
+            &[
+                (StyleProperty::Width, STYLE_VALUE_LENGTH, px(200.0)),
+                (StyleProperty::Height, STYLE_VALUE_LENGTH, px(20.0)),
+            ],
+            &[vec![
+                (StyleProperty::Width, STYLE_VALUE_LENGTH, px(100.0)),
+                (StyleProperty::FlexGrow, STYLE_VALUE_F32, number(0.25)),
+            ]],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(200.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        assert_eq!(widths(&engine, &nodes), vec![125.0]);
+    }
+
+    #[test]
+    fn flex_shrink_weights_by_base_size_and_respects_a_minimum() {
+        let (scene, _, nodes) = flex_row_scene(
+            &[
+                (StyleProperty::Width, STYLE_VALUE_LENGTH, px(200.0)),
+                (StyleProperty::Height, STYLE_VALUE_LENGTH, px(20.0)),
+            ],
+            &[
+                vec![
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(200.0)),
+                    (StyleProperty::MinWidth, STYLE_VALUE_LENGTH, px(150.0)),
+                    (StyleProperty::FlexShrink, STYLE_VALUE_F32, number(1.0)),
+                ],
+                vec![
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(200.0)),
+                    (StyleProperty::FlexShrink, STYLE_VALUE_F32, number(1.0)),
+                ],
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(200.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        // Equal shrink weights would give 100/100, but the first item floors at
+        // 150, so the freeze round pushes the whole deficit onto the second.
+        assert_eq!(widths(&engine, &nodes), vec![150.0, 50.0]);
+    }
+
+    #[test]
+    fn flex_basis_replaces_the_main_axis_size_property() {
+        let (scene, _, nodes) = flex_row_scene(
+            &[
+                (StyleProperty::Width, STYLE_VALUE_LENGTH, px(300.0)),
+                (StyleProperty::Height, STYLE_VALUE_LENGTH, px(20.0)),
+            ],
+            &[
+                vec![
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(999.0)),
+                    (StyleProperty::FlexBasis, STYLE_VALUE_LENGTH, px(0.0)),
+                    (StyleProperty::FlexGrow, STYLE_VALUE_F32, number(1.0)),
+                ],
+                vec![
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(999.0)),
+                    (StyleProperty::FlexBasis, STYLE_VALUE_LENGTH, percent(20.0)),
+                    (StyleProperty::FlexGrow, STYLE_VALUE_F32, number(0.0)),
+                    (StyleProperty::FlexShrink, STYLE_VALUE_F32, number(0.0)),
+                ],
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(300.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        // Basis 0 and 20% of 300 give bases of 0 and 60; the first grows into
+        // the remaining 240.
+        assert_eq!(widths(&engine, &nodes), vec![240.0, 60.0]);
+    }
+
+    #[test]
+    fn a_scrollable_main_axis_overflows_instead_of_shrinking() {
+        let (scene, _, nodes) = flex_row_scene(
+            &[
+                (StyleProperty::Width, STYLE_VALUE_LENGTH, px(100.0)),
+                (StyleProperty::Height, STYLE_VALUE_LENGTH, px(20.0)),
+                (
+                    StyleProperty::OverflowX,
+                    STYLE_VALUE_KEYWORD,
+                    keyword(StyleKeyword::Auto),
+                ),
+            ],
+            &[
+                vec![
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(400.0)),
+                    (StyleProperty::FlexShrink, STYLE_VALUE_F32, number(1.0)),
+                ],
+                vec![
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(400.0)),
+                    (StyleProperty::FlexShrink, STYLE_VALUE_F32, number(1.0)),
+                ],
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(100.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        assert_eq!(widths(&engine, &nodes), vec![400.0, 400.0]);
+        assert_eq!(engine.metrics().flex_resolutions, 0);
+    }
+
+    #[test]
+    fn an_inflexible_line_never_runs_a_second_pass() {
+        let (scene, _, nodes) = flex_row_scene(
+            &[
+                (StyleProperty::Width, STYLE_VALUE_LENGTH, px(300.0)),
+                (StyleProperty::Height, STYLE_VALUE_LENGTH, px(20.0)),
+            ],
+            &[
+                vec![
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(40.0)),
+                    (StyleProperty::FlexShrink, STYLE_VALUE_F32, number(0.0)),
+                ],
+                vec![
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(40.0)),
+                    (StyleProperty::FlexShrink, STYLE_VALUE_F32, number(0.0)),
+                ],
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(300.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        assert_eq!(widths(&engine, &nodes), vec![40.0, 40.0]);
+        assert_eq!(engine.metrics().flex_resolutions, 0);
+        assert_eq!(engine.metrics().flex_relayouts, 0);
+    }
+
     proptest! {
         #[test]
         fn generated_layouts_are_constrained_and_idempotent(
@@ -2613,6 +3284,53 @@ mod tests {
                 let (_, size) = first.snapshot().geometry_at(index).expect("geometry");
                 prop_assert!(size.is_valid());
                 prop_assert!(size.width <= viewport_width);
+            }
+        }
+
+        #[test]
+        fn incremental_flex_lines_match_full_layout_after_each_change(
+            changes in prop::collection::vec((0_usize..3, 0.0_f32..260.0), 1..40),
+        ) {
+            let (mut scene, _, nodes) = flex_row_scene(
+                &[
+                    (StyleProperty::Width, STYLE_VALUE_LENGTH, px(320.0)),
+                    (StyleProperty::Height, STYLE_VALUE_LENGTH, px(60.0)),
+                    (StyleProperty::ColumnGap, STYLE_VALUE_LENGTH, px(8.0)),
+                ],
+                &[
+                    vec![
+                        (StyleProperty::FlexGrow, STYLE_VALUE_F32, number(1.0)),
+                        (StyleProperty::MinWidth, STYLE_VALUE_LENGTH, px(30.0)),
+                    ],
+                    vec![
+                        (StyleProperty::FlexGrow, STYLE_VALUE_F32, number(2.0)),
+                        (StyleProperty::MaxWidth, STYLE_VALUE_LENGTH, px(140.0)),
+                    ],
+                    vec![(StyleProperty::FlexShrink, STYLE_VALUE_F32, number(0.0))],
+                ],
+            );
+            let constraints =
+                BoxConstraints::tight(Size::new(400.0, 400.0)).expect("viewport");
+            let mut incremental = LayoutEngine::new();
+            incremental
+                .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+                .expect("initial");
+            scene.clear_dirty();
+            for (frame, (child_index, width)) in (2_u32..).zip(changes) {
+                commit(
+                    &mut scene,
+                    frame,
+                    vec![set_f32(nodes[child_index], Prop::Width, width)],
+                );
+                incremental
+                    .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+                    .expect("incremental");
+                let mut reference = LayoutEngine::new();
+                reference
+                    .layout(&scene, constraints, &mut ZeroIntrinsicMeasurer)
+                    .expect("reference");
+                prop_assert_eq!(incremental.snapshot(), reference.snapshot());
+                scene.clear_dirty();
             }
         }
 

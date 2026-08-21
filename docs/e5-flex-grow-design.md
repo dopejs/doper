@@ -76,11 +76,11 @@ feature bit 只是"这个 Shell 说自己是哪个子集版本"，**没有任何
 
 ### D1：新增三个 longhand + 一个 Shell shorthand
 
-| CSS 名 | JS 名 | id | grammar | canonical | initial | 继承 | animation | percentageReference |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `flex-grow` | `flexGrow` | 59 | `non-negative-number` | `f32` | `0` | 否 | `number` | `none` |
-| `flex-shrink` | `flexShrink` | 60 | `non-negative-number` | `f32` | `1` | 否 | `number` | `none` |
-| `flex-basis` | `flexBasis` | 61 | `length-auto` | `length` | `auto` | 否 | `number` | `containing-main-size` |
+| CSS 名        | JS 名        | id  | grammar               | canonical | initial | 继承 | animation | percentageReference    |
+| ------------- | ------------ | --- | --------------------- | --------- | ------- | ---- | --------- | ---------------------- |
+| `flex-grow`   | `flexGrow`   | 59  | `non-negative-number` | `f32`     | `0`     | 否   | `number`  | `none`                 |
+| `flex-shrink` | `flexShrink` | 60  | `non-negative-number` | `f32`     | `1`     | 否   | `number`  | `none`                 |
+| `flex-basis`  | `flexBasis`  | 61  | `length-auto`         | `length`  | `auto`  | 否   | `number`  | `containing-main-size` |
 
 `appliesTo`：全部六种 node type（与 `width` 一致）。
 `invalidation`：`["layout", "paint", "hit", "scroll"]`，`affects`：`["layout", "hit", "scroll"]`
@@ -94,15 +94,15 @@ feature bit 只是"这个 Shell 说自己是哪个子集版本"，**没有任何
 
 **shorthand `flex`**（Shell 展开，不进 ABI）：
 
-| 输入 | grow | shrink | basis |
-| --- | --- | --- | --- |
-| `flex: none` | 0 | 0 | `auto` |
-| `flex: auto` | 1 | 1 | `auto` |
-| `flex: <number>` | n | 1 | `0px` |
-| `flex: <number> <number>` | a | b | `0px` |
-| `flex: <number> <length\|auto>` | a | 1 | basis |
-| `flex: <number> <number> <length\|auto>` | a | b | basis |
-| `flex: <length\|auto>` | 1 | 1 | basis |
+| 输入                                     | grow | shrink | basis  |
+| ---------------------------------------- | ---- | ------ | ------ |
+| `flex: none`                             | 0    | 0      | `auto` |
+| `flex: auto`                             | 1    | 1      | `auto` |
+| `flex: <number>`                         | n    | 1      | `0px`  |
+| `flex: <number> <number>`                | a    | b      | `0px`  |
+| `flex: <number> <length\|auto>`          | a    | 1      | basis  |
+| `flex: <number> <number> <length\|auto>` | a    | b      | basis  |
+| `flex: <length\|auto>`                   | 1    | 1      | basis  |
 
 **与 CSS 的已知偏差**：CSS 规定 `flex: <number>` 的 basis 为 `0%`，本实现用 `0px`。
 理由：`0%` 在 basis 不确定的容器中会退化为 `auto`，而 `0px` 恒定确定；两者在确定
@@ -169,6 +169,20 @@ feature bit 只是"这个 Shell 说自己是哪个子集版本"，**没有任何
 initial 是 `0px`（见 schema），没有 `auto` 值，也没有 min-content 测量。因此
 **本实现的 flex item 可以被压缩到 0**，等价于浏览器里到处写 `min-w-0`。
 这是显式取舍：避免引入 min-content 内在尺寸子系统。写入 `docs/style-support.md`。
+
+**执行期新增决策 1：可滚动主轴不做 shrink。** `overflow` 非 visible 的轴上，
+`child_constraints` 已被显式放宽到无限——这是"内容溢出即滚动区"的语义。若在同
+一根轴上再执行 shrink，会把滚动容器存在的理由（可滚动的溢出内容）直接压没。
+因此 `resolve_flex` 在 `free < 0 && scrollable_axis(container, main)` 时返回空。
+grow 不受影响（视口比内容长时仍然拉伸）。写入 `docs/style-support.md`。
+
+**执行期新增决策 2：缺失的 flex 因子按"不可伸缩"处理。** Shell 的
+`resolveStyle` 对每个适用属性都会写出解析值（含 initial），所以任何被 Shell 样式
+化的节点一定携带显式的 `flexShrink`（至少是 initial `1`）。反过来，**完全没有
+computed style 资源的节点走的是 legacy direct-prop 路径**（滚动/虚拟列表子系统与
+Core 测试用的 `Prop::Width` 等），从未选择加入 CSS 盒模型。因此 Core 取不到值时
+默认 `grow = 0`、`shrink = 0`，而不是 CSS 的 `shrink = 1`。这条区分让 CSS 语义对
+CSS 节点完全成立，同时保证既有 direct-prop 场景（如横向滚动的 cell 行）零回归。
 
 ### D4：修正百分比基准（分离"测量约束"与"百分比基准"）
 
@@ -244,24 +258,24 @@ packages/ui/src/input.tsx / input.scss                prefix/suffix slot（出�
 
 ## 6. 备选方案
 
-| 方案 | 未采用原因 |
-| --- | --- |
-| 递归重排（Taffy 式） | 破坏显式栈的抗爆栈保证；深树是本引擎的核心场景 |
-| 在 `arrange_children` 里直接改尺寸 | 子树不重新测量，文本换行/孙节点几何全错；是伪实现 |
-| 用 `f32` 存 basis 的三态（auto/px/%） | canonical `length` 已有 `auto` 单位，重复造轮子 |
-| 百分比问题留给 E3 | 已有产品级规避在生产代码里（Progress），欠债在涨；且 flex-basis 的 % 依赖同一条基准 |
-| 不加 feature gate，只加属性 | 降级行为不可测；违反 Track B 统一约束 |
-| 引入 min-content 以支持 `min-width: auto` | 需要完整内在尺寸子系统，远超 E5 范围；显式记为偏差 |
+| 方案                                      | 未采用原因                                                                          |
+| ----------------------------------------- | ----------------------------------------------------------------------------------- |
+| 递归重排（Taffy 式）                      | 破坏显式栈的抗爆栈保证；深树是本引擎的核心场景                                      |
+| 在 `arrange_children` 里直接改尺寸        | 子树不重新测量，文本换行/孙节点几何全错；是伪实现                                   |
+| 用 `f32` 存 basis 的三态（auto/px/%）     | canonical `length` 已有 `auto` 单位，重复造轮子                                     |
+| 百分比问题留给 E3                         | 已有产品级规避在生产代码里（Progress），欠债在涨；且 flex-basis 的 % 依赖同一条基准 |
+| 不加 feature gate，只加属性               | 降级行为不可测；违反 Track B 统一约束                                               |
+| 引入 min-content 以支持 `min-width: auto` | 需要完整内在尺寸子系统，远超 E5 范围；显式记为偏差                                  |
 
 ## 7. 失败模式
 
-| 失败模式 | 表现 | 检测 |
-| --- | --- | --- |
-| 冻结循环不收敛 | 布局 hang | 迭代上限 = 子节点数，超出返回 `LayoutError::SceneInvariant` |
-| 第二遍与第一遍尺寸振荡 | 帧间抖动 | 第二遍不再触发第三遍（`flex_pass` 单向），结果确定 |
-| 嵌套 grow 链重算爆炸 | 帧时尖峰 | `flex_relayouts` 计数器 + `m1:perf` 绝对门禁 |
-| 百分比基准修复改变现有布局 | 既有页面回归 | 非滚动轴逐字节等价（§D4）+ 全仓回归 |
-| feature gate 误拒 | 样式整体失效 | 逐条 gate 单测 + 往返测试 |
+| 失败模式                   | 表现         | 检测                                                        |
+| -------------------------- | ------------ | ----------------------------------------------------------- |
+| 冻结循环不收敛             | 布局 hang    | 迭代上限 = 子节点数，超出返回 `LayoutError::SceneInvariant` |
+| 第二遍与第一遍尺寸振荡     | 帧间抖动     | 第二遍不再触发第三遍（`flex_pass` 单向），结果确定          |
+| 嵌套 grow 链重算爆炸       | 帧时尖峰     | `flex_relayouts` 计数器 + `m1:perf` 绝对门禁                |
+| 百分比基准修复改变现有布局 | 既有页面回归 | 非滚动轴逐字节等价（§D4）+ 全仓回归                         |
+| feature gate 误拒          | 样式整体失效 | 逐条 gate 单测 + 往返测试                                   |
 
 ## 8. 回滚
 

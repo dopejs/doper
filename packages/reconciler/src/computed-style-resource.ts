@@ -23,7 +23,12 @@ import {
 const ENTRY_HEADER_BYTES = 8;
 const TRANSFORM_RECORD_BYTES = 28;
 const encoder = new TextEncoder();
-const allFeatureBits = Object.values(STYLE_FEATURE_BITS).reduce((bits, value) => bits | value, 0);
+const featureBitByPropertyId = new Map<number, number>(
+  Object.values(STYLE_PROPERTIES).map((metadata) => [
+    metadata.id,
+    STYLE_FEATURE_BITS[metadata.feature as keyof typeof STYLE_FEATURE_BITS],
+  ]),
+);
 
 /** Deterministically encodes resolved base and exact-state values for Core validation. */
 export function encodeComputedStyleResource(result: ResolveInteractionStylesResult): Uint8Array {
@@ -64,7 +69,14 @@ export function encodeComputedStyleResource(result: ResolveInteractionStylesResu
   const view = new DataView(bytes.buffer);
   bytes[COMPUTED_STYLE_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
   bytes[COMPUTED_STYLE_VARIANT_OFFSET] = COMPUTED_STYLE_RESOURCE_VARIANT;
-  view.setUint32(COMPUTED_STYLE_FEATURE_BITS_OFFSET, allFeatureBits, true);
+  // The header declares the features this resource actually uses, not every
+  // feature the Shell can emit. A Core that does not know a newer feature then
+  // rejects only the resources that need it, instead of every resource.
+  const featureBits = entries.reduce(
+    (bits, entry) => bits | (featureBitByPropertyId.get(entry.propertyId) ?? 0),
+    0,
+  );
+  view.setUint32(COMPUTED_STYLE_FEATURE_BITS_OFFSET, featureBits, true);
   view.setUint32(COMPUTED_STYLE_ENTRY_COUNT_OFFSET, entries.length, true);
   view.setUint32(COMPUTED_STYLE_PAYLOAD_BYTES_OFFSET, payloadBytes, true);
   let offset = COMPUTED_STYLE_PAYLOAD_OFFSET;

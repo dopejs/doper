@@ -98,6 +98,7 @@ function expandShorthand(
   if (shorthand === undefined) return invalidValue(rawName, rawValue, location);
   const grammar = shorthand.grammar;
   if (grammar === "border") return expandBorder(shorthand.longhands, rawName, rawValue, location);
+  if (grammar === "flex") return expandFlex(shorthand.longhands, rawName, rawValue, location);
   const parts = splitWhitespace(rawValue);
   if (parts === null) return invalidValue(rawName, rawValue, location);
 
@@ -138,6 +139,62 @@ function expandShorthand(
     };
   }
   return invalidValue(rawName, rawValue, location);
+}
+
+/**
+ * Expands `flex` into its three longhands.
+ *
+ * `flex: <number>` uses a `0px` basis rather than CSS's `0%`: an indefinite
+ * container makes `0%` behave as `auto`, while `0px` is always definite, and
+ * the two agree inside a definite container. See docs/style-support.md.
+ */
+function expandFlex(
+  longhands: readonly string[],
+  rawName: string,
+  rawValue: unknown,
+  location?: StyleSourceLocation,
+): DeclarationExpansion {
+  // splitWhitespace turns a bare number into a px length because every other
+  // shorthand takes lengths. A bare number in `flex` is a grow factor.
+  const parts = typeof rawValue === "number" ? [String(rawValue)] : splitWhitespace(rawValue);
+  if (parts === null || parts.length < 1 || parts.length > 3) {
+    return invalidValue(rawName, rawValue, location);
+  }
+  const emit = (
+    grow: SpecifiedStyleValue,
+    shrink: SpecifiedStyleValue,
+    basis: SpecifiedStyleValue,
+  ): DeclarationExpansion => ({
+    declarations: [grow, shrink, basis].map((value, index) =>
+      declaration(longhands[index] as StylePropertyName, value, location),
+    ),
+    diagnostics: [],
+  });
+
+  if (parts.length === 1) {
+    const single = parts[0];
+    if (single === "none") return emit(0, 0, "auto");
+    if (single === "auto") return emit(1, 1, "auto");
+    const grow = parsePropertyValue("non-negative-number", single);
+    if (grow !== null) return emit(grow, 1, "0px");
+    const basis = parsePropertyValue("length-auto", single);
+    if (basis !== null) return emit(1, 1, basis);
+    return invalidValue(rawName, rawValue, location);
+  }
+
+  const grow = parsePropertyValue("non-negative-number", parts[0]);
+  if (grow === null) return invalidValue(rawName, rawValue, location);
+  const second = parts[1];
+  const shrink = parsePropertyValue("non-negative-number", second);
+  if (parts.length === 2) {
+    if (shrink !== null) return emit(grow, shrink, "0px");
+    const basis = parsePropertyValue("length-auto", second);
+    if (basis !== null) return emit(grow, 1, basis);
+    return invalidValue(rawName, rawValue, location);
+  }
+  const basis = parsePropertyValue("length-auto", parts[2]);
+  if (shrink === null || basis === null) return invalidValue(rawName, rawValue, location);
+  return emit(grow, shrink, basis);
 }
 
 function expandBorder(
@@ -193,6 +250,10 @@ function parsePropertyValue(grammar: string, rawValue: unknown): SpecifiedStyleV
       return rawValue === "none" ? "none" : parseLength(rawValue, false, false);
     case "non-negative-length":
       return parseLength(rawValue, true, false);
+    case "non-negative-number": {
+      const number = parseFiniteNumber(rawValue);
+      return number === null || number < 0 ? null : number;
+    }
     case "non-negative-length-normal":
       return rawValue === "normal" ? "normal" : parseLength(rawValue, true, false);
     case "positive-length":
