@@ -1,10 +1,12 @@
 import { TextEditingController, type EditTransaction } from "@dopejs/pingo-editing";
-import { Input as EngineInput, View, type EditableInputMode, type PingoNode } from "@dopejs/pingo-jsx";
+import { Input as EngineInput, memo, View, type EditableInputMode, type PingoNode } from "@dopejs/pingo-jsx";
 import { useMemo } from "@dopejs/pingo-runtime";
 
 import { useTheme } from "../theme";
 
-export interface InputProps {
+// Type alias (not interface) so the implicit index signature satisfies
+// memo's Props extends Record<string, unknown> constraint.
+export type InputProps = {
   /** Initial value for uncontrolled usage; ignored when `controller` is set. */
   readonly value?: string;
   /** Called after each edit transaction with the controller-applied value. */
@@ -20,7 +22,7 @@ export interface InputProps {
   readonly className?: string;
   readonly width?: number;
   readonly semanticLabel?: string;
-}
+};
 
 /** Builds the Input descriptor tree. Pure: safe to call without a component scope. */
 export function inputDescriptor(props: InputProps, controller: TextEditingController): PingoNode {
@@ -59,11 +61,14 @@ export function inputDescriptor(props: InputProps, controller: TextEditingContro
 /**
  * shadcn-style decorated input. MUST be used as a JSX component
  * (createElement(Input, props) / <Input />) — it uses hooks to keep the
- * editing controller stable across renders; calling it as a plain function
- * throws outside a component scope. Known gaps (tracked in the capability
- * plan): no placeholder, no focus ring, no prefix/suffix slots.
+ * editing controller stable across renders; calling `.component(props)` as a
+ * plain function throws outside a component scope. Memoized: re-renders only
+ * when props change — hits require stable handler references (an inline
+ * `onValueChange` defeats memo, same semantics as every memo'd component).
+ * Known gaps (tracked in the capability plan): no placeholder, no focus ring,
+ * no prefix/suffix slots.
  */
-export function Input(props: InputProps): PingoNode {
+export const Input = memo(function InputImpl(props: InputProps): PingoNode {
   // Deps [] intentionally capture the initial controller/value: a later
   // `controller` prop change is ignored — callers owning a controller should
   // keep passing the same instance for the component's lifetime.
@@ -72,4 +77,4 @@ export function Input(props: InputProps): PingoNode {
     [],
   );
   return inputDescriptor(props, controller);
-}
+});

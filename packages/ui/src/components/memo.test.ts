@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Checkbox } from "./checkbox";
 import { Divider } from "./divider";
 import { IconButton } from "./icon-button";
+import { Input } from "./input";
 import { Label } from "./label";
 import { Progress } from "./progress";
 import { RadioGroup, RadioGroupItem } from "./radio-group";
@@ -35,6 +36,7 @@ describe("memoized components", () => {
       CardFooter,
       Label,
       IconButton,
+      Input,
       Divider,
       Skeleton,
       Alert,
