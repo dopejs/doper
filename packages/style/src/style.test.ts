@@ -45,6 +45,7 @@ describe("style schema capabilities", () => {
       borderWidth: "1px 2px 3px 4px",
       flex: "1 1 auto",
       gap: "8px 12px",
+      inset: "0 auto",
       margin: "auto 2px",
       overflow: "hidden auto",
       padding: 8,
@@ -57,7 +58,9 @@ describe("style schema capabilities", () => {
     expect(supportsStyle("width", 10)).toBe(true);
     expect(supportsStyle("transform", "scale(nope)")).toBe(false);
     expect(supportsStyle("transform", "translate(10px, 20%) rotate(0.5turn)")).toBe(true);
-    expect(supportsStyle("position", "absolute")).toBe(false);
+    // `position: absolute` is in the subset since E3; `relative` is not.
+    expect(supportsStyle("position", "absolute")).toBe(true);
+    expect(supportsStyle("position", "relative")).toBe(false);
   });
 });
 
@@ -181,6 +184,28 @@ describe("computed style resolver", () => {
     ]);
     expect(result.style.color).toBe("#444444ff");
     expect(result.style.width).toBe("40px");
+  });
+
+  it("expands inset and accepts only the positioning keywords", () => {
+    const result = resolveStyle({
+      nodeType: "view",
+      inlineStyle: { position: "absolute", inset: "0 auto 4px 8px" },
+    });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.style).toMatchObject({
+      position: "absolute",
+      top: "0px",
+      right: "auto",
+      bottom: "4px",
+      left: "8px",
+    });
+    expect(resolveStyle({ nodeType: "view", inlineStyle: { inset: 0 } }).style.left).toBe("0px");
+
+    expect(supportsStyle("position", "static")).toBe(true);
+    // relative and fixed are deliberately absent; see docs/style-support.md.
+    for (const invalid of ["relative", "fixed", "sticky", "auto"]) {
+      expect(supportsStyle("position", invalid), invalid).toBe(false);
+    }
   });
 
   it("accepts an integer or auto z-index and nothing else", () => {

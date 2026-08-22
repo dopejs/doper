@@ -119,4 +119,6 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
   overflow）保留，因为 indicator 宽度本就由 0–100% clamp 保证不溢出。
 - 引擎行为（仍存在）：主轴不确定时百分比解析为 `0` 而不是 CSS 的 `auto`；
   flex item 没有 CSS 的 automatic minimum size，可被压缩到 0（等价于浏览器里
-  到处写 `min-w-0`）。完整偏差清单见 `docs/style-support.md`。
+  到处写 `min-w-0`）；`position: absolute` 的包含块是**父节点**而不是最近的
+  positioned 祖先，因此绝对定位元素必须是它所对齐的盒子的直接子节点，
+  也没有 `position: relative`。完整偏差清单见 `docs/style-support.md`。

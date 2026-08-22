@@ -2,7 +2,7 @@
 
 # CSS subset support
 
-Subset version: **1.4.0**
+Subset version: **1.5.0**
 
 The Shell parses and computes the declarations below and the M6 Core consumes their canonical
 typed values. CSS text and selector matching remain outside Core.
@@ -71,6 +71,11 @@ typed values. CSS text and selector matching remain outside Core.
 | `flex-basis`          | `flexBasis`          | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
 | `box-shadow`          | `boxShadow`          | `box-shadow`                 | no        | paint, paintSelf                      | discrete  | M6 Core       |
 | `z-index`             | `zIndex`             | `z-index`                    | no        | paint, hit                            | discrete  | M6 Core       |
+| `position`            | `position`           | `positioning`                | no        | layout, paint, hit, scroll            | discrete  | M6 Core       |
+| `top`                 | `top`                | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `right`               | `right`              | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `bottom`              | `bottom`             | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `left`                | `left`               | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
 
 ## Shorthands
 
@@ -87,6 +92,7 @@ Shorthands are expanded in the Shell and never reach the ABI.
 | `border-style` | `borderStyle`   | `box-border-style`                | `borderTopStyle`, `borderRightStyle`, `borderBottomStyle`, `borderLeftStyle`                                                                                                                                                             |
 | `border`       | `border`        | `border`                          | `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderTopColor`, `borderRightColor`, `borderBottomColor`, `borderLeftColor`, `borderTopStyle`, `borderRightStyle`, `borderBottomStyle`, `borderLeftStyle` |
 | `flex`         | `flex`          | `flex`                            | `flexGrow`, `flexShrink`, `flexBasis`                                                                                                                                                                                                    |
+| `inset`        | `inset`         | `box-length-auto`                 | `top`, `right`, `bottom`, `left`                                                                                                                                                                                                         |
 
 ## Known deviations from CSS
 
@@ -117,6 +123,10 @@ When a flex container scrolls along its main axis, overflowing content becomes s
 ### `z-index` reorders siblings, not stacking contexts
 
 A `z-index` lifts or lowers a child within its own siblings, stably, so equal values keep document order. There are no stacking contexts: `opacity` and `transform` do not create one, and a `z-index` never escapes its parent. Accessibility order is deliberately unaffected, because a screen reader follows document order rather than what is drawn on top.
+
+### An absolutely positioned child is placed against its parent
+
+CSS uses the nearest positioned ancestor as the containing block. This subset uses the parent's padding box, so every element is a containing block for its own absolutely positioned children and such a child must be a direct child of the box it is placed against. `position: relative` therefore has nothing left to mean and is not in the subset; use `transform` for a visual offset. With both `left` and `right` given, `left` wins and `right` is ignored; with neither, the child sits at the content-box origin rather than at its static position.
 
 ### No `flex-wrap`
 

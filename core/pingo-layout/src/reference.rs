@@ -135,12 +135,17 @@ fn layout_node(
     let container = describe(scene, node, constraints, basis, flex_axis_row)?;
 
     let mut items = Vec::new();
+    let mut out_of_flow = Vec::new();
     let mut child = scene.first_child(node);
     let has_children = child.is_some();
     while let Some(current) = child {
         child = scene.next_sibling(current);
         if scene.display_none(current) {
             zero(scene, current, out);
+            continue;
+        }
+        if scene.out_of_flow(current) {
+            out_of_flow.push(child_item(scene, &container, current)?);
             continue;
         }
         items.push(child_item(scene, &container, current)?);
@@ -190,7 +195,65 @@ fn layout_node(
         size = container_size(&container, &items, intrinsic);
     }
     arrange(&container, &items, size, out);
+    // Out of flow: laid out against the container's padding box and placed
+    // there, never touching the flow totals.
+    for item in &mut out_of_flow {
+        item.size = layout_node(
+            scene,
+            item.node,
+            item.constraints,
+            item.basis,
+            Some(container.row),
+            measurer,
+            out,
+        )?;
+        let offset = out_of_flow_offset(scene, &container, item);
+        out.geometry.insert(item.node, (offset, item.size));
+    }
     Ok(size)
+}
+
+/// Where an out-of-flow child sits inside its container's padding box.
+fn out_of_flow_offset(scene: &Scene, container: &Box2, item: &Item) -> Point {
+    let x = axis_offset(
+        scene,
+        item.node,
+        container.percent.width,
+        item.size.width + item.margin.horizontal(),
+        StyleProperty::Left,
+        StyleProperty::Right,
+    ) + item.margin.left;
+    let y = axis_offset(
+        scene,
+        item.node,
+        container.percent.height,
+        item.size.height + item.margin.vertical(),
+        StyleProperty::Top,
+        StyleProperty::Bottom,
+    ) + item.margin.top;
+    Point::new(container.insets.left + x, container.insets.top + y)
+}
+
+fn axis_offset(
+    scene: &Scene,
+    node: NodeId,
+    available: f32,
+    outer: f32,
+    start: StyleProperty,
+    end: StyleProperty,
+) -> f32 {
+    if let Some(value) = resolve_style_length(scene.style_length(node, start, 0), available)
+        && value.is_finite()
+    {
+        return value;
+    }
+    if available.is_finite()
+        && let Some(value) = resolve_style_length(scene.style_length(node, end, 0), available)
+        && value.is_finite()
+    {
+        return available - value - outer;
+    }
+    0.0
 }
 
 /// Distributes main-axis free space and tightens the affected constraints.
@@ -587,16 +650,48 @@ fn describe(
 fn child_item(scene: &Scene, container: &Box2, node: NodeId) -> Result<Item, LayoutError> {
     let margin_basis = container_margin_basis(container);
     let margins = style_margin(scene, node, margin_basis)?;
-    let mut constraints = container.child_constraints;
-    constraints.max_width = subtract_insets(constraints.max_width, margins.values.horizontal());
-    constraints.max_height = subtract_insets(constraints.max_height, margins.values.vertical());
-    let basis = PercentBasis {
-        width: subtract_insets(container.percent.width, margins.values.horizontal()),
-        height: subtract_insets(container.percent.height, margins.values.vertical()),
+    let out_of_flow = scene.out_of_flow(node);
+    let mut constraints = if out_of_flow {
+        BoxConstraints {
+            min_width: 0.0,
+            max_width: subtract_insets(container.percent.width, margins.values.horizontal()),
+            min_height: 0.0,
+            max_height: subtract_insets(container.percent.height, margins.values.vertical()),
+        }
+    } else {
+        container.child_constraints
     };
+    if !out_of_flow {
+        constraints.max_width = subtract_insets(constraints.max_width, margins.values.horizontal());
+        constraints.max_height = subtract_insets(constraints.max_height, margins.values.vertical());
+    }
+    let basis = if out_of_flow {
+        container.percent
+    } else {
+        PercentBasis {
+            width: subtract_insets(container.percent.width, margins.values.horizontal()),
+            height: subtract_insets(container.percent.height, margins.values.vertical()),
+        }
+    };
+    if out_of_flow {
+        if has_requested_dimension(scene, node, Prop::Width, StyleProperty::Width) {
+            constraints.max_width = f32::INFINITY;
+        } else if let Some(span) = inset_span(scene, node, basis.width, true) {
+            constraints.min_width = span;
+            constraints.max_width = span;
+        }
+        if has_requested_dimension(scene, node, Prop::Height, StyleProperty::Height) {
+            constraints.max_height = f32::INFINITY;
+        } else if let Some(span) = inset_span(scene, node, basis.height, false) {
+            constraints.min_height = span;
+            constraints.max_height = span;
+        }
+    }
     let child_width_basis = percentage_basis(basis.width, constraints.min_width);
     let child_height_basis = percentage_basis(basis.height, constraints.min_height);
-    if container.align == StyleKeyword::Stretch {
+    // align-items does not reach an out-of-flow child; its cross size comes
+    // from its own box and its insets.
+    if !out_of_flow && container.align == StyleKeyword::Stretch {
         if container.row {
             if !has_requested_dimension(scene, node, Prop::Height, StyleProperty::Height)
                 && constraints.max_height.is_finite()
@@ -692,6 +787,24 @@ fn child_item(scene: &Scene, container: &Box2, node: NodeId) -> Result<Item, Lay
         auto_cross_end,
         size: Size::ZERO,
     })
+}
+
+/// The extent both insets pin down, when neither is `auto`.
+fn inset_span(scene: &Scene, node: NodeId, available: f32, horizontal: bool) -> Option<f32> {
+    if !available.is_finite() {
+        return None;
+    }
+    let (start, end) = if horizontal {
+        (StyleProperty::Left, StyleProperty::Right)
+    } else {
+        (StyleProperty::Top, StyleProperty::Bottom)
+    };
+    let start = resolve_style_length(scene.style_length(node, start, 0), available)?;
+    let end = resolve_style_length(scene.style_length(node, end, 0), available)?;
+    if !start.is_finite() || !end.is_finite() {
+        return None;
+    }
+    Some((available - start - end).max(0.0))
 }
 
 /// Inline basis every direct child resolves percentage margins against.
@@ -1030,6 +1143,31 @@ mod tests {
                 STYLE_VALUE_LENGTH,
                 px(f32::from(spec[15] % 70)),
             ));
+        }
+        if spec[11].is_multiple_of(7) {
+            entries.push((
+                StyleProperty::Position,
+                STYLE_VALUE_KEYWORD,
+                keyword(StyleKeyword::Absolute),
+            ));
+            for (index, property) in [
+                StyleProperty::Top,
+                StyleProperty::Right,
+                StyleProperty::Bottom,
+                StyleProperty::Left,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let knob = spec[(12 + index) % 16];
+                match knob % 4 {
+                    0 => entries.push((property, STYLE_VALUE_LENGTH, px(f32::from(knob % 60)))),
+                    1 => {
+                        entries.push((property, STYLE_VALUE_LENGTH, percent(f32::from(knob % 61))))
+                    }
+                    _ => {}
+                }
+            }
         }
         entries
     }

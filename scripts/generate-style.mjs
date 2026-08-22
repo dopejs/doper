@@ -46,6 +46,7 @@ const grammarTypes = {
   "pair-non-negative-length-normal": "string | number",
   "pair-overflow": "string",
   "pointer-events": '"auto" | "none"',
+  "positioning": '"absolute" | "static"',
   "position": "string",
   "positive-length": "PingoStyleLength",
   "text-align": '"center" | "end" | "justify" | "left" | "right" | "start"',

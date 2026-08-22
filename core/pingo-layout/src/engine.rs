@@ -775,6 +775,9 @@ fn compute_subtree(
             // actually changed. Everything else keeps its first-pass subtree and
             // just re-contributes its box, so a container with one flexible
             // child among many costs one extra subtree, not all of them.
+            if frame.flex_pass && scene.out_of_flow(child) {
+                continue;
+            }
             if frame.flex_pass && flex.target_for(frame, child).is_none() {
                 let index = scene.resolve(child).ok_or(LayoutError::SceneInvariant(
                     "layout encountered a stale node",
@@ -881,6 +884,11 @@ fn compute_subtree(
                     frame.margin.values.left + size.width + frame.margin.values.right
                 };
                 parent.cross = parent.cross.max(cross);
+            } else if scene.out_of_flow(frame.node) {
+                // Out of flow: placed against the parent's padding box, and
+                // deliberately absent from the flow totals so it cannot grow
+                // the container or consume a gap.
+                output.offsets[frame.index] = out_of_flow_offset(scene, parent, frame.node, size)?;
             } else {
                 if !parent.flex_pass {
                     record_flex_item(scene, parent, &frame, size, &mut flex.items);
@@ -1183,7 +1191,7 @@ fn zero_subtree(
 /// parent's content box. Any node whose geometry reads that basis therefore lays
 /// out differently incrementally than it does in a full pass, so it cannot be a
 /// containment boundary.
-const PERCENTAGE_SENSITIVE_PROPERTIES: [StyleProperty; 16] = [
+const PERCENTAGE_SENSITIVE_PROPERTIES: [StyleProperty; 20] = [
     StyleProperty::MinWidth,
     StyleProperty::MinHeight,
     StyleProperty::MaxWidth,
@@ -1200,12 +1208,19 @@ const PERCENTAGE_SENSITIVE_PROPERTIES: [StyleProperty; 16] = [
     StyleProperty::MarginRight,
     StyleProperty::MarginBottom,
     StyleProperty::MarginLeft,
+    StyleProperty::Top,
+    StyleProperty::Right,
+    StyleProperty::Bottom,
+    StyleProperty::Left,
 ];
 
 fn is_fixed_boundary(scene: &Scene, node: NodeId) -> bool {
     has_fixed_dimension(scene, node, Prop::Width, StyleProperty::Width)
         && has_fixed_dimension(scene, node, Prop::Height, StyleProperty::Height)
         && !reads_parent_percentage_basis(scene, node)
+        // An out-of-flow node takes its position from the parent's box, so it
+        // cannot contain a relayout that started below it.
+        && !scene.out_of_flow(node)
 }
 
 fn reads_parent_percentage_basis(scene: &Scene, node: NodeId) -> bool {
@@ -1523,6 +1538,9 @@ fn constraints_for_child(
 ) -> Result<ChildInput, LayoutError> {
     let margin_basis = child_margin_basis(parent);
     let margin = style_margin(scene, child, margin_basis)?.values;
+    if scene.out_of_flow(child) {
+        return out_of_flow_input(scene, parent, child, margin_basis, margin);
+    }
     let mut constraints = parent.child_constraints;
     constraints.max_width = subtract_insets(constraints.max_width, margin.horizontal());
     constraints.max_height = subtract_insets(constraints.max_height, margin.vertical());
@@ -1585,6 +1603,136 @@ pub(crate) fn flex_basis_main(
     })
 }
 
+/// Constraints for a child that has left its parent's flow.
+///
+/// The containing block is the parent's padding box rather than CSS's nearest
+/// positioned ancestor: offsets are stored parent-relative, and the parent's
+/// available content box is known on the way down while an ancestor's final
+/// size is not. See docs/e3-position-design.md.
+fn out_of_flow_input(
+    scene: &Scene,
+    parent: &Frame,
+    child: NodeId,
+    margin_basis: f32,
+    margin: EdgeInsets,
+) -> Result<ChildInput, LayoutError> {
+    let basis = PercentBasis {
+        width: parent.percent.width,
+        height: parent.percent.height,
+    };
+    // With no size and no opposing insets the box shrinks to fit inside the
+    // containing block, which is the closest this subset gets to CSS's
+    // shrink-to-fit. A declared size is used as declared and is allowed to
+    // overflow, as CSS does: the containing block gives the origin and the
+    // percentage basis, not a ceiling.
+    let mut constraints = BoxConstraints {
+        min_width: 0.0,
+        max_width: subtract_insets(basis.width, margin.horizontal()),
+        min_height: 0.0,
+        max_height: subtract_insets(basis.height, margin.vertical()),
+    };
+    if has_requested_dimension(scene, child, Prop::Width, StyleProperty::Width) {
+        constraints.max_width = f32::INFINITY;
+    } else if let Some(span) = inset_span(scene, child, basis.width, true)? {
+        // Opposite insets with no size between them decide the size themselves.
+        constraints.min_width = span;
+        constraints.max_width = span;
+    }
+    if has_requested_dimension(scene, child, Prop::Height, StyleProperty::Height) {
+        constraints.max_height = f32::INFINITY;
+    } else if let Some(span) = inset_span(scene, child, basis.height, false)? {
+        constraints.min_height = span;
+        constraints.max_height = span;
+    }
+    Ok(ChildInput {
+        constraints,
+        basis,
+        margin_basis,
+        flex_axis_row: parent.row,
+    })
+}
+
+/// The extent both insets pin down, when neither is `auto`.
+fn inset_span(
+    scene: &Scene,
+    node: NodeId,
+    available: f32,
+    horizontal: bool,
+) -> Result<Option<f32>, LayoutError> {
+    if !available.is_finite() {
+        return Ok(None);
+    }
+    let (start, end) = if horizontal {
+        (StyleProperty::Left, StyleProperty::Right)
+    } else {
+        (StyleProperty::Top, StyleProperty::Bottom)
+    };
+    let Some(start) = resolve_style_length(scene.style_length(node, start, 0), available) else {
+        return Ok(None);
+    };
+    let Some(end) = resolve_style_length(scene.style_length(node, end, 0), available) else {
+        return Ok(None);
+    };
+    if !start.is_finite() || !end.is_finite() {
+        return Ok(None);
+    }
+    Ok(Some((available - start - end).max(0.0)))
+}
+
+/// Where an out-of-flow child sits inside its parent's padding box.
+///
+/// `left` wins over `right` when both are given, matching CSS for a
+/// left-to-right box. With neither, the child sits at the content-box origin;
+/// CSS would use its static position, which this subset does not model.
+fn out_of_flow_offset(
+    scene: &Scene,
+    frame: &Frame,
+    child: NodeId,
+    size: Size,
+) -> Result<Point, LayoutError> {
+    let insets = frame.padding.add(frame.border);
+    let margin = style_margin(scene, child, child_margin_basis(frame))?.values;
+    let x = out_of_flow_axis(
+        scene,
+        child,
+        frame.percent.width,
+        size.width + margin.horizontal(),
+        StyleProperty::Left,
+        StyleProperty::Right,
+    ) + margin.left;
+    let y = out_of_flow_axis(
+        scene,
+        child,
+        frame.percent.height,
+        size.height + margin.vertical(),
+        StyleProperty::Top,
+        StyleProperty::Bottom,
+    ) + margin.top;
+    Ok(Point::new(insets.left + x, insets.top + y))
+}
+
+fn out_of_flow_axis(
+    scene: &Scene,
+    node: NodeId,
+    available: f32,
+    outer: f32,
+    start: StyleProperty,
+    end: StyleProperty,
+) -> f32 {
+    if let Some(value) = resolve_style_length(scene.style_length(node, start, 0), available)
+        && value.is_finite()
+    {
+        return value;
+    }
+    if available.is_finite()
+        && let Some(value) = resolve_style_length(scene.style_length(node, end, 0), available)
+        && value.is_finite()
+    {
+        return available - value - outer;
+    }
+    0.0
+}
+
 /// Inline basis every direct child of `parent` uses for percentage margins.
 ///
 /// Margins are resolved once against this number by `constraints_for_child`,
@@ -1620,7 +1768,7 @@ fn arrange_children(
     let mut auto_main_edges = 0_usize;
     let mut child = scene.first_child(frame.node);
     while let Some(node) = child {
-        if !scene.display_none(node) {
+        if !scene.display_none(node) && !scene.out_of_flow(node) {
             child_count += 1;
             let auto = style_margin(scene, node, percentage_basis)?.auto;
             auto_main_edges += if frame.row {
@@ -1647,7 +1795,8 @@ fn arrange_children(
     child = scene.first_child(frame.node);
     while let Some(node) = child {
         child = scene.next_sibling(node);
-        if scene.display_none(node) {
+        // An out-of-flow child was already placed when it popped.
+        if scene.display_none(node) || scene.out_of_flow(node) {
             continue;
         }
         let index = scene.resolve(node).ok_or(LayoutError::SceneInvariant(
@@ -2126,6 +2275,10 @@ mod tests {
     }
 
     fn computed_style(entries: &[(StyleProperty, u8, Vec<u8>)]) -> Vec<u8> {
+        // The decoder requires entries sorted by (state, property).
+        let mut entries = entries.to_vec();
+        entries.sort_by_key(|(property, _, _)| *property as u16);
+        let entries = &entries;
         let payload_bytes = entries
             .iter()
             .map(|(_, _, payload)| 8 + payload.len().next_multiple_of(4))
@@ -3243,6 +3396,163 @@ mod tests {
         assert_eq!(widths(&engine, &nodes), vec![40.0, 40.0]);
         assert_eq!(engine.metrics().flex_resolutions, 0);
         assert_eq!(engine.metrics().flex_relayouts, 0);
+    }
+
+    #[test]
+    fn an_absolute_child_leaves_the_flow_and_lands_on_its_insets() {
+        let root = id(0);
+        let flow = id(1);
+        let pinned = id(2);
+        let stretched = id(3);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[
+                        (StyleProperty::PaddingTop, STYLE_VALUE_LENGTH, px(10.0)),
+                        (StyleProperty::PaddingLeft, STYLE_VALUE_LENGTH, px(10.0)),
+                        (StyleProperty::PaddingRight, STYLE_VALUE_LENGTH, px(10.0)),
+                        (StyleProperty::PaddingBottom, STYLE_VALUE_LENGTH, px(10.0)),
+                    ]),
+                },
+                // Pinned to the bottom-right corner at a declared size.
+                Mutation::DefineResource {
+                    resource_id: 2,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[
+                        (
+                            StyleProperty::Position,
+                            STYLE_VALUE_KEYWORD,
+                            keyword(StyleKeyword::Absolute),
+                        ),
+                        (StyleProperty::Width, STYLE_VALUE_LENGTH, px(20.0)),
+                        (StyleProperty::Height, STYLE_VALUE_LENGTH, px(10.0)),
+                        (StyleProperty::Right, STYLE_VALUE_LENGTH, px(5.0)),
+                        (StyleProperty::Bottom, STYLE_VALUE_LENGTH, px(5.0)),
+                    ]),
+                },
+                // Opposite insets with no size: the insets decide the size.
+                Mutation::DefineResource {
+                    resource_id: 3,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[
+                        (
+                            StyleProperty::Position,
+                            STYLE_VALUE_KEYWORD,
+                            keyword(StyleKeyword::Absolute),
+                        ),
+                        (StyleProperty::Left, STYLE_VALUE_LENGTH, px(4.0)),
+                        (StyleProperty::Right, STYLE_VALUE_LENGTH, px(6.0)),
+                        (StyleProperty::Top, STYLE_VALUE_LENGTH, percent(50.0)),
+                        (StyleProperty::Height, STYLE_VALUE_LENGTH, px(8.0)),
+                    ]),
+                },
+                create(root, NodeKind::Root, None),
+                create(flow, NodeKind::Container, Some(root)),
+                create(pinned, NodeKind::Container, Some(root)),
+                create(stretched, NodeKind::Container, Some(root)),
+                Mutation::SetRef {
+                    node_id: root.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 1,
+                },
+                Mutation::SetRef {
+                    node_id: pinned.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 2,
+                },
+                Mutation::SetRef {
+                    node_id: stretched.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 3,
+                },
+                set_f32(flow, Prop::Width, 30.0),
+                set_f32(flow, Prop::Height, 15.0),
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(120.0, 80.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+
+        // Content box is 100x60 inside 10px padding.
+        // Pinned: right 5 from the content edge, bottom 5 likewise.
+        assert_eq!(
+            engine.snapshot().geometry(pinned),
+            Some((Point::new(10.0 + 75.0, 10.0 + 45.0), Size::new(20.0, 10.0)))
+        );
+        // Stretched: 100 - 4 - 6 wide, top at half the content height.
+        assert_eq!(
+            engine.snapshot().geometry(stretched),
+            Some((Point::new(14.0, 40.0), Size::new(90.0, 8.0)))
+        );
+        // The in-flow child is untouched: nothing out of flow took a slot.
+        assert_eq!(
+            engine.snapshot().geometry(flow),
+            Some((Point::new(10.0, 10.0), Size::new(30.0, 15.0)))
+        );
+    }
+
+    #[test]
+    fn an_absolute_child_never_grows_its_container() {
+        let root = id(0);
+        let shrink = id(1);
+        let huge = id(2);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[
+                        (
+                            StyleProperty::Position,
+                            STYLE_VALUE_KEYWORD,
+                            keyword(StyleKeyword::Absolute),
+                        ),
+                        (StyleProperty::Width, STYLE_VALUE_LENGTH, px(90.0)),
+                        (StyleProperty::Height, STYLE_VALUE_LENGTH, px(70.0)),
+                    ]),
+                },
+                create(root, NodeKind::Root, None),
+                create(shrink, NodeKind::Container, Some(root)),
+                create(huge, NodeKind::Container, Some(shrink)),
+                Mutation::SetRef {
+                    node_id: huge.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 1,
+                },
+                set_f32(shrink, Prop::Width, 20.0),
+            ],
+        );
+        let mut engine = LayoutEngine::new();
+        engine
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(200.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+
+        // The container shrink-wraps to nothing: its only child left the flow.
+        assert_eq!(
+            engine.snapshot().geometry(shrink),
+            Some((Point::ZERO, Size::new(20.0, 0.0)))
+        );
+        assert_eq!(
+            engine.snapshot().geometry(huge),
+            Some((Point::ZERO, Size::new(90.0, 70.0)))
+        );
     }
 
     proptest! {

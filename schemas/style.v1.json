@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "cssSubsetVersion": "1.4.0",
+  "cssSubsetVersion": "1.5.0",
   "propertyIdBits": 16,
   "reservedPropertyIds": [17],
   "reservedPropertyIdReasons": {
@@ -51,6 +51,8 @@
   },
   "keywords": [
     { "id": 1, "name": "anywhere" },
+    { "id": 51, "name": "absolute" },
+    { "id": 52, "name": "static" },
     { "id": 2, "name": "auto" },
     { "id": 3, "name": "baseline" },
     { "id": 4, "name": "border-box" },
@@ -131,6 +133,7 @@
     "overflow-wrap": ["anywhere", "break-word", "normal"],
     "overscroll-behavior": ["auto", "contain", "none"],
     "pointer-events": ["auto", "none"],
+    "positioning": ["absolute", "static"],
     "text-align": ["center", "end", "justify", "left", "right", "start"],
     "text-overflow": ["clip", "ellipsis"],
     "touch-action": ["auto", "manipulation", "none", "pan-x", "pan-y"],
@@ -167,6 +170,10 @@
       "note": "A `z-index` lifts or lowers a child within its own siblings, stably, so equal values keep document order. There are no stacking contexts: `opacity` and `transform` do not create one, and a `z-index` never escapes its parent. Accessibility order is deliberately unaffected, because a screen reader follows document order rather than what is drawn on top."
     },
     {
+      "topic": "An absolutely positioned child is placed against its parent",
+      "note": "CSS uses the nearest positioned ancestor as the containing block. This subset uses the parent's padding box, so every element is a containing block for its own absolutely positioned children and such a child must be a direct child of the box it is placed against. `position: relative` therefore has nothing left to mean and is not in the subset; use `transform` for a visual offset. With both `left` and `right` given, `left` wins and `right` is ignored; with neither, the child sits at the content-box origin rather than at its static position."
+    },
+    {
       "topic": "No `flex-wrap`",
       "note": "Flex containers are single-line. `flex-wrap` is not part of the subset, so main-axis overflow is clipped or scrolled rather than wrapped."
     }
@@ -177,7 +184,8 @@
     { "name": "m6-foundation", "bit": 0 },
     { "name": "flex-sizing", "bit": 1 },
     { "name": "box-shadow", "bit": 2 },
-    { "name": "z-index", "bit": 3 }
+    { "name": "z-index", "bit": 3 },
+    { "name": "positioning", "bit": 4 }
   ],
   "properties": [
     {
@@ -1109,6 +1117,81 @@
       "feature": "z-index",
       "affects": ["paint", "hit"],
       "percentageReference": "none"
+    },
+    {
+      "id": 64,
+      "cssName": "position",
+      "jsName": "position",
+      "initial": "static",
+      "inherited": false,
+      "grammar": "positioning",
+      "canonical": "keyword",
+      "invalidation": ["layout", "paint", "hit", "scroll"],
+      "animation": "discrete",
+      "appliesTo": ["view", "text", "image", "input", "textArea", "video"],
+      "feature": "positioning",
+      "affects": ["layout", "paint", "hit", "scroll"],
+      "percentageReference": "none"
+    },
+    {
+      "id": 65,
+      "cssName": "top",
+      "jsName": "top",
+      "initial": "auto",
+      "inherited": false,
+      "grammar": "length-auto",
+      "canonical": "length",
+      "invalidation": ["layout", "paint", "hit", "scroll"],
+      "animation": "number",
+      "appliesTo": ["view", "text", "image", "input", "textArea", "video"],
+      "feature": "positioning",
+      "affects": ["layout", "hit", "scroll"],
+      "percentageReference": "containing-block-size"
+    },
+    {
+      "id": 66,
+      "cssName": "right",
+      "jsName": "right",
+      "initial": "auto",
+      "inherited": false,
+      "grammar": "length-auto",
+      "canonical": "length",
+      "invalidation": ["layout", "paint", "hit", "scroll"],
+      "animation": "number",
+      "appliesTo": ["view", "text", "image", "input", "textArea", "video"],
+      "feature": "positioning",
+      "affects": ["layout", "hit", "scroll"],
+      "percentageReference": "containing-inline-size"
+    },
+    {
+      "id": 67,
+      "cssName": "bottom",
+      "jsName": "bottom",
+      "initial": "auto",
+      "inherited": false,
+      "grammar": "length-auto",
+      "canonical": "length",
+      "invalidation": ["layout", "paint", "hit", "scroll"],
+      "animation": "number",
+      "appliesTo": ["view", "text", "image", "input", "textArea", "video"],
+      "feature": "positioning",
+      "affects": ["layout", "hit", "scroll"],
+      "percentageReference": "containing-block-size"
+    },
+    {
+      "id": 68,
+      "cssName": "left",
+      "jsName": "left",
+      "initial": "auto",
+      "inherited": false,
+      "grammar": "length-auto",
+      "canonical": "length",
+      "invalidation": ["layout", "paint", "hit", "scroll"],
+      "animation": "number",
+      "appliesTo": ["view", "text", "image", "input", "textArea", "video"],
+      "feature": "positioning",
+      "affects": ["layout", "hit", "scroll"],
+      "percentageReference": "containing-inline-size"
     }
   ],
   "shorthands": [
@@ -1178,6 +1261,12 @@
       "jsName": "flex",
       "grammar": "flex",
       "longhands": ["flexGrow", "flexShrink", "flexBasis"]
+    },
+    {
+      "cssName": "inset",
+      "jsName": "inset",
+      "grammar": "box-length-auto",
+      "longhands": ["top", "right", "bottom", "left"]
     }
   ]
 }

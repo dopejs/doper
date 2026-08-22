@@ -663,6 +663,16 @@ impl Scene {
         }
     }
 
+    /// Whether the node is taken out of its parent's flow.
+    ///
+    /// An out-of-flow child still belongs to its parent in every other sense:
+    /// it is hit, clipped and read in document order like any other child. Only
+    /// its geometry stops coming from the flow.
+    #[must_use]
+    pub fn out_of_flow(&self, node: NodeId) -> bool {
+        self.style_keyword(node, StyleProperty::Position, 0) == Some(StyleKeyword::Absolute)
+    }
+
     /// Returns the node's resolved `z-index`, where `auto` and absent are zero.
     #[must_use]
     pub fn z_index(&self, node: NodeId) -> i32 {
