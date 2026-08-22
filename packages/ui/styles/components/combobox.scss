@@ -1,0 +1,86 @@
+@use "../tokens" as t;
+
+.pui-combobox {
+  flex-direction: column;
+}
+
+.pui-combobox__trigger {
+  align-items: center;
+  justify-content: space-between;
+  min-height: t.$input-height;
+  padding-left: t.$input-padding-x;
+  padding-right: t.$input-padding-x;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$input-border;
+  border-radius: t.$radius-md;
+  background-color: t.$background;
+  cursor: pointer;
+  &.pui-dark {
+    border-color: t.$dark-input-border;
+    background-color: t.$dark-background;
+  }
+}
+
+.pui-combobox__value {
+  font-size: t.$font-size-sm;
+  color: t.$foreground;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-combobox__value--placeholder {
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-combobox__indicator {
+  font-size: t.$font-size-xs;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-combobox__content {
+  position: absolute;
+  top: t.$anchor-top;
+  left: t.$zero;
+  width: t.$full;
+  margin-top: t.$popover-offset;
+  z-index: t.$z-dropdown;
+}
+
+.pui-hover-card {
+  flex-direction: column;
+}
+
+.pui-hover-card__trigger {
+  flex-direction: row;
+}
+
+.pui-hover-card__content {
+  position: absolute;
+  top: t.$anchor-top;
+  left: t.$zero;
+  width: t.$popover-width;
+  margin-top: t.$popover-offset;
+  padding: t.$popover-padding;
+  background-color: t.$card;
+  color: t.$card-foreground;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$border;
+  border-radius: t.$radius-md;
+  box-shadow: t.$shadow-md;
+  z-index: t.$z-dropdown;
+  &.pui-dark {
+    background-color: t.$dark-card;
+    color: t.$dark-card-foreground;
+    border-color: t.$dark-border;
+    box-shadow: t.$dark-shadow-md;
+  }
+}

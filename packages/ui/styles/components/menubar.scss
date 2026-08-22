@@ -1,0 +1,67 @@
+@use "../tokens" as t;
+
+.pui-menubar,
+.pui-navigation-menu {
+  align-items: center;
+  column-gap: t.$menubar-gap;
+  padding: t.$tabs-list-padding;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$border;
+  border-radius: t.$radius-md;
+  background-color: t.$background;
+  &.pui-dark {
+    border-color: t.$dark-border;
+    background-color: t.$dark-background;
+  }
+}
+
+.pui-menubar__menu {
+  flex-direction: column;
+}
+
+.pui-menubar__trigger {
+  padding-left: t.$tabs-trigger-padding-x;
+  padding-right: t.$tabs-trigger-padding-x;
+  padding-top: t.$tabs-trigger-padding-y;
+  padding-bottom: t.$tabs-trigger-padding-y;
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+  border-radius: t.$radius-md;
+  color: t.$foreground;
+  cursor: pointer;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-menubar__trigger--open {
+  background-color: t.$accent;
+  color: t.$accent-foreground;
+  &.pui-dark {
+    background-color: t.$dark-accent;
+    color: t.$dark-accent-foreground;
+  }
+}
+
+.pui-menubar__content {
+  position: absolute;
+  top: t.$anchor-top;
+  left: t.$zero;
+  flex-direction: column;
+  min-width: t.$popover-width;
+  margin-top: t.$popover-offset;
+  padding: t.$tabs-list-padding;
+  background-color: t.$card;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$border;
+  border-radius: t.$radius-md;
+  box-shadow: t.$shadow-md;
+  z-index: t.$z-dropdown;
+  &.pui-dark {
+    background-color: t.$dark-card;
+    border-color: t.$dark-border;
+    box-shadow: t.$dark-shadow-md;
+  }
+}

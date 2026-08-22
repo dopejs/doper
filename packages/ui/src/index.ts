@@ -64,6 +64,12 @@ export { Pagination, paginationRange } from "./components/pagination";
 export type { PaginationProps } from "./components/pagination";
 export { Toggle, ToggleGroup, ToggleGroupItem } from "./components/toggle";
 export type { ToggleGroupItemProps, ToggleGroupProps, ToggleProps } from "./components/toggle";
+export { Combobox } from "./components/combobox";
+export type { ComboboxProps } from "./components/combobox";
+export { HoverCard } from "./components/hover-card";
+export type { HoverCardProps } from "./components/hover-card";
+export { Menubar, MenubarMenu, NavigationMenu } from "./components/menubar";
+export type { MenubarMenuProps, MenubarProps } from "./components/menubar";
 export { Collapsible } from "./components/collapsible";
 export type { CollapsibleProps } from "./components/collapsible";
 export {
