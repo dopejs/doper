@@ -58,6 +58,12 @@ export type {
 } from "./components/dialog";
 export { AlertDialog } from "./components/alert-dialog";
 export type { AlertDialogProps } from "./components/alert-dialog";
+export { Breadcrumb } from "./components/breadcrumb";
+export type { BreadcrumbItem, BreadcrumbProps } from "./components/breadcrumb";
+export { Pagination, paginationRange } from "./components/pagination";
+export type { PaginationProps } from "./components/pagination";
+export { Toggle, ToggleGroup, ToggleGroupItem } from "./components/toggle";
+export type { ToggleGroupItemProps, ToggleGroupProps, ToggleProps } from "./components/toggle";
 export { Collapsible } from "./components/collapsible";
 export type { CollapsibleProps } from "./components/collapsible";
 export {

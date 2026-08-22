@@ -89,7 +89,7 @@ describe("sheet sides", () => {
         "sheet",
         side,
       );
-      const panel = (node as { props: { children: unknown[] } }).props.children[1] as {
+      const panel = (node as unknown as { props: { children: unknown[] } }).props.children[1] as {
         props: { className: string };
       };
       expect(panel.props.className).toContain(`pui-sheet__panel--${side}`);

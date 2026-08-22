@@ -1,0 +1,45 @@
+@use "../tokens" as t;
+
+.pui-pagination {
+  align-items: center;
+  column-gap: t.$pagination-gap;
+}
+
+.pui-pagination__page,
+.pui-pagination__control {
+  min-width: t.$pagination-size;
+  min-height: t.$pagination-size;
+  font-size: t.$font-size-sm;
+  text-align: center;
+  border-radius: t.$radius-md;
+  color: t.$foreground;
+  cursor: pointer;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-pagination__page--active {
+  background-color: t.$primary;
+  color: t.$primary-foreground;
+  font-weight: t.$font-weight-medium;
+  &.pui-dark {
+    background-color: t.$dark-primary;
+    color: t.$dark-primary-foreground;
+  }
+}
+
+.pui-pagination__control--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}
+
+.pui-pagination__ellipsis {
+  min-width: t.$pagination-size;
+  font-size: t.$font-size-sm;
+  text-align: center;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}

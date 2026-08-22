@@ -1,0 +1,32 @@
+@use "../tokens" as t;
+
+.pui-breadcrumb {
+  align-items: center;
+  column-gap: t.$breadcrumb-gap;
+}
+
+.pui-breadcrumb__item {
+  font-size: t.$font-size-sm;
+  color: t.$muted-foreground;
+  cursor: pointer;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-breadcrumb__item--current {
+  color: t.$foreground;
+  font-weight: t.$font-weight-medium;
+  cursor: default;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-breadcrumb__separator {
+  font-size: t.$font-size-sm;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
