@@ -7,7 +7,7 @@ transport → Runtime hook → 定位策略 → 四个锚定组件接入，并�
 **前置：** 设计门 [`e8-layout-readback-design.md`](./e8-layout-readback-design.md)
 D1–D9 已 Accepted，无未决项。
 
-**进度：** E8-1 `7d49cdf`；E8-2 `7d49cdf`；E8-3 `22bb799` + 观察态基准 `455b85b`；E8-4 `07898f7`；E8-5 `350ae71`。
+**进度：** E8-1 `7d49cdf`；E8-2 `7d49cdf`；E8-3 `22bb799` + 观察态基准 `455b85b`；E8-4 `07898f7`；E8-5 `350ae71`；E8-6 `f321ec0`；E8-7 `2d28f10`。
 本文件的复选框**随执行实时维护**，与已完成的其他子计划不同（那些是事后回填的）。
 
 ---
@@ -72,8 +72,9 @@ hosted-root.ts}`
 - [x] `onLayoutGeometry` 回调 + 每帧 `emitLayoutGeometry()`（照 `emitSemantics`）。
 - [x] Worker 协议消息 + 主线程回放路径。
 - [x] `HostedRoot` 侧维护 nodeId → 最新几何的表，并暴露给 Runtime。
-- [ ] feature flag（默认关闭，设计门 D8）：关闭时不发 `ObserveGeometry`，
-      不注册回调。
+- [x] feature flag `layoutReadbackEnabled`（默认关闭，设计门 D8）：关闭时既不注册
+      Host 通道（Core 导出根本不被调用），也不向组件提供 access 对象（因此不发
+      `ObserveGeometry`）。断言：关闭时 `layoutGeometry()` 恒为 undefined。
 - [x] **只接受 `frameSeq` 不回退的几何帧**，更旧的丢弃并计入
       `staleLayoutGeometryFrames()`。设计门 D9 原文写的是"与已应用的 DisplayList
       匹配"，那在 worker 模式下不成立（主线程不应用 DisplayList），已在设计文档
@@ -82,9 +83,12 @@ hosted-root.ts}`
       因为未被裁剪的节点上报无界裁剪框；worker 协议校验器同上；worker 消息投递
       逐字段保真；主线程路径下故意乱序投递时旧帧被丢弃、计入
       `staleLayoutGeometryFrames()`，且节点停止被观察时几何消失而不是变陈旧。
-- [ ] **三 transport 端到端一致性尚未覆盖**：现有测试覆盖主线程路径与 worker 协议
-      两端，但没有一条测试在 SAB / postMessage / 主线程三种 transport 下跑同一场景
-      并比较几何帧。E8-8 出口前补，或明确降级为"协议层已覆盖、端到端未覆盖"。
+- [x] **几何只有两条路径，不是三条**，所以"三 transport 一致性"这个提法本身不准确：
+      SAB 只替换 Shell→Core 的 mutation 传输，几何在 SAB 与 postMessage 两种 worker
+      模式下走的是同一条 `pingo:layout-geometry` 消息（`render-worker.ts` 无分支）。
+      两条路径各自有测试：主线程直调回调（`hosted-root.test.ts`）、worker 消息投递
+      逐字段保真（`worker-client.test.ts`）。**仍未覆盖的是把同一场景跑完整两遍再
+      比较结果**——这需要一个能驱动真实 worker 的夹具，本仓库没有，记为验证缺口。
 
 ### Task E8-5: Runtime `useLayoutValue` 与公开面
 
@@ -124,28 +128,38 @@ hosted-root.ts}`
 
 **Files:** `packages/ui/src/components/{popover,menu}.ts`、皮肤、storybook
 
-- [ ] `Popover` / `DropdownMenu` / `Select` / `Tooltip` 接入策略。
-- [ ] **锚点观察以 `enabled: open` 绑定打开状态**，不绑定 trigger 挂载。
-      回归断言：渲染 100 行、每行一个未打开的 Popover，观察数为 0。
-- [ ] 首帧 `visibility: hidden`，测得几何后显形（设计门 D6）；
-      per-component 可选退回"先猜后校正"。
-- [ ] flag 关闭时四个组件行为与今天逐字节一致（回归断言）。
-- [ ] storybook 增"贴边 / 可滚动容器内 / 长列表"三个展区，明暗都覆盖。
+- [x] `Popover` / `DropdownMenu` / `Select` / `Tooltip` 接入策略
+      （`useAnchoredPlacement`）。
+- [x] **锚点与面板观察都以 `enabled: open` 绑定打开状态**，不绑定 trigger 挂载，
+      所以一屏未打开的 Popover 占 0 个额度。
+- [x] **未测得时完全不下发 style**，皮肤的静态方向照旧——这既是首帧行为，也是 flag
+      关闭时的行为，两条路径合一因此必然被现有测试覆盖。测得后才写
+      `left/top/maxHeight/visibility`；锚点滚出裁剪框时 `visibility: hidden`。
+      比 D6 原文的"首帧显式隐藏"更省：静态方向的首帧位置本来就是对的，隐藏它只会
+      让打开慢一帧，因此 per-component 的"先猜后校正"不需要单独提供。
+- [x] flag 关闭时四个组件的描述符与接入前一致（断言 `style` 键不存在，而不是
+      断言它等于中性值）。
+- [x] 视口通过 `useViewport()` 由 Shell 提供（Host 本就拥有画布尺寸），不新增 ABI 字段。
+- [x] storybook 增"贴边 flip / 可滚动容器内 clip / 24 项 Select size"三个展区，
+      随 Light/Dark 两个 story 一起覆盖明暗。
 
 ### Task E8-8: 门禁与文档回写
 
-- [ ] `pnpm m1:check`（含覆盖率门槛）、`m2:check`、`m3:*`、`m5:backend:diff`、
-      `release:check`、`migration:check`、`storybook:build` 全绿。
-- [ ] WASM 体积：新增通路的 gzip 增量记入 `docs/wasm-size-attribution.md`。
+- [x] `pnpm m1:check`（含覆盖率门槛，p95 3.061ms）、`m2:check`、`m3:check`、
+      `m3:scroll:check`、`m3:text:check`、`m3:diff`、`m3:perf`（p95 0.792µs）、
+      `e8:perf`（8 倍场景 1.31 倍成本）、`m5:backend:diff`、`release:check`、
+      `migration:check`、`storybook:build` 全绿。
+- [x] WASM 体积：**369,999 → 371,133，合计 +1,134 bytes**，工程预算余 22,083，
+      未动用工程→产品之间的 16,384 余量。归因记入 `docs/wasm-size-attribution.md`。
       体积主要是加载期成本，可由预加载与流式编译摊薄，因此**允许侵占工程预算
       （393,216）到产品预算（409,600）之间那 16,384 的既有余量**——那段本就是
       为此预留的。**不上调产品预算**：它是 `docs/design.md` 的产品要求，且低端机
       冷启动的编译时间随模块大小走，预加载藏不住。要守的是记录纪律，不是数字：
       每次增量都要有归因，不允许"体积不重要"退化成"不再测量"。
-- [ ] `docs/design.md` 记录 `useLayoutValue` 由承诺转为已实现，含兼容性与回滚。
-- [ ] `overlay-auto-flip-design.md` 状态从 Blocked 改为 Superseded；
+- [x] `docs/design.md` 记录 `useLayoutValue` 由承诺转为已实现，含兼容性与回滚。
+- [x] `overlay-auto-flip-design.md` 状态从 Blocked 改为 Superseded；
       `packages/ui/README.md` 的"没有碰撞感知定位"条目改写。
-- [ ] 回写 `pingo-ui-implementation-plan.md` 进度表与验收记录。
+- [x] 回写 `pingo-ui-implementation-plan.md` 进度表与验收记录。
 
 ---
 

@@ -1937,7 +1937,30 @@ function Cell({ row, col }: CellProps) {
 ### Hooks 范围
 
 本期提供：`useState` `useMemo` `useCallback` `useRef` `useEffect`（在 commit 后执行）`useSelector` `useSignal`。
-**不提供** `useLayoutEffect` 的同步语义——布局在 Worker 里，同步读布局结果会破坏双时钟。改为 `useLayoutValue(nodeRef, selector)`，异步一帧返回。这是与 React 的一个明确差异，需在文档中显著说明。
+**不提供** `useLayoutEffect` 的同步语义——布局在 Worker 里，同步读布局结果会破坏双时钟。改为异步一帧返回的 `useLayoutValue`。这是与 React 的一个明确差异，需在文档中显著说明。
+
+**已实现（E8，见 [`e8-layout-readback-design.md`](./e8-layout-readback-design.md)）。签名与本节原先的草案不同：**
+
+```ts
+useLayoutValue<T>(
+  selector: (geometry: LayoutGeometry) => T,
+  options?: { enabled?: boolean },
+): readonly [attach: (handle: NodeHandle | null) => void, value: T | undefined];
+```
+
+不是 `useLayoutValue(nodeRef, selector)`：`RefObject` 在需要它的那次渲染**之后**才被填充，
+钩子因此拿不到节点，而且没有任何东西会重跑它；回调 ref 在挂载时触发，正是节点 id 变已知的时刻。
+
+- **首帧返回 `undefined`**，而不是 0——调用方必须能区分"还没测"与"测出来是零"。
+- **观察是显式且有界的**：`ObserveGeometry` mutation（opcode 96），上界
+  `maxObservedGeometryNodes = 64`，Shell 侧排队、Core 侧兜底拒绝。让 Core 每帧导出
+  全场景几何会是 O(节点数) 的每帧分配。
+- **`enabled: false` 不占额度**，用来把观察绑定到"弹层是否打开"而非"触发器是否挂载"。
+- **兼容性**：`abiVersion` 19 → 20，纯增量；旧 Shell 不发 `ObserveGeometry` 即得到旧行为。
+- **回滚**：Host 选项 `layoutReadbackEnabled` 默认**关闭**。关闭时不注册几何通道、
+  不提供 access 对象，`useLayoutValue` 恒为 `undefined`，组件退回静态方向。
+  回滚是关 flag，不需要回退 ABI。
+- **验证**：`pnpm e8:perf` 断言导出成本随观察数而非场景规模增长（8 倍场景 1.3 倍成本）。
 
 ---
 

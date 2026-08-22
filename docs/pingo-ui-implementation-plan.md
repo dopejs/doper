@@ -4,22 +4,22 @@
 
 ## 进度总览（2026-08-22 更新）
 
-| Track                                                    | 状态      | 证据                                                                                                                                                                                                              |
-| -------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C0 m10 决策修订                                          | ✅ 完成   | `a88dfa9`                                                                                                                                                                                                         |
-| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成   | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试                                                                                                                                                       |
-| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成   | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证                                                                                                                                                       |
-| E6 组件级 memo                                           | ✅ 完成   | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md`                                                                                                                                                    |
-| E7 context（Provider+useContext）                        | ✅ 完成   | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md`                                                                                                                                                    |
-| E5 flexGrow/Shrink/Basis                                 | ✅ 完成   | 设计门 `e5-flex-grow-design.md`，子计划 `pingo-ui-e5-implementation-plan.md`；`40f06a1…feedf85`                                                                                                                   |
-| E1 keyboard 事件                                         | ✅ 完成   | 设计门 `e1-keyboard-events-design.md`，子计划 `pingo-ui-e1-implementation-plan.md`；`ba9d1fd…055c117`                                                                                                             |
-| W0 WASM 体积归因与回收                                   | ✅ 完成   | **计划外必需前置**（见下）；`30d33e8`，回收 30,321 gzip bytes                                                                                                                                                     |
-| E4 boxShadow                                             | ✅ 完成   | 设计门 `e4-boxshadow-design.md`；`d462a96`                                                                                                                                                                        |
-| E2 zIndex                                                | ✅ 完成   | 设计门 `e2-zindex-design.md`；`62850ea…e0b9347`                                                                                                                                                                   |
-| E3 position/inset                                        | ✅ 完成   | 设计门 `e3-position-design.md`；`6c72939`                                                                                                                                                                         |
-| A2 第二批弹层组件                                        | ✅ 完成   | 子计划 `pingo-ui-overlay-components-plan.md`；`0a43cf1`                                                                                                                                                           |
-| A3 第三批产品分子                                        | ✅ 完成   | 子计划 `pingo-ui-product-molecules-plan.md`；`55cde8d`。无试点 fixture，规格取自计划点名的四个组件                                                                                                                |
-| E8 布局回读 + 碰撞感知定位                               | 🚧 进行中 | 设计门 `e8-layout-readback-design.md`（**Accepted**，D1–D9），子计划 `pingo-ui-e8-implementation-plan.md` 逐 Task 实时勾选；E8-1/E8-2 `7d49cdf`、E8-3 `22bb799`（含 `pnpm e8:perf` 观察态基准），E8-4…E8-8 未开始 |
+| Track                                                    | 状态    | 证据                                                                                                                                           |
+| -------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| C0 m10 决策修订                                          | ✅ 完成 | `a88dfa9`                                                                                                                                      |
+| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成 | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试                                                                                    |
+| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成 | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证                                                                                    |
+| E6 组件级 memo                                           | ✅ 完成 | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md`                                                                                 |
+| E7 context（Provider+useContext）                        | ✅ 完成 | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md`                                                                                 |
+| E5 flexGrow/Shrink/Basis                                 | ✅ 完成 | 设计门 `e5-flex-grow-design.md`，子计划 `pingo-ui-e5-implementation-plan.md`；`40f06a1…feedf85`                                                |
+| E1 keyboard 事件                                         | ✅ 完成 | 设计门 `e1-keyboard-events-design.md`，子计划 `pingo-ui-e1-implementation-plan.md`；`ba9d1fd…055c117`                                          |
+| W0 WASM 体积归因与回收                                   | ✅ 完成 | **计划外必需前置**（见下）；`30d33e8`，回收 30,321 gzip bytes                                                                                  |
+| E4 boxShadow                                             | ✅ 完成 | 设计门 `e4-boxshadow-design.md`；`d462a96`                                                                                                     |
+| E2 zIndex                                                | ✅ 完成 | 设计门 `e2-zindex-design.md`；`62850ea…e0b9347`                                                                                                |
+| E3 position/inset                                        | ✅ 完成 | 设计门 `e3-position-design.md`；`6c72939`                                                                                                      |
+| A2 第二批弹层组件                                        | ✅ 完成 | 子计划 `pingo-ui-overlay-components-plan.md`；`0a43cf1`                                                                                        |
+| A3 第三批产品分子                                        | ✅ 完成 | 子计划 `pingo-ui-product-molecules-plan.md`；`55cde8d`。无试点 fixture，规格取自计划点名的四个组件                                             |
+| E8 布局回读 + 碰撞感知定位                               | ✅ 完成 | 设计门 `e8-layout-readback-design.md`（Accepted，D1–D9），子计划 `pingo-ui-e8-implementation-plan.md`；`7d49cdf…` 共 8 个 Task。默认 flag 关闭 |
 
 **接手指引**：引擎工作包按各自设计门启动（设计文档评审 → 写 `docs/pingo-ui-e<N>-implementation-plan.md` 子计划 → subagent 执行）；组件批次按本文件规格表执行。已完成的子计划内 checkbox 状态以本表为准。
 
@@ -289,21 +289,22 @@ TS/Rust 往返 + malformed-input/fuzz。
 
 ### 已完成步骤的验收记录
 
-| 步骤 | 验收标准                                                                                                                                                                                                  | 证据              |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| C0   | m10 决策行 Defer→Adopt；design.md §12.1 同步                                                                                                                                                              | `a88dfa9`         |
-| A0   | cva/theme/皮肤/组件测试 35 全绿；storybook 明暗截图确认；全仓回归绿                                                                                                                                       | `2addeb3…6a5fa4b` |
-| E6   | memo 5 语义测试 + signal 正交测试；api:check 快照纯增量；全仓 416 绿                                                                                                                                      | `a923e61…abc3d8d` |
-| E7   | 7 条 context 行为测试；repo typecheck 绿；全仓 429 绿                                                                                                                                                     | `34145ee…bf81554` |
-| A1   | 17 组件交付；104/104 包测试；全仓 496 绿；明暗 showcase 截图确认；README 覆盖约定/约束/缺口清单                                                                                                           | `a8b8b66…31f8b34` |
-| E5   | reference oracle（递归、非增量、`#[cfg(test)]`）与引擎差分 8000 例；flex 单测 6 条；增量↔全量 flex proptest；schema/生成/`style-support.md` 原子同步；feature gate 逐条拒绝；Input `prefix`/`suffix` slot | `40f06a1…feedf85` |
-| E1   | ABI golden 重生成（逐字节审计）；TS↔Rust 往返；malformed/fuzz；Core 焦点路由 3 条；Shell 传播 2 条；Host 键表/组合/焦点性 3 条；三 transport 顺序一致；IME fixture 无回归；组件方向键导航 8 条            | `ba9d1fd…055c117` |
-| W0   | 按函数归因（`scripts/attribute-wasm-code.mjs`）；`OrderedMap`/`OrderedSet` 与 `BTreeMap` 的 4000 步随机操作流差分；gzip 393,174 → 362,853；m1 回到基线 ±1%                                                | `30d33e8`         |
-| E4   | box-shadow 解析 7 条非法输入拒绝；paint 顺序/spread 折叠单测；hover 阴影像素差分 + 增量↔冷启动一致；replayer 契约测试；headless box-blur oracle；display-list golden 含 shadow 指令                       | `d462a96`         |
-| E2   | z-index 解析（整数/auto/拒绝小数）；paint 顺序单测；hit 顺序（BVH 与 naive 双路）；无 z-index 时零开销路径                                                                                                | `62850ea…e0b9347` |
-| E3   | oracle 差分 8000 例（含 position/inset 生成）；insets 定位与尺寸单测；脱离流不撑大容器单测；`inset` shorthand 与关键字拒绝                                                                                | `6c72939`         |
-| A2   | 8 组件 + Overlay 基元；33 条组件测试（层叠顺序、锚定结构、Escape、焦点交接、键盘导航、过滤、明暗）；skin 层级断言；storybook 明暗展区                                                                     | `0a43cf1`         |
-| A3   | 4 产品分子；22 条组件测试（伸缩列位置、slot 缺省、trend 三态、禁用无 handler、键盘导航、明暗）；skin 断言伸缩件与 trend 色；storybook 明暗展区                                                            | `55cde8d`         |
+| 步骤 | 验收标准                                                                                                                                                                                                                                                                                                                                                                       | 证据              |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
+| C0   | m10 决策行 Defer→Adopt；design.md §12.1 同步                                                                                                                                                                                                                                                                                                                                   | `a88dfa9`         |
+| A0   | cva/theme/皮肤/组件测试 35 全绿；storybook 明暗截图确认；全仓回归绿                                                                                                                                                                                                                                                                                                            | `2addeb3…6a5fa4b` |
+| E6   | memo 5 语义测试 + signal 正交测试；api:check 快照纯增量；全仓 416 绿                                                                                                                                                                                                                                                                                                           | `a923e61…abc3d8d` |
+| E7   | 7 条 context 行为测试；repo typecheck 绿；全仓 429 绿                                                                                                                                                                                                                                                                                                                          | `34145ee…bf81554` |
+| A1   | 17 组件交付；104/104 包测试；全仓 496 绿；明暗 showcase 截图确认；README 覆盖约定/约束/缺口清单                                                                                                                                                                                                                                                                                | `a8b8b66…31f8b34` |
+| E5   | reference oracle（递归、非增量、`#[cfg(test)]`）与引擎差分 8000 例；flex 单测 6 条；增量↔全量 flex proptest；schema/生成/`style-support.md` 原子同步；feature gate 逐条拒绝；Input `prefix`/`suffix` slot                                                                                                                                                                      | `40f06a1…feedf85` |
+| E1   | ABI golden 重生成（逐字节审计）；TS↔Rust 往返；malformed/fuzz；Core 焦点路由 3 条；Shell 传播 2 条；Host 键表/组合/焦点性 3 条；三 transport 顺序一致；IME fixture 无回归；组件方向键导航 8 条                                                                                                                                                                                 | `ba9d1fd…055c117` |
+| W0   | 按函数归因（`scripts/attribute-wasm-code.mjs`）；`OrderedMap`/`OrderedSet` 与 `BTreeMap` 的 4000 步随机操作流差分；gzip 393,174 → 362,853；m1 回到基线 ±1%                                                                                                                                                                                                                     | `30d33e8`         |
+| E4   | box-shadow 解析 7 条非法输入拒绝；paint 顺序/spread 折叠单测；hover 阴影像素差分 + 增量↔冷启动一致；replayer 契约测试；headless box-blur oracle；display-list golden 含 shadow 指令                                                                                                                                                                                            | `d462a96`         |
+| E2   | z-index 解析（整数/auto/拒绝小数）；paint 顺序单测；hit 顺序（BVH 与 naive 双路）；无 z-index 时零开销路径                                                                                                                                                                                                                                                                     | `62850ea…e0b9347` |
+| E3   | oracle 差分 8000 例（含 position/inset 生成）；insets 定位与尺寸单测；脱离流不撑大容器单测；`inset` shorthand 与关键字拒绝                                                                                                                                                                                                                                                     | `6c72939`         |
+| A2   | 8 组件 + Overlay 基元；33 条组件测试（层叠顺序、锚定结构、Escape、焦点交接、键盘导航、过滤、明暗）；skin 层级断言；storybook 明暗展区                                                                                                                                                                                                                                          | `0a43cf1`         |
+| E8   | `ObserveGeometry` opcode 96 + `layoutGeometryBatch`（golden/往返/malformed/fuzz）；Core 循环外重算几何并断言与循环内逐位一致；观察集上界 64 双层执行（Shell 排队 + Core 兜底）；三处 Host 通道与乱序丢弃；`useLayoutValue`/`useViewport` + facade 快照；四条定位策略含 4000 例 property test；四个弹层接入 + storybook 三展区；`pnpm e8:perf` 断言成本随观察数而非场景规模增长 | `7d49cdf…`        |
+| A3   | 4 产品分子；22 条组件测试（伸缩列位置、slot 缺省、trend 三态、禁用无 handler、键盘导航、明暗）；skin 断言伸缩件与 trend 色；storybook 明暗展区                                                                                                                                                                                                                                 | `55cde8d`         |
 
 **全量门禁（2026-08-22 收尾复跑，全部通过）**：`pnpm m1:check` 退出码 0——它包含
 `m0:check`（lockfile、format:check、build、lint、typecheck、vitest、
@@ -348,7 +349,8 @@ oracle 一致；`pnpm release:check`、`pnpm migration:check`、`pnpm storybook:
   `unsupported-value`（带属性与源位置），`cssSubsetVersion` → `1.6.0`。其余九条要么
   本来就有诊断（`position: relative`、`flex-wrap`、`inset` 阴影），要么偏差本身被
   note 精确描述，属于**刻意的子集边界**而非缺陷。
-- **自动翻转** —— **已立项为 E8，待批准后执行**。设计门
+- **自动翻转** —— **已实现（E8）**，默认 flag 关闭。下面是立项时的分析，保留是为了
+  记录判断依据。设计门
   [`e8-layout-readback-design.md`](./e8-layout-readback-design.md)（D1–D8）与子计划
   [`pingo-ui-e8-implementation-plan.md`](./pingo-ui-e8-implementation-plan.md)
   （E8-1…E8-8）已就绪；下面是立项时的分析，方案取舍见
@@ -365,6 +367,11 @@ oracle 一致；`pnpm release:check`、`pnpm migration:check`、`pnpm storybook:
   父节点"偏差——定位基准与裁剪边界是两个问题，可单独推进。建议先补
   `useLayoutValue`（A 方案），策略上线顺序 `size` → `shift` → `flip` → `hide`；
   在那之前维持静态方向并在 README 明说。
+- **E8 的两处验证缺口** —— 其一，几何只有两条路径（主线程直调、worker 消息），两条
+  各有测试，但**没有把同一场景跑完整两遍再比较结果**——那需要能驱动真实 worker 的夹具，
+  本仓库没有。其二，定位在**真实浏览器里的视觉正确性**只有 storybook 的三个展区供人工
+  查看，没有像素断言；`placeAnchored` 的数学有 4000 例 property test，但"算对了"和
+  "看起来对"之间那一步仍靠人眼。
 - **A3 是无 fixture 立项** —— **无法收口，属于立项前提缺失**。原计划要求"试点业务有
   明确需求 fixture"才启动，实际没有。因此只做了计划点名的四个组件，API 由"分子=组合
   前两批"与"shadcn superset"两条约束推导。试点接入后若与实际需求不符，改的是这四个

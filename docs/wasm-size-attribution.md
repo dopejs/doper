@@ -107,6 +107,22 @@ duplicate-function-elimination、vacuum、DAE 和 instruction optimization。没
 377,967/148,458 raw/gzip bytes 变为 377,807/148,428（分别减少 160/30 bytes）；
 `docs/evidence/wasm-budget.v2.json` 已显式重审这一 host baseline，300 KiB 探针上限不变。
 
+## 2026-08-22：E8 布局回读通路
+
+| 阶段                                                | gzip bytes | 增量   |
+| --------------------------------------------------- | ---------- | ------ |
+| E8 之前                                             | 369,999    | —      |
+| E8-1/E8-2 `ObserveGeometry` + `layoutGeometryBatch` | 371,101    | +1,102 |
+| E8-3…E8-7 Core 导出、观察集、诊断字段               | 371,133    | +32    |
+
+**合计 +1,134 bytes**，工程预算 393,216 仍余 22,083。远低于立项时 5–15 KB 的预估，
+原因是新增的 Rust 代码几乎全是编解码与集合操作，没有引入新依赖，也没有新的
+monomorphisation 面——观察集用的是既有的 `pingo-collections::OrderedSet`，几何重算
+复用 `pingo-hit` 已有的仿射与裁剪折叠，`WorldGeometry` 一个字节都没加宽。
+
+因此**没有动用**工程预算到产品预算之间那 16,384 的余量。子计划 E8-8 允许动用它，
+但这次不需要，这条记录是为了让"允许"不被读成"已经用了"。
+
 ## 失败模式与回滚
 
 - 任一 clean build 不同：拒绝候选，保留两个产物和工具版本做差分，不更新基线掩盖差异；
