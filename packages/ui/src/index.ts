@@ -1,5 +1,17 @@
 export { cva } from "./cva";
 export type { CvaCompound, CvaConfig, CvaProps } from "./cva";
+export {
+  availableOn,
+  flipSide,
+  intersectRects,
+  isAnchorHidden,
+  oppositeSide,
+  placeAnchored,
+  shiftIntoBounds,
+  type Placement,
+  type PlacementInput,
+  type Side,
+} from "./positioning";
 export { useFocusableRef } from "./overlay";
 export type { OverlayFocus } from "./overlay";
 export { getTheme, setTheme, useTheme } from "./theme";

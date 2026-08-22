@@ -7,7 +7,7 @@ transport → Runtime hook → 定位策略 → 四个锚定组件接入，并�
 **前置：** 设计门 [`e8-layout-readback-design.md`](./e8-layout-readback-design.md)
 D1–D9 已 Accepted，无未决项。
 
-**进度：** E8-1 `7d49cdf`；E8-2 `7d49cdf`；E8-3 `22bb799` + 观察态基准。
+**进度：** E8-1 `7d49cdf`；E8-2 `7d49cdf`；E8-3 `22bb799` + 观察态基准 `455b85b`；E8-4 `07898f7`；E8-5 `350ae71`。
 本文件的复选框**随执行实时维护**，与已完成的其他子计划不同（那些是事后回填的）。
 
 ---
@@ -112,12 +112,12 @@ hosted-root.ts}`
 
 **Files:** `packages/ui/src/positioning.ts`（新增）+ 测试
 
-- [ ] `size`：约束 `maxHeight`/`maxWidth`，内容内部滚动。
-- [ ] `shift`：沿轴滑动保持在边界内，不改变边。
-- [ ] `flip`：空间不足翻到对侧；两侧都不足时保留原边（不做无限翻转）。
-- [ ] `hide`：锚点完全脱离有效边界时隐藏浮层。
-- [ ] 边界 = 通道裁剪框 ∩ 视口，在此求交（设计门 D5）。
-- [ ] 纯函数，输入 `(anchor, panel, bounds, side)`，无 DOM/Core 依赖；
+- [x] `size`：约束 `maxHeight`/`maxWidth`，内容内部滚动。
+- [x] `shift`：沿轴滑动保持在边界内，不改变边。
+- [x] `flip`：空间不足翻到对侧；两侧都不足时保留原边（不做无限翻转）。
+- [x] `hide`：锚点完全脱离有效边界时隐藏浮层。
+- [x] 边界 = 通道裁剪框 ∩ 视口，在此求交（设计门 D5）。
+- [x] 纯函数，输入 `(anchor, panel, bounds, side)`，无 DOM/Core 依赖；
       property test：结果永远不超出 bounds，或明确报告"放不下"。
 
 ### Task E8-7: 组件接入与首帧策略
