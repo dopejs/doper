@@ -1,6 +1,7 @@
-import { memo, Text, View, type PingoEvent, type PingoNode } from "@dopejs/pingo-jsx";
+import { Svg, View, memo, type PingoEvent, type PingoNode, type PingoSvg } from "@dopejs/pingo-jsx";
 import { useSignal } from "@dopejs/pingo-runtime";
 
+import { ChevronLeftIcon, ChevronRightIcon } from "../icons";
 import { classes } from "../overlay";
 import { useTheme } from "../theme";
 
@@ -36,15 +37,15 @@ export function carouselDescriptor(props: CarouselProps, index: number): PingoNo
     const next = carouselStep(index, delta, count, loop);
     if (next !== index) props.onIndexChange?.(next);
   };
-  const control = (label: string, delta: number, name: string): PingoNode => {
+  const control = (label: PingoSvg, delta: number, name: string): PingoNode => {
     const enabled = count > 0 && (loop || carouselStep(index, delta, count, loop) !== index);
-    return Text({
+    return Svg({
       className: classes(
         "pui-carousel__control",
         enabled ? undefined : "pui-carousel__control--disabled",
         dark,
       ),
-      value: label,
+      source: label,
       semanticRole: "button",
       semanticLabel: name,
       ...(enabled
@@ -90,8 +91,8 @@ export function carouselDescriptor(props: CarouselProps, index: number): PingoNo
         className: "pui-carousel__controls",
         direction: "row",
         children: [
-          control(props.previousLabel ?? "‹", -1, "previous slide"),
-          control(props.nextLabel ?? "›", 1, "next slide"),
+          control(ChevronLeftIcon, -1, "previous slide"),
+          control(ChevronRightIcon, 1, "next slide"),
         ],
       }),
     ],

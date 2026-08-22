@@ -1,14 +1,16 @@
 import {
-  createElement,
-  memo,
+  Svg,
   Text,
   View,
+  createElement,
+  memo,
   type NodeHandle,
   type PingoEvent,
   type PingoNode,
 } from "@dopejs/pingo-jsx";
 import { createContext, useContext, useMemo, useSignal } from "@dopejs/pingo-runtime";
 
+import { ChevronDownIcon } from "../icons";
 import { orderedValues, step } from "../keyboard";
 import { useTheme } from "../theme";
 
@@ -142,8 +144,12 @@ export function accordionItemDescriptor(
         onClick: toggle,
         children: [
           Text({ value: props.title }),
-          // ▾ glyph depends on font coverage — placeholder until icon assets.
-          Text({ value: "▾", ...(open ? { style: { transform: "rotate(180deg)" } } : {}) }),
+          // Rotated rather than swapped for a second glyph, so the chevron
+          // turns rather than jumping once transitions exist.
+          Svg({
+            source: ChevronDownIcon,
+            ...(open ? { style: { transform: "rotate(180deg)" } } : {}),
+          }),
         ],
       }),
       View({

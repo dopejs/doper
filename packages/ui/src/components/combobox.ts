@@ -1,14 +1,16 @@
 import {
-  createElement,
-  memo,
+  Svg,
   Text,
   View,
+  createElement,
+  memo,
   type NodeHandle,
   type PingoEvent,
   type PingoNode,
 } from "@dopejs/pingo-jsx";
 import { useMemo, useSignal } from "@dopejs/pingo-runtime";
 
+import { ChevronDownIcon } from "../icons";
 import { classes, OverlayFocusContext, useOverlayFocus } from "../overlay";
 import { useTheme } from "../theme";
 
@@ -75,7 +77,7 @@ export function comboboxDescriptor(
             // one says what to pick, the other says how to search.
             value: selected?.label ?? props.placeholder ?? "请选择",
           }),
-          Text({ className: classes("pui-combobox__indicator", dark), value: "▾" }),
+          Svg({ className: classes("pui-combobox__indicator", dark), source: ChevronDownIcon }),
         ],
       }),
       state.open

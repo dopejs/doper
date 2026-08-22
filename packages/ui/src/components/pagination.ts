@@ -1,5 +1,14 @@
-import { memo, Text, View, type PingoEvent, type PingoNode } from "@dopejs/pingo-jsx";
+import {
+  Svg,
+  Text,
+  View,
+  memo,
+  type PingoEvent,
+  type PingoNode,
+  type PingoSvg,
+} from "@dopejs/pingo-jsx";
 
+import { ChevronLeftIcon, ChevronRightIcon } from "../icons";
 import { classes } from "../overlay";
 import { useTheme } from "../theme";
 
@@ -55,15 +64,15 @@ export function paginationDescriptor(props: PaginationProps): PingoNode {
     if (page < 1 || page > props.pageCount || page === props.page) return;
     props.onPageChange?.(page);
   };
-  const control = (label: string, target: number, name: string): PingoNode => {
+  const control = (label: PingoSvg, target: number, name: string): PingoNode => {
     const enabled = target >= 1 && target <= props.pageCount;
-    return Text({
+    return Svg({
       className: classes(
         "pui-pagination__control",
         enabled ? undefined : "pui-pagination__control--disabled",
         dark,
       ),
-      value: label,
+      source: label,
       semanticRole: "button",
       semanticLabel: name,
       ...(enabled
@@ -112,9 +121,9 @@ export function paginationDescriptor(props: PaginationProps): PingoNode {
       go(props.page + delta);
     },
     children: [
-      control(props.previousLabel ?? "‹", props.page - 1, "previous page"),
+      control(ChevronLeftIcon, props.page - 1, "previous page"),
       ...entries,
-      control(props.nextLabel ?? "›", props.page + 1, "next page"),
+      control(ChevronRightIcon, props.page + 1, "next page"),
     ],
   });
 }

@@ -29,7 +29,9 @@
 }
 
 .pui-checkbox__indicator {
-  font-size: t.$font-size-xs;
+  // A drawn outline needs a box, not a font size: the glyph used to be text.
+  width: t.$icon-size-sm;
+  height: t.$icon-size-sm;
   color: t.$primary-foreground;
   &.pui-dark {
     color: t.$dark-primary-foreground;

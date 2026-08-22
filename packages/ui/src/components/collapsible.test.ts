@@ -30,11 +30,17 @@ describe("collapsibleDescriptor", () => {
     );
     expect(closed.props["semanticRole"]).toBe("button");
     expect(closed.props["semanticValue"]).toBe("collapsed");
-    expect(tree(children(closed)[1]).props["value"]).toBe("▸");
 
     const open = tree(children(collapsibleDescriptor({ trigger: "T", children: null }, true))[0]);
     expect(open.props["semanticValue"]).toBe("expanded");
-    expect(tree(children(open)[1]).props["value"]).toBe("▾");
+
+    // The two states draw different chevrons rather than different glyphs, so
+    // compare the geometry instead of a character.
+    const outline = (node: unknown): unknown =>
+      (tree(children(node)[1]).props["children"] as { props: Record<string, unknown> }[])[0]?.props[
+        "d"
+      ];
+    expect(outline(closed)).not.toBe(outline(open));
   });
 
   it("toggles on tap and on Enter or Space, and claims neither other key", () => {

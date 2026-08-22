@@ -110,10 +110,10 @@
 }
 
 .pui-carousel__control {
-  min-width: t.$pagination-size;
-  min-height: t.$pagination-size;
-  text-align: center;
-  font-size: t.$font-size-sm;
+  width: t.$icon-size;
+  height: t.$icon-size;
+  margin-left: t.$pagination-gap;
+  margin-right: t.$pagination-gap;
   border-radius: t.$radius-md;
   color: t.$foreground;
   cursor: pointer;
@@ -224,9 +224,10 @@
 }
 
 .pui-calendar__control {
-  min-width: t.$calendar-cell;
-  text-align: center;
-  font-size: t.$font-size-sm;
+  width: t.$icon-size;
+  height: t.$icon-size;
+  margin-left: t.$calendar-gap;
+  margin-right: t.$calendar-gap;
   color: t.$muted-foreground;
   cursor: pointer;
   &.pui-dark {

@@ -188,6 +188,11 @@ Resizable 共用它；指针捕获在按下时取得、结束时释放，否则�
   Shift+Tab 在登记项之间循环，Escape 仍然关闭；没有登记任何控件时 Tab 不被吞掉。
   `order` 由调用方给出而非自动发现——面板内容是任意子树，Shell 无法判断哪些是
   可达控件、以什么顺序可达。
+- **图标是 Lucide 的路径数据（ISC），且尚未与上游核对**：`packages/ui/src/icons.ts`
+  内联了组件自身要画的 8 个字形，许可证声明在文件头。**这些路径是转录的，不是生成
+  的**——`pnpm icons:check` 会把它们与 `lucide-static` 逐条比对，但它需要先
+  `pnpm add -Dw lucide-static`；在跑通之前，不要把这些坐标当作已验证。应用侧用哪套
+  图标不由本库决定，`createSvg` 接受任意一套。
 - **`ScrollArea` 与 `AspectRatio` 晚一帧**：两者都靠 E8 的布局回读，而测量在它描述
   的那一帧之后才到。ScrollArea 表现为甩动时拇指滞后一帧，AspectRatio 表现为首帧没有
   高度（宁可无高度也不猜，猜错要先按错的尺寸布局再挪）。彻底解法分别是 Core 渲染
@@ -205,8 +210,7 @@ Resizable 共用它；指针捕获在按下时取得、结束时释放，否则�
 - Skeleton 无 pulse 动画（Core 动画只覆盖 opacity/transform，CSS keyframes 不在
   子集内）。
 - Switch thumb 无滑动过渡（同上，thumb 直接跳变）。
-- Checkbox 的 `✓` 与 Accordion 的 `▾` 是文本字形，显示效果依赖字体覆盖，图标
-  资产就绪前是占位实现。
+
 - 引擎行为（已修复，E5）：`overflow` 非 visible 的容器内子元素百分比尺寸曾解析为
   零；百分比现在按容器自身 content box 解析。Progress 的规避（track 不开
   overflow）保留，因为 indicator 宽度本就由 0–100% clamp 保证不溢出。

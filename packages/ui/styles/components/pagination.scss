@@ -9,14 +9,26 @@
 .pui-pagination__control {
   min-width: t.$pagination-size;
   min-height: t.$pagination-size;
-  font-size: t.$font-size-sm;
-  text-align: center;
+  align-items: center;
+  justify-content: center;
   border-radius: t.$radius-md;
   color: t.$foreground;
   cursor: pointer;
   &.pui-dark {
     color: t.$dark-foreground;
   }
+}
+
+// The page number is still text; only the arrows became drawn outlines, and
+// giving both the same box would shrink the numbers to icon size.
+.pui-pagination__page {
+  font-size: t.$font-size-sm;
+  text-align: center;
+}
+
+.pui-pagination__control {
+  width: t.$icon-size;
+  height: t.$icon-size;
 }
 
 .pui-pagination__page--active {

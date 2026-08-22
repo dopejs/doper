@@ -1,6 +1,7 @@
-import { memo, Text, View, type PingoEvent, type PingoNode } from "@dopejs/pingo-jsx";
+import { Svg, Text, View, memo, type PingoEvent, type PingoNode } from "@dopejs/pingo-jsx";
 import { useSignal } from "@dopejs/pingo-runtime";
 
+import { ChevronDownIcon, ChevronRightIcon } from "../icons";
 import { classes } from "../overlay";
 import { useTheme } from "../theme";
 
@@ -55,9 +56,9 @@ export function collapsibleDescriptor(props: CollapsibleProps, open: boolean): P
             }),
         children: [
           Text({ className: classes("pui-collapsible__label", dark), value: props.trigger }),
-          Text({
+          Svg({
             className: classes("pui-collapsible__indicator", dark),
-            value: open ? "▾" : "▸",
+            source: open ? ChevronDownIcon : ChevronRightIcon,
           }),
         ],
       }),

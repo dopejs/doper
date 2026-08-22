@@ -12,6 +12,17 @@ export {
   type PlacementInput,
   type Side,
 } from "./positioning";
+export {
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  CloseIcon,
+  LUCIDE_SOURCES,
+  MinusIcon,
+  SearchIcon,
+} from "./icons";
 export { useFocusableRef } from "./overlay";
 export type { OverlayFocus } from "./overlay";
 export { getTheme, setTheme, useTheme } from "./theme";

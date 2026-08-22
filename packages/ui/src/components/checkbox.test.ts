@@ -30,7 +30,11 @@ describe("Checkbox", () => {
     expect(box.props.className).toBe("pui-checkbox__box pui-checkbox__box--checked");
     const indicator = box.props.children as Host;
     expect(indicator.props.className).toBe("pui-checkbox__indicator");
-    expect(indicator.props.value).toBe("✓");
+    // A drawn outline rather than a text glyph, so the tick no longer depends
+    // on whichever font the host happened to resolve.
+    const outline = indicator.props.children as Host[];
+    expect(outline).toHaveLength(1);
+    expect(outline[0]?.props.strokeWidth).toBe(2);
   });
 
   it("renders the optional label text", () => {

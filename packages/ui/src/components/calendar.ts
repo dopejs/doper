@@ -1,6 +1,15 @@
-import { memo, Text, View, type PingoEvent, type PingoNode } from "@dopejs/pingo-jsx";
+import {
+  Svg,
+  Text,
+  View,
+  memo,
+  type PingoEvent,
+  type PingoNode,
+  type PingoSvg,
+} from "@dopejs/pingo-jsx";
 import { useSignal } from "@dopejs/pingo-runtime";
 
+import { ChevronLeftIcon, ChevronRightIcon } from "../icons";
 import { classes } from "../overlay";
 import { useTheme } from "../theme";
 
@@ -67,10 +76,10 @@ export function calendarDescriptor(props: CalendarProps, month: CalendarDate): P
   const labels = props.weekdayLabels ?? WEEKDAYS;
   const grid = monthGrid(month.year, month.month);
   const page = (delta: number): void => props.onMonthChange?.(shiftMonth(month, delta));
-  const control = (label: string, delta: number, name: string): PingoNode =>
-    Text({
+  const control = (label: PingoSvg, delta: number, name: string): PingoNode =>
+    Svg({
       className: classes("pui-calendar__control", dark),
-      value: label,
+      source: label,
       semanticRole: "button",
       semanticLabel: name,
       onPointerDown: (event: PingoEvent): void => event.currentTarget.focus(),
@@ -134,13 +143,13 @@ export function calendarDescriptor(props: CalendarProps, month: CalendarDate): P
         className: "pui-calendar__header",
         direction: "row",
         children: [
-          control("‹", -1, "previous month"),
+          control(ChevronLeftIcon, -1, "previous month"),
           Text({
             className: classes("pui-calendar__title", dark),
             value:
               props.monthLabel?.(month) ?? `${String(month.year)} 年 ${String(month.month)} 月`,
           }),
-          control("›", 1, "next month"),
+          control(ChevronRightIcon, 1, "next month"),
         ],
       }),
       View({

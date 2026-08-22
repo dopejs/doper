@@ -56,7 +56,10 @@ describe("accordionItemDescriptor", () => {
     expect(trigger.props.semanticValue).toBe("closed");
     const [title, chevron] = trigger.props.children as [Host, Host];
     expect(title.props.value).toBe("标题");
-    expect(chevron.props.value).toBe("▾");
+    // A drawn chevron, not a font glyph: the indicator is now geometry.
+    expect((chevron.props.children as { props: Record<string, unknown> }[])[0]?.props.d).toContain(
+      "6 6",
+    );
     expect(chevron.props.style).toBeUndefined();
     expect(content.props.className).toBe("pui-accordion__content");
     expect(content.props.style).toEqual({ display: "none" });

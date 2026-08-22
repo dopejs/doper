@@ -1,5 +1,6 @@
-import { memo, Text, View, type PingoEvent, type PingoNode } from "@dopejs/pingo-jsx";
+import { memo, Svg, Text, View, type PingoEvent, type PingoNode } from "@dopejs/pingo-jsx";
 
+import { CheckIcon } from "../icons";
 import { useTheme } from "../theme";
 
 // Type alias (not interface) so the implicit index signature satisfies
@@ -48,11 +49,11 @@ function CheckboxImpl(props: CheckboxProps): PingoNode {
           .filter((part) => part !== undefined)
           .join(" "),
         children: props.checked
-          ? Text({
+          ? Svg({
               className: ["pui-checkbox__indicator", dark ? "pui-dark" : undefined]
                 .filter((part) => part !== undefined)
                 .join(" "),
-              value: "✓",
+              source: CheckIcon,
             })
           : null,
       }),
