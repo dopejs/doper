@@ -176,6 +176,9 @@ impl HeadlessRenderer {
             DisplayCommand::FillColorPath { path_id, rgba } => {
                 self.execute_fill_color_path(path_id, rgba, scene, width, height)?;
             }
+            DisplayCommand::StrokeColorPath { .. } => {
+                self.execute_stroke_color_path(&command, scene, width, height)?;
+            }
             DisplayCommand::FillColorRRect { rect, radii, rgba } => {
                 let [red, green, blue, alpha] = rgba.to_be_bytes();
                 let state = self.current().clone();
@@ -286,6 +289,132 @@ impl HeadlessRenderer {
         )
     }
 
+    /// Unpacks the stroke command and refuses the styles this cannot be exact for.
+    ///
+    /// Only a round cap and a round join make the stroked region exactly the
+    /// set of points within half the width of the polyline. Core emits nothing
+    /// else today, and approximating the others would make the oracle disagree
+    /// with itself depending on which corner a pixel happened to fall near.
+    fn execute_stroke_color_path(
+        &mut self,
+        command: &DisplayCommand,
+        scene: &Scene,
+        width: u32,
+        height: u32,
+    ) -> Result<(), HeadlessError> {
+        let DisplayCommand::StrokeColorPath {
+            path_id,
+            rgba,
+            width: stroke_width,
+            cap,
+            join,
+            ..
+        } = *command
+        else {
+            return Err(HeadlessError::UnsupportedCommand(command_opcode(command)));
+        };
+        if cap != 1 || join != 1 {
+            return Err(HeadlessError::UnsupportedCommand(command_opcode(command)));
+        }
+        let [red, green, blue, alpha] = rgba.to_be_bytes();
+        let state = self.current().clone();
+        self.stroke_path(
+            &StrokeRequest {
+                path_id,
+                radius: f64::from(stroke_width) / 2.0,
+                paint: SolidPaint {
+                    red,
+                    green,
+                    blue,
+                    alpha,
+                },
+            },
+            scene,
+            &state,
+            width,
+            height,
+        )
+    }
+
+    /// Strokes an outline by distance sampling.
+    ///
+    /// A round cap and a round join make the stroked region exactly the set of
+    /// points within half the width of the polyline, so this is a distance
+    /// test rather than an approximation: no offset outline to construct, no
+    /// self-intersection to resolve, and no join geometry to get wrong.
+    ///
+    /// It does not try to match `Canvas2D` pixel for pixel, and could not: curve
+    /// flattening tolerance is implementation-defined. What it gives is a
+    /// deterministic reference, which is what the incremental-versus-full
+    /// comparisons actually need.
+    fn stroke_path(
+        &mut self,
+        request: &StrokeRequest,
+        scene: &Scene,
+        state: &State,
+        width: u32,
+        height: u32,
+    ) -> Result<(), HeadlessError> {
+        let &StrokeRequest {
+            path_id,
+            radius,
+            paint,
+        } = request;
+        let path = decode_path_resource(scene, path_id)?;
+        let contours = flatten_path(&path);
+        if radius <= 0.0 {
+            return Ok(());
+        }
+        let Some(local_bounds) = contour_bounds(&contours) else {
+            return Ok(());
+        };
+        // The stroke reaches half a width outside the outline, so the sampled
+        // box has to grow or the edge of every stroke would be clipped away.
+        let grown = [
+            local_bounds[0] - clamp_f32(radius),
+            local_bounds[1] - clamp_f32(radius),
+            local_bounds[2] + clamp_f32(radius * 2.0),
+            local_bounds[3] + clamp_f32(radius * 2.0),
+        ];
+        let polygon = state.transform.rect(grown);
+        let Some(bounds) = polygon.bounds(width, height) else {
+            return Ok(());
+        };
+        let Some(inverse) = state.transform.inverse() else {
+            return Ok(());
+        };
+        let source_alpha = scale_alpha(paint.alpha, state.alpha);
+        if source_alpha == 0 {
+            return Ok(());
+        }
+        let radius_squared = radius * radius;
+        for y in bounds.top..bounds.bottom {
+            for x in bounds.left..bounds.right {
+                self.metrics.candidate_pixels += 1;
+                let sample = Point {
+                    x: f64::from(x) + 0.5,
+                    y: f64::from(y) + 0.5,
+                };
+                let local = inverse.point_f64(sample);
+                if !within_stroke(&contours, local, radius_squared)
+                    || state.clips.iter().any(|clip| !clip.contains(sample))
+                {
+                    continue;
+                }
+                let pixel = (usize::try_from(y).expect("bounded y")
+                    * usize::try_from(width).expect("bounded width")
+                    + usize::try_from(x).expect("bounded x"))
+                    * 4;
+                blend(
+                    &mut self.pixels[pixel..pixel + 4],
+                    [paint.red, paint.green, paint.blue, source_alpha],
+                );
+                self.metrics.blended_pixels += 1;
+            }
+        }
+        Ok(())
+    }
+
     /// Fills a flattened outline by sampling, the same way `fill_rrect` does.
     ///
     /// Sampling rather than scanline conversion because the renderer already
@@ -300,25 +429,7 @@ impl HeadlessRenderer {
         width: u32,
         height: u32,
     ) -> Result<(), HeadlessError> {
-        let resource = scene
-            .resource(path_id)
-            .ok_or(HeadlessError::MissingResource {
-                resource_id: path_id,
-            })?;
-        if resource.kind != ResourceKind::Path {
-            return Err(HeadlessError::WrongResourceKind {
-                resource_id: path_id,
-                actual: resource.kind,
-            });
-        }
-        // Scene validated this at commit; decoding again keeps the oracle from
-        // trusting a caller that assembled a Scene by hand.
-        let path = PathResource::decode(&resource.bytes).map_err(|_| {
-            HeadlessError::WrongResourceKind {
-                resource_id: path_id,
-                actual: resource.kind,
-            }
-        })?;
+        let path = decode_path_resource(scene, path_id)?;
         let contours = flatten_path(&path);
         let Some(local_bounds) = contour_bounds(&contours) else {
             return Ok(());
@@ -796,6 +907,7 @@ fn validate_supported(display_list: &DisplayList) -> Result<(), HeadlessError> {
             | DisplayCommand::FillRRect { .. }
             | DisplayCommand::FillColorRRect { .. }
             | DisplayCommand::FillColorPath { .. }
+            | DisplayCommand::StrokeColorPath { .. }
             | DisplayCommand::FillColorBorder { .. }
             | DisplayCommand::FillColorShadow { .. }
             | DisplayCommand::FillPlaceholder { .. }
@@ -1102,6 +1214,69 @@ fn hash_image(width: u32, height: u32, pixels: &[u8]) -> u64 {
     hash
 }
 
+/// Resolves and decodes a path resource.
+///
+/// The Scene validated it at commit; decoding again keeps the oracle from
+/// trusting a caller that assembled a Scene by hand.
+fn decode_path_resource(scene: &Scene, path_id: u32) -> Result<PathResource, HeadlessError> {
+    let resource = scene
+        .resource(path_id)
+        .ok_or(HeadlessError::MissingResource {
+            resource_id: path_id,
+        })?;
+    if resource.kind != ResourceKind::Path {
+        return Err(HeadlessError::WrongResourceKind {
+            resource_id: path_id,
+            actual: resource.kind,
+        });
+    }
+    PathResource::decode(&resource.bytes).map_err(|_| HeadlessError::WrongResourceKind {
+        resource_id: path_id,
+        actual: resource.kind,
+    })
+}
+
+/// Whether a point lies within `radius` of any segment of any contour.
+///
+/// Squared distances throughout: a square root per segment per pixel buys
+/// nothing when the comparison can be made on the squares.
+fn within_stroke(contours: &[Vec<Point>], sample: Point, radius_squared: f64) -> bool {
+    for contour in contours {
+        for index in 0..contour.len().saturating_sub(1) {
+            let start = contour[index];
+            let end = contour[index + 1];
+            if squared_distance_to_segment(sample, start, end) <= radius_squared {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn squared_distance_to_segment(sample: Point, start: Point, end: Point) -> f64 {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let length_squared = dx * dx + dy * dy;
+    // A degenerate segment is a point, which a round cap still paints as a disc.
+    let t = if length_squared == 0.0 {
+        0.0
+    } else {
+        (((sample.x - start.x) * dx + (sample.y - start.y) * dy) / length_squared).clamp(0.0, 1.0)
+    };
+    let nearest_x = start.x + t * dx;
+    let nearest_y = start.y + t * dy;
+    let offset_x = sample.x - nearest_x;
+    let offset_y = sample.y - nearest_y;
+    offset_x * offset_x + offset_y * offset_y
+}
+
+/// One stroke to sample, gathered so the sampler keeps a readable signature.
+struct StrokeRequest {
+    path_id: u32,
+    radius: f64,
+    paint: SolidPaint,
+}
+
 const ORIGIN: Point = Point { x: 0.0, y: 0.0 };
 
 /// Flattens every subpath into a closed polyline in path-local coordinates.
@@ -1256,14 +1431,14 @@ fn contours_contain(contours: &[Vec<Point>], sample: Point, rule: FillRule) -> b
 #[cfg(test)]
 mod tests {
     use pingo_abi::{
-        DisplayCommand, DisplayInstruction, DisplayList, Mutation, MutationBatch,
-        MutationInstruction, NULL_NODE_ID, NodeKind, ResourceKind,
+        DisplayCommand, DisplayInstruction, DisplayList, FillRule, Mutation, MutationBatch,
+        MutationInstruction, NULL_NODE_ID, NodeKind, PathResource, PathVerb, ResourceKind,
     };
     use pingo_paint::SolidPaint;
     use pingo_scene::{NodeId, Scene};
     use proptest::prelude::*;
 
-    use super::HeadlessRenderer;
+    use super::{HeadlessRenderer, Point, flatten_path, within_stroke};
     use crate::HeadlessError;
 
     fn scene_with_paint(color: SolidPaint) -> Scene {
@@ -1439,5 +1614,58 @@ mod tests {
                 }
             }
         }
+    }
+    #[test]
+    fn a_stroked_outline_is_the_set_of_points_within_half_its_width() {
+        // A round cap and join make that exact rather than approximate, which
+        // is why this sampler can assert equality instead of a tolerance.
+        let contour = vec![vec![Point { x: 10.0, y: 10.0 }, Point { x: 30.0, y: 10.0 }]];
+
+        // On the line, and half a width to either side.
+        assert!(within_stroke(&contour, Point { x: 20.0, y: 10.0 }, 25.0));
+        assert!(within_stroke(&contour, Point { x: 20.0, y: 14.9 }, 25.0));
+        assert!(!within_stroke(&contour, Point { x: 20.0, y: 15.1 }, 25.0));
+
+        // Past the end the cap is a half disc, so the reach shrinks with the
+        // distance along the axis rather than staying square.
+        assert!(within_stroke(&contour, Point { x: 34.9, y: 10.0 }, 25.0));
+        assert!(!within_stroke(&contour, Point { x: 35.1, y: 10.0 }, 25.0));
+        assert!(!within_stroke(&contour, Point { x: 34.0, y: 14.0 }, 25.0));
+
+        // A degenerate segment is a point, which a round cap paints as a disc.
+        let dot = vec![vec![Point { x: 5.0, y: 5.0 }, Point { x: 5.0, y: 5.0 }]];
+        assert!(within_stroke(&dot, Point { x: 5.0, y: 9.9 }, 25.0));
+        assert!(!within_stroke(&dot, Point { x: 5.0, y: 10.1 }, 25.0));
+    }
+
+    #[test]
+    fn stroke_sampling_is_deterministic_across_renderers() {
+        // The property the incremental-versus-full comparisons rely on. It says
+        // nothing about agreeing with Canvas2D, which curve flattening
+        // tolerance makes impossible for anyone.
+        let path = PathResource {
+            verbs: vec![PathVerb::Move, PathVerb::Cubic],
+            points: vec![4.0, 4.0, 8.0, 20.0, 16.0, -4.0, 20.0, 12.0],
+            view_box: [0.0, 0.0, 24.0, 24.0],
+            fill_rule: FillRule::NonZero,
+        };
+        let coordinates = |contours: &[Vec<Point>]| -> Vec<(u64, u64)> {
+            contours
+                .iter()
+                .flatten()
+                .map(|point| (point.x.to_bits(), point.y.to_bits()))
+                .collect()
+        };
+        let first = flatten_path(&path);
+        let second = flatten_path(&path);
+        // Bit patterns, not approximate equality: the claim is that two runs
+        // produce the same numbers, and a tolerance would not test that.
+        assert_eq!(coordinates(&first), coordinates(&second));
+
+        let sample = Point { x: 12.0, y: 8.0 };
+        assert_eq!(
+            within_stroke(&first, sample, 4.0),
+            within_stroke(&second, sample, 4.0)
+        );
     }
 }
