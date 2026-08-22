@@ -961,6 +961,59 @@ fn build_node(
             );
         }
     }
+    if visible && let Some(path_id) = scene.ref_prop(node, Prop::Path) {
+        // The outline is authored in its own view box and scaled into the
+        // node's box, so one icon resource serves every size it is used at.
+        // Scale rides on a Transform rather than being baked into the points:
+        // the resource is immutable and shared.
+        let resource = typed_resource(scene, path_id, ResourceKind::Path)?;
+        let path = pingo_abi::PathResource::decode(&resource.bytes).map_err(|_| {
+            PaintError::InvalidResource {
+                resource_id: path_id,
+                reason: "path resource is malformed",
+            }
+        })?;
+        let [view_x, view_y, view_width, view_height] = path.view_box;
+        let scale_x = size.width / view_width;
+        let scale_y = size.height / view_height;
+        // The outline takes the node's `color`, so an icon inherits it the way
+        // text does and `currentColor` artwork behaves as its author expected.
+        let rgba = scene
+            .presented_style_rgba(node, StyleProperty::Color)
+            .unwrap_or(0x0000_00ff);
+        let stroke_width = scene.f32_prop(node, Prop::PathStrokeWidth).unwrap_or(0.0);
+        push(&mut instructions, DisplayCommand::Save);
+        push(
+            &mut instructions,
+            DisplayCommand::Transform([
+                scale_x,
+                0.0,
+                0.0,
+                scale_y,
+                -view_x * scale_x,
+                -view_y * scale_y,
+            ]),
+        );
+        if stroke_width > 0.0 {
+            push(
+                &mut instructions,
+                DisplayCommand::StrokeColorPath {
+                    path_id,
+                    rgba,
+                    width: stroke_width,
+                    cap: 1,
+                    join: 1,
+                    miter_limit: 4.0,
+                },
+            );
+        } else {
+            push(
+                &mut instructions,
+                DisplayCommand::FillColorPath { path_id, rgba },
+            );
+        }
+        push(&mut instructions, DisplayCommand::Restore);
+    }
     if visible
         && let Some((image_id, resource_kind)) = scene
             .ref_prop(node, Prop::Image)

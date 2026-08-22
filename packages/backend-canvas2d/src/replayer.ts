@@ -225,17 +225,20 @@ function validateCommand(
       required(resources.getPath(reader.u32()), "path");
       required(resources.getPaint(reader.u32()), "paint");
       return;
+    case DisplayOpcode.FillColorPath:
+      required(resources.getPath(reader.u32()), "path");
+      reader.u32();
+      return;
+    case DisplayOpcode.StrokeColorPath: {
+      required(resources.getPath(reader.u32()), "path");
+      reader.u32();
+      validateStrokeStyle(reader);
+      return;
+    }
     case DisplayOpcode.StrokePath: {
       required(resources.getPath(reader.u32()), "path");
       required(resources.getPaint(reader.u32()), "paint");
-      const width = reader.f32();
-      if (!(width >= 0)) replayFail("stroke width is negative");
-      const cap = reader.u8();
-      const join = reader.u8();
-      reader.u16();
-      const miterLimit = reader.f32();
-      if (cap > 2 || join > 2) replayFail("stroke cap or join is out of range");
-      if (!(miterLimit >= 1)) replayFail("stroke miter limit is below one");
+      validateStrokeStyle(reader);
       return;
     }
     case DisplayOpcode.DrawGlyphRun: {
@@ -443,6 +446,19 @@ function replayCommand(
       context.fill(path);
       return;
     }
+    case DisplayOpcode.FillColorPath: {
+      const path = required(resources.getPath(reader.u32()), "path");
+      context.fillStyle = rgbaCss(reader.u32());
+      context.fill(path);
+      return;
+    }
+    case DisplayOpcode.StrokeColorPath: {
+      const path = required(resources.getPath(reader.u32()), "path");
+      context.strokeStyle = rgbaCss(reader.u32());
+      applyStrokeStyle(context, reader);
+      context.stroke(path);
+      return;
+    }
     case DisplayOpcode.StrokePath: {
       const path = required(resources.getPath(reader.u32()), "path");
       context.strokeStyle = required(resources.getPaint(reader.u32()), "paint");
@@ -539,6 +555,31 @@ function replayCommand(
     default:
       return assertNeverOpcode(opcode);
   }
+}
+
+/** Reads and checks the stroke tail without applying it. */
+function validateStrokeStyle(reader: { f32(): number; u8(): number; u16(): number }): void {
+  const width = reader.f32();
+  if (!(width >= 0)) replayFail("stroke width is negative");
+  const cap = reader.u8();
+  const join = reader.u8();
+  reader.u16();
+  const miterLimit = reader.f32();
+  if (cap > 2 || join > 2) replayFail("stroke cap or join is out of range");
+  if (!(miterLimit >= 1)) replayFail("stroke miter limit is below one");
+}
+
+/** Applies the stroke tail to the context, in ABI field order. */
+function applyStrokeStyle(
+  context: Canvas2DContext,
+  reader: { f32(): number; u8(): number; u16(): number },
+): void {
+  context.lineWidth = reader.f32();
+  context.lineCap = STROKE_CAPS[reader.u8()] ?? "butt";
+  context.lineJoin = STROKE_JOINS[reader.u8()] ?? "miter";
+  // Reserved halfword, read to advance rather than skipped by count.
+  reader.u16();
+  context.miterLimit = reader.f32();
 }
 
 /** Cap and join codes in the order the ABI declares them. */

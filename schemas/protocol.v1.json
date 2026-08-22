@@ -953,6 +953,16 @@
           ]
         },
         {
+          "name": "FillColorPath",
+          "opcode": 43,
+          "fields": ["u32", "u32"]
+        },
+        {
+          "name": "StrokeColorPath",
+          "opcode": 44,
+          "fields": ["u32", "u32", "f32", "u8", "u8", "pad16", "f32"]
+        },
+        {
           "name": "DrawImage",
           "opcode": 34,
           "fields": ["u32", "f32", "f32", "f32", "f32", "f32", "f32", "f32", "f32"]
@@ -1950,6 +1960,12 @@
       "valueType": "ref",
       "resourceKind": "Image",
       "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "PathStrokeWidth",
+      "id": 38,
+      "valueType": "f32",
+      "invalidation": ["paint"]
     },
     {
       "name": "Path",

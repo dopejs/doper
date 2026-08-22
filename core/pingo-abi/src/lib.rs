@@ -16,6 +16,7 @@ mod event_transactions;
 mod glyph_resources;
 mod input;
 mod mutation;
+mod path;
 mod picture_resources;
 mod recording;
 mod system_text_metrics;
@@ -61,6 +62,7 @@ pub use input::{
     InputPosition, InputSelection, InteractionResetReason, KEY_FLAG_MASK, KEY_FLAG_REPEAT,
 };
 pub use mutation::{Mutation, MutationBatch, MutationInstruction, OBSERVE_GEOMETRY_FLAG_ACTIVE};
+pub use path::{FillRule, PathResource, PathVerb};
 pub use picture_resources::{
     PictureResourceBatch, PictureResourceCommand, PictureResourceInstruction,
 };

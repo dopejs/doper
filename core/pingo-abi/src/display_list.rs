@@ -129,6 +129,32 @@ pub enum DisplayCommand {
         /// Miter limit; ignored unless `join` is miter.
         miter_limit: f32,
     },
+    /// Fills an interned path with an inline colour.
+    ///
+    /// The inline-colour form is what Core emits, matching `FillColorRect`:
+    /// interning a paint resource per colour would put a round trip through
+    /// the Shell in front of every icon.
+    FillColorPath {
+        /// Interned path identifier.
+        path_id: u32,
+        /// Packed `RGBA8` colour.
+        rgba: u32,
+    },
+    /// Strokes an interned path with an inline colour.
+    StrokeColorPath {
+        /// Interned path identifier.
+        path_id: u32,
+        /// Packed `RGBA8` colour.
+        rgba: u32,
+        /// Stroke width in local units; must be finite and non-negative.
+        width: f32,
+        /// 0 butt, 1 round, 2 square.
+        cap: u8,
+        /// 0 miter, 1 round, 2 bevel.
+        join: u8,
+        /// Miter limit; ignored unless `join` is miter.
+        miter_limit: f32,
+    },
     /// Draws a shaped glyph span.
     DrawGlyphRun {
         /// Interned font identifier.
@@ -428,27 +454,27 @@ fn decode_command(
         DisplayOpcode::StrokePath => {
             let path_id = reader.read_u32()?;
             let paint_id = reader.read_u32()?;
-            let width = reader.read_f32()?;
-            let cap = reader.read_u8()?;
-            let join = reader.read_u8()?;
-            reader.read_zeroes(2)?;
-            let miter_limit = reader.read_f32()?;
-            if !width.is_finite() || width < 0.0 {
-                return Err(AbiError::InvalidValue(
-                    "stroke width must be finite and non-negative",
-                ));
-            }
-            if !miter_limit.is_finite() || miter_limit < 1.0 {
-                return Err(AbiError::InvalidValue(
-                    "stroke miter limit must be at least one",
-                ));
-            }
-            if cap > 2 || join > 2 {
-                return Err(AbiError::InvalidValue("stroke cap or join is out of range"));
-            }
+            let (width, cap, join, miter_limit) = read_stroke_style(reader)?;
             DisplayCommand::StrokePath {
                 path_id,
                 paint_id,
+                width,
+                cap,
+                join,
+                miter_limit,
+            }
+        }
+        DisplayOpcode::FillColorPath => DisplayCommand::FillColorPath {
+            path_id: reader.read_u32()?,
+            rgba: reader.read_u32()?,
+        },
+        DisplayOpcode::StrokeColorPath => {
+            let path_id = reader.read_u32()?;
+            let rgba = reader.read_u32()?;
+            let (width, cap, join, miter_limit) = read_stroke_style(reader)?;
+            DisplayCommand::StrokeColorPath {
+                path_id,
+                rgba,
                 width,
                 cap,
                 join,
@@ -630,11 +656,25 @@ fn encode_command(writer: &mut Writer, instruction: &DisplayInstruction) -> Resu
             writer.instruction(DisplayOpcode::StrokePath as u8, flags);
             writer.u32(*path_id);
             writer.u32(*paint_id);
-            writer.f32(*width)?;
-            writer.u8(*cap);
-            writer.u8(*join);
-            writer.u16(0);
-            writer.f32(*miter_limit)?;
+            write_stroke_style(writer, *width, *cap, *join, *miter_limit)?;
+        }
+        DisplayCommand::FillColorPath { path_id, rgba } => {
+            writer.instruction(DisplayOpcode::FillColorPath as u8, flags);
+            writer.u32(*path_id);
+            writer.u32(*rgba);
+        }
+        DisplayCommand::StrokeColorPath {
+            path_id,
+            rgba,
+            width,
+            cap,
+            join,
+            miter_limit,
+        } => {
+            writer.instruction(DisplayOpcode::StrokeColorPath as u8, flags);
+            writer.u32(*path_id);
+            writer.u32(*rgba);
+            write_stroke_style(writer, *width, *cap, *join, *miter_limit)?;
         }
         DisplayCommand::DrawGlyphRun {
             font_id,
@@ -735,6 +775,8 @@ fn display_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::FillRRect { .. } => DisplayOpcode::FillRRect,
         DisplayCommand::FillPath { .. } => DisplayOpcode::FillPath,
         DisplayCommand::StrokePath { .. } => DisplayOpcode::StrokePath,
+        DisplayCommand::FillColorPath { .. } => DisplayOpcode::FillColorPath,
+        DisplayCommand::StrokeColorPath { .. } => DisplayOpcode::StrokeColorPath,
         DisplayCommand::DrawGlyphRun { .. } => DisplayOpcode::DrawGlyphRun,
         DisplayCommand::DrawTextFallback { .. } => DisplayOpcode::DrawTextFallback,
         DisplayCommand::DrawTextInlineFallback { .. } => DisplayOpcode::DrawTextInlineFallback,
@@ -756,6 +798,44 @@ fn validate_rrect(rect: [f32; 4], radii: [f32; 4]) -> Result<(), AbiError> {
             "rounded rectangle has negative radius",
         ));
     }
+    Ok(())
+}
+
+/// Shared stroke tail: width, cap, join, reserved halfword, miter limit.
+fn read_stroke_style(reader: &mut Reader<'_>) -> Result<(f32, u8, u8, f32), AbiError> {
+    let width = reader.read_f32()?;
+    let cap = reader.read_u8()?;
+    let join = reader.read_u8()?;
+    reader.read_zeroes(2)?;
+    let miter_limit = reader.read_f32()?;
+    if !width.is_finite() || width < 0.0 {
+        return Err(AbiError::InvalidValue(
+            "stroke width must be finite and non-negative",
+        ));
+    }
+    if !miter_limit.is_finite() || miter_limit < 1.0 {
+        return Err(AbiError::InvalidValue(
+            "stroke miter limit must be at least one",
+        ));
+    }
+    if cap > 2 || join > 2 {
+        return Err(AbiError::InvalidValue("stroke cap or join is out of range"));
+    }
+    Ok((width, cap, join, miter_limit))
+}
+
+fn write_stroke_style(
+    writer: &mut Writer,
+    width: f32,
+    cap: u8,
+    join: u8,
+    miter_limit: f32,
+) -> Result<(), AbiError> {
+    writer.f32(width)?;
+    writer.u8(cap);
+    writer.u8(join);
+    writer.u16(0);
+    writer.f32(miter_limit)?;
     Ok(())
 }
 

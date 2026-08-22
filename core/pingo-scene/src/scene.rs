@@ -1592,7 +1592,14 @@ fn validate_resource(resource_id: u32, kind: ResourceKind, bytes: &[u8]) -> Resu
             pingo_anim::AnimationResource::decode(bytes)
                 .map_err(|_| SceneError::InvalidResourceEncoding { resource_id })?;
         }
-        ResourceKind::Path | ResourceKind::GlyphSpan => {}
+        ResourceKind::Path => {
+            // Validated here rather than at draw time: a malformed outline must
+            // fail the commit, not surface as a frame that renders differently
+            // on two backends.
+            pingo_abi::PathResource::decode(bytes)
+                .map_err(|_| SceneError::InvalidResourceEncoding { resource_id })?;
+        }
+        ResourceKind::GlyphSpan => {}
     }
     Ok(())
 }

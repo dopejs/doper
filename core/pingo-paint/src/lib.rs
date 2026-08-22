@@ -12,6 +12,4 @@ pub use engine::{
     ShapedGlyphRun, TextPaintResolver, VirtualPaintResolver,
 };
 pub use error::PaintError;
-pub use resource::{
-    AffineResource, FillRule, PathResource, PathVerb, SolidPaint, TextStyleResource,
-};
+pub use resource::{AffineResource, SolidPaint, TextStyleResource};

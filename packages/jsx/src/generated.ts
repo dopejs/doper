@@ -346,6 +346,8 @@ export enum DisplayOpcode {
   FillColorBorder = 41,
   DrawEditorDecoration = 37,
   FillColorShadow = 42,
+  FillColorPath = 43,
+  StrokeColorPath = 44,
   DrawImage = 34,
   DrawPicture = 35,
 }
@@ -369,6 +371,8 @@ export const DISPLAY_LAYOUTS = {
   [DisplayOpcode.FillColorBorder]: { fixedBytes: 68, minimumBytes: 68 },
   [DisplayOpcode.DrawEditorDecoration]: { fixedBytes: 28, minimumBytes: 28 },
   [DisplayOpcode.FillColorShadow]: { fixedBytes: 52, minimumBytes: 52 },
+  [DisplayOpcode.FillColorPath]: { fixedBytes: 12, minimumBytes: 12 },
+  [DisplayOpcode.StrokeColorPath]: { fixedBytes: 24, minimumBytes: 24 },
   [DisplayOpcode.DrawImage]: { fixedBytes: 40, minimumBytes: 40 },
   [DisplayOpcode.DrawPicture]: { fixedBytes: 16, minimumBytes: 16 },
 } as const;
@@ -435,6 +439,7 @@ export enum Prop {
   FontSize = 33,
   Font = 34,
   Image = 35,
+  PathStrokeWidth = 38,
   Path = 37,
   VideoFrame = 36,
   OnTap = 48,
@@ -478,6 +483,7 @@ export const PROP_METADATA = {
   33: { name: "FontSize", valueType: "f32", resourceKind: null, invalidation: 3 },
   34: { name: "Font", valueType: "ref", resourceKind: ResourceKind.Font, invalidation: 3 },
   35: { name: "Image", valueType: "ref", resourceKind: ResourceKind.Image, invalidation: 3 },
+  38: { name: "PathStrokeWidth", valueType: "f32", resourceKind: null, invalidation: 2 },
   37: { name: "Path", valueType: "ref", resourceKind: ResourceKind.Path, invalidation: 2 },
   36: {
     name: "VideoFrame",

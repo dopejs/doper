@@ -1,4 +1,6 @@
-use pingo_abi::{DisplayCommand, DisplayList, DisplayOpcode, ResourceKind};
+use pingo_abi::{
+    DisplayCommand, DisplayList, DisplayOpcode, FillRule, PathResource, PathVerb, ResourceKind,
+};
 use pingo_paint::SolidPaint;
 use pingo_scene::Scene;
 
@@ -171,6 +173,9 @@ impl HeadlessRenderer {
                 let state = self.current().clone();
                 self.fill_shadow(rect, radii, offset, blur, rgba, &state, width, height);
             }
+            DisplayCommand::FillColorPath { path_id, rgba } => {
+                self.execute_fill_color_path(path_id, rgba, scene, width, height)?;
+            }
             DisplayCommand::FillColorRRect { rect, radii, rgba } => {
                 let [red, green, blue, alpha] = rgba.to_be_bytes();
                 let state = self.current().clone();
@@ -252,6 +257,108 @@ impl HeadlessRenderer {
                 self.metrics.blended_pixels += 1;
             }
         }
+    }
+
+    /// Unpacks the inline colour before handing off, so `execute` stays a
+    /// dispatch table rather than growing a body per command.
+    fn execute_fill_color_path(
+        &mut self,
+        path_id: u32,
+        rgba: u32,
+        scene: &Scene,
+        width: u32,
+        height: u32,
+    ) -> Result<(), HeadlessError> {
+        let [red, green, blue, alpha] = rgba.to_be_bytes();
+        let state = self.current().clone();
+        self.fill_path(
+            path_id,
+            scene,
+            &state,
+            SolidPaint {
+                red,
+                green,
+                blue,
+                alpha,
+            },
+            width,
+            height,
+        )
+    }
+
+    /// Fills a flattened outline by sampling, the same way `fill_rrect` does.
+    ///
+    /// Sampling rather than scanline conversion because the renderer already
+    /// inverse-transforms each pixel to test containment; a second rasterisation
+    /// strategy would be a second set of edge cases to keep in agreement.
+    fn fill_path(
+        &mut self,
+        path_id: u32,
+        scene: &Scene,
+        state: &State,
+        paint: SolidPaint,
+        width: u32,
+        height: u32,
+    ) -> Result<(), HeadlessError> {
+        let resource = scene
+            .resource(path_id)
+            .ok_or(HeadlessError::MissingResource {
+                resource_id: path_id,
+            })?;
+        if resource.kind != ResourceKind::Path {
+            return Err(HeadlessError::WrongResourceKind {
+                resource_id: path_id,
+                actual: resource.kind,
+            });
+        }
+        // Scene validated this at commit; decoding again keeps the oracle from
+        // trusting a caller that assembled a Scene by hand.
+        let path = PathResource::decode(&resource.bytes).map_err(|_| {
+            HeadlessError::WrongResourceKind {
+                resource_id: path_id,
+                actual: resource.kind,
+            }
+        })?;
+        let contours = flatten_path(&path);
+        let Some(local_bounds) = contour_bounds(&contours) else {
+            return Ok(());
+        };
+        let polygon = state.transform.rect(local_bounds);
+        let Some(bounds) = polygon.bounds(width, height) else {
+            return Ok(());
+        };
+        let Some(inverse) = state.transform.inverse() else {
+            return Ok(());
+        };
+        let source_alpha = scale_alpha(paint.alpha, state.alpha);
+        if source_alpha == 0 {
+            return Ok(());
+        }
+        for y in bounds.top..bounds.bottom {
+            for x in bounds.left..bounds.right {
+                self.metrics.candidate_pixels += 1;
+                let sample = Point {
+                    x: f64::from(x) + 0.5,
+                    y: f64::from(y) + 0.5,
+                };
+                let local = inverse.point_f64(sample);
+                if !contours_contain(&contours, local, path.fill_rule)
+                    || state.clips.iter().any(|clip| !clip.contains(sample))
+                {
+                    continue;
+                }
+                let pixel = (usize::try_from(y).expect("bounded y")
+                    * usize::try_from(width).expect("bounded width")
+                    + usize::try_from(x).expect("bounded x"))
+                    * 4;
+                blend(
+                    &mut self.pixels[pixel..pixel + 4],
+                    [paint.red, paint.green, paint.blue, source_alpha],
+                );
+                self.metrics.blended_pixels += 1;
+            }
+        }
+        Ok(())
     }
 
     fn fill_rrect(
@@ -688,6 +795,7 @@ fn validate_supported(display_list: &DisplayList) -> Result<(), HeadlessError> {
             | DisplayCommand::FillColorRect { .. }
             | DisplayCommand::FillRRect { .. }
             | DisplayCommand::FillColorRRect { .. }
+            | DisplayCommand::FillColorPath { .. }
             | DisplayCommand::FillColorBorder { .. }
             | DisplayCommand::FillColorShadow { .. }
             | DisplayCommand::FillPlaceholder { .. }
@@ -713,6 +821,8 @@ fn command_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::FillRRect { .. } => DisplayOpcode::FillRRect,
         DisplayCommand::FillPath { .. } => DisplayOpcode::FillPath,
         DisplayCommand::StrokePath { .. } => DisplayOpcode::StrokePath,
+        DisplayCommand::FillColorPath { .. } => DisplayOpcode::FillColorPath,
+        DisplayCommand::StrokeColorPath { .. } => DisplayOpcode::StrokeColorPath,
         DisplayCommand::DrawGlyphRun { .. } => DisplayOpcode::DrawGlyphRun,
         DisplayCommand::DrawTextFallback { .. } => DisplayOpcode::DrawTextFallback,
         DisplayCommand::DrawTextInlineFallback { .. } => DisplayOpcode::DrawTextInlineFallback,
@@ -990,6 +1100,157 @@ fn hash_image(width: u32, height: u32, pixels: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash
+}
+
+const ORIGIN: Point = Point { x: 0.0, y: 0.0 };
+
+/// Flattens every subpath into a closed polyline in path-local coordinates.
+///
+/// Curves are subdivided a fixed number of times rather than adaptively: the
+/// oracle has to be deterministic across machines, and error-driven
+/// subdivision turns on floating-point comparisons that need not agree.
+fn flatten_path(path: &PathResource) -> Vec<Vec<Point>> {
+    /// Fixed subdivision count. The table is built once so the cast from a
+    /// loop counter never appears in the hot path.
+    const SEGMENTS: usize = 24;
+    let steps: [f64; SEGMENTS] =
+        std::array::from_fn(|index| f64::from(u32::try_from(index + 1).unwrap_or(u32::MAX)) / 24.0);
+    let mut contours: Vec<Vec<Point>> = Vec::new();
+    let mut current: Vec<Point> = Vec::new();
+    let mut cursor = 0_usize;
+    let mut next = || {
+        let point = Point {
+            x: f64::from(path.points[cursor]),
+            y: f64::from(path.points[cursor + 1]),
+        };
+        cursor += 2;
+        point
+    };
+    for verb in &path.verbs {
+        match verb {
+            PathVerb::Move => {
+                if current.len() > 1 {
+                    contours.push(std::mem::take(&mut current));
+                } else {
+                    current.clear();
+                }
+                current.push(next());
+            }
+            PathVerb::Line => current.push(next()),
+            PathVerb::Quad => {
+                let start = *current.last().unwrap_or(&ORIGIN);
+                let control = next();
+                let end = next();
+                for t in steps {
+                    let inverse = 1.0 - t;
+                    current.push(Point {
+                        x: inverse * inverse * start.x
+                            + 2.0 * inverse * t * control.x
+                            + t * t * end.x,
+                        y: inverse * inverse * start.y
+                            + 2.0 * inverse * t * control.y
+                            + t * t * end.y,
+                    });
+                }
+            }
+            PathVerb::Cubic => {
+                let start = *current.last().unwrap_or(&ORIGIN);
+                let first = next();
+                let second = next();
+                let end = next();
+                for t in steps {
+                    let inverse = 1.0 - t;
+                    let start_weight = inverse * inverse * inverse;
+                    let first_weight = 3.0 * inverse * inverse * t;
+                    let second_weight = 3.0 * inverse * t * t;
+                    let end_weight = t * t * t;
+                    current.push(Point {
+                        x: start_weight * start.x
+                            + first_weight * first.x
+                            + second_weight * second.x
+                            + end_weight * end.x,
+                        y: start_weight * start.y
+                            + first_weight * first.y
+                            + second_weight * second.y
+                            + end_weight * end.y,
+                    });
+                }
+            }
+            PathVerb::Close => {
+                if current.len() > 1 {
+                    contours.push(std::mem::take(&mut current));
+                } else {
+                    current.clear();
+                }
+            }
+        }
+    }
+    if current.len() > 1 {
+        contours.push(current);
+    }
+    contours
+}
+
+/// Local bounding rectangle as `x, y, width, height`.
+fn contour_bounds(contours: &[Vec<Point>]) -> Option<[f32; 4]> {
+    let mut left = f64::INFINITY;
+    let mut top = f64::INFINITY;
+    let mut right = f64::NEG_INFINITY;
+    let mut bottom = f64::NEG_INFINITY;
+    for point in contours.iter().flatten() {
+        left = left.min(point.x);
+        top = top.min(point.y);
+        right = right.max(point.x);
+        bottom = bottom.max(point.y);
+    }
+    if !left.is_finite() || right <= left || bottom <= top {
+        return None;
+    }
+    Some([
+        clamp_f32(left),
+        clamp_f32(top),
+        clamp_f32(right - left),
+        clamp_f32(bottom - top),
+    ])
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "path bounds only feed a device-space rectangle, which is f32"
+)]
+fn clamp_f32(value: f64) -> f32 {
+    value as f32
+}
+
+/// Point-in-path under the resource's fill rule.
+///
+/// Every contour is treated as closed, which is what filling means: an open
+/// subpath is filled as if a segment joined its ends.
+fn contours_contain(contours: &[Vec<Point>], sample: Point, rule: FillRule) -> bool {
+    let mut winding = 0_i32;
+    let mut crossings = 0_u32;
+    for contour in contours {
+        for index in 0..contour.len() {
+            let start = contour[index];
+            let end = contour[(index + 1) % contour.len()];
+            if (start.y <= sample.y) != (end.y <= sample.y) {
+                let span = end.y - start.y;
+                if span == 0.0 {
+                    continue;
+                }
+                let t = (sample.y - start.y) / span;
+                let x = start.x + t * (end.x - start.x);
+                if x > sample.x {
+                    crossings += 1;
+                    winding += if end.y > start.y { 1 } else { -1 };
+                }
+            }
+        }
+    }
+    match rule {
+        FillRule::NonZero => winding != 0,
+        FillRule::EvenOdd => crossings % 2 == 1,
+    }
 }
 
 #[cfg(test)]
