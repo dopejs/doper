@@ -51,14 +51,15 @@ Canvas 原生的可编辑文本。
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm check           # 构建、lint、类型、测试、覆盖率门槛与帧时基准
+pnpm check           # 日常：构建、lint、类型、测试、覆盖率门槛与帧时基准
+pnpm check:full      # 完整：加上协议/API/迁移/后端差分/动画/soak 等全部门禁
 pnpm storybook:build # 组件库
 pnpm probe:dev       # 平台探针；开发服务器发送 COOP/COEP 以启用跨源隔离
 ```
 
 ## 当前实测
 
-下表取自同一次完整门禁执行，不是历史累积：
+下表取自同一次 `pnpm check:full` 执行，不是历史累积：
 
 | 项目        | 实测                                                  |
 | ----------- | ----------------------------------------------------- |
@@ -78,7 +79,8 @@ pnpm probe:dev       # 平台探针；开发服务器发送 COOP/COEP 以启用�
 保持可见，但不把已完成的工程项标记为未完成。具备正式设备与环境时使用
 `pnpm platform:qualify`；未认证的平台不得对外宣称已达到对应指标。
 
-完整的门禁清单与各自的口径见 [`docs/plan.md`](docs/plan.md)。
+发布另有 `pnpm release:gate`：它在 `check:full` 之上追加平台资格审计、npm 打包验证与
+候选报告，且要求工作树干净。完整口径见 [`docs/plan.md`](docs/plan.md)。
 
 采集口径与已知限制见 [`docs/m0-probes.md`](docs/m0-probes.md)。
 

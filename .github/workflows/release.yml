@@ -69,7 +69,7 @@ jobs:
           fi
 
       - name: Full engineering gates (M0-M9)
-        run: pnpm m9:check
+        run: pnpm release:gate
         env:
           VITE_PINGO_BUILD_ID: ${{ github.sha }}
 
