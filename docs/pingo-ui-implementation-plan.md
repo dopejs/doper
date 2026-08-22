@@ -348,10 +348,15 @@ oracle 一致；`pnpm release:check`、`pnpm migration:check`、`pnpm storybook:
   本来就有诊断（`position: relative`、`flex-wrap`、`inset` 阴影），要么偏差本身被
   note 精确描述，属于**刻意的子集边界**而非缺陷。
 - **自动翻转** —— **设计门待决策，未实现**。见
-  [`overlay-auto-flip-design.md`](./overlay-auto-flip-design.md)。阻塞点是仓库里没有
-  任何布局回读通道：`NodeHandle` 无几何，设计文档承诺的 `useLayoutValue` 没有实现，
-  唯一的 Core→Shell 几何通道是单主体的编辑几何。组件层只能靠猜尺寸，猜错比不翻转更
-  糟。建议先补 `useLayoutValue`（A 方案），在那之前维持静态方向并在 README 明说。
+  [`overlay-auto-flip-design.md`](./overlay-auto-flip-design.md)。"翻转"是窄化说法：
+  浮层定位需要 `flip` / `shift` / `size` / `hide` 一族策略，它们吃同一个输入（锚点
+  绝对 rect + 裁剪边界 + 浮层自身尺寸），因此要立的项是**碰撞感知定位**。阻塞点是
+  Shell 没有面向组件的几何查询：`NodeHandle` 无几何，`useLayoutValue` 没有实现。
+  已有的两条几何通道都不顶用——编辑几何是单主体的，语义快照虽然带每节点根坐标
+  绝对 rect（Popover trigger 因为有 `semanticRole` 已在其中），但不含无 role 的浮层
+  内容本身、是 a11y 节奏的全量快照、且不回答"裁剪边界相对谁"。它是可行性先例，不是
+  捷径。建议先补 `useLayoutValue`（A 方案），策略上线顺序 `size` → `shift` →
+  `flip` → `hide`；在那之前维持静态方向并在 README 明说。
 - **A3 是无 fixture 立项** —— **无法收口，属于立项前提缺失**。原计划要求"试点业务有
   明确需求 fixture"才启动，实际没有。因此只做了计划点名的四个组件，API 由"分子=组合
   前两批"与"shadcn superset"两条约束推导。试点接入后若与实际需求不符，改的是这四个

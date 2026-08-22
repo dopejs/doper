@@ -155,9 +155,10 @@ ListRow 的文本列都是伸缩件，尾部 slot 因此落在边缘，不需要
   Shift+Tab 在登记项之间循环，Escape 仍然关闭；没有登记任何控件时 Tab 不被吞掉。
   `order` 由调用方给出而非自动发现——面板内容是任意子树，Shell 无法判断哪些是
   可达控件、以什么顺序可达。
-- **弹层没有自动翻转**：只有静态方向，没有"空间不足时翻到上方"。翻转需要布局后
-  回读，而 `useLayoutValue` 尚未实现；候选方案与建议见
-  `docs/overlay-auto-flip-design.md`。
+- **弹层没有碰撞感知定位**：只有静态方向。没有 `flip`（空间不足翻到对侧）、
+  `shift`（沿轴滑动保持可见）、`size`（约束 max-height 让长列表内部滚动）、
+  `hide`（锚点滚出裁剪框时隐藏）。四者都要先读到布局结果，而 `useLayoutValue`
+  尚未实现；候选方案与建议见 `docs/overlay-auto-flip-design.md`。
 - Skeleton 无 pulse 动画（Core 动画只覆盖 opacity/transform，CSS keyframes 不在
   子集内）。
 - Switch thumb 无滑动过渡（同上，thumb 直接跳变）。
