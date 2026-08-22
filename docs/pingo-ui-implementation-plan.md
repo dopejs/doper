@@ -18,7 +18,7 @@
 | E2 zIndex                                                | ✅ 完成 | 设计门 `e2-zindex-design.md`；`62850ea…e0b9347`                                                       |
 | E3 position/inset                                        | ✅ 完成 | 设计门 `e3-position-design.md`；`6c72939`                                                             |
 | A2 第二批弹层组件                                        | ✅ 完成 | 子计划 `pingo-ui-overlay-components-plan.md`；`0a43cf1`                                               |
-| A3 第三批产品分子                                        | ✅ 完成 | 子计划 `pingo-ui-product-molecules-plan.md`；无试点 fixture，规格取自计划点名的四个组件               |
+| A3 第三批产品分子                                        | ✅ 完成 | 子计划 `pingo-ui-product-molecules-plan.md`；`55cde8d`。无试点 fixture，规格取自计划点名的四个组件    |
 
 **接手指引**：引擎工作包按各自设计门启动（设计文档评审 → 写 `docs/pingo-ui-e<N>-implementation-plan.md` 子计划 → subagent 执行）；组件批次按本文件规格表执行。已完成的子计划内 checkbox 状态以本表为准。
 
@@ -302,6 +302,7 @@ TS/Rust 往返 + malformed-input/fuzz。
 | E2   | z-index 解析（整数/auto/拒绝小数）；paint 顺序单测；hit 顺序（BVH 与 naive 双路）；无 z-index 时零开销路径                                                                                                | `62850ea…e0b9347` |
 | E3   | oracle 差分 8000 例（含 position/inset 生成）；insets 定位与尺寸单测；脱离流不撑大容器单测；`inset` shorthand 与关键字拒绝                                                                                | `6c72939`         |
 | A2   | 8 组件 + Overlay 基元；33 条组件测试（层叠顺序、锚定结构、Escape、焦点交接、键盘导航、过滤、明暗）；skin 层级断言；storybook 明暗展区                                                                     | `0a43cf1`         |
+| A3   | 4 产品分子；22 条组件测试（伸缩列位置、slot 缺省、trend 三态、禁用无 handler、键盘导航、明暗）；skin 断言伸缩件与 trend 色；storybook 明暗展区                                                            | `55cde8d`         |
 
 **全量门禁（2026-08-22，全部通过）**：`pnpm m0:check` 退出码 0（含 lockfile、
 format:check、build、lint、typecheck、559 条 vitest、contracts:check、rust:check
