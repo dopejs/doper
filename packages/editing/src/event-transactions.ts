@@ -245,6 +245,8 @@ function eventKind(value: number): InputEventKind {
       return "keydown";
     case 18:
       return "keyup";
+    case 19:
+      return "contextmenu";
     default:
       return fail("unknown event transaction kind");
   }

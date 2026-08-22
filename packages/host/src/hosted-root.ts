@@ -789,6 +789,14 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.dispatchCanvasEvent("click", event, 0, 0);
   };
 
+  private readonly handleCanvasContextMenu = (event: Event): void => {
+    // The platform menu is suppressed unconditionally, not only when a handler
+    // exists: whether one exists is Core's answer after a hit test, and by the
+    // time that answer arrives the event is no longer cancellable.
+    if (event.cancelable) event.preventDefault();
+    this.dispatchCanvasEvent("contextmenu", event as MouseEvent, 0, 0);
+  };
+
   private readonly handleCanvasKeyDown = (event: Event): void => {
     this.dispatchCanvasKeyEvent("keydown", event as KeyboardEvent);
   };
@@ -955,6 +963,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   private dispatchCanvasEvent(
     kind:
       | "click"
+      | "contextmenu"
       | "pointercancel"
       | "pointerdown"
       | "pointerleave"
@@ -1075,6 +1084,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   private blurEditableOutsideActiveEditor(
     kind:
       | "click"
+      | "contextmenu"
       | "pointercancel"
       | "pointerdown"
       | "pointerleave"
@@ -1157,6 +1167,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   private synthesizeTextSelection(
     kind:
       | "click"
+      | "contextmenu"
       | "pointercancel"
       | "pointerdown"
       | "pointerleave"
@@ -1318,6 +1329,9 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (typeof this.#canvas.getAttribute === "function" && this.#canvas.tabIndex < 0) {
       this.#canvas.tabIndex = 0;
     }
+    this.#canvas.addEventListener("contextmenu", this.handleCanvasContextMenu, {
+      passive: false,
+    });
     this.#canvas.addEventListener("keydown", this.handleCanvasKeyDown, { passive: false });
     this.#canvas.addEventListener("keyup", this.handleCanvasKeyUp, { passive: false });
     if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
@@ -1358,6 +1372,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
       window.removeEventListener("blur", this.handleWindowBlur);
     }
+    this.#canvas.removeEventListener("contextmenu", this.handleCanvasContextMenu);
     this.#canvas.removeEventListener("keydown", this.handleCanvasKeyDown);
     this.#canvas.removeEventListener("keyup", this.handleCanvasKeyUp);
     this.#canvas.removeEventListener("pointerdown", this.handleCanvasPointerEvent);

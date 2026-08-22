@@ -162,6 +162,38 @@ describe("Input Stream", () => {
     expect(() => decodeInputBatch(bytes)).toThrow(/reserved/u);
   });
 
+  it("round-trips a context-menu request as a positioned event", () => {
+    // It rides the existing positioned-event command rather than getting its
+    // own opcode: it is a pointer-positioned request, and Core hit-tests it on
+    // the same path as a press.
+    const command = {
+      type: "dispatchEvent" as const,
+      eventId: 4,
+      kind: "contextmenu" as const,
+      flags: 0,
+      x: 12,
+      y: 34,
+      deltaX: 0,
+      deltaY: 0,
+      buttons: 0,
+      modifiers: 0,
+      // Positioned but not pointer-identified, the same shape click and wheel
+      // use: Core must not treat it as a pointer input, or it would drive hover
+      // and active state on the node the menu is about to cover.
+      pointerId: 0,
+      elapsedMicros: 16_667,
+      pointerType: "none" as const,
+      isPrimary: true,
+      pressure: 0,
+      tiltX: 0,
+      tiltY: 0,
+      width: 1,
+      height: 1,
+    };
+    const batch = { frameSeq: 1, commands: [command] };
+    expect(decodeInputBatch(encodeInputBatch(batch))).toEqual(batch);
+  });
+
   it("rejects invalid event coordinates and reserved flag bits", () => {
     const valid = {
       type: "dispatchEvent" as const,

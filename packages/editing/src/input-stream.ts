@@ -86,7 +86,8 @@ export type InputEventKind =
   | "pointerup"
   | "wheel"
   | "keydown"
-  | "keyup";
+  | "keyup"
+  | "contextmenu";
 
 export type InputPointerType = "mouse" | "none" | "pen" | "touch";
 export type InputFocusOrigin = "accessibility" | "keyboard" | "pointer" | "programmatic";
@@ -892,6 +893,8 @@ function eventKindCode(kind: InputEventKind): number {
       return 17;
     case "keyup":
       return 18;
+    case "contextmenu":
+      return 19;
   }
 }
 
@@ -933,6 +936,8 @@ function eventKind(value: number): InputEventKind {
       return "keydown";
     case 18:
       return "keyup";
+    case 19:
+      return "contextmenu";
     default:
       return fail("unknown input event kind");
   }

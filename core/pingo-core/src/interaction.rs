@@ -774,6 +774,46 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_context_menu_request_routes_by_hit_test_and_leaves_state_alone() {
+        let mut scene = scene();
+        let mut interaction = InteractionController::default();
+        let path = vec![id(0), id(1)];
+
+        let result = interaction.apply(
+            &mut scene,
+            InteractionCommand::Dispatch(pointer(1, InputEventKind::ContextMenu)),
+            Some(path.clone()),
+        );
+
+        // Exactly one record, along the hit path: no synthesized hover or focus
+        // companions, because the user is now interacting with the menu this
+        // opens rather than with the node beneath it.
+        assert_eq!(
+            result
+                .records
+                .iter()
+                .map(|record| record.kind)
+                .collect::<Vec<_>>(),
+            vec![InputEventKind::ContextMenu]
+        );
+        assert_eq!(
+            result.records[0].path,
+            path.iter().map(|node| node.raw()).collect::<Vec<_>>()
+        );
+        assert_eq!(scene.interaction_state(id(0)), 0);
+        assert_eq!(scene.interaction_state(id(1)), 0);
+
+        // Nothing hit means nothing dispatched, rather than a record aimed at
+        // the root that a background handler would answer.
+        let missed = interaction.apply(
+            &mut scene,
+            InteractionCommand::Dispatch(pointer(2, InputEventKind::ContextMenu)),
+            None,
+        );
+        assert!(missed.records.is_empty());
+    }
+
     fn assert_reset_clears_interaction(reset: &InteractionResult, scene: &Scene) {
         assert_eq!(
             reset

@@ -2860,6 +2860,8 @@ function normalizeEventHandlers(
     ["keydown:bubble", "onKeyDown"],
     ["keyup:capture", "onKeyUpCapture"],
     ["keyup:bubble", "onKeyUp"],
+    ["contextmenu:capture", "onContextMenuCapture"],
+    ["contextmenu:bubble", "onContextMenu"],
   ] as const satisfies readonly (readonly [EventHandlerKey, string])[];
   const result = new Map<EventHandlerKey, PingoEventHandler>();
   for (const [key, property] of bindings) {

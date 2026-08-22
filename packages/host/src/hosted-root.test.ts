@@ -367,8 +367,32 @@ describe("createHostedCanvasRoot", () => {
       metaKey: false,
     });
 
+    // A right-click travels as a positioned event, and the platform menu is
+    // suppressed unconditionally: whether a handler exists is Core's answer
+    // after a hit test, and by then the DOM event is no longer cancellable.
+    let prevented = false;
+    canvas.emit("contextmenu", {
+      type: "contextmenu",
+      cancelable: true,
+      clientX: 8,
+      clientY: 9,
+      preventDefault: () => {
+        prevented = true;
+      },
+    });
+    expect(prevented).toBe(true);
+
     const commands = core.inputs.flatMap((bytes) => decodeInputBatch(bytes).commands);
-    expect(commands).toHaveLength(2);
+    expect(commands).toHaveLength(3);
+    expect(commands[2]).toMatchObject({
+      type: "dispatchEvent",
+      kind: "contextmenu",
+      // Positioned but not pointer-identified, like click and wheel: Core must
+      // not drive hover or active state on the node the menu will cover.
+      pointerId: 0,
+      pointerType: "none",
+      buttons: 0,
+    });
     expect(commands[0]).toMatchObject({
       type: "dispatchKeyEvent",
       kind: "keydown",

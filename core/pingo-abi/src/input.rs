@@ -147,6 +147,12 @@ pub enum InputEventKind {
     KeyDown = 17,
     /// Non-editing key release routed to the focused node.
     KeyUp = 18,
+    /// Context-menu request at a point; routed by hit test like a pointer press.
+    ///
+    /// Deliberately not a pointer input: it must not change hover or active
+    /// state, because the menu it opens is what the user is now interacting
+    /// with, not the node underneath.
+    ContextMenu = 19,
 }
 
 impl InputEventKind {
@@ -170,6 +176,7 @@ impl InputEventKind {
             16 => Ok(Self::FocusOut),
             17 => Ok(Self::KeyDown),
             18 => Ok(Self::KeyUp),
+            19 => Ok(Self::ContextMenu),
             _ => Err(AbiError::UnknownIdentifier {
                 category: "input event kind",
                 value: u32::from(value),

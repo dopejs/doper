@@ -60,6 +60,7 @@ export interface PingoEvent {
     | "focusin"
     | "focusout"
     | "gotpointercapture"
+    | "contextmenu"
     | "keydown"
     | "keyup"
     | "lostpointercapture"
@@ -243,6 +244,15 @@ export interface CommonProps {
   readonly onKeyDown?: PingoEventHandler;
   readonly onKeyUpCapture?: PingoEventHandler;
   readonly onKeyUp?: PingoEventHandler;
+  /**
+   * Context-menu request, routed by hit test to the node under the pointer.
+   *
+   * Unlike a pointer press it leaves hover and active state alone: what the
+   * user is now interacting with is the menu, not the node beneath it. The Host
+   * suppresses the platform menu, so a handler is the only way one appears.
+   */
+  readonly onContextMenuCapture?: PingoEventHandler;
+  readonly onContextMenu?: PingoEventHandler;
   readonly semanticRole?: string;
   readonly semanticLabel?: string;
   readonly semanticValue?: string;
