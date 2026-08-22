@@ -4,7 +4,8 @@
 交付 `useLayoutValue` 全链路：schema/ABI → Scene 观察集 → Core 几何导出 → Host 三
 transport → Runtime hook → 定位策略 → 四个锚定组件接入，并保留 feature flag 回滚。
 
-**前置：** 设计门 D1–D8 需先批准；§4 三条未决问题在 E8-1 前定稿。
+**前置：** 设计门 [`e8-layout-readback-design.md`](./e8-layout-readback-design.md)
+D1–D9 已 Accepted，无未决项，可直接开工。
 
 ---
 
@@ -15,7 +16,7 @@ transport → Runtime hook → 定位策略 → 四个锚定组件接入，并�
 
 - [ ] `abiVersion` 19 → 20；`minimumReadableAbiVersion` 不变（20 对 19 纯增量）。
 - [ ] Mutation 命令 `ObserveGeometry = 96`（新分组，`nodeId + flags`）。
-- [ ] `layoutGeometryBatch`：header（version/recordCount）+ 每记录 10 words
+- [ ] `layoutGeometryBatch`：header（version/**frameSeq**/recordCount）+ 每记录 10 words
       （`nodeId`、`flags`、own rect ×4、clip rect ×4），形状对齐
       `editingGeometryBatch`。
 - [ ] `limits.maxObservedGeometryNodes`（设计门 §4.2 定值）。
@@ -66,8 +67,11 @@ hosted-root.ts}`
 - [ ] `HostedRoot` 侧维护 nodeId → 最新几何的表，并暴露给 Runtime。
 - [ ] feature flag（默认关闭，设计门 D8）：关闭时不发 `ObserveGeometry`，
       不注册回调。
-- [ ] 契约测试：SAB / postMessage / 主线程 Canvas2D 三条 transport 下几何帧
-      内容一致、与 DisplayList 的相对顺序一致。
+- [ ] **只采用 `frameSeq` 与已应用 DisplayList 匹配的几何帧**，不匹配即丢弃
+      （设计门 D9）。不依赖发送顺序。
+- [ ] 契约测试：SAB / postMessage / 主线程 Canvas2D 三条 transport 下几何帧内容一致；
+      故意乱序投递时几何被丢弃而非错帧应用；断言 `frameSeq` 一致性——单靠"顺序对"
+      测不出来，多数帧布局相同，用错帧看不出差别。
 
 ### Task E8-5: Runtime `useLayoutValue` 与公开面
 

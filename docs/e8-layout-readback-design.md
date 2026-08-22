@@ -1,6 +1,8 @@
 # E8 设计门：布局回读（`useLayoutValue`）与碰撞感知定位
 
-- 状态：Proposed（待批准）
+- 状态：**Accepted**（2026-08-22 逐条讨论通过，无未决项）
+- 批准范围：D2 / D3 / D4 / D9 与体积口径逐条讨论确认；D5 由需求方直接拍板（裁剪边界
+  取视口）；D1 / D6 / D7 / D8 随本文一并接受，未逐条辩论
 - 日期：2026-08-22
 - 关联计划：[`pingo-ui-e8-implementation-plan.md`](./pingo-ui-e8-implementation-plan.md)
 - 前置：E3（`position: absolute` + inset，已完成 `6c72939`）
@@ -97,7 +99,8 @@ Core 拖成全场景导出。
 
 ### D3：新通道 `layoutGeometryBatch`，形状照搬编辑几何
 
-版本化 `Uint32Array` 帧，`abiVersion` 19 → 20。每条记录 10 words：
+版本化 `Uint32Array` 帧，`abiVersion` 19 → 20。头部为 `version` / `frameSeq` /
+`recordCount`（`frameSeq` 的用途见 D9），每条记录 10 words：
 
 | 字段                        | 说明                                |
 | --------------------------- | ----------------------------------- |
@@ -192,6 +195,25 @@ per-component 选项，不作默认。
 `undefined`，组件退回 D7 之前的静态方向。回滚路径是关 flag，不需要回退 ABI——
 `abiVersion` 20 对 19 是纯增量，旧 Shell 不发 `ObserveGeometry` 即得到旧行为。
 
+### D9：几何帧用 `frameSeq` 与 DisplayList 对齐，不靠发送顺序
+
+Worker 模式下 DisplayList 与几何帧都经 `postMessage` 到主线程，先后不定。若 Shell 拿
+一帧的几何去校正另一帧的画面，弹层会在显形瞬间按错误位置定位一次、下一帧才修正——
+一次可见跳动，恰是 D6 要消除的东西。
+
+几何帧头部携带 `frameSeq`（与 `frameDiagnostics` 同源）。Shell 只在 `frameSeq` 与已
+应用的 DisplayList 匹配时采用该几何，不匹配即丢弃、等下一帧。
+
+**为什么不是"规定几何在 DisplayList 之后发"**：那依赖发送侧的代码顺序，任何人重排两
+行就悄悄破坏，而且测不出来——多数帧的布局相同，用错帧的几何看不出差别。带标记之后，
+契约测试可以直接断言 `frameSeq` 一致性。
+
+**为什么不把几何塞进 DisplayList 帧当一个 section**：那让纯渲染通道背上非渲染数据，
+并破坏"Canvas2D replay 是一个薄的、分配敏感的 typed-array 循环"这条不变量。
+
+**Tradeoff**：每帧多 4 字节（头部，非每记录）与 Shell 侧一次比较；顺序错乱时最坏是慢
+一帧显形，而不是定位错误。
+
 ## 3. 不做
 
 - 同步布局读取（`useLayoutEffect` 语义）——`docs/design.md` 明确排除。
@@ -204,6 +226,14 @@ per-component 选项，不作默认。
 
 ## 4. 未决问题
 
-1. Worker 模式下几何帧与 DisplayList 的顺序保证：同帧内先后是否需要固定。
+无。立项时的三条均已定稿：
 
-（"全量还是增量"已定为全量，见 D3；"观察上界取值与超限行为"已定，见 D2。）
+| 问题                      | 结论                                          | 落点 |
+| ------------------------- | --------------------------------------------- | ---- |
+| 几何帧全量还是增量        | 全量                                          | D3   |
+| 观察上界取值与超限行为    | 64；单条拒绝 + 降级，Shell 策略层 / Core 兜底 | D2   |
+| 与 DisplayList 的同帧顺序 | 不约定顺序，用 `frameSeq` 对齐                | D9   |
+
+讨论中另外修正了三处：D4 由"循环内旁路表"改为"循环外重算"（我的错，非取舍）；
+D1 增加 `enabled` 并把观察绑定到 open 状态（否则 100 行未打开的 Popover 会占满额度）；
+E8-8 的体积口径改为允许侵占工程→产品之间的既有余量，但不上调产品预算。
