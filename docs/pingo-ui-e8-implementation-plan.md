@@ -41,7 +41,9 @@ transport → Runtime hook → 定位策略 → 四个锚定组件接入，并�
 
 - [ ] Scene 维护观察集（提交期），并提供 `observes_any()` 布尔——手法同
       `StyleCapabilities`（`2933441`），无观察时导出路径整体不执行。
-- [ ] 超过 `maxObservedGeometryNodes` 时提交整体失败，不半应用。
+- [ ] 超过 `maxObservedGeometryNodes`（64）时**只拒该条 `ObserveGeometry`**，
+      同帧其余 mutation 照常提交；`frameDiagnostics` 增 `observeGeometryRejected`
+      计数。整帧失败是错的：畸形字节与资源策略性质不同（设计门 D2）。
 - [ ] **几何循环一行不改**：`own_aabb` 与有效裁剪框在循环外，由已存的
       `transform`/`width`/`height` 与祖先链重算（设计门 D4 方案 3）。
       断言重算结果与循环内的 `inherited_clip` 逐位一致，否则两条路径会悄悄分叉。
@@ -76,6 +78,10 @@ hosted-root.ts}`
       selector 结果 `Object.is` 不变则不触发重渲染。
 - [ ] 首帧返回 `undefined`；flag 关闭时恒为 `undefined`。
 - [ ] 同一节点被多处订阅只观察一次（引用计数）。
+- [ ] **Shell 侧执行上界**：本地持有计数，越界订阅入 FIFO 队列，名额释放时自动补发。
+      只靠 Core 拒绝会让被拒订阅永久停在 `undefined`——命令已发出，不会重试。
+- [ ] 单测：第 65 个订阅进队列且不发命令；前面某个卸载后队首自动补发并拿到几何；
+      dev 模式下越界有带组件上下文的告警。
 - [ ] 单测：订阅/退订对称、快速开关不泄漏观察、selector 稳定性。
 - [ ] `pnpm api:check` 快照按 `docs/api/index.md` 程序更新。
 
