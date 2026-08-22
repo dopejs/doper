@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 19,
+  "abiVersion": 20,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -83,7 +83,8 @@
     "systemTextAdvances": 1048576,
     "wordBoundaries": 262144,
     "recordingRecords": 1048576,
-    "virtualItems": 4000000
+    "virtualItems": 4000000,
+    "maxObservedGeometryNodes": 64
   },
   "recording": {
     "magic": "DOPR",
@@ -470,6 +471,65 @@
       }
     ]
   },
+  "layoutGeometryBatch": {
+    "version": 1,
+    "headerFields": [
+      {
+        "name": "version",
+        "type": "u32"
+      },
+      {
+        "name": "frameSeq",
+        "type": "u32"
+      },
+      {
+        "name": "recordCount",
+        "type": "u32"
+      }
+    ],
+    "recordFields": [
+      {
+        "name": "nodeId",
+        "type": "u32"
+      },
+      {
+        "name": "flags",
+        "type": "u32"
+      },
+      {
+        "name": "ownLeftBits",
+        "type": "u32"
+      },
+      {
+        "name": "ownTopBits",
+        "type": "u32"
+      },
+      {
+        "name": "ownWidthBits",
+        "type": "u32"
+      },
+      {
+        "name": "ownHeightBits",
+        "type": "u32"
+      },
+      {
+        "name": "clipLeftBits",
+        "type": "u32"
+      },
+      {
+        "name": "clipTopBits",
+        "type": "u32"
+      },
+      {
+        "name": "clipWidthBits",
+        "type": "u32"
+      },
+      {
+        "name": "clipHeightBits",
+        "type": "u32"
+      }
+    ]
+  },
   "streams": {
     "mutation": {
       "magic": "DOPM",
@@ -549,6 +609,11 @@
           "name": "ConfigureEditable",
           "opcode": 80,
           "fields": ["u32", "u32", "u32", "u32", "u32"]
+        },
+        {
+          "name": "ObserveGeometry",
+          "opcode": 96,
+          "fields": ["u32", "u32"]
         },
         {
           "name": "Commit",

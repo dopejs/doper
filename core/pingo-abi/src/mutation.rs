@@ -7,6 +7,13 @@ use crate::{
     MutationOpcode, NodeKind, Prop, PropValueType, ResourceKind, StreamKind, VirtualAxis,
 };
 
+/// Version 1 observation flags: bit 0 asks Core to report this node's geometry.
+///
+/// Zero withdraws the observation, so the mask doubles as the reserved-bit
+/// check — an unknown bit must not be read as "withdraw".
+pub const OBSERVE_GEOMETRY_FLAG_ACTIVE: u32 = 1;
+const OBSERVE_GEOMETRY_FLAG_MASK: u32 = OBSERVE_GEOMETRY_FLAG_ACTIVE;
+
 /// One validated Shell-to-Core mutation.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mutation {
@@ -146,6 +153,17 @@ pub enum Mutation {
         flags: u32,
         /// Maximum user-perceived characters accepted by Core.
         max_graphemes: u32,
+    },
+    /// Declares or withdraws Shell interest in one node's laid-out geometry.
+    ///
+    /// Observation is explicit because exporting every node's rect each frame
+    /// would be an allocation proportional to the scene; the observed set is
+    /// bounded by `MAX_OBSERVED_GEOMETRY_NODES`.
+    ObserveGeometry {
+        /// Node whose geometry the Shell wants reported.
+        node_id: u32,
+        /// Version 1 observation flags; zero withdraws the observation.
+        flags: u32,
     },
 }
 
@@ -424,6 +442,20 @@ fn decode_mutation(opcode: MutationOpcode, reader: &mut Reader<'_>) -> Result<Mu
             flags: reader.read_u32()?,
             max_graphemes: reader.read_u32()?,
         },
+        MutationOpcode::ObserveGeometry => Mutation::ObserveGeometry {
+            node_id: reader.read_u32()?,
+            flags: {
+                let flags = reader.read_u32()?;
+                // Reserved bits are rejected rather than masked off: a newer
+                // producer's flag must not be silently read as "withdraw".
+                if flags & !OBSERVE_GEOMETRY_FLAG_MASK != 0 {
+                    return Err(AbiError::InvalidValue(
+                        "observe-geometry flags use reserved bits",
+                    ));
+                }
+                flags
+            },
+        },
         MutationOpcode::Commit => return Err(AbiError::InvalidValue("nested commit")),
     })
 }
@@ -630,6 +662,14 @@ fn encode_mutation(writer: &mut Writer, instruction: &MutationInstruction) -> Re
             writer.u32(*node_id);
             writer.u32(*item_index);
         }
+        Mutation::ObserveGeometry {
+            node_id,
+            flags: observe_flags,
+        } => {
+            writer.instruction(MutationOpcode::ObserveGeometry as u8, flags);
+            writer.u32(*node_id);
+            writer.u32(*observe_flags);
+        }
         Mutation::ConfigureEditable {
             node_id,
             revision,
@@ -674,6 +714,7 @@ fn mutation_opcode(mutation: &Mutation) -> MutationOpcode {
         Mutation::ConfigureVirtualList { .. } => MutationOpcode::ConfigureVirtualList,
         Mutation::SetVirtualItem { .. } => MutationOpcode::SetVirtualItem,
         Mutation::ConfigureEditable { .. } => MutationOpcode::ConfigureEditable,
+        Mutation::ObserveGeometry { .. } => MutationOpcode::ObserveGeometry,
     }
 }
 
@@ -858,6 +899,14 @@ mod tests {
                 flags: 0b101,
                 max_graphemes: 1_000_000,
             },
+            Mutation::ObserveGeometry {
+                node_id: 20,
+                flags: OBSERVE_GEOMETRY_FLAG_ACTIVE,
+            },
+            Mutation::ObserveGeometry {
+                node_id: 20,
+                flags: 0,
+            },
         ];
         let batch = MutationBatch {
             frame_seq: 21,
@@ -870,6 +919,52 @@ mod tests {
             MutationBatch::decode(&batch.encode().expect("encode")),
             Ok(batch)
         );
+    }
+
+    #[test]
+    fn observe_geometry_round_trips_and_rejects_reserved_flag_bits() {
+        let observe = |flags| MutationBatch {
+            frame_seq: 1,
+            instructions: vec![MutationInstruction {
+                flags: 0,
+                mutation: Mutation::ObserveGeometry { node_id: 7, flags },
+            }],
+        };
+
+        // Withdrawal is flags == 0, so both states must survive a round trip;
+        // encoding only the active one would make "stop observing" unsendable.
+        for flags in [OBSERVE_GEOMETRY_FLAG_ACTIVE, 0] {
+            let batch = observe(flags);
+            assert_eq!(
+                MutationBatch::decode(&batch.encode().expect("encode")),
+                Ok(batch)
+            );
+        }
+
+        // Golden bytes: 16-byte stream header, 4-byte instruction header, then
+        // node id and flags. Pinned so a layout change has to be deliberate.
+        let bytes = observe(OBSERVE_GEOMETRY_FLAG_ACTIVE)
+            .encode()
+            .expect("encode");
+        let instruction = &bytes[crate::STREAM_HEADER_BYTES..crate::STREAM_HEADER_BYTES + 12];
+        assert_eq!(instruction[0], MutationOpcode::ObserveGeometry as u8);
+        assert_eq!(u32::from_le_bytes(instruction[4..8].try_into().unwrap()), 7);
+        assert_eq!(
+            u32::from_le_bytes(instruction[8..12].try_into().unwrap()),
+            1
+        );
+
+        // A newer producer's flag must fail loudly, not be masked down to zero —
+        // that would read as "withdraw" and silently stop reporting geometry.
+        let mut hostile = bytes.clone();
+        let flags_at = crate::STREAM_HEADER_BYTES + 8;
+        hostile[flags_at..flags_at + 4].copy_from_slice(&0b10_u32.to_le_bytes());
+        assert!(MutationBatch::decode(&hostile).is_err());
+
+        // Truncating the payload must not read past the end.
+        for cut in 1..=8 {
+            assert!(MutationBatch::decode(&bytes[..bytes.len() - cut]).is_err());
+        }
     }
 
     #[test]

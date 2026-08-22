@@ -83,6 +83,8 @@ async function checkAbiRoundtrip() {
         bytes: new TextEncoder().encode("hello"),
       },
       { type: "setTextRun", nodeId: 7, stringId: 9, styleId: 10 },
+      { type: "observeGeometry", nodeId: 7, flags: 1 },
+      { type: "observeGeometry", nodeId: 7, flags: 0 },
     ],
   });
   const mutationHex = encodeHex(mutationBytes);
@@ -310,7 +312,10 @@ async function checkAbiRoundtrip() {
   );
 
   const pictureBytes = backend.encodePictureResourceBatch([
-    { type: "define", pictureId: 11, bytes: decodeHex(displayGolden) },
+    // Not `displayGolden`: under --update that string is the pre-regeneration
+    // file, so the picture fixture would embed a stale header and the very next
+    // run would fail. A golden updater that needs two passes is a trap.
+    { type: "define", pictureId: 11, bytes: decodeHex(currentHex(displayGolden)) },
     { type: "release", pictureId: 12 },
   ]);
   const pictureHex = encodeHex(pictureBytes);
@@ -355,6 +360,12 @@ function roundTripInRust(kind, hex) {
     throw new Error(`Rust ${kind} round trip failed: ${result.stderr.trim()}`);
   }
   return result.stdout.trim();
+}
+
+/** The regenerated value for a golden when --update replaced it, else itself. */
+function currentHex(hex) {
+  const name = goldenNames.get(hex);
+  return (name === undefined ? undefined : regenerated.get(name)) ?? hex;
 }
 
 function encodeHex(bytes) {

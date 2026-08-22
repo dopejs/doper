@@ -105,7 +105,22 @@ export type Mutation =
       readonly revision: bigint;
       readonly flags: number;
       readonly maxGraphemes: number;
+    }
+  | {
+      /**
+       * Declares or withdraws Shell interest in one node's laid-out geometry.
+       *
+       * Core reports geometry only for observed nodes, because exporting every
+       * node's rect each frame would allocate in proportion to the scene.
+       */
+      readonly type: "observeGeometry";
+      readonly nodeId: number;
+      /** {@link OBSERVE_GEOMETRY_FLAG_ACTIVE}; zero withdraws the observation. */
+      readonly flags: number;
     };
+
+/** Bit 0 asks Core to report this node's geometry. Zero withdraws. */
+export const OBSERVE_GEOMETRY_FLAG_ACTIVE = 1;
 
 /** A complete transaction. Commit is encoded automatically at the end. */
 export interface MutationBatch {
@@ -372,6 +387,18 @@ function encodeMutation(writer: ByteWriter, mutation: Mutation): void {
       writer.u32(mutation.flags);
       writer.u32(mutation.maxGraphemes);
       return;
+    case "observeGeometry":
+      assertU32(mutation.nodeId, "nodeId");
+      assertU32(mutation.flags, "observe flags");
+      if ((mutation.flags & ~OBSERVE_GEOMETRY_FLAG_ACTIVE) !== 0) {
+        // Core rejects reserved bits rather than masking them, so sending one
+        // would fail the whole frame at the decoder instead of here.
+        fail("observe flags use reserved bits");
+      }
+      writer.instruction(MutationOpcode.ObserveGeometry);
+      writer.u32(mutation.nodeId);
+      writer.u32(mutation.flags);
+      return;
   }
 }
 
@@ -499,6 +526,14 @@ function decodeMutation(reader: ByteReader, opcode: MutationOpcode): Mutation {
         flags: reader.u32(),
         maxGraphemes: reader.u32(),
       };
+    case MutationOpcode.ObserveGeometry: {
+      const nodeId = reader.u32();
+      const flags = reader.u32();
+      if ((flags & ~OBSERVE_GEOMETRY_FLAG_ACTIVE) !== 0) {
+        return fail("observe flags use reserved bits");
+      }
+      return { type: "observeGeometry", nodeId, flags };
+    }
     default:
       return fail(`unknown mutation opcode ${String(opcode)}`);
   }

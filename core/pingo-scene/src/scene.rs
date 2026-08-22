@@ -1272,6 +1272,10 @@ impl Scene {
                 }
             }
             Mutation::ConfigureEditable { .. } => {}
+            // Observation is Engine state keyed by node, not scene-graph data,
+            // so the Scene only resolves the node and leaves it alone — the same
+            // treatment ConfigureEditable gets.
+            Mutation::ObserveGeometry { .. } => {}
             Mutation::CreateNode { .. }
             | Mutation::RemoveNode { .. }
             | Mutation::Reparent { .. }
@@ -1527,7 +1531,8 @@ fn mutation_node(mutation: &Mutation) -> Option<u32> {
         | Mutation::ScrollTo { node_id, .. }
         | Mutation::ConfigureVirtualList { node_id, .. }
         | Mutation::SetVirtualItem { node_id, .. }
-        | Mutation::ConfigureEditable { node_id, .. } => Some(*node_id),
+        | Mutation::ConfigureEditable { node_id, .. }
+        | Mutation::ObserveGeometry { node_id, .. } => Some(*node_id),
         Mutation::CreateNode { .. }
         | Mutation::Reparent { .. }
         | Mutation::DefineResource { .. }
@@ -2222,7 +2227,8 @@ const fn mutation_target(mutation: &Mutation) -> Option<u32> {
         | Mutation::ScrollTo { node_id, .. }
         | Mutation::ConfigureVirtualList { node_id, .. }
         | Mutation::SetVirtualItem { node_id, .. }
-        | Mutation::ConfigureEditable { node_id, .. } => Some(*node_id),
+        | Mutation::ConfigureEditable { node_id, .. }
+        | Mutation::ObserveGeometry { node_id, .. } => Some(*node_id),
         Mutation::DefineResource { .. } | Mutation::ReleaseResource { .. } => None,
     }
 }
@@ -2573,6 +2579,7 @@ fn plan_apply_property(
                 .virtual_item_index = Some(item_index);
         }
         Mutation::ConfigureEditable { .. } => {}
+        Mutation::ObserveGeometry { .. } => {}
         Mutation::CreateNode { .. }
         | Mutation::RemoveNode { .. }
         | Mutation::Reparent { .. }

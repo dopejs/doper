@@ -60,7 +60,7 @@ pub use input::{
     InputBatch, InputCommand, InputEventKind, InputFocusOrigin, InputInstruction, InputPointerType,
     InputPosition, InputSelection, InteractionResetReason, KEY_FLAG_MASK, KEY_FLAG_REPEAT,
 };
-pub use mutation::{Mutation, MutationBatch, MutationInstruction};
+pub use mutation::{Mutation, MutationBatch, MutationInstruction, OBSERVE_GEOMETRY_FLAG_ACTIVE};
 pub use picture_resources::{
     PictureResourceBatch, PictureResourceCommand, PictureResourceInstruction,
 };

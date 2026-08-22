@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_MUTATION_INSTRUCTIONS, NodeKind, Prop, ResourceKind, VirtualAxis } from "./generated";
 import {
   NULL_NODE_ID,
+  OBSERVE_GEOMETRY_FLAG_ACTIVE,
   decodeMutationBatch,
   encodeMutationBatch,
   type Mutation,
@@ -31,11 +32,42 @@ const GOLDEN_BATCH: MutationBatch = {
 };
 
 describe("Mutation Stream", () => {
+  it("round-trips both observation states and refuses reserved flag bits", () => {
+    const observe = (flags: number): MutationBatch => ({
+      frameSeq: 1,
+      mutations: [{ type: "observeGeometry", nodeId: 7, flags }],
+    });
+
+    // Withdrawal is flags === 0, so both states must survive the round trip;
+    // dropping the zero case would make "stop observing" unsendable.
+    for (const flags of [OBSERVE_GEOMETRY_FLAG_ACTIVE, 0]) {
+      const batch = observe(flags);
+      expect(decodeMutationBatch(encodeMutationBatch(batch))).toEqual(batch);
+    }
+
+    // Core rejects reserved bits rather than masking them, so the encoder has
+    // to refuse here — masking would read as "withdraw" and silently stop
+    // reporting geometry, and sending it would fail the whole frame instead.
+    expect(() => encodeMutationBatch(observe(0b10))).toThrow(/reserved bits/u);
+
+    // The decoder is a trust boundary too: bytes may not come from this encoder.
+    // Flags sit after the 16-byte stream header, the 4-byte instruction header
+    // and the node id; the trailing Commit instruction is what makes counting
+    // from the end wrong. Assert the byte before overwriting it so this cannot
+    // silently start patching some other field.
+    const bytes = encodeMutationBatch(observe(OBSERVE_GEOMETRY_FLAG_ACTIVE));
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const flagsAt = 16 + 4 + 4;
+    expect(view.getUint32(flagsAt, true)).toBe(OBSERVE_GEOMETRY_FLAG_ACTIVE);
+    view.setUint32(flagsAt, 0b10, true);
+    expect(() => decodeMutationBatch(bytes)).toThrow(/reserved bits/u);
+  });
+
   it("round-trips a canonical transaction", () => {
     const bytes = encodeMutationBatch(GOLDEN_BATCH);
     expect(decodeMutationBatch(bytes)).toEqual(GOLDEN_BATCH);
     expect(toHex(bytes)).toBe(
-      "444f504d130010006400000005000000010005000700000003000000ffffffffffffffff1000040007000000010000000040a0433000060009000000010000000500000068656c6c6f0000002000040007000000090000000a000000f00002002a000000",
+      "444f504d140010006400000005000000010005000700000003000000ffffffffffffffff1000040007000000010000000040a0433000060009000000010000000500000068656c6c6f0000002000040007000000090000000a000000f00002002a000000",
     );
   });
 
