@@ -27,6 +27,8 @@
     "m2:check": "node scripts/run-with-rust-target-cleanup.mjs pnpm m2:check:run",
     "m2:check:run": "pnpm m1:check",
     "m3:perf": "node scripts/run-with-rust-target-cleanup.mjs pnpm m3:perf:run",
+    "e8:perf": "node scripts/run-with-rust-target-cleanup.mjs pnpm e8:perf:run",
+    "e8:perf:run": "node scripts/check-e8-geometry-performance.mjs",
     "m3:perf:run": "node scripts/check-m3-scroll-performance.mjs",
     "m3:diff": "node scripts/run-with-rust-target-cleanup.mjs pnpm m3:diff:run",
     "m3:diff:run": "pnpm core:wasm && node scripts/check-m3-wasm-native.mjs",
