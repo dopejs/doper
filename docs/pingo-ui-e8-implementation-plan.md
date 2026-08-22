@@ -76,7 +76,8 @@ hosted-root.ts}`
 
 - [ ] `useLayoutValue(ref, selector)`：挂载时发 `ObserveGeometry`，卸载时撤销；
       selector 结果 `Object.is` 不变则不触发重渲染。
-- [ ] 首帧返回 `undefined`；flag 关闭时恒为 `undefined`。
+- [ ] 首帧返回 `undefined`；flag 关闭或 `enabled: false` 时恒为 `undefined`，
+      且**不发 `ObserveGeometry`、不占额度**（设计门 D1/D2）。
 - [ ] 同一节点被多处订阅只观察一次（引用计数）。
 - [ ] **Shell 侧执行上界**：本地持有计数，越界订阅入 FIFO 队列，名额释放时自动补发。
       只靠 Core 拒绝会让被拒订阅永久停在 `undefined`——命令已发出，不会重试。
@@ -102,6 +103,8 @@ hosted-root.ts}`
 **Files:** `packages/ui/src/components/{popover,menu}.ts`、皮肤、storybook
 
 - [ ] `Popover` / `DropdownMenu` / `Select` / `Tooltip` 接入策略。
+- [ ] **锚点观察以 `enabled: open` 绑定打开状态**，不绑定 trigger 挂载。
+      回归断言：渲染 100 行、每行一个未打开的 Popover，观察数为 0。
 - [ ] 首帧 `visibility: hidden`，测得几何后显形（设计门 D6）；
       per-component 可选退回"先猜后校正"。
 - [ ] flag 关闭时四个组件行为与今天逐字节一致（回归断言）。

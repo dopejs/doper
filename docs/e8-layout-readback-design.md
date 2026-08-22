@@ -27,8 +27,12 @@
 function useLayoutValue<T>(
   ref: RefObject<NodeHandle | null>,
   selector: (geometry: LayoutGeometry) => T,
+  options?: { readonly enabled?: boolean }, // 默认 true
 ): T | undefined;
 ```
+
+`enabled: false` 时不发 `ObserveGeometry`，也不占额度，返回 `undefined`。这不是便利
+开关，是额度正确性的前提——见 D2 的"观察绑定 open 状态"。
 
 `LayoutGeometry` 是闭集记录（见 D3），`selector` 是在 **Shell 侧**运行的纯投影，
 只用于变化比较：投影结果不变则不触发重渲染。首帧返回 `undefined`——节点还没被
@@ -44,6 +48,16 @@ function useLayoutValue<T>(
 新增 Mutation 命令 `ObserveGeometry`（opcode `96`，新分组）：`(nodeId, flags)`。
 `flags == 0` 表示取消观察；节点销毁时观察自动失效（generation 已经保证陈旧 ID
 不会复活）。
+
+**观察的生命周期绑定 open 状态，不绑定 trigger 挂载。** 面板那半边天然安全——面板只
+在打开时才挂载。锚点这半边不是：`Popover` 根与 trigger 是常驻的，若在 trigger 挂载时
+就观察，一个 100 行、每行一个 Popover 的表格在一个都没打开时就占满 100 个额度。因此
+锚点观察必须以 `enabled: props.open` 表达（D1 的 `options.enabled` 正是为此存在）。
+
+**内容复杂度不消耗额度。** 定位策略只需要锚点 rect、面板 rect 与边界，面板里是三个
+按钮还是两百条命令项都一样，所以一个打开的弹层恒为 2 个观察。增长的是同时打开的浮层
+数量：四级级联子菜单全开是 8，再叠一个 Dialog 内的 Popover 与 Tooltip 约 12–16，
+对 64 仍有四倍以上余量。
 
 **为什么不让 Core 每帧发全场景几何**：那是 O(节点数) 的每帧分配，直接违反
 "避免每帧对象分配"与"显式有界数据契约"。观察集的大小由 Shell 的实际订阅数决定，
@@ -158,6 +172,10 @@ Core 已经在算这个交集（D4 引用的 `inherited_clip`，且 `axis_clip` 
 浮层打开的第一帧没有测量结果，必须二选一：接受一帧跳变，或先隐藏。选后者——弹层
 的一帧跳变非常显眼，而 `visibility: hidden` 在子集内、占布局空间、不影响几何计算
 （`visible` 只门控可命中性，不门控几何循环）。
+
+首帧隐藏还顺带解开一处循环：`size` 要知道面板的**自然尺寸**才能决定是否约束，而
+约束之后量到的已不是自然尺寸。首帧不施加约束、量到自然尺寸，第二帧再约束，循环消失，
+且仍然只需 2 个观察。
 
 **Tradeoff**：打开慢一帧。可通过"静态方向先猜、测得后校正"降级为跳变，作为
 per-component 选项，不作默认。
