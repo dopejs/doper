@@ -36,8 +36,10 @@ E3 把包含块定为**父节点的 padding box**，这直接决定了锚定 API
   铺满**它自己的父节点**。因此调用方必须把它们挂在靠近根的容器下；
   这是 E3 偏差的直接后果，写进组件 docstring 与 README。
 
-不提供 `placement: "top" | "bottom" | ...` 的自动翻转：那需要测量后再定位，
-即"布局后回读"，与异步 `useLayoutValue` 契约冲突。v1 只提供 `side` 静态方向。
+不提供 `placement: "top" | "bottom" | ...` 的自动翻转：那需要测量后再定位，即
+"布局后回读"，而 `useLayoutValue` 至今没有实现，仓库里也没有别的几何通道。v1 只
+提供 `side` 静态方向。后续处置与候选方案见
+[`overlay-auto-flip-design.md`](./overlay-auto-flip-design.md)。
 
 ### Esc 关闭与焦点
 
@@ -49,6 +51,11 @@ E1 的键事件**只送达当前焦点节点**，所以：
 
 **不承诺焦点陷阱**：Tab 循环需要引擎侧的 tab order，E1 明确不内建它
 （`docs/e1-keyboard-events-design.md` §D4）。README 记为已知缺口。
+
+> 后续修正（`8171d7d`）：这条的因果反了。Core 没有 tab order，所以 Tab 根本不移动
+> 焦点，焦点也漏不出弹层——不需要陷阱。缺的是键盘用户进不到面板内的控件。现在
+> `OverlayFocus` 提供 `focusable(order)` 登记表，Tab / Shift+Tab 在登记项之间循环，
+> 公开入口是 `useFocusableRef(order)`。下面 A2-1 的验收项按此理解。
 
 ---
 
@@ -93,5 +100,5 @@ E1 的键事件**只送达当前焦点节点**，所以：
 - [ ] storybook 明暗双 story 覆盖八个组件。
 - [ ] `pnpm test:run`、`pnpm typecheck`、`pnpm api:check`、`pnpm rust:test`、
       `pnpm contracts:check`、`pnpm storybook:build` 全绿。
-- [ ] README 更新导出清单与已知缺口（无焦点陷阱、无自动翻转、视口型需挂近根）。
+- [x] README 更新导出清单与已知缺口（Tab 遍历需显式登记、无自动翻转、视口型需挂近根）。
 - [ ] 回写 `pingo-ui-implementation-plan.md` 进度表。

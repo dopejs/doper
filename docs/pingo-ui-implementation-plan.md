@@ -313,21 +313,46 @@ format:check、build、lint、typecheck、559 条 vitest、contracts:check、rus
 
 ### 残余风险与验证缺口
 
-- **帧时相对基线上升约 5%**：m1 p95 从 3.03ms（本轮开始时）到 3.19–3.28ms。
-  逐项排查后剩下的成本是 z-index 与 position 各自每帧每节点一次样式查询；
-  可避免的部分（每帧 DFS 排序、每节点 Vec 分配、`from_iter` 的 O(n²)）都已消除。
-  绝对门禁仍有大量余量。要再降需要把"是否有节点声明该属性"做成 Scene 提交期
-  维护的标志，属于后续优化。
-- **A3 是无 fixture 立项**：原计划要求"试点业务有明确需求 fixture"才启动，实际
-  没有。因此只做了计划点名的四个组件，API 由"分子=组合前两批"与"shadcn superset"
-  两条约束推导。试点接入后若与实际需求不符，改的是这四个的 API，不是引擎。
-- **平台资格未做**：真机帧时、真实 IME、跨浏览器均未验证——按 AGENTS.md，
-  这属于平台资格而不是工程完成度。
-- **弹层的两项能力刻意未做**：焦点陷阱（需要引擎侧 tab order）与自动翻转
-  （需要"布局后回读"）。已写入 `packages/ui/README.md`。
-- **CSS 子集的既知偏差**共 10 条，集中记录在 `docs/style-support.md`
+逐条处置见下。**已收口**的条目保留在这里是为了记录判断依据，不代表仍有敞口。
+
+- **帧时相对基线上升约 5%** —— **已收口**。原判断认为"是否有节点声明该属性"必须
+  每帧每节点查一次、只能留作后续优化；实际它是**提交期**才会变的事实。Scene 现在
+  在两条 commit 路径上各维护一次 `StyleCapabilities`（`2933441`），z-index 与
+  position 的每节点查询降为每帧一次布尔读。m1 p95 从 3.23ms 回到 3.158ms，相对
+  基线 3.048ms 剩余 +3.6%，其中 +2.7% 是 W0 本身——即用 2.7% 帧时换 30KB WASM，
+  没有它 E4/E2/E3 都上不了。绝对门禁仍有大量余量。
+- **弹层焦点陷阱** —— **已收口，且原判断是错的**（`8171d7d`）。原因写的是"需要
+  引擎侧 tab order"，方向反了：Core **根本没有** tab order，所以 Tab 不会移动焦点，
+  焦点也不可能从弹层漏出去，模态的 backdrop 吸掉了唯一另一种移动焦点的方式（指针
+  按下）。没有可陷之物。真正缺的是反面——键盘用户**进不去**面板内的控件。现在
+  `OverlayFocus` 带 `focusable(order)` / `cycle(backward)` 登记表，
+  `overlayKeyHandler` 在其上循环 Tab / Shift+Tab 并保留 Escape；Dialog / Sheet /
+  Popover 通过 `OverlayFocusContext` 把登记表交给调用方渲染的内容，
+  `useFocusableRef(order)` 是公开入口。Menu / Select / Command 保留方向键，那是这
+  几个 role 的正确模式。
+- **CSS 子集既知偏差中唯一"静默"的一条** —— **已收口**（`5c09b91`）。`min-width` /
+  `min-height` 沿用了 `width` 的 `length-auto` grammar，但 `auto` 在最小值上无法
+  兑现：解析通过、`outer_dimension` 落到 `unwrap_or(0.0)`，写了内容下限的样式表干净
+  编译然后运行时缩成零。现改为 `non-negative-length`，`auto` 与负值都在编译期报
+  `unsupported-value`（带属性与源位置），`cssSubsetVersion` → `1.6.0`。其余九条要么
+  本来就有诊断（`position: relative`、`flex-wrap`、`inset` 阴影），要么偏差本身被
+  note 精确描述，属于**刻意的子集边界**而非缺陷。
+- **自动翻转** —— **设计门待决策，未实现**。见
+  [`overlay-auto-flip-design.md`](./overlay-auto-flip-design.md)。阻塞点是仓库里没有
+  任何布局回读通道：`NodeHandle` 无几何，设计文档承诺的 `useLayoutValue` 没有实现，
+  唯一的 Core→Shell 几何通道是单主体的编辑几何。组件层只能靠猜尺寸，猜错比不翻转更
+  糟。建议先补 `useLayoutValue`（A 方案），在那之前维持静态方向并在 README 明说。
+- **A3 是无 fixture 立项** —— **无法收口，属于立项前提缺失**。原计划要求"试点业务有
+  明确需求 fixture"才启动，实际没有。因此只做了计划点名的四个组件，API 由"分子=组合
+  前两批"与"shadcn superset"两条约束推导。试点接入后若与实际需求不符，改的是这四个
+  的 API，不是引擎。
+- **平台资格未做** —— **本环境无法收口**。真机帧时、真实 IME、跨浏览器均未验证，且
+  没有可用的自动化设备服务。按 AGENTS.md 这属于平台资格而不是工程完成度：它必须保持
+  可见，但不把已完成的工程项标记为未完成。
+- **CSS 子集的其余既知偏差**共 9 条，集中记录在 `docs/style-support.md`
   「Known deviations from CSS」，其中最可能被踩到的是：绝对定位的包含块是父节点、
-  flex item 没有 automatic minimum size、不确定轴上的百分比解析为 0。
+  不确定轴上的百分比解析为 0。前者与自动翻转的"相对谁测可用空间"是同一个语义问题，
+  应当一起决策，见上面的设计门 §4。
 
 ## 验证矩阵（每个阶段出口必过）
 
