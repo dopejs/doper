@@ -456,6 +456,7 @@ export class CanvasFrameSink implements MutationSink {
   readonly #onLayoutGeometry: ((frame: LayoutGeometryFrame) => void) | undefined;
   readonly #fontSet: FontFaceSet | undefined;
   readonly #fontLoadingDone: (() => void) | undefined;
+  #layoutGeometryActive = false;
   #devicePixelRatio = 1;
   #lastDisplayList: Uint8Array | undefined;
   #lastPictureKey: string | undefined;
@@ -1211,8 +1212,19 @@ export class CanvasFrameSink implements MutationSink {
     if (frame !== undefined) this.#onEditingGeometry(frame);
   }
 
+  /**
+   * Turns the per-frame geometry export on only while something is observed.
+   *
+   * Nothing measures anything in most applications, and the export is a WASM
+   * call plus an allocation per frame; leaving it running would charge every
+   * caller for a feature they do not use.
+   */
+  public setLayoutGeometryActive(active: boolean): void {
+    this.#layoutGeometryActive = active;
+  }
+
   private emitLayoutGeometry(): void {
-    if (this.#onLayoutGeometry === undefined) return;
+    if (!this.#layoutGeometryActive || this.#onLayoutGeometry === undefined) return;
     const snapshot = this.#core.layout_geometry?.();
     if (snapshot === undefined) return;
     // An empty frame still carries frameSeq, and a consumer needs it to notice

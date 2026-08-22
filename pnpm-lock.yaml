@@ -168,6 +168,10 @@ importers:
       '@dopejs/pingo-reconciler':
         specifier: workspace:*
         version: link:../reconciler
+    devDependencies:
+      '@dopejs/pingo-runtime':
+        specifier: workspace:*
+        version: link:../runtime
 
   packages/jsx:
     dependencies:

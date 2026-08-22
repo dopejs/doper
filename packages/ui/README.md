@@ -155,12 +155,11 @@ ListRow 的文本列都是伸缩件，尾部 slot 因此落在边缘，不需要
   Shift+Tab 在登记项之间循环，Escape 仍然关闭；没有登记任何控件时 Tab 不被吞掉。
   `order` 由调用方给出而非自动发现——面板内容是任意子树，Shell 无法判断哪些是
   可达控件、以什么顺序可达。
-- **弹层的碰撞感知定位默认关闭**：`flip` / `shift` / `size` / `hide` 已随 E8 实现
-  （`packages/ui/src/positioning.ts`），但需要 Host 传 `layoutReadbackEnabled: true`
-  才生效。关闭时四者都不发生，弹层只有皮肤给的静态方向——位置仍然正确，只是不翻转、
-  不收缩、不隐藏。定位晚一帧：测量本身就要等一帧布局结果。边界取"引擎上报的有效裁剪框
-  ∩ 视口"，所以可滚动容器内的弹层受容器约束而不是受画布约束。设计见
-  `docs/e8-layout-readback-design.md`。
+- **弹层的碰撞感知定位**：`flip` / `shift` / `size` / `hide` 随 E8 实现
+  （`packages/ui/src/positioning.ts`），无需配置。定位**晚一帧**——测量本身要等一帧
+  布局结果，所以弹层的首帧用皮肤给的静态方向，位置正确但尚未翻转/收缩。边界取
+  "引擎上报的有效裁剪框 ∩ 视口"，因此可滚动容器内的弹层受容器约束而不是受画布约束。
+  设计见 `docs/e8-layout-readback-design.md`。
 - Skeleton 无 pulse 动画（Core 动画只覆盖 opacity/transform，CSS keyframes 不在
   子集内）。
 - Switch thumb 无滑动过渡（同上，thumb 直接跳变）。

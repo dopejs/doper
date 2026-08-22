@@ -72,9 +72,11 @@ hosted-root.ts}`
 - [x] `onLayoutGeometry` 回调 + 每帧 `emitLayoutGeometry()`（照 `emitSemantics`）。
 - [x] Worker 协议消息 + 主线程回放路径。
 - [x] `HostedRoot` 侧维护 nodeId → 最新几何的表，并暴露给 Runtime。
-- [x] feature flag `layoutReadbackEnabled`（默认关闭，设计门 D8）：关闭时既不注册
-      Host 通道（Core 导出根本不被调用），也不向组件提供 access 对象（因此不发
-      `ObserveGeometry`）。断言：关闭时 `layoutGeometry()` 恒为 undefined。
+- [x] **按需自启，不设 feature flag**（设计门 D8 已据此修订）。观察集从空变非空时
+      Host 才打开每帧导出，变空即关闭；worker 模式经 `pingo:layout-geometry-active`
+      传递。默认关闭的 flag 会把能力变成事实上没人用得到的死代码，同时给尚未发布的
+      库加一个需要解释的配置项。断言：没有组件观察时 `layoutGeometry()` 恒为
+      undefined，且 Core 导出一次都不被调用。
 - [x] **只接受 `frameSeq` 不回退的几何帧**，更旧的丢弃并计入
       `staleLayoutGeometryFrames()`。设计门 D9 原文写的是"与已应用的 DisplayList
       匹配"，那在 worker 模式下不成立（主线程不应用 DisplayList），已在设计文档
@@ -86,7 +88,8 @@ hosted-root.ts}`
 - [x] **几何只有两条路径，不是三条**，所以"三 transport 一致性"这个提法本身不准确：
       SAB 只替换 Shell→Core 的 mutation 传输，几何在 SAB 与 postMessage 两种 worker
       模式下走的是同一条 `pingo:layout-geometry` 消息（`render-worker.ts` 无分支）。
-      两条路径各自有测试：主线程直调回调（`hosted-root.test.ts`）、worker 消息投递
+      两条路径各自有测试：主线程端到端（`hosted-root.test.ts` 渲染一个真的调用
+      `useLayoutValue` 的组件，因此连"导出按需自启"一起覆盖）、worker 消息投递
       逐字段保真（`worker-client.test.ts`）。**仍未覆盖的是把同一场景跑完整两遍再
       比较结果**——这需要一个能驱动真实 worker 的夹具，本仓库没有，记为验证缺口。
 

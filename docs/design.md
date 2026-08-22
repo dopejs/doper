@@ -1957,9 +1957,9 @@ useLayoutValue<T>(
   全场景几何会是 O(节点数) 的每帧分配。
 - **`enabled: false` 不占额度**，用来把观察绑定到"弹层是否打开"而非"触发器是否挂载"。
 - **兼容性**：`abiVersion` 19 → 20，纯增量；旧 Shell 不发 `ObserveGeometry` 即得到旧行为。
-- **回滚**：Host 选项 `layoutReadbackEnabled` 默认**关闭**。关闭时不注册几何通道、
-  不提供 access 对象，`useLayoutValue` 恒为 `undefined`，组件退回静态方向。
-  回滚是关 flag，不需要回退 ABI。
+- **按需自启，无 feature flag**：观察集从空变非空时 Host 才打开每帧几何导出，变空即
+  关闭。没有组件调用 `useLayoutValue` 时这条路径一次都不执行，因此不需要配置项。
+- **回滚**：`abiVersion` 20 对 19 纯增量，旧 Shell 不发 `ObserveGeometry` 即得到旧行为。
 - **验证**：`pnpm e8:perf` 断言导出成本随观察数而非场景规模增长（8 倍场景 1.3 倍成本）。
 
 ---

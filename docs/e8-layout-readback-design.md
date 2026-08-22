@@ -189,11 +189,22 @@ per-component 选项，不作默认。
 可单独单测。顺序按本组件集的实际触发频率排，不按生态知名度排：长列表 Select 撑破
 容器比 Tooltip 贴边常见得多。
 
-### D8：feature flag 与回滚
+### D8：按需自启，不设 feature flag
 
-整条通路挂在一个 Host 选项后（默认关闭），关闭时 `useLayoutValue` 始终返回
-`undefined`，组件退回 D7 之前的静态方向。回滚路径是关 flag，不需要回退 ABI——
-`abiVersion` 20 对 19 是纯增量，旧 Shell 不发 `ObserveGeometry` 即得到旧行为。
+**修订（实现期，2026-08-22）：原方案是"挂在默认关闭的 Host 选项后"，已撤销。**
+
+默认关闭的 flag 对一个尚未发布、还没有用户的库是负收益：它把能力变成事实上没人用得到
+的死代码，同时给公开面加了一个需要解释的配置项，而"关闭"这条路径反而是被测得最多的
+那条。**去掉 flag，能力始终可用。**
+
+flag 关闭时省下的东西是真的——每帧一次 WASM 调用加一次分配——所以不是简单删掉，而是
+换成**按需自启**：Reconciler 在观察集从空变非空、以及从非空变空时通知 Host
+（`onLayoutObservationChange`），Host 据此开关每帧导出（worker 模式经
+`pingo:layout-geometry-active` 消息）。没有任何组件调用 `useLayoutValue` 时，
+这条路径一次都不执行——与原先 flag 关闭时的成本相同，但不需要任何人去配置。
+
+**回滚**：`abiVersion` 20 对 19 是纯增量，旧 Shell 不发 `ObserveGeometry` 即得到旧行为；
+Shell 侧回滚是撤销提交。没有运行时开关，因此也没有"开关处于哪一档"这个额外状态。
 
 ### D9：几何帧用 `frameSeq` 与 DisplayList 对齐，不靠发送顺序
 

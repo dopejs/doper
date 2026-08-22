@@ -105,6 +105,10 @@ async function handle(message: RenderWorkerInboundMessage): Promise<void> {
       if (!active || message.sessionId !== sessionId) return;
       sink?.setReducedMotion(message.reduced);
       return;
+    case "pingo:layout-geometry-active":
+      if (!active || message.sessionId !== sessionId) return;
+      sink?.setLayoutGeometryActive(message.active);
+      return;
     case "pingo:media-frame":
       if (!active || message.sessionId !== sessionId) {
         closeMediaSource(message.source);

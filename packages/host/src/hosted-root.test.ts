@@ -5,6 +5,7 @@ import {
   EVENT_FLAG_PRECISE_WHEEL,
   KEY_FLAG_REPEAT,
 } from "@dopejs/pingo-editing";
+import { useLayoutValue } from "@dopejs/pingo-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedCanvasRoot } from "./hosted-root";
@@ -75,6 +76,8 @@ describe("createHostedCanvasRoot", () => {
       coreFactory: () => Promise.resolve(fakeCore()),
       transport: { pageWorkerEnabled: false },
     });
+    // Nothing measures anything here, so the export never switches on and the
+    // application pays nothing for a feature it does not use.
     disabled.render(editableElement(9));
     expect(disabled.layoutGeometry(7)).toBeUndefined();
     await disabled.close();
@@ -82,34 +85,34 @@ describe("createHostedCanvasRoot", () => {
     const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
       capabilities: allCapabilities(),
       coreFactory: () => Promise.resolve(core),
-      layoutReadbackEnabled: true,
       transport: { pageWorkerEnabled: false },
     });
 
     // Each render changes the tree, because an unchanged one produces no
     // mutations and therefore no frame to carry geometry.
-    root.render(editableElement(10));
+    root.render(measuringElement(10));
+    root.render(measuringElement(11));
     expect(root.layoutGeometry(7)?.bounds.width).toBe(100);
     expect(root.staleLayoutGeometryFrames()).toBe(0);
 
     // Newer frame: adopted.
     frameSeq = 11;
     width = 140;
-    root.render(editableElement(11));
+    root.render(measuringElement(21));
     expect(root.layoutGeometry(7)?.bounds.width).toBe(140);
 
     // Older frame reaching the Shell after a newer one would move the overlay
     // back to where it used to be. It must be dropped, not applied.
     frameSeq = 10;
     width = 100;
-    root.render(editableElement(12));
+    root.render(measuringElement(22));
     expect(root.layoutGeometry(7)?.bounds.width).toBe(140);
     expect(root.staleLayoutGeometryFrames()).toBe(1);
 
     // A node that stops being observed disappears rather than going stale.
     frameSeq = 12;
     core.layout_geometry = (): Uint32Array => Uint32Array.of(1, frameSeq, 0);
-    root.render(editableElement(13));
+    root.render(measuringElement(23));
     expect(root.layoutGeometry(7)).toBeUndefined();
 
     await root.close();
@@ -1171,6 +1174,30 @@ interface FakeCore extends CoreClient {
 }
 
 /** An editable element without importing the JSX package. */
+/**
+ * A component that measures itself, which is what turns the geometry export on.
+ *
+ * The export is inert until something observes, so a test that only stubs the
+ * Core method would measure a channel nobody switched on.
+ */
+function measuringElement(width = 80): RenderNode {
+  const Measuring = (): RenderNode => {
+    const [attach] = useLayoutValue((geometry) => geometry.bounds.width);
+    return {
+      $$typeof: Symbol.for("dopejs.pingo.element"),
+      type: "container",
+      key: null,
+      props: { height: 40, ref: attach, width },
+    } as unknown as RenderNode;
+  };
+  return {
+    $$typeof: Symbol.for("dopejs.pingo.element"),
+    type: Measuring,
+    key: null,
+    props: {},
+  };
+}
+
 function editableElement(width = 80): RenderNode {
   // The descriptor is a plain object keyed by a globally registered symbol, so
   // this stays a test detail rather than a new edge in the package graph.

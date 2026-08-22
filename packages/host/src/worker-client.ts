@@ -22,6 +22,7 @@ import {
   type WorkerInputWakeMessage,
   type WorkerPrepareMessage,
   type WorkerReducedMotionMessage,
+  type WorkerLayoutGeometryActiveMessage,
   type WorkerMediaFrameMessage,
   type WorkerShutdownMessage,
 } from "./worker-protocol";
@@ -245,6 +246,16 @@ export class RenderWorkerClient {
       sessionId: this.#sessionId,
     };
     this.#worker.postMessage(message);
+  }
+
+  /** Starts or stops the worker's per-frame geometry export. */
+  public postLayoutGeometryActive(active: boolean): void {
+    if (this.#state !== "ready") return;
+    this.#worker.postMessage({
+      kind: "pingo:layout-geometry-active",
+      active,
+      sessionId: this.#sessionId,
+    } satisfies WorkerLayoutGeometryActiveMessage);
   }
 
   /** Propagates a live prefers-reduced-motion change to the active Core. */

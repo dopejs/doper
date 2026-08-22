@@ -108,15 +108,15 @@ export interface RootOptions {
     context: { readonly nodeId: number; readonly hostType: HostType },
   ) => void;
   /** Host bridge for imperative capture/focus requests issued by node handles. */
-  /**
-   * Enables Core geometry readback. Off by default, matching the Host flag.
-   *
-   * When off, `useLayoutValue` gets no access object, so it observes nothing
-   * and reports `undefined` — the same path a component takes on a Host that
-   * never provides geometry at all.
-   */
-  readonly layoutReadbackEnabled?: boolean;
   readonly onInteractionRequest?: (request: InteractionRequest) => void;
+  /**
+   * Called when the observed set becomes non-empty or empty again.
+   *
+   * Lets the Host skip the per-frame geometry export entirely while nothing is
+   * measured, which is the whole benefit the old opt-in flag bought without
+   * asking anyone to configure it.
+   */
+  readonly onLayoutObservationChange?: (active: boolean) => void;
   /** Host bridge for mounting, updating, and releasing browser-owned media state. */
   readonly onMediaBinding?: (binding: MediaBinding | undefined, nodeId: number) => void;
 }
@@ -499,7 +499,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       ) => void)
     | undefined;
   readonly #onInteractionRequest: ((request: InteractionRequest) => void) | undefined;
-  readonly #layoutReadbackEnabled: boolean;
+  readonly #onLayoutObservationChange: ((active: boolean) => void) | undefined;
   readonly #onMediaBinding:
     ((binding: MediaBinding | undefined, nodeId: number) => void) | undefined;
   readonly #pointerCaptures = new Map<number, number>();
@@ -574,7 +574,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     this.#videoEnabled = options.videoEnabled ?? true;
     this.#onStyleDiagnostics = options.onStyleDiagnostics;
     this.#onInteractionRequest = options.onInteractionRequest;
-    this.#layoutReadbackEnabled = options.layoutReadbackEnabled ?? false;
+    this.#onLayoutObservationChange = options.onLayoutObservationChange;
     this.#onMediaBinding = options.onMediaBinding;
   }
 
@@ -1115,7 +1115,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       scope: new ComponentScope(
         () => this.enqueueComponent(instance),
         (context) => this.lookupContext(instance, context),
-        this.#layoutReadbackEnabled ? this.#layoutGeometryAccess : undefined,
+        this.#layoutGeometryAccess,
       ),
       mounted: true,
       contextValue: isContextProvider(descriptor.type)
@@ -2009,6 +2009,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
 
   /** Takes a slot when one is free, otherwise queues for the next release. */
   private claimObservationSlot(nodeId: number): void {
+    if (this.#observedNodes.size === 0) this.#onLayoutObservationChange?.(true);
     if (this.#observedNodes.size < MAX_OBSERVED_GEOMETRY_NODES) {
       this.#observedNodes.add(nodeId);
       this.observeGeometry(nodeId, true);
@@ -2036,12 +2037,13 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     // Promote the oldest waiter that still has someone watching it.
     while (this.#deferredObservations.length > 0) {
       const next = this.#deferredObservations.shift();
-      if (next === undefined) return;
+      if (next === undefined) break;
       if (this.#geometrySubscribers.get(next) === undefined) continue;
       this.#observedNodes.add(next);
       this.observeGeometry(next, true);
-      return;
+      break;
     }
+    if (this.#observedNodes.size === 0) this.#onLayoutObservationChange?.(false);
   }
 
   /**

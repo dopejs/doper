@@ -61,7 +61,7 @@ class RecordingSink implements MutationSink {
 describe("reconciler", () => {
   it("observes a node once for many watchers and withdraws when the last one goes", () => {
     const sink = new RecordingSink();
-    const root = createRoot(sink, { layoutReadbackEnabled: true });
+    const root = createRoot(sink);
     let attachA: ((handle: { readonly nodeId: number } | null) => void) | undefined;
     let attachB: ((handle: { readonly nodeId: number } | null) => void) | undefined;
     let widthA: number | undefined;
@@ -140,7 +140,7 @@ describe("reconciler", () => {
 
   it("queues observations past the cap and promotes the oldest when a slot frees", () => {
     const sink = new RecordingSink();
-    const root = createRoot(sink, { layoutReadbackEnabled: true });
+    const root = createRoot(sink);
     const total = MAX_OBSERVED_GEOMETRY_NODES + 2;
     const first = signal(true);
 

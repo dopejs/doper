@@ -77,6 +77,12 @@ export interface WorkerReducedMotionMessage {
   readonly sessionId: number;
 }
 
+export interface WorkerLayoutGeometryActiveMessage {
+  readonly active: boolean;
+  readonly kind: "pingo:layout-geometry-active";
+  readonly sessionId: number;
+}
+
 export interface WorkerMediaFrameMessage {
   readonly kind: "pingo:media-frame";
   readonly resourceId: number;
@@ -93,6 +99,7 @@ export type RenderWorkerInboundMessage =
   | WorkerMediaFrameMessage
   | WorkerPrepareMessage
   | WorkerReducedMotionMessage
+  | WorkerLayoutGeometryActiveMessage
   | WorkerResizeMessage
   | WorkerShutdownMessage;
 
@@ -225,6 +232,8 @@ export function isRenderWorkerInboundMessage(value: unknown): value is RenderWor
       return true;
     case "pingo:reduced-motion":
       return typeof value.reduced === "boolean";
+    case "pingo:layout-geometry-active":
+      return typeof value.active === "boolean";
     case "pingo:media-frame":
       return (
         isPositiveU32(value.resourceId) &&
@@ -249,6 +258,7 @@ export function isRenderWorkerInboundEnvelope(value: unknown): boolean {
     value.kind === "pingo:input-wake" ||
     value.kind === "pingo:media-frame" ||
     value.kind === "pingo:reduced-motion" ||
+    value.kind === "pingo:layout-geometry-active" ||
     value.kind === "pingo:shutdown"
   );
 }

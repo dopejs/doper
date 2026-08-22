@@ -25,6 +25,9 @@
       "import": "./dist/index.js"
     }
   },
+  "devDependencies": {
+    "@dopejs/pingo-runtime": "workspace:*"
+  },
   "dependencies": {
     "@dopejs/pingo-backend-canvas2d": "workspace:*",
     "@dopejs/pingo-a11y": "workspace:*",

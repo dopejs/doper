@@ -101,14 +101,7 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly initializationTimeoutMs?: number;
   /** Uses immutable Picture resources; false is the production rollback path. */
   readonly incrementalPicturesEnabled?: boolean;
-  /**
-   * Enables Core geometry readback for `useLayoutValue`. Off by default.
-   *
-   * Off is the rollback path: no `ObserveGeometry` is sent, no geometry channel
-   * is registered, `useLayoutValue` reports `undefined`, and components fall
-   * back to static placement. See docs/e8-layout-readback-design.md D8.
-   */
-  readonly layoutReadbackEnabled?: boolean;
+
   readonly mutationAcknowledgementTimeoutMs?: number;
   readonly mutationBufferBytes?: number;
   /** Forces the centralized textarea fallback for qualification or known-bad EditContext builds. */
@@ -537,9 +530,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       onNonPassiveRegions: (regions) => this.handleNonPassiveRegions(regions),
       onEditingGeometry: (frame) => this.handleEditingGeometry(frame),
       onSemantics: (nodes) => this.handleSemantics(nodes),
-      ...(this.#options.layoutReadbackEnabled === true
-        ? { onLayoutGeometry: (frame: LayoutGeometryFrame) => this.handleLayoutGeometry(frame) }
-        : {}),
+      onLayoutGeometry: (frame: LayoutGeometryFrame) => this.handleLayoutGeometry(frame),
       sessionId: nextSessionId(),
     };
     const client = new RenderWorkerClient(workerFactory(), clientOptions);
@@ -633,7 +624,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   private reconcilerOptions(): RootOptions {
     return {
       ...this.#options,
-      layoutReadbackEnabled: this.#options.layoutReadbackEnabled ?? false,
+      onLayoutObservationChange: (active) => this.setLayoutGeometryActive(active),
       onInteractionRequest: (request) => {
         this.handleInteractionRequest(request);
         this.#options.onInteractionRequest?.(request);
@@ -643,6 +634,17 @@ class HostedCanvasRootController implements HostedCanvasRoot {
         this.#options.onMediaBinding?.(binding, nodeId);
       },
     };
+  }
+
+  /**
+   * Starts and stops the per-frame geometry export with the observed set.
+   *
+   * Worker mode has no direct handle on the sink, so the toggle rides the
+   * protocol the same way every other worker-side setting does.
+   */
+  private setLayoutGeometryActive(active: boolean): void {
+    this.#frameSink?.setLayoutGeometryActive(active);
+    this.#client?.postLayoutGeometryActive(active);
   }
 
   private handleInteractionRequest(request: InteractionRequest): void {
@@ -1443,9 +1445,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       (frame) => this.handleEditingGeometry(frame),
       (nodes) => this.handleSemantics(nodes),
       this.#options.incrementalPicturesEnabled ?? true,
-      this.#options.layoutReadbackEnabled === true
-        ? (frame) => this.handleLayoutGeometry(frame)
-        : undefined,
+      (frame) => this.handleLayoutGeometry(frame),
     );
     this.#frameSink = sink;
     this.#recoverableSink.install(sink);
