@@ -74,6 +74,14 @@ export { Form, FormField } from "./components/form";
 export type { FormFieldProps, FormProps } from "./components/form";
 export { applyOtpEdit, InputOTP } from "./components/input-otp";
 export type { InputOTPProps } from "./components/input-otp";
+export { Carousel, carouselStep } from "./components/carousel";
+export type { CarouselProps } from "./components/carousel";
+export { clampSplit, Resizable } from "./components/resizable";
+export type { ResizableProps } from "./components/resizable";
+export { Slider, sliderRatio } from "./components/slider";
+export type { SliderProps } from "./components/slider";
+export { createDrag, positionToValue, useDrag } from "./drag";
+export type { DragCallbacks, DragHandlers } from "./drag";
 export { Collapsible } from "./components/collapsible";
 export type { CollapsibleProps } from "./components/collapsible";
 export {

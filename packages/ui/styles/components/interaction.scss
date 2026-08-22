@@ -1,0 +1,128 @@
+@use "../tokens" as t;
+
+// No `position: relative`: in this engine every element is the containing
+// block for its own absolutely positioned children, so the track, range and
+// thumb are already placed against the slider. See docs/style-support.md.
+.pui-slider {
+  min-height: t.$slider-height;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.pui-slider--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}
+
+.pui-slider__track {
+  position: absolute;
+  left: t.$zero;
+  width: t.$full;
+  height: t.$slider-track;
+  border-radius: t.$slider-track-radius;
+  background-color: t.$secondary;
+  &.pui-dark {
+    background-color: t.$dark-secondary;
+  }
+}
+
+.pui-slider__range {
+  position: absolute;
+  left: t.$zero;
+  height: t.$slider-track;
+  border-radius: t.$slider-track-radius;
+  background-color: t.$primary;
+  &.pui-dark {
+    background-color: t.$dark-primary;
+  }
+}
+
+.pui-slider__thumb {
+  position: absolute;
+  width: t.$slider-thumb;
+  height: t.$slider-thumb;
+  margin-left: t.$slider-thumb-offset;
+  border-radius: t.$slider-thumb-radius;
+  background-color: t.$background;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$primary;
+  &.pui-dark {
+    background-color: t.$dark-background;
+    border-color: t.$dark-primary;
+  }
+}
+
+.pui-resizable {
+  width: t.$full;
+  height: t.$full;
+}
+
+.pui-resizable__pane {
+  overflow: hidden;
+}
+
+.pui-resizable__handle {
+  background-color: t.$border;
+  cursor: pointer;
+  &.pui-dark {
+    background-color: t.$dark-border;
+  }
+}
+
+.pui-resizable__handle--row {
+  width: t.$resizable-handle;
+  height: t.$full;
+}
+
+.pui-resizable__handle--column {
+  width: t.$full;
+  height: t.$resizable-handle;
+}
+
+.pui-resizable__handle--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}
+
+.pui-carousel {
+  flex-direction: column;
+  row-gap: t.$overlay-gap;
+}
+
+.pui-carousel__viewport {
+  overflow: hidden;
+  width: t.$full;
+}
+
+.pui-carousel__track {
+  width: t.$full;
+}
+
+.pui-carousel__slide {
+  width: t.$full;
+  flex: t.$carousel-slide-flex;
+}
+
+.pui-carousel__controls {
+  justify-content: flex-end;
+  column-gap: t.$pagination-gap;
+}
+
+.pui-carousel__control {
+  min-width: t.$pagination-size;
+  min-height: t.$pagination-size;
+  text-align: center;
+  font-size: t.$font-size-sm;
+  border-radius: t.$radius-md;
+  color: t.$foreground;
+  cursor: pointer;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-carousel__control--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}
