@@ -29,3 +29,5 @@ export {
   type VirtualRangeRequest,
 } from "./reconciler";
 export type { PingoMediaError, PingoMediaEvent } from "@dopejs/pingo-jsx";
+export { arcToCubics, encodePath, encodePathData, parsePathData, PathDataError } from "./path-data";
+export type { ParsedPath, PathFillRule } from "./path-data";

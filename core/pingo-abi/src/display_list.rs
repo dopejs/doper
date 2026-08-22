@@ -1048,6 +1048,74 @@ mod tests {
         }
     }
     #[test]
+    fn every_path_command_round_trips_and_rejects_impossible_stroke_styles() {
+        let commands = [
+            DisplayCommand::FillPath {
+                path_id: 3,
+                paint_id: 4,
+            },
+            DisplayCommand::FillColorPath {
+                path_id: 3,
+                rgba: 0x1122_33ff,
+            },
+            DisplayCommand::StrokePath {
+                path_id: 3,
+                paint_id: 4,
+                width: 2.5,
+                cap: 1,
+                join: 2,
+                miter_limit: 4.0,
+            },
+            DisplayCommand::StrokeColorPath {
+                path_id: 3,
+                rgba: 0x1122_33ff,
+                width: 0.0,
+                cap: 0,
+                join: 0,
+                miter_limit: 1.0,
+            },
+        ];
+        for command in commands {
+            let list = DisplayList {
+                instructions: vec![DisplayInstruction { flags: 0, command }],
+            };
+            let bytes = list.encode().expect("path command encodes");
+            assert_eq!(DisplayList::decode(&bytes), Ok(list));
+        }
+
+        // The stroke tail is shared by both stroke commands, so one malformed
+        // table proves the guard for both rather than only the one tested.
+        let stroke = |width: f32, cap: u8, join: u8, miter_limit: f32| DisplayList {
+            instructions: vec![DisplayInstruction {
+                flags: 0,
+                command: DisplayCommand::StrokeColorPath {
+                    path_id: 1,
+                    rgba: 0xffff_ffff,
+                    width,
+                    cap,
+                    join,
+                    miter_limit,
+                },
+            }],
+        };
+        for list in [
+            stroke(-1.0, 0, 0, 1.0),
+            stroke(f32::NAN, 0, 0, 1.0),
+            stroke(1.0, 3, 0, 1.0),
+            stroke(1.0, 0, 3, 1.0),
+            stroke(1.0, 0, 0, 0.5),
+            stroke(1.0, 0, 0, f32::INFINITY),
+        ] {
+            // Encoding may refuse outright; when it does not, decoding must.
+            let rejected = match list.encode() {
+                Ok(bytes) => DisplayList::decode(&bytes).is_err(),
+                Err(_) => true,
+            };
+            assert!(rejected, "an impossible stroke style must not survive");
+        }
+    }
+
+    #[test]
     fn an_unknown_draw_command_is_skipped_only_when_the_producer_allowed_it() {
         // Losing a draw command costs a visual detail, which is the defined
         // downgrade for a list produced by a newer build. Losing one the

@@ -268,6 +268,14 @@ async function checkAbiRoundtrip() {
   );
   assertEqual(resources.getTextStyle(3)?.textAlign, "center", "portable M6 text alignment fixture");
 
+  // The path resource is the one binary contract the Shell authors from text,
+  // so a Rust round trip is what proves the parser and the decoder agree.
+  const pathBytes = reconciler.encodePathData("M2 12 A10 10 0 1 1 22 12 L12 12 Z", [0, 0, 24, 24]);
+  const pathHex = encodeHex(pathBytes);
+  assertEqual(roundTripInRust("path", pathHex), pathHex, "TypeScript to Rust path round trip");
+  // The Canvas2D half is not checked here: decodePath builds a Path2D, which
+  // Node does not provide. Browser coverage owns that side.
+
   const display = backend.decodeDisplayList(decodeHex(displayGolden));
   if (display.commands.length !== 5 || display.commands[0]?.type !== "save") {
     throw new Error("TypeScript display-list decoder did not accept the golden contract");

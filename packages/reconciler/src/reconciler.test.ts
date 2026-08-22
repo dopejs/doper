@@ -1451,6 +1451,48 @@ describe("keyboard events", () => {
   });
 });
 
+describe("vector paths", () => {
+  it("interns the outline as a Path resource and carries the stroke width", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    root.render(
+      createElement("path", {
+        d: "M2 12 A10 10 0 1 1 22 12 Z",
+        viewBox: [0, 0, 24, 24],
+        strokeWidth: 2,
+      }),
+    );
+
+    const mutations = sink.batches.flatMap((batch) => batch.mutations);
+    const define = mutations.find(
+      (mutation) => mutation.type === "defineResource" && mutation.kind === ResourceKind.Path,
+    );
+    if (define?.type !== "defineResource") throw new Error("no path resource was defined");
+    // The arc is expanded here, not deferred: Core has no arc verb, so a
+    // resource that still contained one would be undrawable.
+    expect(define.bytes.byteLength).toBeGreaterThan(28);
+
+    const strokeWidth = mutations.find(
+      (mutation) => mutation.type === "setF32" && mutation.prop === Prop.PathStrokeWidth,
+    );
+    expect(strokeWidth).toMatchObject({ value: 2 });
+  });
+
+  it("rejects malformed path data at the commit that introduced it", () => {
+    // Parsing at normalization means the failure names the node, rather than
+    // surfacing later as a resource the Core cannot decode.
+    const root = createRoot(new RecordingSink());
+    expect(() => root.render(createElement("path", { d: "L1 1" }))).toThrow();
+  });
+
+  it("rejects a negative stroke width", () => {
+    const root = createRoot(new RecordingSink());
+    expect(() => root.render(createElement("path", { d: "M0 0 L1 1", strokeWidth: -1 }))).toThrow(
+      TypeError,
+    );
+  });
+});
+
 interface StyleDiagnosticRecord {
   readonly items: readonly { readonly code: string }[];
   readonly context: { readonly nodeId: number; readonly hostType: string };

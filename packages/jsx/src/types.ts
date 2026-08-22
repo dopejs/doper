@@ -10,7 +10,7 @@ export type Key = string | number;
 
 /** Engine-native host element names. */
 export type HostType =
-  "container" | "editableText" | "image" | "scroll" | "text" | "video" | "virtualList";
+  "container" | "editableText" | "image" | "path" | "scroll" | "text" | "video" | "virtualList";
 
 /** Mounted host handle exposed through refs without leaking internal instances. */
 export interface NodeHandle {
@@ -308,6 +308,17 @@ export interface ScrollProps extends CommonProps {
   readonly scrollY?: number;
 }
 
+/** Engine-drawn vector outline, authored as SVG path data. */
+export interface PathProps extends Omit<CommonProps, "children"> {
+  /** SVG `d` attribute. Only the path grammar, not an SVG document. */
+  readonly d: string;
+  /** Author-space box the outline is drawn in; scaled into the node's box. */
+  readonly viewBox?: readonly [number, number, number, number];
+  /** Non-zero strokes the outline at this width instead of filling it. */
+  readonly strokeWidth?: number;
+  readonly fillRule?: "nonzero" | "evenodd";
+}
+
 /** Core-planned virtual list whose Shell materializes only the requested preheat window. */
 export interface VirtualListProps extends Omit<CommonProps, "children"> {
   readonly itemCount: number;
@@ -422,6 +433,7 @@ export declare namespace JSX {
     scroll: ScrollProps;
     text: TextProps;
     video: VideoProps;
+    path: PathProps;
     virtualList: VirtualListProps;
   }
 }

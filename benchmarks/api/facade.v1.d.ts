@@ -31,6 +31,7 @@ export {
 export {
   Fragment,
   Image,
+  Path,
   Scroll,
   Input,
   PingoFont,
@@ -87,6 +88,7 @@ export {
   type ScrollProps,
   type TextProps,
   type TextAreaProps as UnstyledTextAreaProps,
+  type PathProps,
   type VirtualListProps,
   type ViewProps,
   type Woff2Decoder,

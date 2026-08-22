@@ -4,6 +4,7 @@ import type {
   ContainerProps,
   EditableTextProps,
   ImageProps,
+  PathProps,
   VideoProps,
   TextProps,
   ViewHandle,
@@ -61,6 +62,16 @@ export function TextArea(props: TextAreaProps): AnyPingoElement {
 }
 
 /**
+ * Creates an engine-drawn vector outline through the compatible path intrinsic.
+ *
+ * The outline is painted in the node's `color`, so an icon inherits it the way
+ * text does and artwork authored against `currentColor` behaves as expected.
+ */
+export function Path(props: PathProps): AnyPingoElement {
+  return compatibleHostElement("path", props);
+}
+
+/**
  * Creates a Core-scrolled container through the compatible scroll intrinsic.
  *
  * Scrolling is owned by Core, so this is a real scroll port rather than a
@@ -85,14 +96,17 @@ function compatibleHostElement(type: "text", props: TextProps): AnyPingoElement;
 function compatibleHostElement(type: "image", props: ImageProps): AnyPingoElement;
 function compatibleHostElement(type: "video", props: VideoProps): AnyPingoElement;
 function compatibleHostElement(type: "editableText", props: EditableTextProps): AnyPingoElement;
+function compatibleHostElement(type: "path", props: PathProps): AnyPingoElement;
 function compatibleHostElement(type: "scroll", props: ScrollProps): AnyPingoElement;
 function compatibleHostElement(type: "virtualList", props: VirtualListProps): AnyPingoElement;
 function compatibleHostElement(
-  type: "container" | "editableText" | "image" | "scroll" | "text" | "video" | "virtualList",
+  type:
+    "container" | "editableText" | "image" | "path" | "scroll" | "text" | "video" | "virtualList",
   props:
     | ViewProps
     | EditableTextProps
     | ImageProps
+    | PathProps
     | ScrollProps
     | TextProps
     | VideoProps

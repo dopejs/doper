@@ -19,6 +19,7 @@ import {
   type PingoMediaEvent,
   type HostType,
   type ImageProps,
+  type PathProps,
   type Key,
   type MemoComponent,
   type NodeHandle,
@@ -79,6 +80,7 @@ import {
   encodeTextStyle,
   encodeUtf8,
 } from "./resource-pool";
+import { encodePathData } from "./path-data";
 
 /** Synchronous main-thread or transport adapter for committed mutation bytes. */
 export interface MutationSink {
@@ -297,6 +299,7 @@ interface NormalizedHostProps {
       }
     | undefined;
   readonly image: Uint8Array | undefined;
+  readonly path: Uint8Array | undefined;
   readonly media: NormalizedMedia | undefined;
   readonly scrollPosition: readonly [number, number] | undefined;
   readonly virtualItemIndex: number | undefined;
@@ -437,6 +440,13 @@ const EDITABLE_KEYS = new Set([
 const SCROLL_KEYS = new Set([...COMMON_KEYS, "scrollX", "scrollY"]);
 const CONTAINER_KEYS = new Set([...SCROLL_KEYS, "virtual"]);
 const IMAGE_KEYS = new Set([...[...COMMON_KEYS].filter((key) => key !== "children"), "source"]);
+const PATH_KEYS = new Set([
+  ...[...COMMON_KEYS].filter((key) => key !== "children"),
+  "d",
+  "viewBox",
+  "strokeWidth",
+  "fillRule",
+]);
 const VIDEO_KEYS = new Set([
   ...[...COMMON_KEYS].filter((key) => key !== "children"),
   "autoPlay",
@@ -1356,6 +1366,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     instance.eventHandlers = next.eventHandlers;
     this.replaceResourceProp(instance, "text:font", Prop.Font, ResourceKind.Font, next.text?.font);
     this.replaceResourceProp(instance, "image", Prop.Image, ResourceKind.Image, next.image);
+    this.replaceResourceProp(instance, "path", Prop.Path, ResourceKind.Path, next.path);
     this.replaceResourceProp(
       instance,
       "video-frame",
@@ -2244,6 +2255,20 @@ function normalizeHostProps(
     }
   }
 
+  let path: Uint8Array | undefined;
+  if (type === "path") {
+    const outline = props as unknown as PathProps;
+    // Parsed at normalization rather than in a component so a malformed `d`
+    // fails at the commit that introduced it, with the node still in hand.
+    path = encodePathData(outline.d, outline.viewBox ?? [0, 0, 24, 24], outline.fillRule);
+    if (outline.strokeWidth !== undefined) {
+      if (!Number.isFinite(outline.strokeWidth) || outline.strokeWidth < 0) {
+        throw new TypeError("path strokeWidth must be finite and non-negative");
+      }
+      scalars.set(Prop.PathStrokeWidth, outline.strokeWidth);
+    }
+  }
+
   let media: NormalizedMedia | undefined;
   if (type === "video") {
     if (!styleContext.videoEnabled) throw new Error("M8 Video is disabled for this root");
@@ -2467,6 +2492,7 @@ function normalizeHostProps(
     onTap,
     text,
     image,
+    path,
     media,
     scrollPosition,
     virtualItemIndex,
@@ -2571,7 +2597,10 @@ function styleNodeType(
   editable: NormalizedEditable | undefined,
 ): PingoStyleNodeType {
   switch (type) {
+    // A path is styled as a view: it has a box, a colour and a border like any
+    // other, and the outline is content inside that box.
     case "container":
+    case "path":
     case "scroll":
     case "virtualList":
       return "view";
@@ -2636,7 +2665,11 @@ function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown
 
 function hostNodeKind(type: HostType): NodeKind {
   switch (type) {
+    // A path is a Container that carries an outline resource. It needs no node
+    // kind of its own: the kind decides layout and hit behaviour, and a path
+    // box behaves exactly like any other box.
     case "container":
+    case "path":
       return NodeKind.Container;
     case "text":
       return NodeKind.Text;
@@ -3020,9 +3053,11 @@ function assertAllowedProps(type: HostType, props: Readonly<Record<string, unkno
               ? IMAGE_KEYS
               : type === "video"
                 ? VIDEO_KEYS
-                : type === "container"
-                  ? CONTAINER_KEYS
-                  : COMMON_KEYS;
+                : type === "path"
+                  ? PATH_KEYS
+                  : type === "container"
+                    ? CONTAINER_KEYS
+                    : COMMON_KEYS;
   for (const key of Object.keys(props)) {
     if (!allowed.has(key)) throw new TypeError(`unknown ${type} prop ${key}`);
   }

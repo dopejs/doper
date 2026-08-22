@@ -2,6 +2,7 @@ export { PINGO_ELEMENT_TYPE, createElement, isPingoElement, normalizeChildren } 
 export {
   Image,
   Input,
+  Path,
   Scroll,
   Text,
   TextArea,
@@ -64,6 +65,7 @@ export {
   type Ref,
   type ScrollProps,
   type TextProps,
+  type PathProps,
   type VirtualListProps,
   type VirtualViewProps,
 } from "./types";

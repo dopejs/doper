@@ -92,6 +92,16 @@ impl PathResource {
         if expected * 2 != self.points.len() {
             return Err(AbiError::InvalidValue("path verbs and points disagree"));
         }
+        // The decoder refuses an outline that does not start with a move, and
+        // so must this: an encoder that emits what its own decoder rejects
+        // turns a caller's mistake into a resource nobody can read back.
+        if self
+            .verbs
+            .first()
+            .is_some_and(|verb| *verb != PathVerb::Move)
+        {
+            return Err(AbiError::InvalidValue("path must begin with a move"));
+        }
         let mut bytes = vec![0_u8; PATH_RESOURCE_MINIMUM_BYTES];
         bytes[PATH_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION;
         bytes[PATH_VARIANT_OFFSET] = PATH_RESOURCE_VARIANT;
@@ -366,5 +376,88 @@ mod tests {
                 .collect::<Vec<_>>();
             let _ = PathResource::decode(&bytes);
         }
+    }
+    #[test]
+    fn rejects_every_malformed_outline() {
+        let valid = PathResource {
+            verbs: vec![PathVerb::Move, PathVerb::Line, PathVerb::Close],
+            points: vec![0.0, 0.0, 1.0, 1.0],
+            view_box: [0.0, 0.0, 24.0, 24.0],
+            fill_rule: FillRule::NonZero,
+        };
+        let bytes = valid.encode().expect("valid outline encodes");
+        assert_eq!(PathResource::decode(&bytes), Ok(valid));
+
+        // Truncated below the header, so no field can be read at all.
+        assert!(PathResource::decode(&bytes[..8]).is_err());
+
+        let mut wrong_version = bytes.clone();
+        wrong_version[PATH_VERSION_OFFSET] = RESOURCE_ENCODING_VERSION + 1;
+        assert!(PathResource::decode(&wrong_version).is_err());
+
+        let mut wrong_variant = bytes.clone();
+        wrong_variant[PATH_VARIANT_OFFSET] = PATH_RESOURCE_VARIANT + 1;
+        assert!(PathResource::decode(&wrong_variant).is_err());
+
+        // Reserved byte: a future field must not be read as padding.
+        let mut reserved = bytes.clone();
+        reserved[PATH_RESERVED_OFFSET] = 1;
+        assert!(PathResource::decode(&reserved).is_err());
+
+        let mut unknown_rule = bytes.clone();
+        unknown_rule[PATH_FILL_RULE_OFFSET] = 2;
+        assert!(PathResource::decode(&unknown_rule).is_err());
+
+        // Counts that do not describe the bytes that follow.
+        let mut wrong_counts = bytes.clone();
+        wrong_counts[PATH_VERB_COUNT_OFFSET] = 9;
+        assert!(PathResource::decode(&wrong_counts).is_err());
+
+        // Padding between the verbs and the points must be zero, for the same
+        // reason as the reserved byte.
+        let mut dirty_padding = bytes.clone();
+        let verbs_end = PATH_RESOURCE_MINIMUM_BYTES + 3;
+        dirty_padding[verbs_end] = 1;
+        assert!(PathResource::decode(&dirty_padding).is_err());
+
+        // A view box with no extent would divide by zero when scaled.
+        let mut empty_view_box = bytes.clone();
+        empty_view_box[PATH_VIEW_BOX_WIDTH_OFFSET..PATH_VIEW_BOX_WIDTH_OFFSET + 4]
+            .copy_from_slice(&0.0_f32.to_le_bytes());
+        assert!(PathResource::decode(&empty_view_box).is_err());
+
+        // A non-finite coordinate would poison every bound derived from it.
+        let mut wild_point = bytes.clone();
+        let points_start = wild_point.len() - 16;
+        wild_point[points_start..points_start + 4].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert!(PathResource::decode(&wild_point).is_err());
+    }
+
+    #[test]
+    fn refuses_to_encode_an_outline_that_could_not_be_drawn() {
+        // A path that does not begin with a move has no start point, and every
+        // consumer would have to invent one — differently.
+        assert!(
+            PathResource {
+                verbs: vec![PathVerb::Line],
+                points: vec![1.0, 1.0],
+                view_box: [0.0, 0.0, 1.0, 1.0],
+                fill_rule: FillRule::NonZero,
+            }
+            .encode()
+            .is_err()
+        );
+
+        // Verb and point counts that disagree.
+        assert!(
+            PathResource {
+                verbs: vec![PathVerb::Move, PathVerb::Cubic],
+                points: vec![0.0, 0.0],
+                view_box: [0.0, 0.0, 1.0, 1.0],
+                fill_rule: FillRule::NonZero,
+            }
+            .encode()
+            .is_err()
+        );
     }
 }
