@@ -304,12 +304,22 @@ TS/Rust 往返 + malformed-input/fuzz。
 | A2   | 8 组件 + Overlay 基元；33 条组件测试（层叠顺序、锚定结构、Escape、焦点交接、键盘导航、过滤、明暗）；skin 层级断言；storybook 明暗展区                                                                     | `0a43cf1`         |
 | A3   | 4 产品分子；22 条组件测试（伸缩列位置、slot 缺省、trend 三态、禁用无 handler、键盘导航、明暗）；skin 断言伸缩件与 trend 色；storybook 明暗展区                                                            | `55cde8d`         |
 
-**全量门禁（2026-08-22，全部通过）**：`pnpm m0:check` 退出码 0（含 lockfile、
-format:check、build、lint、typecheck、559 条 vitest、contracts:check、rust:check
-的 26 个 suite）；`pnpm m1:perf` p95 3.28ms / dropped 0 / over-invalidated 0；
-`pnpm m3:perf` p95 0.79µs；`pnpm m3:diff` native/wasm 逐字节一致；
-`pnpm m5:backend:diff` GPU 与 headless oracle 一致；`pnpm release:check`、
-`pnpm migration:check`、`pnpm storybook:build` 通过；WASM 369,815 / 393,216 gzip。
+**全量门禁（2026-08-22 收尾复跑，全部通过）**：`pnpm m1:check` 退出码 0——它包含
+`m0:check`（lockfile、format:check、build、lint、typecheck、vitest、
+contracts:check、rust:check）、`coverage:ts`、`coverage:rust`（整仓行覆盖 ≥85%，
+`pingo-abi` / `pingo-scene` / `pingo-scroll` ≥95%、`pingo-text` ≥94%）、
+`test:browser`、`m1:perf`。`pnpm m1:perf` p95 **3.000ms** / dropped 0 /
+over-invalidated 0；`pnpm m2:check`、`m3:check`、`m3:scroll:check`、
+`m3:text:check` 全绿；`pnpm m3:perf` p95 0.792µs；`pnpm m3:diff` 与
+`m3:scroll:check` native/wasm 逐字节一致；`pnpm m5:backend:diff` GPU 与 headless
+oracle 一致；`pnpm release:check`、`pnpm migration:check`、`pnpm storybook:build`
+通过；WASM **369,945 / 393,216** gzip（余量 23,271）。
+
+> 复跑发现并修掉一个此前**没被发现的红灯**：`pingo-abi` 行覆盖 94.77% 低于
+> `coverage:rust` 的 95% 门槛，`m1:check` 因此一直是红的——之前的验收只跑到
+> `rust:check`（跑测试，不跑覆盖率门槛）。未覆盖的正是 computed-style 解码器的
+> 拒绝分支，其中 box-shadow 那批是 E4 引入却没有补 malformed-input 测试，而
+> AGENTS.md 对 ABI 变更明确要求这一层。已补齐（`f2400c2`），95.20%。
 
 ### 残余风险与验证缺口
 
