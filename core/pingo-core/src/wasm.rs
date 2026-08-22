@@ -166,6 +166,11 @@ impl WasmCore {
         self.inner.editing_geometry()
     }
 
+    /// Returns observed nodes' unclipped boxes and effective clip boxes.
+    pub fn layout_geometry(&self) -> Vec<u32> {
+        self.inner.layout_geometry()
+    }
+
     /// Serializes the committed semantic tree for the accessibility mirror.
     pub fn semantics(&self) -> Vec<u8> {
         self.inner.semantics()

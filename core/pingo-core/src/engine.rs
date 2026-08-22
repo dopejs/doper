@@ -33,8 +33,11 @@ use pingo_abi::{
     FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_END_INDEX, FRAME_DIAGNOSTICS_VIRTUAL_VISIBLE_START_INDEX,
     FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX, FRAME_DIAGNOSTICS_WORDS, InputAffinity,
     InputBatch, InputCommand, InputEventKind, InputPointerType, InputPosition, InputSelection,
-    Mutation, MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind, Prop,
-    ResourceKind, SEMANTICS_VERSION, StyleKeyword, StyleProperty, SystemTextMetricBatch,
+    LAYOUT_GEOMETRY_HEADER_FRAME_SEQ_INDEX, LAYOUT_GEOMETRY_HEADER_RECORD_COUNT_INDEX,
+    LAYOUT_GEOMETRY_HEADER_VERSION_INDEX, LAYOUT_GEOMETRY_HEADER_WORDS, LAYOUT_GEOMETRY_VERSION,
+    MAX_OBSERVED_GEOMETRY_NODES, Mutation, MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID,
+    NodeKind, OBSERVE_GEOMETRY_FLAG_ACTIVE, Prop, ResourceKind, SEMANTICS_VERSION, StyleKeyword,
+    StyleProperty, SystemTextMetricBatch,
 };
 use pingo_collections::OrderedSet;
 use pingo_hit::{HitIndex, HitPoint, WorldGeometry, WorldRect};
@@ -289,6 +292,17 @@ pub struct CoreEngine {
     constraints: BoxConstraints,
     metrics: CoreMetrics,
     last_frame_seq: Option<u32>,
+    /// Nodes whose laid-out geometry the Shell asked to have reported.
+    ///
+    /// Bounded by `MAX_OBSERVED_GEOMETRY_NODES` so a Shell cannot turn a
+    /// bounded export into a full-scene one; see
+    /// docs/e8-layout-readback-design.md D2.
+    observed_geometry: OrderedSet<u32>,
+    /// Cumulative observations refused because the set was full.
+    ///
+    /// Degrading to static placement is safe but must not be silent, so this
+    /// reaches the Shell through frame diagnostics.
+    observe_geometry_rejections: u32,
     last_input_sequence: Option<u32>,
     caret_elapsed_seconds: f64,
     caret_visible: bool,
@@ -330,6 +344,18 @@ fn collect_programmatic_scrolls(batch: &MutationBatch) -> OrderedSet<u32> {
         .iter()
         .filter_map(|instruction| match instruction.mutation {
             Mutation::ScrollTo { node_id, .. } => Some(node_id),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Observation commands in stream order, so a later one overrides an earlier.
+fn collect_geometry_observations(batch: &MutationBatch) -> Vec<(u32, u32)> {
+    batch
+        .instructions
+        .iter()
+        .filter_map(|instruction| match instruction.mutation {
+            Mutation::ObserveGeometry { node_id, flags } => Some((node_id, flags)),
             _ => None,
         })
         .collect()
@@ -731,6 +757,8 @@ impl CoreEngine {
             constraints,
             metrics: CoreMetrics::default(),
             last_frame_seq: None,
+            observed_geometry: OrderedSet::new(),
+            observe_geometry_rejections: 0,
             last_input_sequence: None,
             caret_elapsed_seconds: 0.0,
             caret_visible: true,
@@ -780,10 +808,14 @@ impl CoreEngine {
         let frame_seq = batch.frame_seq;
         let editable_configurations = collect_editable_configurations(&batch);
         let programmatic_scrolls = collect_programmatic_scrolls(&batch);
+        let observations = collect_geometry_observations(&batch);
         if let Err(error) = self.scene.commit(batch) {
             self.metrics.scene_rejections += 1;
             return Err(CoreError::Scene(error));
         }
+        // After the commit: an observation names a node the same frame may have
+        // created, and pruning needs the post-commit generation table.
+        self.apply_geometry_observations(&observations);
         self.reconcile_interaction_after_commit()?;
 
         let editing_changed = match self
@@ -1964,6 +1996,99 @@ impl CoreEngine {
         words
     }
 
+    /// Applies this frame's observation commands and drops unresolvable nodes.
+    ///
+    /// Exceeding the cap rejects only the offending observation: the cap is a
+    /// resource policy, not malformed input, so failing the whole frame would
+    /// escalate "measuring too much" into "application unusable". The Shell
+    /// sees `undefined` for that node and falls back to static placement.
+    fn apply_geometry_observations(&mut self, observations: &[(u32, u32)]) {
+        let maximum = MAX_OBSERVED_GEOMETRY_NODES as usize;
+        for &(node_id, flags) in observations {
+            if flags & OBSERVE_GEOMETRY_FLAG_ACTIVE == 0 {
+                self.observed_geometry.remove(&node_id);
+                continue;
+            }
+            if !self.observed_geometry.contains(&node_id) && self.observed_geometry.len() >= maximum
+            {
+                self.observe_geometry_rejections =
+                    self.observe_geometry_rejections.saturating_add(1);
+                continue;
+            }
+            self.observed_geometry.insert(node_id);
+        }
+        if self.observed_geometry.is_empty() {
+            return;
+        }
+        // A removed node's observation would otherwise hold a slot forever.
+        // Generations make this exact: a recycled index does not resolve.
+        let scene = &self.scene;
+        self.observed_geometry.retain(|node_id| {
+            NodeId::from_raw(*node_id).is_ok_and(|node| scene.resolve(node).is_some())
+        });
+    }
+
+    /// Encodes the observed nodes' geometry for the frame the Shell just saw.
+    ///
+    /// Full rather than incremental: the observed set is bounded, so comparing
+    /// against the previous frame would cost the same order as emitting, and
+    /// absence in an incremental batch cannot distinguish "unchanged" from
+    /// "no longer observed". See docs/e8-layout-readback-design.md D3.
+    ///
+    /// `frameSeq` lets the Shell refuse geometry that does not belong to the
+    /// `DisplayList` it applied (D9); without it, out-of-order delivery under the
+    /// worker transport would position an overlay against the wrong frame.
+    #[must_use]
+    pub fn layout_geometry(&self) -> Vec<u32> {
+        let mut words = vec![0_u32; LAYOUT_GEOMETRY_HEADER_WORDS];
+        words[LAYOUT_GEOMETRY_HEADER_VERSION_INDEX] = LAYOUT_GEOMETRY_VERSION;
+        words[LAYOUT_GEOMETRY_HEADER_FRAME_SEQ_INDEX] = self.last_frame_seq.unwrap_or(0);
+        if self.observed_geometry.is_empty() {
+            return words;
+        }
+        let mut records = 0_u32;
+        for &raw in self.observed_geometry.iter() {
+            let Ok(node) = NodeId::from_raw(raw) else {
+                continue;
+            };
+            let Some((own, clip)) = self.hit.observed_geometry(&self.scene, node) else {
+                continue;
+            };
+            // No clipping ancestor is reported as an unbounded box rather than a
+            // sentinel: the Shell intersects it with the viewport either way.
+            let clip = clip.unwrap_or(pingo_hit::WorldRect {
+                left: f32::NEG_INFINITY,
+                top: f32::NEG_INFINITY,
+                right: f32::INFINITY,
+                bottom: f32::INFINITY,
+            });
+            words.extend_from_slice(&[
+                raw,
+                0,
+                own.left.to_bits(),
+                own.top.to_bits(),
+                (own.right - own.left).max(0.0).to_bits(),
+                (own.bottom - own.top).max(0.0).to_bits(),
+                clip.left.to_bits(),
+                clip.top.to_bits(),
+                (clip.right - clip.left).max(0.0).to_bits(),
+                (clip.bottom - clip.top).max(0.0).to_bits(),
+            ]);
+            records = records.saturating_add(1);
+        }
+        words[LAYOUT_GEOMETRY_HEADER_RECORD_COUNT_INDEX] = records;
+        words
+    }
+
+    /// Observations refused so far because the observed set was full.
+    ///
+    /// Surfaced so a degraded overlay is diagnosable; frame diagnostics carry
+    /// it to the Shell once the Host channel exists.
+    #[must_use]
+    pub const fn observe_geometry_rejections(&self) -> u32 {
+        self.observe_geometry_rejections
+    }
+
     /// Serializes the committed semantic tree for the accessibility mirror.
     ///
     /// Records carry world bounds from the last painted frame plus role,
@@ -2636,6 +2761,100 @@ mod tests {
         }
         .encode()
         .expect("encode frame")
+    }
+
+    #[test]
+    fn geometry_is_reported_only_for_observed_nodes_and_the_set_is_bounded() {
+        use pingo_abi::{
+            LAYOUT_GEOMETRY_HEADER_FRAME_SEQ_INDEX, LAYOUT_GEOMETRY_HEADER_RECORD_COUNT_INDEX,
+            LAYOUT_GEOMETRY_HEADER_WORDS, LAYOUT_GEOMETRY_RECORD_NODE_ID_INDEX,
+            LAYOUT_GEOMETRY_RECORD_OWN_WIDTH_BITS_INDEX, LAYOUT_GEOMETRY_RECORD_WORDS,
+            MAX_OBSERVED_GEOMETRY_NODES, OBSERVE_GEOMETRY_FLAG_ACTIVE,
+        };
+
+        let observed = |words: &[u32]| words[LAYOUT_GEOMETRY_HEADER_RECORD_COUNT_INDEX];
+        let mut engine = CoreEngine::new(320.0, 240.0).expect("Core");
+        let node_count = MAX_OBSERVED_GEOMETRY_NODES + 4;
+        let mut mutations = vec![Mutation::CreateNode {
+            node_id: id(0),
+            kind: NodeKind::Root,
+            parent: NULL_NODE_ID,
+            before_sibling: NULL_NODE_ID,
+        }];
+        for index in 1..=node_count {
+            mutations.push(Mutation::CreateNode {
+                node_id: id(index),
+                kind: NodeKind::Container,
+                parent: id(0),
+                before_sibling: NULL_NODE_ID,
+            });
+            mutations.push(Mutation::SetF32 {
+                node_id: id(index),
+                prop: Prop::Width,
+                value: 10.0,
+            });
+        }
+        engine.commit(&frame(1, mutations)).expect("create");
+
+        // Nothing observed: a header and no records. This is the path every
+        // application that never calls useLayoutValue takes.
+        let idle = engine.layout_geometry();
+        assert_eq!(idle.len(), LAYOUT_GEOMETRY_HEADER_WORDS);
+        assert_eq!(observed(&idle), 0);
+
+        engine
+            .commit(&frame(
+                2,
+                vec![Mutation::ObserveGeometry {
+                    node_id: id(1),
+                    flags: OBSERVE_GEOMETRY_FLAG_ACTIVE,
+                }],
+            ))
+            .expect("observe");
+        let words = engine.layout_geometry();
+        assert_eq!(observed(&words), 1);
+        assert_eq!(words[LAYOUT_GEOMETRY_HEADER_FRAME_SEQ_INDEX], 2);
+        let record = &words[LAYOUT_GEOMETRY_HEADER_WORDS..];
+        assert_eq!(record[LAYOUT_GEOMETRY_RECORD_NODE_ID_INDEX], id(1));
+        assert!(f32::from_bits(record[LAYOUT_GEOMETRY_RECORD_OWN_WIDTH_BITS_INDEX]) > 0.0);
+        assert_eq!(record.len(), LAYOUT_GEOMETRY_RECORD_WORDS);
+
+        // Withdrawal has to work, or a closed overlay keeps its slot forever.
+        engine
+            .commit(&frame(
+                3,
+                vec![Mutation::ObserveGeometry {
+                    node_id: id(1),
+                    flags: 0,
+                }],
+            ))
+            .expect("withdraw");
+        assert_eq!(observed(&engine.layout_geometry()), 0);
+
+        // Filling past the cap rejects only the surplus; the frame still
+        // commits, which is the difference between a degraded overlay and a
+        // dead application.
+        let fill = (1..=node_count)
+            .map(|index| Mutation::ObserveGeometry {
+                node_id: id(index),
+                flags: OBSERVE_GEOMETRY_FLAG_ACTIVE,
+            })
+            .collect();
+        engine.commit(&frame(4, fill)).expect("frame still commits");
+        assert_eq!(
+            observed(&engine.layout_geometry()),
+            MAX_OBSERVED_GEOMETRY_NODES
+        );
+        assert_eq!(engine.observe_geometry_rejections(), 4);
+
+        // A removed node must free its slot, or the cap leaks away over time.
+        engine
+            .commit(&frame(5, vec![Mutation::RemoveNode { node_id: id(1) }]))
+            .expect("remove");
+        assert_eq!(
+            observed(&engine.layout_geometry()),
+            MAX_OBSERVED_GEOMETRY_NODES - 1
+        );
     }
 
     fn computed_keyword(property: StyleProperty, keyword: StyleKeyword) -> Vec<u8> {

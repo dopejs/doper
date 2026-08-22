@@ -94,6 +94,14 @@ impl<T: Ord> OrderedSet<T> {
             Err(_) => false,
         }
     }
+
+    /// Keeps only the values the predicate accepts, preserving order.
+    ///
+    /// One pass rather than repeated `remove`, which would be quadratic when a
+    /// caller prunes many entries at once.
+    pub fn retain(&mut self, keep: impl FnMut(&T) -> bool) {
+        self.values.retain(keep);
+    }
 }
 
 impl<T: Ord> OrderedSet<T> {
@@ -183,6 +191,12 @@ mod tests {
                 assert_eq!(ordered.insert(value), reference.insert(value));
             }
             assert_eq!(ordered.contains(&value), reference.contains(&value));
+            // Prune periodically so retain is exercised against live state
+            // rather than only on a hand-built set.
+            if step % 250 == 249 {
+                ordered.retain(|value| value % 5 != 0);
+                reference.retain(|value| value % 5 != 0);
+            }
         }
         assert_eq!(
             ordered.iter().copied().collect::<Vec<_>>(),

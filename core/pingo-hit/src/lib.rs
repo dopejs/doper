@@ -224,6 +224,55 @@ impl HitIndex {
         self.geometry.get(index).copied()
     }
 
+    /// Unclipped world box and effective clip box for one node.
+    ///
+    /// `WorldGeometry` deliberately retains only the intersection of the two,
+    /// because widening it would cost every node sixteen resident bytes on a
+    /// hot SoA path so that a handful of observed nodes can be read. Both parts
+    /// are recoverable instead: the box is the stored affine applied to the
+    /// stored size, and the clip is `axis_clip` folded over the ancestors,
+    /// each of whose box is recovered the same way. Cost is proportional to
+    /// tree depth, paid only for nodes the Shell actually observes.
+    ///
+    /// `None` for the clip means nothing above this node clips it. An empty
+    /// clip means the node is entirely scrolled out — which the intersection
+    /// alone could not express, since it degrades to empty and loses where the
+    /// node is. See docs/e8-layout-readback-design.md D4.
+    #[must_use]
+    pub fn observed_geometry(
+        &self,
+        scene: &Scene,
+        node: NodeId,
+    ) -> Option<(WorldRect, Option<WorldRect>)> {
+        let own = self.own_box(node)?;
+        // Root-first, so the fold matches the order the geometry pass used.
+        let mut ancestors = Vec::new();
+        let mut cursor = scene.parent(node);
+        while let Some(parent) = cursor {
+            ancestors.push(parent);
+            cursor = scene.parent(parent);
+        }
+        let mut clip = None;
+        for ancestor in ancestors.into_iter().rev() {
+            let Some(ancestor_box) = self.own_box(ancestor) else {
+                continue;
+            };
+            clip = axis_clip(
+                clip,
+                ancestor_box,
+                scene.clips_axis(ancestor, true),
+                scene.clips_axis(ancestor, false),
+            );
+        }
+        Some((own, clip))
+    }
+
+    /// The node's world box before any ancestor clipping.
+    fn own_box(&self, node: NodeId) -> Option<WorldRect> {
+        let geometry = self.geometry(node)?;
+        Some(Affine(geometry.transform).rect_aabb(geometry.width, geometry.height))
+    }
+
     /// Iterates topology-aligned generation-bearing world geometry.
     pub fn geometries(&self) -> impl ExactSizeIterator<Item = (NodeId, WorldGeometry)> + '_ {
         self.ids.iter().copied().zip(self.geometry.iter().copied())
@@ -933,6 +982,121 @@ mod tests {
             )
             .expect("layout");
         (scene, layout)
+    }
+
+    /// Root -> Scroll(100x100) -> two stacked children of `heights`.
+    fn scene_with_scroll_container(heights: &[f32]) -> (Scene, LayoutEngine) {
+        let scroller = id(1);
+        let mut instructions = vec![
+            MutationInstruction {
+                flags: 0,
+                mutation: Mutation::CreateNode {
+                    node_id: id(0).raw(),
+                    kind: NodeKind::Root,
+                    parent: NULL_NODE_ID,
+                    before_sibling: NULL_NODE_ID,
+                },
+            },
+            MutationInstruction {
+                flags: 0,
+                mutation: Mutation::CreateNode {
+                    node_id: scroller.raw(),
+                    // A Scroll node clips on both axes without needing styles.
+                    kind: NodeKind::Scroll,
+                    parent: id(0).raw(),
+                    before_sibling: NULL_NODE_ID,
+                },
+            },
+            MutationInstruction {
+                flags: 0,
+                mutation: Mutation::SetF32 {
+                    node_id: scroller.raw(),
+                    prop: Prop::Width,
+                    value: 100.0,
+                },
+            },
+            MutationInstruction {
+                flags: 0,
+                mutation: Mutation::SetF32 {
+                    node_id: scroller.raw(),
+                    prop: Prop::Height,
+                    value: 100.0,
+                },
+            },
+        ];
+        for (index, height) in heights.iter().copied().enumerate() {
+            let node = id(u32::try_from(index + 2).expect("bounded test index"));
+            instructions.extend([
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::CreateNode {
+                        node_id: node.raw(),
+                        kind: NodeKind::Container,
+                        parent: scroller.raw(),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                },
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::SetF32 {
+                        node_id: node.raw(),
+                        prop: Prop::Width,
+                        value: 100.0,
+                    },
+                },
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::SetF32 {
+                        node_id: node.raw(),
+                        prop: Prop::Height,
+                        value: height,
+                    },
+                },
+            ]);
+        }
+        let mut scene = Scene::new();
+        scene
+            .commit(MutationBatch {
+                frame_seq: 1,
+                instructions,
+            })
+            .expect("scene");
+        let mut layout = LayoutEngine::new();
+        layout
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(500.0, 500.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        (scene, layout)
+    }
+
+    #[test]
+    fn recovered_geometry_agrees_with_the_pass_that_produced_it() {
+        // The exported box and clip are recomputed outside the geometry loop
+        // rather than stored, so nothing structurally forces them to match what
+        // the loop derived. This is that force: if the two ever disagree, the
+        // Shell positions overlays against numbers the engine does not believe.
+        let (scene, layout) = scene_with_scroll_container(&[100.0, 100.0]);
+        let mut index = HitIndex::default();
+        index.update(&scene, layout.snapshot()).expect("hit");
+
+        let mut clipped_away = 0;
+        for (node, geometry) in index.geometries() {
+            let (own, clip) = index.observed_geometry(&scene, node).expect("geometry");
+            let expected = clip.map_or(own, |clip| own.intersect(clip));
+            assert_eq!(geometry.aabb, expected, "node {node:?}");
+
+            // The second child starts at y=100 in a 100-tall scroller, so its
+            // intersection is empty while its own box is not — the case that
+            // makes exporting only the intersection lossy.
+            if clip.is_some_and(|clip| own.intersect(clip).bottom <= own.intersect(clip).top) {
+                assert!(own.bottom > own.top, "unclipped box must survive");
+                clipped_away += 1;
+            }
+        }
+        assert_eq!(clipped_away, 1, "expected exactly one fully clipped child");
     }
 
     #[test]
