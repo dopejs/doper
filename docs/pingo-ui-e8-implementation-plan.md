@@ -69,16 +69,22 @@ D1–D9 已 Accepted，无未决项。
 **Files:** `packages/host/src/{main-thread.ts,worker-client.ts,worker-protocol.ts,
 hosted-root.ts}`
 
-- [ ] `onLayoutGeometry` 回调 + 每帧 `emitLayoutGeometry()`（照 `emitSemantics`）。
-- [ ] Worker 协议消息 + 主线程回放路径。
-- [ ] `HostedRoot` 侧维护 nodeId → 最新几何的表，并暴露给 Runtime。
+- [x] `onLayoutGeometry` 回调 + 每帧 `emitLayoutGeometry()`（照 `emitSemantics`）。
+- [x] Worker 协议消息 + 主线程回放路径。
+- [x] `HostedRoot` 侧维护 nodeId → 最新几何的表，并暴露给 Runtime。
 - [ ] feature flag（默认关闭，设计门 D8）：关闭时不发 `ObserveGeometry`，
       不注册回调。
-- [ ] **只采用 `frameSeq` 与已应用 DisplayList 匹配的几何帧**，不匹配即丢弃
-      （设计门 D9）。不依赖发送顺序。
-- [ ] 契约测试：SAB / postMessage / 主线程 Canvas2D 三条 transport 下几何帧内容一致；
-      故意乱序投递时几何被丢弃而非错帧应用；断言 `frameSeq` 一致性——单靠"顺序对"
-      测不出来，多数帧布局相同，用错帧看不出差别。
+- [x] **只接受 `frameSeq` 不回退的几何帧**，更旧的丢弃并计入
+      `staleLayoutGeometryFrames()`。设计门 D9 原文写的是"与已应用的 DisplayList
+      匹配"，那在 worker 模式下不成立（主线程不应用 DisplayList），已在设计文档
+      中修订为单调接受。
+- [x] 测试：解码器逐条拒绝（版本、记录数不符、保留位、NaN、负尺寸），保留 ±Infinity
+      因为未被裁剪的节点上报无界裁剪框；worker 协议校验器同上；worker 消息投递
+      逐字段保真；主线程路径下故意乱序投递时旧帧被丢弃、计入
+      `staleLayoutGeometryFrames()`，且节点停止被观察时几何消失而不是变陈旧。
+- [ ] **三 transport 端到端一致性尚未覆盖**：现有测试覆盖主线程路径与 worker 协议
+      两端，但没有一条测试在 SAB / postMessage / 主线程三种 transport 下跑同一场景
+      并比较几何帧。E8-8 出口前补，或明确降级为"协议层已覆盖、端到端未覆盖"。
 
 ### Task E8-5: Runtime `useLayoutValue` 与公开面
 

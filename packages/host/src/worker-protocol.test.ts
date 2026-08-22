@@ -166,6 +166,37 @@ describe("render Worker protocol validation", () => {
         },
       }),
     ).toBe(false);
+    const layoutGeometry = (clip: Record<string, number>): unknown => ({
+      kind: "pingo:layout-geometry",
+      frame: {
+        frameSeq: 12,
+        records: [{ nodeId: 7, bounds: { left: 1, top: 2, width: 3, height: 4 }, clip }],
+      },
+      sessionId: 7,
+    });
+    // An unclipped node reports an unbounded clip, so the validator must admit
+    // infinities where the editing-geometry one requires finite numbers.
+    expect(
+      isRenderWorkerOutboundMessage(
+        layoutGeometry({
+          left: Number.NEGATIVE_INFINITY,
+          top: Number.NEGATIVE_INFINITY,
+          width: Number.POSITIVE_INFINITY,
+          height: Number.POSITIVE_INFINITY,
+        }),
+      ),
+    ).toBe(true);
+    // NaN and negative extents still fail: both would poison a placement
+    // comparison instead of failing where they entered.
+    expect(
+      isRenderWorkerOutboundMessage(
+        layoutGeometry({ left: Number.NaN, top: 0, width: 1, height: 1 }),
+      ),
+    ).toBe(false);
+    expect(
+      isRenderWorkerOutboundMessage(layoutGeometry({ left: 0, top: 0, width: -1, height: 1 })),
+    ).toBe(false);
+
     expect(
       isRenderWorkerOutboundMessage({
         kind: "pingo:editing-geometry",

@@ -109,7 +109,7 @@
     ]
   },
   "frameDiagnostics": {
-    "version": 9,
+    "version": 10,
     "fields": [
       {
         "name": "version",
@@ -285,6 +285,10 @@
       },
       {
         "name": "pictureBudgetFallbacks",
+        "type": "u32"
+      },
+      {
+        "name": "observeGeometryRejected",
         "type": "u32"
       }
     ]

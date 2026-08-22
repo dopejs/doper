@@ -18,6 +18,7 @@ use pingo_abi::{
     FRAME_DIAGNOSTICS_DIRTY_SEMANTICS_NODES_INDEX, FRAME_DIAGNOSTICS_DISPLAY_COMMANDS_INDEX,
     FRAME_DIAGNOSTICS_FRAME_SEQ_INDEX, FRAME_DIAGNOSTICS_INTERACTION_STATE_CHANGES_INDEX,
     FRAME_DIAGNOSTICS_LAYOUT_CHANGED_NODES_INDEX, FRAME_DIAGNOSTICS_LAYOUT_VISITED_NODES_INDEX,
+    FRAME_DIAGNOSTICS_OBSERVE_GEOMETRY_REJECTED_INDEX,
     FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX, FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_BUDGET_FALLBACKS_INDEX, FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
     FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX, FRAME_DIAGNOSTICS_PICTURE_DEFINES_INDEX,
@@ -180,6 +181,11 @@ pub struct FrameDiagnostics {
     pub picture_resource_bytes: usize,
     /// Cumulative resident-budget fallbacks to the inline reference path.
     pub picture_budget_fallbacks: u64,
+    /// Cumulative geometry observations refused because the set was full.
+    ///
+    /// A refused observation degrades one overlay to static placement, which is
+    /// safe but invisible from the outside; this is what makes it findable.
+    pub observe_geometry_rejected: u32,
 }
 
 impl FrameDiagnostics {
@@ -255,6 +261,7 @@ impl FrameDiagnostics {
             count_word(self.picture_resource_bytes);
         words[FRAME_DIAGNOSTICS_PICTURE_BUDGET_FALLBACKS_INDEX] =
             count_u64_word(self.picture_budget_fallbacks);
+        words[FRAME_DIAGNOSTICS_OBSERVE_GEOMETRY_REJECTED_INDEX] = self.observe_geometry_rejected;
         words
     }
 }
@@ -2309,6 +2316,7 @@ impl CoreEngine {
             picture_resident_bytes: paint_metrics.picture_resident_bytes,
             picture_resource_bytes: paint_metrics.picture_resource_bytes,
             picture_budget_fallbacks: paint_metrics.picture_budget_fallbacks,
+            observe_geometry_rejected: self.observe_geometry_rejections,
         };
         if !painted.picture_resources.is_empty() {
             self.pending_picture_resources = painted.picture_resources.clone();

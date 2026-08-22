@@ -38,6 +38,8 @@ import {
   type EditingGeometryRect,
   type FrameReport,
   type NonPassiveRegion,
+  type LayoutGeometryFrame,
+  type LayoutGeometryRecord,
   type SemanticNode,
   type VirtualRefillRange,
 } from "./main-thread";
@@ -114,6 +116,13 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly onEventTransaction?: (transaction: EventTransaction) => void;
   readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
   readonly onSemantics?: (nodes: readonly SemanticNode[]) => void;
+  /**
+   * Observed-node geometry, one call per committed frame.
+   *
+   * Only fires for nodes the Shell asked Core to observe; see
+   * docs/e8-layout-readback-design.md.
+   */
+  readonly onLayoutGeometry?: (frame: LayoutGeometryFrame) => void;
   /** Disables the DOM accessibility mirror; enabled whenever the canvas is mounted. */
   readonly accessibility?: boolean;
   /**
@@ -163,6 +172,15 @@ export interface HostedCanvasRoot extends PingoRoot {
   blurEditable(): void;
   updateEditingGeometry(geometry: EditingGeometry): void;
   inputTransportMetrics(): HostInputTransportMetrics;
+  /**
+   * Latest geometry for one observed node, or undefined when it has none yet.
+   *
+   * Undefined is the honest answer for "not measured yet"; a zero rectangle
+   * would be indistinguishable from a node that really is empty.
+   */
+  layoutGeometry(nodeId: number): LayoutGeometryRecord | undefined;
+  /** Geometry frames dropped for arriving out of order. Diagnostic only. */
+  staleLayoutGeometryFrames(): number;
   mediaMetrics(): MediaPipelineMetrics | undefined;
   resize(width: number, height: number): void;
   setReducedMotion(reduced: boolean): void;
@@ -213,6 +231,11 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   #media: MediaPipeline | undefined;
   #nonPassiveRegions: readonly NonPassiveRegion[] = [];
   #editingGeometry: EditingGeometryFrame | undefined;
+  /** Latest observed geometry, keyed by generation-bearing node id. */
+  readonly #layoutGeometry = new Map<number, LayoutGeometryRecord>();
+  /** Frame of the geometry currently held, for the monotonic gate. */
+  #layoutGeometrySeq: number | undefined;
+  #staleLayoutGeometryFrames = 0;
   /** A double click held until its editor becomes active; see the handler. */
   #pendingWordSelection: { x: number; y: number; deadline: number } | undefined;
   #textDragPointer: number | undefined;
@@ -506,6 +529,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       onNonPassiveRegions: (regions) => this.handleNonPassiveRegions(regions),
       onEditingGeometry: (frame) => this.handleEditingGeometry(frame),
       onSemantics: (nodes) => this.handleSemantics(nodes),
+      onLayoutGeometry: (frame) => this.handleLayoutGeometry(frame),
       sessionId: nextSessionId(),
     };
     const client = new RenderWorkerClient(workerFactory(), clientOptions);
@@ -1408,6 +1432,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       (frame) => this.handleEditingGeometry(frame),
       (nodes) => this.handleSemantics(nodes),
       this.#options.incrementalPicturesEnabled ?? true,
+      (frame) => this.handleLayoutGeometry(frame),
     );
     this.#frameSink = sink;
     this.#recoverableSink.install(sink);
@@ -1770,6 +1795,42 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   }
 
   /** Mirrors the committed semantic tree into the accessibility DOM. */
+  /**
+   * Records observed geometry, refusing anything older than what it already has.
+   *
+   * Under the worker transport the geometry frame and the frame report cross
+   * `postMessage` independently, so ordering is not guaranteed. Accepting a
+   * stale frame would move an overlay back to where it used to be; accepting
+   * only non-decreasing `frameSeq` means the Shell always holds the newest
+   * measurement, which is what a placement strategy wants regardless of which
+   * picture is currently on screen. See docs/e8-layout-readback-design.md D9.
+   */
+  private handleLayoutGeometry(frame: LayoutGeometryFrame): void {
+    if (this.#layoutGeometrySeq !== undefined && frame.frameSeq < this.#layoutGeometrySeq) {
+      this.#staleLayoutGeometryFrames += 1;
+      return;
+    }
+    this.#layoutGeometrySeq = frame.frameSeq;
+    this.#layoutGeometry.clear();
+    for (const record of frame.records) this.#layoutGeometry.set(record.nodeId, record);
+    this.#options.onLayoutGeometry?.(frame);
+  }
+
+  /**
+   * Latest geometry for one observed node, or undefined when it has none yet.
+   *
+   * Undefined is the honest answer for "not measured yet" — a zero rectangle
+   * would be indistinguishable from a node that really is empty.
+   */
+  public layoutGeometry(nodeId: number): LayoutGeometryRecord | undefined {
+    return this.#layoutGeometry.get(nodeId);
+  }
+
+  /** Geometry frames dropped for arriving out of order. Diagnostic only. */
+  public staleLayoutGeometryFrames(): number {
+    return this.#staleLayoutGeometryFrames;
+  }
+
   private handleSemantics(nodes: readonly SemanticNode[]): void {
     try {
       this.#semanticMirror?.update(nodes);

@@ -5,6 +5,8 @@ import type {
   EditingCharacterBounds,
   EditingGeometryFrame,
   EditingGeometryRect,
+  LayoutGeometryFrame,
+  LayoutGeometryRecord,
   SemanticNode,
 } from "./main-thread";
 import type { HostTransportMode } from "./capabilities";
@@ -159,6 +161,12 @@ export interface WorkerSemanticsMessage {
   readonly sessionId: number;
 }
 
+export interface WorkerLayoutGeometryMessage {
+  readonly frame: LayoutGeometryFrame;
+  readonly kind: "pingo:layout-geometry";
+  readonly sessionId: number;
+}
+
 export interface WorkerFatalMessage {
   readonly error: string;
   readonly kind: "pingo:fatal";
@@ -177,6 +185,7 @@ export type RenderWorkerOutboundMessage =
   | WorkerNonPassiveRegionsMessage
   | WorkerEditingGeometryMessage
   | WorkerSemanticsMessage
+  | WorkerLayoutGeometryMessage
   | WorkerFatalMessage
   | WorkerFrameMessage
   | WorkerPreparedMessage
@@ -273,6 +282,8 @@ export function isRenderWorkerOutboundMessage(
       return isEditingGeometryFrame(value.frame);
     case "pingo:semantics":
       return Array.isArray(value.nodes) && value.nodes.every(isSemanticNode);
+    case "pingo:layout-geometry":
+      return isLayoutGeometryFrame(value.frame);
     case "pingo:fatal":
       return typeof value.error === "string";
     case "pingo:shutdown-complete":
@@ -295,6 +306,7 @@ export function isRenderWorkerOutboundEnvelope(value: unknown): boolean {
     value.kind === "pingo:non-passive-regions" ||
     value.kind === "pingo:editing-geometry" ||
     value.kind === "pingo:semantics" ||
+    value.kind === "pingo:layout-geometry" ||
     value.kind === "pingo:fatal" ||
     value.kind === "pingo:shutdown-complete"
   );
@@ -349,6 +361,44 @@ function isEditingGeometryFrame(value: unknown): value is EditingGeometryFrame {
     Array.isArray(value.characterBounds) &&
     value.characterBounds.every(isEditingCharacterBounds)
   );
+}
+
+function isLayoutGeometryFrame(value: unknown): value is LayoutGeometryFrame {
+  return (
+    isRecord(value) &&
+    isU32(value.frameSeq) &&
+    Array.isArray(value.records) &&
+    value.records.every(isLayoutGeometryRecord)
+  );
+}
+
+function isLayoutGeometryRecord(value: unknown): value is LayoutGeometryRecord {
+  return (
+    isRecord(value) && isU32(value.nodeId) && isLayoutRect(value.bounds) && isLayoutRect(value.clip)
+  );
+}
+
+/**
+ * Like {@link isEditingGeometryRect} but tolerates infinities.
+ *
+ * An unclipped node reports an unbounded clip box, so requiring finiteness here
+ * would reject the common case. NaN is still refused — it survives every
+ * comparison a placement strategy would make.
+ */
+function isLayoutRect(value: unknown): value is EditingGeometryRect {
+  return (
+    isRecord(value) &&
+    isNonNaNNumber(value.left) &&
+    isNonNaNNumber(value.top) &&
+    isNonNaNNumber(value.width) &&
+    isNonNaNNumber(value.height) &&
+    (value.width as number) >= 0 &&
+    (value.height as number) >= 0
+  );
+}
+
+function isNonNaNNumber(value: unknown): boolean {
+  return typeof value === "number" && !Number.isNaN(value);
 }
 
 function isNonPassiveRegion(value: unknown): value is NonPassiveRegion {

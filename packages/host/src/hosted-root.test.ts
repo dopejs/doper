@@ -41,6 +41,68 @@ describe("createHostedCanvasRoot", () => {
     expect(onModeChange).toHaveBeenCalledWith("main-thread", expect.any(Object));
   });
 
+  it("keeps the newest observed geometry and refuses a frame that arrives late", async () => {
+    installCanvasGlobal();
+    const canvas = new FakeCanvas();
+    const core = fakeCore();
+    // frameSeq is driven by the fixture, so out-of-order delivery is
+    // reproducible instead of depending on transport timing.
+    let frameSeq = 10;
+    let width = 100;
+    core.layout_geometry = (): Uint32Array => {
+      const bits = (input: number): number => {
+        const scratch = new DataView(new ArrayBuffer(4));
+        scratch.setFloat32(0, input, true);
+        return scratch.getUint32(0, true);
+      };
+      return Uint32Array.of(
+        1,
+        frameSeq,
+        1,
+        7,
+        0,
+        bits(0),
+        bits(0),
+        bits(width),
+        bits(20),
+        ...[bits(0), bits(0), bits(Number.POSITIVE_INFINITY), bits(Number.POSITIVE_INFINITY)],
+      );
+    };
+    const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(core),
+      transport: { pageWorkerEnabled: false },
+    });
+
+    // Each render changes the tree, because an unchanged one produces no
+    // mutations and therefore no frame to carry geometry.
+    root.render(editableElement(10));
+    expect(root.layoutGeometry(7)?.bounds.width).toBe(100);
+    expect(root.staleLayoutGeometryFrames()).toBe(0);
+
+    // Newer frame: adopted.
+    frameSeq = 11;
+    width = 140;
+    root.render(editableElement(11));
+    expect(root.layoutGeometry(7)?.bounds.width).toBe(140);
+
+    // Older frame reaching the Shell after a newer one would move the overlay
+    // back to where it used to be. It must be dropped, not applied.
+    frameSeq = 10;
+    width = 100;
+    root.render(editableElement(12));
+    expect(root.layoutGeometry(7)?.bounds.width).toBe(140);
+    expect(root.staleLayoutGeometryFrames()).toBe(1);
+
+    // A node that stops being observed disappears rather than going stale.
+    frameSeq = 12;
+    core.layout_geometry = (): Uint32Array => Uint32Array.of(1, frameSeq, 0);
+    root.render(editableElement(13));
+    expect(root.layoutGeometry(7)).toBeUndefined();
+
+    await root.close();
+  });
+
   it("tracks live prefers-reduced-motion changes and detaches on close", async () => {
     installCanvasGlobal();
     let changeListener: ((event: MediaQueryListEvent) => void) | undefined;

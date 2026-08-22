@@ -3,6 +3,7 @@ import type { FrameReport } from "./main-thread";
 import type {
   EditingGeometryFrame,
   NonPassiveRegion,
+  LayoutGeometryFrame,
   SemanticNode,
   VirtualRefillRange,
 } from "./main-thread";
@@ -50,6 +51,7 @@ export interface RenderWorkerClientOptions {
   readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
   readonly onEditingGeometry?: (frame: EditingGeometryFrame) => void;
   readonly onSemantics?: (nodes: readonly SemanticNode[]) => void;
+  readonly onLayoutGeometry?: (frame: LayoutGeometryFrame) => void;
   readonly sessionId: number;
 }
 
@@ -78,6 +80,7 @@ export class RenderWorkerClient {
   readonly #onNonPassiveRegions: ((regions: readonly NonPassiveRegion[]) => void) | undefined;
   readonly #onEditingGeometry: ((frame: EditingGeometryFrame) => void) | undefined;
   readonly #onSemantics: ((nodes: readonly SemanticNode[]) => void) | undefined;
+  readonly #onLayoutGeometry: ((frame: LayoutGeometryFrame) => void) | undefined;
   readonly #sessionId: number;
   readonly #worker: WorkerLike;
   #capabilities: RenderWorkerCapabilities | undefined;
@@ -106,6 +109,7 @@ export class RenderWorkerClient {
     this.#onNonPassiveRegions = options.onNonPassiveRegions;
     this.#onEditingGeometry = options.onEditingGeometry;
     this.#onSemantics = options.onSemantics;
+    this.#onLayoutGeometry = options.onLayoutGeometry;
     worker.addEventListener("message", this.#handleMessage);
     worker.addEventListener("error", this.#handleError);
     worker.addEventListener("messageerror", this.#handleMessageError);
@@ -356,6 +360,9 @@ export class RenderWorkerClient {
         return;
       case "pingo:semantics":
         if (this.#state === "ready") this.#onSemantics?.(message.nodes);
+        return;
+      case "pingo:layout-geometry":
+        if (this.#state === "ready") this.#onLayoutGeometry?.(message.frame);
         return;
       case "pingo:fatal":
         this.fail(new Error(`render Worker failed: ${message.error}`));

@@ -55,6 +55,17 @@ import {
   FRAME_DIAGNOSTICS_PAINT_REBUILT_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_BUILDS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_BUDGET_FALLBACKS_INDEX,
+  FRAME_DIAGNOSTICS_OBSERVE_GEOMETRY_REJECTED_INDEX,
+  LAYOUT_GEOMETRY_HEADER_FRAME_SEQ_INDEX,
+  LAYOUT_GEOMETRY_HEADER_RECORD_COUNT_INDEX,
+  LAYOUT_GEOMETRY_HEADER_VERSION_INDEX,
+  LAYOUT_GEOMETRY_HEADER_WORDS,
+  LAYOUT_GEOMETRY_RECORD_CLIP_LEFT_BITS_INDEX,
+  LAYOUT_GEOMETRY_RECORD_FLAGS_INDEX,
+  LAYOUT_GEOMETRY_RECORD_NODE_ID_INDEX,
+  LAYOUT_GEOMETRY_RECORD_OWN_LEFT_BITS_INDEX,
+  LAYOUT_GEOMETRY_RECORD_WORDS,
+  LAYOUT_GEOMETRY_VERSION,
   FRAME_DIAGNOSTICS_PICTURE_CACHE_HITS_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_DEFINES_INDEX,
   FRAME_DIAGNOSTICS_PICTURE_HASH_HIGH_INDEX,
@@ -147,6 +158,7 @@ export interface CoreClient {
   take_event_transactions?(): Uint8Array;
   non_passive_regions?(): Uint32Array;
   editing_geometry?(): Uint32Array;
+  layout_geometry?(): Uint32Array;
   semantics?(): Uint8Array;
   take_virtual_refills?(): Uint32Array;
 }
@@ -192,6 +204,30 @@ export interface EditingGeometryFrame {
   readonly selectionStart: number;
 }
 
+/** One observed node's laid-out geometry for a single frame. */
+export interface LayoutGeometryRecord {
+  /** Generation-bearing Core node identifier. */
+  readonly nodeId: number;
+  /** World box before any ancestor clipping. */
+  readonly bounds: EditingGeometryRect;
+  /**
+   * Intersection of every clipping ancestor, in world coordinates.
+   *
+   * Unbounded when nothing above the node clips it, so a caller intersects it
+   * with the viewport unconditionally. Zero-sized means the node sits entirely
+   * outside its clipping ancestors — which `bounds` alone cannot express and
+   * the intersection alone would lose.
+   */
+  readonly clip: EditingGeometryRect;
+}
+
+/** Geometry for every observed node, as of one committed frame. */
+export interface LayoutGeometryFrame {
+  /** Frame this geometry describes; consumers must not regress to an older one. */
+  readonly frameSeq: number;
+  readonly records: readonly LayoutGeometryRecord[];
+}
+
 /** One committed semantic-tree node mirrored into the accessibility DOM. */
 export interface SemanticNode {
   readonly bounds: EditingGeometryRect;
@@ -229,6 +265,13 @@ export interface CoreFrameDiagnostics {
   readonly pictureResourceBytes: number;
   /** Cumulative resident-budget fallbacks to the inline reference path. */
   readonly pictureBudgetFallbacks: number;
+  /**
+   * Cumulative geometry observations Core refused because its set was full.
+   *
+   * Non-zero means some component asked to be measured and silently fell back
+   * to static placement. See docs/e8-layout-readback-design.md D2.
+   */
+  readonly observeGeometryRejected: number;
   readonly overInvalidatedFrames: number;
   readonly pictureHash: bigint;
   /**
@@ -317,6 +360,7 @@ export interface CanvasRootOptions extends RootOptions {
   readonly onNonPassiveRegions?: (regions: readonly NonPassiveRegion[]) => void;
   readonly onEditingGeometry?: (frame: EditingGeometryFrame) => void;
   readonly onSemantics?: (nodes: readonly SemanticNode[]) => void;
+  readonly onLayoutGeometry?: (frame: LayoutGeometryFrame) => void;
   readonly onMediaMetrics?: (metrics: MediaPipelineMetrics) => void;
 }
 
@@ -409,6 +453,7 @@ export class CanvasFrameSink implements MutationSink {
   readonly #onNonPassiveRegions: ((regions: readonly NonPassiveRegion[]) => void) | undefined;
   readonly #onEditingGeometry: ((frame: EditingGeometryFrame) => void) | undefined;
   readonly #onSemantics: ((nodes: readonly SemanticNode[]) => void) | undefined;
+  readonly #onLayoutGeometry: ((frame: LayoutGeometryFrame) => void) | undefined;
   readonly #fontSet: FontFaceSet | undefined;
   readonly #fontLoadingDone: (() => void) | undefined;
   #devicePixelRatio = 1;
@@ -429,6 +474,9 @@ export class CanvasFrameSink implements MutationSink {
     onEditingGeometry?: (frame: EditingGeometryFrame) => void,
     onSemantics?: (nodes: readonly SemanticNode[]) => void,
     incrementalPicturesEnabled = true,
+    // Appended rather than slotted beside onSemantics: this constructor is
+    // positional, so inserting there would silently shift every later argument.
+    onLayoutGeometry?: (frame: LayoutGeometryFrame) => void,
   ) {
     this.#context = context;
     this.#core = core;
@@ -441,6 +489,7 @@ export class CanvasFrameSink implements MutationSink {
     this.#onNonPassiveRegions = onNonPassiveRegions;
     this.#onEditingGeometry = onEditingGeometry;
     this.#onSemantics = onSemantics;
+    this.#onLayoutGeometry = onLayoutGeometry;
     this.#resources = new Canvas2DResourceRegistry();
     this.#replayer = new Canvas2DReplayer();
     this.#core.set_incremental_pictures_enabled?.(incrementalPicturesEnabled);
@@ -495,6 +544,7 @@ export class CanvasFrameSink implements MutationSink {
     this.emitNonPassiveRegions();
     this.emitEditingGeometry();
     this.emitSemantics();
+    this.emitLayoutGeometry();
     if (!(displayList instanceof Uint8Array)) {
       throw new TypeError("Core commit must return Uint8Array DisplayList bytes");
     }
@@ -581,6 +631,7 @@ export class CanvasFrameSink implements MutationSink {
       this.emitNonPassiveRegions();
       this.emitEditingGeometry();
       this.emitSemantics();
+      this.emitLayoutGeometry();
       this.emitEventTransactions(this.takeEventTransactions());
       // Drained per transaction, not per batch: Core refuses an input frame
       // while a reverse stream is still pending, so a batch whose first
@@ -621,6 +672,7 @@ export class CanvasFrameSink implements MutationSink {
     this.emitNonPassiveRegions();
     this.emitEditingGeometry();
     this.emitSemantics();
+    this.emitLayoutGeometry();
     this.emitEventTransactions(this.takeEventTransactions());
     if (displayList === undefined) {
       this.emitEditTransactions(this.takeEditTransactions());
@@ -654,6 +706,7 @@ export class CanvasFrameSink implements MutationSink {
     this.emitNonPassiveRegions();
     this.emitEditingGeometry();
     this.emitSemantics();
+    this.emitLayoutGeometry();
     // Core produced no new picture this tick, so the canvas already shows the
     // right thing. Replaying it again was costing a full canvas redraw on every
     // clock frame of a scroll, which measured as the single largest term in the
@@ -1158,6 +1211,15 @@ export class CanvasFrameSink implements MutationSink {
     if (frame !== undefined) this.#onEditingGeometry(frame);
   }
 
+  private emitLayoutGeometry(): void {
+    if (this.#onLayoutGeometry === undefined) return;
+    const snapshot = this.#core.layout_geometry?.();
+    if (snapshot === undefined) return;
+    // An empty frame still carries frameSeq, and a consumer needs it to notice
+    // that its observed node stopped being reported.
+    this.#onLayoutGeometry(parseLayoutGeometry(snapshot));
+  }
+
   private emitSemantics(): void {
     if (this.#onSemantics === undefined) return;
     const snapshot = this.#core.semantics?.();
@@ -1335,6 +1397,7 @@ function parseCoreFrameDiagnostics(
     pictureResidentBytes: requiredWord(words, FRAME_DIAGNOSTICS_PICTURE_RESIDENT_BYTES_INDEX),
     pictureResourceBytes: requiredWord(words, FRAME_DIAGNOSTICS_PICTURE_RESOURCE_BYTES_INDEX),
     pictureBudgetFallbacks: requiredWord(words, FRAME_DIAGNOSTICS_PICTURE_BUDGET_FALLBACKS_INDEX),
+    observeGeometryRejected: requiredWord(words, FRAME_DIAGNOSTICS_OBSERVE_GEOMETRY_REJECTED_INDEX),
     overInvalidatedFrames: requiredWord(words, FRAME_DIAGNOSTICS_OVER_INVALIDATED_FRAMES_INDEX),
     pictureHash: BigInt(low) | (BigInt(high) << 32n),
     visiblePlaceholders: requiredWord(words, FRAME_DIAGNOSTICS_VISIBLE_PLACEHOLDERS_INDEX),
@@ -1482,6 +1545,57 @@ function parseEditingGeometry(words: Uint32Array): EditingGeometryFrame | undefi
 }
 
 /** Fully validates one untrusted Core semantics snapshot before use. */
+/**
+ * Decodes the observed-geometry frame.
+ *
+ * A trust boundary like every other decoder here: the bytes normally come from
+ * this project's Core, which is not a reason to skip validation.
+ */
+export function parseLayoutGeometry(words: Uint32Array): LayoutGeometryFrame {
+  if (!(words instanceof Uint32Array) || words.length < LAYOUT_GEOMETRY_HEADER_WORDS) {
+    throw new TypeError("Core layout geometry must use the generated Uint32Array layout");
+  }
+  if (words[LAYOUT_GEOMETRY_HEADER_VERSION_INDEX] !== LAYOUT_GEOMETRY_VERSION) {
+    throw new Error("Core layout geometry version is incompatible with Host");
+  }
+  const frameSeq = requiredWord(words, LAYOUT_GEOMETRY_HEADER_FRAME_SEQ_INDEX);
+  const count = requiredWord(words, LAYOUT_GEOMETRY_HEADER_RECORD_COUNT_INDEX);
+  const expected = LAYOUT_GEOMETRY_HEADER_WORDS + count * LAYOUT_GEOMETRY_RECORD_WORDS;
+  if (!Number.isSafeInteger(expected) || words.length !== expected) {
+    throw new TypeError("Core layout geometry record count does not match its payload");
+  }
+  const scratch = new DataView(new ArrayBuffer(4));
+  // Infinities are meaningful here: an unclipped node reports an unbounded clip
+  // box. NaN is not, and would poison every comparison downstream.
+  const float = (index: number): number => {
+    scratch.setUint32(0, requiredWord(words, index), true);
+    const value = scratch.getFloat32(0, true);
+    if (Number.isNaN(value)) throw new RangeError("Core layout geometry contains NaN");
+    return value;
+  };
+  const rect = (offset: number): EditingGeometryRect => {
+    const width = float(offset + 2);
+    const height = float(offset + 3);
+    if (width < 0 || height < 0) {
+      throw new RangeError("Core layout geometry rectangle has a negative extent");
+    }
+    return { left: float(offset), top: float(offset + 1), width, height };
+  };
+  const records: LayoutGeometryRecord[] = [];
+  for (let record = 0; record < count; record += 1) {
+    const offset = LAYOUT_GEOMETRY_HEADER_WORDS + record * LAYOUT_GEOMETRY_RECORD_WORDS;
+    if (requiredWord(words, offset + LAYOUT_GEOMETRY_RECORD_FLAGS_INDEX) !== 0) {
+      throw new RangeError("Core layout geometry flags are reserved");
+    }
+    records.push({
+      nodeId: requiredWord(words, offset + LAYOUT_GEOMETRY_RECORD_NODE_ID_INDEX),
+      bounds: rect(offset + LAYOUT_GEOMETRY_RECORD_OWN_LEFT_BITS_INDEX),
+      clip: rect(offset + LAYOUT_GEOMETRY_RECORD_CLIP_LEFT_BITS_INDEX),
+    });
+  }
+  return { frameSeq, records };
+}
+
 export function parseSemantics(bytes: Uint8Array): SemanticNode[] {
   if (!(bytes instanceof Uint8Array) || bytes.byteLength % 4 !== 0) {
     throw new TypeError("Core semantics must use the generated byte layout");

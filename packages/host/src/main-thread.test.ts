@@ -14,7 +14,13 @@ import {
 import { encodeInputBatch } from "@dopejs/pingo-editing";
 import { describe, expect, it, vi } from "vitest";
 
-import { CanvasFrameSink, parseSemantics, type CoreClient, type FrameReport } from "./main-thread";
+import {
+  CanvasFrameSink,
+  parseLayoutGeometry,
+  parseSemantics,
+  type CoreClient,
+  type FrameReport,
+} from "./main-thread";
 import {
   EDIT_TRANSACTIONS_MAGIC,
   EVENT_TRANSACTIONS_MAGIC,
@@ -610,6 +616,67 @@ describe("CanvasFrameSink", () => {
       vi.fn(),
     );
     expect(() => malformed.commit(mutationFrame([]))).toThrow(/layout/u);
+  });
+
+  it("parses observed geometry strictly and keeps unbounded clips", () => {
+    const bits = (input: number): number => {
+      const scratch = new DataView(new ArrayBuffer(4));
+      scratch.setFloat32(0, input, true);
+      return scratch.getUint32(0, true);
+    };
+    const record = (nodeId: number, clipWidth: number): number[] => [
+      nodeId,
+      0,
+      bits(4),
+      bits(6),
+      bits(120),
+      bits(30),
+      bits(0),
+      bits(0),
+      bits(clipWidth),
+      bits(200),
+    ];
+    const build = (records: number[][]): Uint32Array =>
+      Uint32Array.from([1, 42, records.length, ...records.flat()]);
+
+    // An unclipped node reports an unbounded clip box. Rejecting infinities
+    // here would reject the common case, so only NaN is refused.
+    const frame = parseLayoutGeometry(build([record(17, Number.POSITIVE_INFINITY)]));
+    expect(frame.frameSeq).toBe(42);
+    expect(frame.records).toEqual([
+      {
+        nodeId: 17,
+        bounds: { left: 4, top: 6, width: 120, height: 30 },
+        clip: { left: 0, top: 0, width: Number.POSITIVE_INFINITY, height: 200 },
+      },
+    ]);
+
+    // An empty frame is legal and still carries frameSeq: a consumer needs it
+    // to notice that its node stopped being reported.
+    expect(parseLayoutGeometry(build([])).records).toEqual([]);
+
+    const wrongVersion = build([record(17, 50)]);
+    wrongVersion[0] = 2;
+    expect(() => parseLayoutGeometry(wrongVersion)).toThrow(/version/u);
+
+    const wrongCount = build([record(17, 50)]);
+    wrongCount[2] = 2;
+    expect(() => parseLayoutGeometry(wrongCount)).toThrow(/record count/u);
+
+    const reserved = build([record(17, 50)]);
+    reserved[4] = 1;
+    expect(() => parseLayoutGeometry(reserved)).toThrow(/reserved/u);
+
+    // NaN survives every comparison a placement strategy would make, so it has
+    // to die at the boundary rather than propagate silently.
+    const notANumber = build([record(17, 50)]);
+    notANumber[5] = bits(Number.NaN);
+    expect(() => parseLayoutGeometry(notANumber)).toThrow(/NaN/u);
+
+    const negative = build([record(17, -1)]);
+    expect(() => parseLayoutGeometry(negative)).toThrow(/negative/u);
+
+    expect(() => parseLayoutGeometry(Uint32Array.of(1, 2))).toThrow(/layout/u);
   });
 
   it("parses semantic snapshots strictly and fails closed on hostile bytes", () => {

@@ -10,12 +10,14 @@ describe("RenderWorkerClient", () => {
     const onVirtualRefills = vi.fn();
     const onEventTransaction = vi.fn();
     const onNonPassiveRegions = vi.fn();
+    const onLayoutGeometry = vi.fn();
     const client = new RenderWorkerClient(worker, {
       onClockMetrics,
       onFrame,
       onVirtualRefills,
       onEventTransaction,
       onNonPassiveRegions,
+      onLayoutGeometry,
       sessionId: 9,
     });
     worker.onPost = (message) => {
@@ -53,6 +55,26 @@ describe("RenderWorkerClient", () => {
       reduced: true,
       sessionId: 9,
     });
+    // Geometry has to survive the worker hop unchanged, including the
+    // unbounded clip that means "nothing above this node clips it".
+    const geometryFrame = {
+      frameSeq: 31,
+      records: [
+        {
+          nodeId: 7,
+          bounds: { left: 1, top: 2, width: 3, height: 4 },
+          clip: {
+            left: Number.NEGATIVE_INFINITY,
+            top: Number.NEGATIVE_INFINITY,
+            width: Number.POSITIVE_INFINITY,
+            height: Number.POSITIVE_INFINITY,
+          },
+        },
+      ],
+    };
+    worker.emitMessage({ kind: "pingo:layout-geometry", frame: geometryFrame, sessionId: 9 });
+    expect(onLayoutGeometry).toHaveBeenCalledWith(geometryFrame);
+
     worker.emitMessage({
       kind: "pingo:frame",
       report: {
