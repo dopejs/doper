@@ -101,6 +101,14 @@ export interface HostedCanvasRootOptions extends RootOptions {
   readonly initializationTimeoutMs?: number;
   /** Uses immutable Picture resources; false is the production rollback path. */
   readonly incrementalPicturesEnabled?: boolean;
+  /**
+   * Enables Core geometry readback for `useLayoutValue`. Off by default.
+   *
+   * Off is the rollback path: no `ObserveGeometry` is sent, no geometry channel
+   * is registered, `useLayoutValue` reports `undefined`, and components fall
+   * back to static placement. See docs/e8-layout-readback-design.md D8.
+   */
+  readonly layoutReadbackEnabled?: boolean;
   readonly mutationAcknowledgementTimeoutMs?: number;
   readonly mutationBufferBytes?: number;
   /** Forces the centralized textarea fallback for qualification or known-bad EditContext builds. */
@@ -529,7 +537,9 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       onNonPassiveRegions: (regions) => this.handleNonPassiveRegions(regions),
       onEditingGeometry: (frame) => this.handleEditingGeometry(frame),
       onSemantics: (nodes) => this.handleSemantics(nodes),
-      onLayoutGeometry: (frame) => this.handleLayoutGeometry(frame),
+      ...(this.#options.layoutReadbackEnabled === true
+        ? { onLayoutGeometry: (frame: LayoutGeometryFrame) => this.handleLayoutGeometry(frame) }
+        : {}),
       sessionId: nextSessionId(),
     };
     const client = new RenderWorkerClient(workerFactory(), clientOptions);
@@ -623,6 +633,7 @@ class HostedCanvasRootController implements HostedCanvasRoot {
   private reconcilerOptions(): RootOptions {
     return {
       ...this.#options,
+      layoutReadbackEnabled: this.#options.layoutReadbackEnabled ?? false,
       onInteractionRequest: (request) => {
         this.handleInteractionRequest(request);
         this.#options.onInteractionRequest?.(request);
@@ -1432,7 +1443,9 @@ class HostedCanvasRootController implements HostedCanvasRoot {
       (frame) => this.handleEditingGeometry(frame),
       (nodes) => this.handleSemantics(nodes),
       this.#options.incrementalPicturesEnabled ?? true,
-      (frame) => this.handleLayoutGeometry(frame),
+      this.#options.layoutReadbackEnabled === true
+        ? (frame) => this.handleLayoutGeometry(frame)
+        : undefined,
     );
     this.#frameSink = sink;
     this.#recoverableSink.install(sink);
@@ -1813,6 +1826,11 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#layoutGeometrySeq = frame.frameSeq;
     this.#layoutGeometry.clear();
     for (const record of frame.records) this.#layoutGeometry.set(record.nodeId, record);
+    try {
+      this.#root?.applyLayoutGeometry(frame.records);
+    } catch (cause) {
+      this.#options.onHostError?.(toError(cause, "layout geometry delivery failed"));
+    }
     this.#options.onLayoutGeometry?.(frame);
   }
 

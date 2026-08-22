@@ -12,10 +12,14 @@ export {
   useCallback,
   useContext,
   useEffect,
+  useLayoutValue,
   useMemo,
   useRef,
   useSignal,
   useState,
+  type LayoutGeometry,
+  type LayoutGeometryAccess,
+  type LayoutRect,
   type RefObject,
 } from "./hooks";
 export {

@@ -1,6 +1,38 @@
 import { ReactiveObserver, signal, type Signal, type Unsubscribe } from "./signal";
 import type { ContextLookup, PingoContext } from "./context";
 
+/** Axis-aligned rectangle in world (root) coordinates. */
+export interface LayoutRect {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** One node's laid-out geometry, as reported by Core for a committed frame. */
+export interface LayoutGeometry {
+  /** World box before any ancestor clipping. */
+  readonly bounds: LayoutRect;
+  /**
+   * Intersection of every clipping ancestor. Unbounded when nothing clips the
+   * node, zero-sized when it lies entirely outside its clipping ancestors.
+   */
+  readonly clip: LayoutRect;
+}
+
+/**
+ * Host-provided access to Core geometry, injected by the reconciler.
+ *
+ * The runtime defines the shape it consumes rather than importing it, because
+ * the reconciler depends on the runtime and not the other way round.
+ */
+export interface LayoutGeometryAccess {
+  /** Starts reporting for a node and re-runs `notify` when its geometry moves. */
+  readonly observe: (nodeId: number, notify: () => void) => Unsubscribe;
+  /** Latest geometry, or undefined when the node has not been measured yet. */
+  readonly read: (nodeId: number) => LayoutGeometry | undefined;
+}
+
 /** Mutable stable reference returned by `useRef`. */
 export interface RefObject<T> {
   current: T;
@@ -59,11 +91,22 @@ export class ComponentScope {
   readonly #observer: ReactiveObserver;
   readonly #invalidate: () => void;
   readonly #lookupContext: ContextLookup | undefined;
+  readonly #layoutGeometry: LayoutGeometryAccess | undefined;
 
-  public constructor(invalidate: () => void, lookupContext?: ContextLookup) {
+  public constructor(
+    invalidate: () => void,
+    lookupContext?: ContextLookup,
+    layoutGeometry?: LayoutGeometryAccess,
+  ) {
     this.#invalidate = invalidate;
     this.#observer = new ReactiveObserver(invalidate);
     this.#lookupContext = lookupContext;
+    this.#layoutGeometry = layoutGeometry;
+  }
+
+  /** Core geometry access, or undefined outside a host that provides it. */
+  public layoutGeometryAccess(): LayoutGeometryAccess | undefined {
+    return this.#layoutGeometry;
   }
 
   /** Finds the nearest provider signal for one context along the owner chain. */
@@ -270,6 +313,73 @@ export function useEffect(create: () => void | Unsubscribe, dependencies?: Depen
 function requireScope(): ComponentScope {
   if (activeScope === undefined) throw new Error("hooks may only run in a function component");
   return activeScope;
+}
+
+/**
+ * Observes one mounted node's Core geometry, one frame behind.
+ *
+ * Returns a ref callback to attach and the projected value. The value is
+ * `undefined` until Core has reported the node — the honest answer for "not
+ * measured yet", since a zero rectangle is indistinguishable from a node that
+ * really is empty.
+ *
+ * A ref **callback** rather than a `RefObject`, unlike the sketch in
+ * `docs/design.md`: a ref object is populated after the render that would need
+ * it, so the hook would have no node to observe and nothing would re-run it.
+ * The callback fires on attach, which is when the node id becomes known.
+ *
+ * `enabled: false` observes nothing and consumes no slot in Core's bounded
+ * observation set — bind it to whether an overlay is open, not to whether its
+ * trigger is mounted.
+ */
+export function useLayoutValue<T>(
+  selector: (geometry: LayoutGeometry) => T,
+  options?: { readonly enabled?: boolean },
+): readonly [(handle: { readonly nodeId: number } | null) => void, T | undefined] {
+  const scope = requireScope();
+  const access = scope.layoutGeometryAccess();
+  const enabled = options?.enabled ?? true;
+  const state = useRef<{
+    nodeId: number | undefined;
+    unsubscribe: Unsubscribe | undefined;
+  }>({ nodeId: undefined, unsubscribe: undefined });
+  const notify = useCallback(() => scope.invalidate(), [scope]);
+
+  const attach = useCallback(
+    (handle: { readonly nodeId: number } | null) => {
+      const nodeId = handle?.nodeId;
+      if (state.current.nodeId === nodeId) return;
+      state.current.unsubscribe?.();
+      state.current.unsubscribe = undefined;
+      state.current.nodeId = nodeId;
+      if (nodeId === undefined || access === undefined || !enabled) return;
+      state.current.unsubscribe = access.observe(nodeId, notify);
+      notify();
+    },
+    [access, enabled, notify, state],
+  );
+
+  // Toggling `enabled` on an already-attached node has to take effect without a
+  // remount, and unmounting has to release the observation or Core's bounded
+  // set leaks a slot per closed overlay.
+  useEffect(() => {
+    const nodeId = state.current.nodeId;
+    if (nodeId !== undefined && access !== undefined && enabled) {
+      state.current.unsubscribe ??= access.observe(nodeId, notify);
+    } else {
+      state.current.unsubscribe?.();
+      state.current.unsubscribe = undefined;
+    }
+    return () => {
+      state.current.unsubscribe?.();
+      state.current.unsubscribe = undefined;
+    };
+  }, [access, enabled, notify, state]);
+
+  const nodeId = state.current.nodeId;
+  const geometry =
+    nodeId === undefined || access === undefined || !enabled ? undefined : access.read(nodeId);
+  return [attach, geometry === undefined ? undefined : selector(geometry)] as const;
 }
 
 /**

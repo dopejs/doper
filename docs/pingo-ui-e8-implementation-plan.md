@@ -91,17 +91,22 @@ hosted-root.ts}`
 **Files:** `packages/runtime/src/hooks.ts`、`packages/reconciler`、
 `packages/facade`、api 快照
 
-- [ ] `useLayoutValue(ref, selector)`：挂载时发 `ObserveGeometry`，卸载时撤销；
-      selector 结果 `Object.is` 不变则不触发重渲染。
-- [ ] 首帧返回 `undefined`；flag 关闭或 `enabled: false` 时恒为 `undefined`，
+- [x] `useLayoutValue(selector, options?)`：**签名改为回调 ref**，返回
+      `[attach, value]`。`docs/design.md` 写的是 `useLayoutValue(nodeRef, selector)`，
+      但 `RefObject` 在需要它的那次渲染之后才被填充，钩子拿不到节点、也没有任何东西
+      会重跑它；回调 ref 在挂载时触发，正是节点 id 变已知的时刻。E8-8 回写 design.md。
+- [x] 几何未变则不唤醒（`Object.is` 逐字段比较，因为无裁剪节点上报 ±Infinity）。
+- [x] 首帧返回 `undefined`；flag 关闭或 `enabled: false` 时恒为 `undefined`，
       且**不发 `ObserveGeometry`、不占额度**（设计门 D1/D2）。
-- [ ] 同一节点被多处订阅只观察一次（引用计数）。
-- [ ] **Shell 侧执行上界**：本地持有计数，越界订阅入 FIFO 队列，名额释放时自动补发。
+- [x] 同一节点被多处订阅只观察一次（引用计数）。
+- [x] **Shell 侧执行上界**：本地持有计数，越界订阅入 FIFO 队列，名额释放时自动补发。
       只靠 Core 拒绝会让被拒订阅永久停在 `undefined`——命令已发出，不会重试。
-- [ ] 单测：第 65 个订阅进队列且不发命令；前面某个卸载后队首自动补发并拿到几何；
-      dev 模式下越界有带组件上下文的告警。
-- [ ] 单测：订阅/退订对称、快速开关不泄漏观察、selector 稳定性。
-- [ ] `pnpm api:check` 快照按 `docs/api/index.md` 程序更新。
+- [x] 单测：第 65/66 个订阅进队列且不向 Core 发命令；释放一个名额后队首自动补发。
+      可观测性用计数器 `layoutObservationDeferrals()` 而非 dev 告警——仓库没有既有的
+      告警约定，凭空发明一个不如给一个可断言的计数；Core 侧的拒绝另有
+      `frameDiagnostics.observeGeometryRejected`。
+- [x] 单测：订阅/退订对称、快速开关不泄漏观察、selector 稳定性。
+- [x] `pnpm api:check` 快照按 `docs/api/index.md` 程序更新。
 
 ### Task E8-6: 定位策略纯函数
 

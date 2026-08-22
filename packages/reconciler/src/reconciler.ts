@@ -34,6 +34,9 @@ import {
   isContextProvider,
   signal,
   type ContextProvider,
+  type LayoutGeometry,
+  type LayoutGeometryAccess,
+  type LayoutRect,
   type PingoContext,
   type Signal,
 } from "@dopejs/pingo-runtime";
@@ -49,10 +52,22 @@ import {
   type StylePropertyName,
 } from "@dopejs/pingo-style";
 
-import { MAX_VIRTUAL_ITEMS, NodeKind, Prop, ResourceKind, VirtualAxis } from "./generated";
+import {
+  MAX_OBSERVED_GEOMETRY_NODES,
+  MAX_VIRTUAL_ITEMS,
+  NodeKind,
+  Prop,
+  ResourceKind,
+  VirtualAxis,
+} from "./generated";
 import { encodeAnimationResource } from "./animation-resource";
 import { encodeComputedStyleResource } from "./computed-style-resource";
-import { encodeMutationBatch, NULL_NODE_ID, type Mutation } from "./mutation-stream";
+import {
+  encodeMutationBatch,
+  NULL_NODE_ID,
+  OBSERVE_GEOMETRY_FLAG_ACTIVE,
+  type Mutation,
+} from "./mutation-stream";
 import { NodeIdAllocator } from "./node-id";
 import {
   ResourcePool,
@@ -93,6 +108,14 @@ export interface RootOptions {
     context: { readonly nodeId: number; readonly hostType: HostType },
   ) => void;
   /** Host bridge for imperative capture/focus requests issued by node handles. */
+  /**
+   * Enables Core geometry readback. Off by default, matching the Host flag.
+   *
+   * When off, `useLayoutValue` gets no access object, so it observes nothing
+   * and reports `undefined` — the same path a component takes on a Host that
+   * never provides geometry at all.
+   */
+  readonly layoutReadbackEnabled?: boolean;
   readonly onInteractionRequest?: (request: InteractionRequest) => void;
   /** Host bridge for mounting, updating, and releasing browser-owned media state. */
   readonly onMediaBinding?: (binding: MediaBinding | undefined, nodeId: number) => void;
@@ -161,6 +184,8 @@ export interface CoreDrivenPingoRoot extends PingoRoot {
   updateMediaMetadata(nodeId: number, width: number, height: number): void;
   applyMediaEvent(nodeId: number, event: PingoMediaEvent | PingoMediaError): void;
   activateNode(nodeId: number): void;
+  applyLayoutGeometry(records: readonly LayoutGeometryReport[]): void;
+  layoutObservationDeferrals(): number;
 }
 
 /** Shell-owned durable state used to activate one native editing surface. */
@@ -474,6 +499,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       ) => void)
     | undefined;
   readonly #onInteractionRequest: ((request: InteractionRequest) => void) | undefined;
+  readonly #layoutReadbackEnabled: boolean;
   readonly #onMediaBinding:
     ((binding: MediaBinding | undefined, nodeId: number) => void) | undefined;
   readonly #pointerCaptures = new Map<number, number>();
@@ -495,6 +521,35 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
   #frameSequence = 1;
   #mutations: Mutation[] | undefined;
   #scheduled = false;
+  /**
+   * Observation changes waiting for the next commit, keyed by node id.
+   *
+   * A map rather than a list: toggling a node on and off before the commit
+   * should send one command, not two, and the last state is the true one.
+   */
+  readonly #pendingObservations = new Map<number, boolean>();
+  /** Latest geometry Core reported, keyed by generation-bearing node id. */
+  readonly #layoutGeometry = new Map<number, LayoutGeometry>();
+  /**
+   * Who to wake when a node's geometry changes.
+   *
+   * Reference-counted by construction: the first subscriber turns observation
+   * on and the last one off, so two components watching the same node cost one
+   * slot in Core's bounded set.
+   */
+  readonly #geometrySubscribers = new Map<number, Set<() => void>>();
+  /** Nodes currently holding a slot in Core's bounded observation set. */
+  readonly #observedNodes = new Set<number>();
+  /**
+   * Nodes wanting a slot, oldest first.
+   *
+   * The Shell enforces the cap as policy because it is the only side that knows
+   * the count and can retry: a command Core rejected is never resent, so a
+   * subscription refused there would stay undefined until its component
+   * remounted. Core keeps its own cap as a defensive backstop.
+   */
+  readonly #deferredObservations: number[] = [];
+  #layoutObservationDeferrals = 0;
   #performing = false;
   #unmounted = false;
   #failed = false;
@@ -516,6 +571,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     this.#videoEnabled = options.videoEnabled ?? true;
     this.#onStyleDiagnostics = options.onStyleDiagnostics;
     this.#onInteractionRequest = options.onInteractionRequest;
+    this.#layoutReadbackEnabled = options.layoutReadbackEnabled ?? false;
     this.#onMediaBinding = options.onMediaBinding;
   }
 
@@ -547,7 +603,12 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
 
   public flushSync(): void {
     this.assertUsable();
-    if (this.#performing || this.#dirtyComponents.size === 0) return;
+    // Pending observations count as work. Effects run after the commit, so a
+    // subscribe or withdraw they trigger arrives with nothing else dirty;
+    // returning early here would strand it and Core would keep reporting a node
+    // nobody watches for the life of the application.
+    if (this.#performing) return;
+    if (this.#dirtyComponents.size === 0 && this.#pendingObservations.size === 0) return;
     this.#scheduled = false;
     this.perform(() => this.flushDirtyComponents());
   }
@@ -811,6 +872,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     if (this.#performing) throw new Error("reconciler root cannot commit recursively");
     this.#performing = true;
     this.#mutations = [];
+    this.drainPendingObservations();
     this.#renderedScopes.clear();
     this.#scopesPendingDisposal.clear();
     this.#postCommitCleanups.length = 0;
@@ -1050,6 +1112,7 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       scope: new ComponentScope(
         () => this.enqueueComponent(instance),
         (context) => this.lookupContext(instance, context),
+        this.#layoutReadbackEnabled ? this.#layoutGeometryAccess : undefined,
       ),
       mounted: true,
       contextValue: isContextProvider(descriptor.type)
@@ -1912,6 +1975,139 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
     this.#callbacksByFunction.delete(entry.callback);
   }
 
+  readonly #layoutGeometryAccess: LayoutGeometryAccess = {
+    observe: (nodeId, notify) => {
+      let subscribers = this.#geometrySubscribers.get(nodeId);
+      if (subscribers === undefined) {
+        subscribers = new Set();
+        this.#geometrySubscribers.set(nodeId, subscribers);
+        this.claimObservationSlot(nodeId);
+      }
+      subscribers.add(notify);
+      return () => {
+        const current = this.#geometrySubscribers.get(nodeId);
+        if (current === undefined) return;
+        current.delete(notify);
+        if (current.size > 0) return;
+        this.#geometrySubscribers.delete(nodeId);
+        this.#layoutGeometry.delete(nodeId);
+        this.releaseObservationSlot(nodeId);
+      };
+    },
+    read: (nodeId) => this.#layoutGeometry.get(nodeId),
+  };
+
+  /** Takes a slot when one is free, otherwise queues for the next release. */
+  private claimObservationSlot(nodeId: number): void {
+    if (this.#observedNodes.size < MAX_OBSERVED_GEOMETRY_NODES) {
+      this.#observedNodes.add(nodeId);
+      this.observeGeometry(nodeId, true);
+      return;
+    }
+    this.#deferredObservations.push(nodeId);
+    this.#layoutObservationDeferrals += 1;
+  }
+
+  private releaseObservationSlot(nodeId: number): void {
+    const deferred = this.#deferredObservations.indexOf(nodeId);
+    if (deferred >= 0) {
+      // Never took a slot, so nothing to withdraw.
+      this.#deferredObservations.splice(deferred, 1);
+      return;
+    }
+    if (!this.#observedNodes.delete(nodeId)) return;
+    // Withdraw only if the node still exists; Core prunes observations whose
+    // node no longer resolves, and a stale id would be rejected.
+    if (this.#hostsByNodeId.get(nodeId)?.mounted === true) {
+      this.observeGeometry(nodeId, false);
+    } else {
+      this.#pendingObservations.delete(nodeId);
+    }
+    // Promote the oldest waiter that still has someone watching it.
+    while (this.#deferredObservations.length > 0) {
+      const next = this.#deferredObservations.shift();
+      if (next === undefined) return;
+      if (this.#geometrySubscribers.get(next) === undefined) continue;
+      this.#observedNodes.add(next);
+      this.observeGeometry(next, true);
+      return;
+    }
+  }
+
+  /**
+   * Observations that had to wait for a slot, cumulative.
+   *
+   * Non-zero means some component asked to be measured and is temporarily
+   * reporting `undefined`. Safe, but not something to discover by accident.
+   */
+  public layoutObservationDeferrals(): number {
+    return this.#layoutObservationDeferrals;
+  }
+
+  /**
+   * Applies one Core geometry frame and wakes the components watching it.
+   *
+   * Only subscribed nodes are stored: a record for something nobody watches is
+   * a leak waiting to happen, and Core should not have been reporting it.
+   */
+  public applyLayoutGeometry(records: readonly LayoutGeometryReport[]): void {
+    if (this.#failed || this.#unmounted) return;
+    const woken = new Set<() => void>();
+    const reported = new Set<number>();
+    for (const record of records) {
+      reported.add(record.nodeId);
+      const subscribers = this.#geometrySubscribers.get(record.nodeId);
+      if (subscribers === undefined) continue;
+      const previous = this.#layoutGeometry.get(record.nodeId);
+      this.#layoutGeometry.set(record.nodeId, { bounds: record.bounds, clip: record.clip });
+      if (equalGeometry(previous, record)) continue;
+      for (const notify of subscribers) woken.add(notify);
+    }
+    // A node that stopped being reported must not keep serving its last value.
+    for (const [nodeId, subscribers] of this.#geometrySubscribers) {
+      if (reported.has(nodeId) || !this.#layoutGeometry.delete(nodeId)) continue;
+      for (const notify of subscribers) woken.add(notify);
+    }
+    for (const notify of woken) notify();
+  }
+
+  /**
+   * Requests or withdraws Core geometry reporting for one mounted node.
+   *
+   * The command rides the next commit rather than a batch of its own, so it is
+   * applied in the same transaction as whatever else changed this frame.
+   */
+  public observeGeometry(nodeId: number, enabled: boolean): void {
+    this.assertUsable();
+    this.#pendingObservations.set(nodeId, enabled);
+    // Scheduled even while committing. Effects run inside the commit, and this
+    // frame's observations were already drained, so a change made now belongs
+    // to the next one — dropping the schedule would strand it until some
+    // unrelated render happened to come along, or forever if none did.
+    if (this.#scheduled) return;
+    this.#scheduled = true;
+    this.#schedule(() => {
+      if (!this.#scheduled || this.#failed || this.#unmounted) return;
+      this.#scheduled = false;
+      this.flushSync();
+    });
+  }
+
+  private drainPendingObservations(): void {
+    if (this.#pendingObservations.size === 0) return;
+    for (const [nodeId, enabled] of this.#pendingObservations) {
+      // An unmounted node's observation is dropped rather than sent: Core would
+      // reject the stale id, and withdrawal is implied by removal anyway.
+      if (this.#hostsByNodeId.get(nodeId)?.mounted !== true) continue;
+      this.mutations().push({
+        type: "observeGeometry",
+        nodeId,
+        flags: enabled ? OBSERVE_GEOMETRY_FLAG_ACTIVE : 0,
+      });
+    }
+    this.#pendingObservations.clear();
+  }
+
   private mutations(): Mutation[] {
     if (this.#mutations === undefined) throw new Error("mutation emitted outside a commit");
     return this.#mutations;
@@ -2750,6 +2946,32 @@ function normalizeEditCallback(
   if (value === undefined) return undefined;
   if (typeof value !== "function") throw new TypeError("onTransaction must be a function");
   return value as (transaction: EditTransaction) => void;
+}
+
+/** One node's geometry as delivered by the Host channel. */
+export interface LayoutGeometryReport {
+  readonly nodeId: number;
+  readonly bounds: LayoutRect;
+  readonly clip: LayoutRect;
+}
+
+function equalGeometry(previous: LayoutGeometry | undefined, next: LayoutGeometryReport): boolean {
+  return (
+    previous !== undefined &&
+    equalRect(previous.bounds, next.bounds) &&
+    equalRect(previous.clip, next.clip)
+  );
+}
+
+function equalRect(left: LayoutRect, right: LayoutRect): boolean {
+  // Object.is, not ===: an unclipped node reports infinities, and -0 versus 0
+  // would otherwise read as a change every frame.
+  return (
+    Object.is(left.left, right.left) &&
+    Object.is(left.top, right.top) &&
+    Object.is(left.width, right.width) &&
+    Object.is(left.height, right.height)
+  );
 }
 
 function normalizeRef(value: unknown): Ref<NodeHandle> | undefined {

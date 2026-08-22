@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { ComponentScope } from "./hooks";
-import { useEffect, useMemo, useSignal, useState } from "./hooks";
+import { useEffect, useLayoutValue, useMemo, useSignal, useState } from "./hooks";
+import type { LayoutGeometry, LayoutGeometryAccess } from "./hooks";
 
 describe("component hooks", () => {
   it("retains state and schedules exactly one owning scope invalidation", () => {
@@ -22,6 +23,92 @@ describe("component hooks", () => {
     setCount?.(2);
     expect(invalidations).toBe(1);
     expect(render()).toBe(2);
+  });
+
+  it("observes a node only while attached and enabled, and releases on unmount", () => {
+    const observed: number[] = [];
+    const released: number[] = [];
+    const geometry = new Map<number, LayoutGeometry>();
+    const notifiers = new Map<number, () => void>();
+    const access: LayoutGeometryAccess = {
+      observe: (nodeId, notify) => {
+        observed.push(nodeId);
+        notifiers.set(nodeId, notify);
+        return () => {
+          released.push(nodeId);
+          notifiers.delete(nodeId);
+        };
+      },
+      read: (nodeId) => geometry.get(nodeId),
+    };
+    let invalidations = 0;
+    const scope = new ComponentScope(
+      () => {
+        invalidations += 1;
+      },
+      undefined,
+      access,
+    );
+
+    let enabled = true;
+    let attach: ((handle: { readonly nodeId: number } | null) => void) | undefined;
+    let width: number | undefined;
+    const render = (): void => {
+      scope.render(() => {
+        const [ref, value] = useLayoutValue((next) => next.bounds.width, { enabled });
+        attach = ref;
+        width = value;
+        return undefined;
+      });
+      scope.flushEffects();
+    };
+
+    // Nothing attached: no observation, and undefined rather than zero — a zero
+    // is indistinguishable from a node that really is empty.
+    render();
+    expect(observed).toEqual([]);
+    expect(width).toBeUndefined();
+
+    attach?.({ nodeId: 7 });
+    expect(observed).toEqual([7]);
+    geometry.set(7, {
+      bounds: { left: 0, top: 0, width: 120, height: 20 },
+      clip: { left: 0, top: 0, width: 500, height: 500 },
+    });
+    // Geometry arriving must wake the component, or the value it computed from
+    // the previous frame is what stays on screen.
+    const before = invalidations;
+    notifiers.get(7)?.();
+    expect(invalidations).toBe(before + 1);
+    render();
+    expect(width).toBe(120);
+
+    // Turning it off must release the slot without a remount: an overlay that
+    // closes has to give its observation back or Core's bounded set leaks.
+    enabled = false;
+    render();
+    expect(released).toEqual([7]);
+    expect(width).toBeUndefined();
+
+    enabled = true;
+    render();
+    expect(observed).toEqual([7, 7]);
+
+    scope.dispose();
+    expect(released).toEqual([7, 7]);
+  });
+
+  it("reports undefined and observes nothing when the host provides no access", () => {
+    const scope = new ComponentScope(() => undefined);
+    let attach: ((handle: { readonly nodeId: number } | null) => void) | undefined;
+    const value = scope.render(() => {
+      const [ref, next] = useLayoutValue((geometry) => geometry.bounds.width);
+      attach = ref;
+      return next;
+    });
+    expect(value).toBeUndefined();
+    // The flag-off path must not throw when a component still attaches a ref.
+    expect(() => attach?.({ nodeId: 3 })).not.toThrow();
   });
 
   it("tracks signals read by a component scope", () => {

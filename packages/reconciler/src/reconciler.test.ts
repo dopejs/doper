@@ -15,7 +15,13 @@ import {
   type ViewHandle,
   type VideoHandle,
 } from "@dopejs/pingo-jsx";
-import { createContext, signal, useContext, useEffect } from "@dopejs/pingo-runtime";
+import {
+  createContext,
+  signal,
+  useContext,
+  useEffect,
+  useLayoutValue,
+} from "@dopejs/pingo-runtime";
 import { createStyleSheet } from "@dopejs/pingo-style";
 import type { EventTransaction } from "@dopejs/pingo-editing";
 import { describe, expect, it, vi } from "vitest";
@@ -38,6 +44,7 @@ import {
   TEXT_STYLE_V2_WHITE_SPACE_OFFSET,
   VirtualAxis,
 } from "./generated";
+import { MAX_OBSERVED_GEOMETRY_NODES } from "./generated";
 import { decodeMutationBatch, type Mutation, type MutationBatch } from "./mutation-stream";
 import { createRoot, type MutationSink } from "./reconciler";
 
@@ -52,6 +59,136 @@ class RecordingSink implements MutationSink {
 }
 
 describe("reconciler", () => {
+  it("observes a node once for many watchers and withdraws when the last one goes", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink, { layoutReadbackEnabled: true });
+    let attachA: ((handle: { readonly nodeId: number } | null) => void) | undefined;
+    let attachB: ((handle: { readonly nodeId: number } | null) => void) | undefined;
+    let widthA: number | undefined;
+    // Signals, not plain variables: flipping a variable does not invalidate the
+    // component, so the hook would never see the new `enabled`.
+    const both = signal(true);
+    const watching = signal(true);
+
+    function Watchers(): PingoNode {
+      const [refA, valueA] = useLayoutValue((geometry) => geometry.bounds.width, {
+        enabled: watching.get(),
+      });
+      const [refB] = useLayoutValue((geometry) => geometry.bounds.height, {
+        enabled: both.get(),
+      });
+      attachA = refA;
+      attachB = refB;
+      widthA = valueA;
+      return View({ children: undefined });
+    }
+
+    root.render(createElement(Watchers, {}));
+    const observations = (index: number): Array<{ nodeId: number; flags: number }> =>
+      mutationsOfType(sink.batches[index], "observeGeometry");
+    const nodeId = sink.batches[0]?.mutations.find(
+      (mutation) => mutation.type === "createNode" && mutation.kind === NodeKind.Container,
+    );
+    expect(nodeId?.type).toBe("createNode");
+    const target = nodeId?.type === "createNode" ? nodeId.nodeId : 0;
+
+    // Two watchers, one node: Core's bounded set must see a single slot taken.
+    attachA?.({ nodeId: target });
+    attachB?.({ nodeId: target });
+    root.flushSync();
+    const requested = sink.batches.flatMap((_, index) => observations(index));
+    expect(requested.filter((mutation) => mutation.flags === 1)).toHaveLength(1);
+
+    root.applyLayoutGeometry([
+      {
+        nodeId: target,
+        bounds: { left: 0, top: 0, width: 64, height: 20 },
+        clip: { left: 0, top: 0, width: 500, height: 500 },
+      },
+    ]);
+    root.flushSync();
+    expect(widthA).toBe(64);
+
+    const withdrawals = (): number =>
+      sink.batches.flatMap((_, index) => observations(index)).filter((m) => m.flags === 0).length;
+
+    // Dropping one watcher must not withdraw while the other still watches.
+    both.set(false);
+    root.flushSync();
+    root.flushSync();
+    expect(withdrawals()).toBe(0);
+
+    // Last watcher of a still-mounted node: now it withdraws, or the slot is
+    // held for the life of the application.
+    watching.set(false);
+    root.flushSync();
+    // Two flushes, not one, and that is inherent: effects run after the commit,
+    // so the unsubscribe they trigger cannot join the batch that caused it. In
+    // an application the scheduler supplies the second commit; Core keeps
+    // reporting for exactly one extra frame.
+    expect(withdrawals()).toBe(0);
+    root.flushSync();
+    expect(withdrawals()).toBe(1);
+
+    // Unmounting sends nothing further: Core prunes observations whose node no
+    // longer resolves, so a removal already implies withdrawal and an explicit
+    // command would name a stale id.
+    root.render(undefined);
+    root.flushSync();
+    expect(withdrawals()).toBe(1);
+  });
+
+  it("queues observations past the cap and promotes the oldest when a slot frees", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink, { layoutReadbackEnabled: true });
+    const total = MAX_OBSERVED_GEOMETRY_NODES + 2;
+    const first = signal(true);
+
+    // Real children with real refs: an invented node id would be dropped by the
+    // mounted check on the way out, and the test would prove nothing.
+    function Watchers(): PingoNode {
+      const children = [];
+      for (let index = 0; index < total; index += 1) {
+        const [ref] = useLayoutValue((geometry) => geometry.bounds.width, {
+          enabled: index !== 0 || first.get(),
+        });
+        children.push(View({ key: String(index), ref, children: undefined }));
+      }
+      return View({ children });
+    }
+
+    root.render(createElement(Watchers, {}));
+    root.flushSync();
+    const created = sink.batches
+      .flatMap((batch) => batch.mutations)
+      .filter((mutation) => mutation.type === "createNode" && mutation.kind === NodeKind.Container)
+      .map((mutation) => (mutation.type === "createNode" ? mutation.nodeId : 0));
+    // One wrapper plus one child per watcher.
+    expect(created).toHaveLength(total + 1);
+    const firstChild = created[1] ?? 0;
+    const lastDeferred = created[total] ?? 0;
+
+    const enabled = (): number[] =>
+      sink.batches
+        .flatMap((batch) => batch.mutations)
+        .filter((mutation) => mutation.type === "observeGeometry" && mutation.flags === 1)
+        .map((mutation) => (mutation.type === "observeGeometry" ? mutation.nodeId : 0));
+
+    // Core must never be asked for more than it can hold; the surplus waits in
+    // the Shell instead of being rejected and forgotten.
+    expect(enabled()).toHaveLength(MAX_OBSERVED_GEOMETRY_NODES);
+    expect(root.layoutObservationDeferrals()).toBe(2);
+    expect(enabled()).toContain(firstChild);
+    expect(enabled()).not.toContain(lastDeferred);
+
+    // Freeing one slot promotes the oldest waiter rather than leaving it stuck.
+    first.set(false);
+    root.flushSync();
+    root.flushSync();
+    expect(enabled()).not.toContain(lastDeferred);
+    expect(enabled()).toHaveLength(MAX_OBSERVED_GEOMETRY_NODES + 1);
+  });
+
   it("binds Video lifecycle, metadata replacement, events, and imperative controls", () => {
     const sink = new RecordingSink();
     const bindings = vi.fn();

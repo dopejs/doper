@@ -68,9 +68,21 @@ describe("createHostedCanvasRoot", () => {
         ...[bits(0), bits(0), bits(Number.POSITIVE_INFINITY), bits(Number.POSITIVE_INFINITY)],
       );
     };
+    // Off by default: the rollback path must report nothing at all, not merely
+    // report zeros, or a component cannot tell the flag is off.
+    const disabled = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
+      capabilities: allCapabilities(),
+      coreFactory: () => Promise.resolve(fakeCore()),
+      transport: { pageWorkerEnabled: false },
+    });
+    disabled.render(editableElement(9));
+    expect(disabled.layoutGeometry(7)).toBeUndefined();
+    await disabled.close();
+
     const root = await createHostedCanvasRoot(canvas as unknown as HTMLCanvasElement, {
       capabilities: allCapabilities(),
       coreFactory: () => Promise.resolve(core),
+      layoutReadbackEnabled: true,
       transport: { pageWorkerEnabled: false },
     });
 
