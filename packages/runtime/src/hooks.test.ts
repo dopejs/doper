@@ -40,6 +40,8 @@ describe("component hooks", () => {
         };
       },
       read: (nodeId) => geometry.get(nodeId),
+      viewport: () => ({ left: 0, top: 0, width: 400, height: 300 }),
+      observeViewport: () => () => undefined,
     };
     let invalidations = 0;
     const scope = new ComponentScope(

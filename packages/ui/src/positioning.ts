@@ -191,3 +191,34 @@ export function placeAnchored(input: PlacementInput): Placement {
   const shifted = shiftIntoBounds({ ...constrained, ...origin }, bounds);
   return { side, left: shifted.left, top: shifted.top, maxWidth, maxHeight, hidden: false };
 }
+
+/**
+ * Style a placed panel needs, in the coordinate space of its parent box.
+ *
+ * Numbers rather than strings: the style layer accepts a bare number as
+ * logical pixels, and a template-literal string type would only add a
+ * conversion that can go wrong.
+ */
+export interface PlacementStyle {
+  readonly left: number;
+  readonly top: number;
+  readonly maxHeight: number;
+  readonly visibility: "visible" | "hidden";
+}
+
+/**
+ * Converts a world-space placement into styles relative to the anchor box.
+ *
+ * Absolute children are positioned against their parent in this engine, and the
+ * panel's parent is the anchor wrapper, so the world origin has to come back
+ * out. See docs/style-support.md on containing blocks.
+ */
+export function placementStyle(placement: Placement, anchor: LayoutRect): PlacementStyle {
+  return {
+    left: Math.round(placement.left - anchor.left),
+    top: Math.round(placement.top - anchor.top),
+    // Floored, so a fractional bound never rounds up past the edge it bounds.
+    maxHeight: Math.max(0, Math.floor(placement.maxHeight)),
+    visibility: placement.hidden ? "hidden" : "visible",
+  };
+}

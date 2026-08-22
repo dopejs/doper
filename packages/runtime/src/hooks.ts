@@ -31,6 +31,16 @@ export interface LayoutGeometryAccess {
   readonly observe: (nodeId: number, notify: () => void) => Unsubscribe;
   /** Latest geometry, or undefined when the node has not been measured yet. */
   readonly read: (nodeId: number) => LayoutGeometry | undefined;
+  /**
+   * Visible surface in world coordinates, or undefined before the first frame.
+   *
+   * Carried here rather than through the geometry ABI because the Shell already
+   * owns the canvas size — it is the side that drives resize — so asking Core
+   * for it would add a wire field to answer a question the asker can answer.
+   */
+  readonly viewport: () => LayoutRect | undefined;
+  /** Subscribes to viewport changes; returns an unsubscribe. */
+  readonly observeViewport: (notify: () => void) => Unsubscribe;
 }
 
 /** Mutable stable reference returned by `useRef`. */
@@ -380,6 +390,21 @@ export function useLayoutValue<T>(
   const geometry =
     nodeId === undefined || access === undefined || !enabled ? undefined : access.read(nodeId);
   return [attach, geometry === undefined ? undefined : selector(geometry)] as const;
+}
+
+/**
+ * The visible surface in world coordinates, or `undefined` before the first
+ * frame and whenever layout readback is off.
+ *
+ * Placement needs it as the outer bound; a node's clip box only describes what
+ * its ancestors clip, which is unbounded for anything outside a scroller.
+ */
+export function useViewport(): LayoutRect | undefined {
+  const scope = requireScope();
+  const access = scope.layoutGeometryAccess();
+  const notify = useCallback(() => scope.invalidate(), [scope]);
+  useEffect(() => access?.observeViewport(notify), [access, notify]);
+  return access?.viewport();
 }
 
 /**

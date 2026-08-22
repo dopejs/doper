@@ -17,6 +17,58 @@ function context(open: boolean, setOpen = vi.fn()): AnchorContextValue {
   return { open, setOpen, focus: createOverlayFocus() };
 }
 
+describe("anchored overlay placement", () => {
+  const measured = {
+    anchorRef: vi.fn(),
+    panelRef: vi.fn(),
+    style: { left: 12, top: -40, maxHeight: 160, visibility: "visible" as const },
+  };
+
+  it("carries no style at all when nothing measured it", () => {
+    // The rollback path: with readback off the tree must be what it was before
+    // E8, not the same tree carrying neutral values.
+    const host = anchorContentDescriptor({ children: "x" }, context(true)) as unknown as Host;
+    expect("style" in host.props).toBe(false);
+  });
+
+  it("applies the measured placement and still hands the panel to focus", () => {
+    const focus = createOverlayFocus();
+    const host = anchorContentDescriptor(
+      { children: "x" },
+      {
+        open: true,
+        setOpen: vi.fn(),
+        focus,
+        placement: measured,
+      },
+    ) as unknown as Host;
+    expect(host.props["style"]).toEqual(measured.style);
+
+    // One ref, two consumers: without the fan-out the panel would have to
+    // choose between being focusable and being placed.
+    const handle = { nodeId: 5, focus: vi.fn() };
+    (host.props["ref"] as (value: unknown) => void)(handle);
+    expect(measured.panelRef).toHaveBeenCalledWith(handle);
+    expect(handle.focus).toHaveBeenCalledOnce();
+  });
+
+  it("hides a tooltip whose anchor scrolled away rather than stranding it", () => {
+    const hidden = {
+      anchorRef: vi.fn(),
+      panelRef: vi.fn(),
+      style: { left: 0, top: 0, maxHeight: 0, visibility: "hidden" as const },
+    };
+    const host = tooltipDescriptor(
+      { content: "hi", children: "x" },
+      true,
+      vi.fn(),
+      hidden,
+    ) as unknown as { props: { children: unknown[] } };
+    const panel = host.props.children[1] as Host;
+    expect(panel.props["style"]).toEqual(hidden.style);
+  });
+});
+
 describe("anchored overlays", () => {
   it("renders no content while closed", () => {
     expect(anchorContentDescriptor({ children: "x" }, context(false))).toBeNull();

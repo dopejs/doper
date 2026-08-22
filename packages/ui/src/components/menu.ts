@@ -13,6 +13,10 @@ import { orderedValues, step } from "../keyboard";
 import { classes, escapeHandler, useOverlayFocus, type OverlayFocus } from "../overlay";
 import { useTheme } from "../theme";
 import { anchorDescriptor } from "./popover";
+import { useAnchoredPlacement, type AnchoredPlacement } from "../use-anchored";
+
+/** Gap between an anchor and its panel, matching `$popover-offset`. */
+const ANCHOR_OFFSET = 4;
 
 export type MenuContextValue = {
   readonly open: boolean;
@@ -26,6 +30,8 @@ export type MenuContextValue = {
   readonly focus: OverlayFocus;
   readonly registerItem: (value: string, handle: NodeHandle | null) => void;
   readonly focusItem: (value: string) => void;
+  /** Measured placement, or undefined when readback is off. See Popover. */
+  readonly placement?: AnchoredPlacement;
 };
 
 const MenuContext = createContext<MenuContextValue | undefined>(undefined);
@@ -45,6 +51,7 @@ function MenuRoot(props: MenuRootProps, closeOnSelect: boolean): PingoNode {
   const focus = useOverlayFocus();
   const handles = useMemo(() => new Map<string, NodeHandle>(), []);
   const open = openSignal.get();
+  const placement = useAnchoredPlacement(open, "bottom", ANCHOR_OFFSET);
   const value: MenuContextValue = {
     open,
     setOpen: (next) => {
@@ -69,10 +76,11 @@ function MenuRoot(props: MenuRootProps, closeOnSelect: boolean): PingoNode {
       else handles.set(item, handle);
     },
     focusItem: (item) => handles.get(item)?.focus(),
+    placement,
   };
   return createElement(MenuContext.Provider, {
     value,
-    children: anchorDescriptor(props),
+    children: anchorDescriptor({ ...props, ref: placement.anchorRef }),
   });
 }
 
@@ -150,7 +158,13 @@ export function menuContentDescriptor(
   return View({
     className: classes("pui-anchor__content", "pui-menu__content", dark, props.className),
     semanticRole: "menu",
-    ref: context.focus.panel,
+    ref: (handle: NodeHandle | null) => {
+      context.focus.panel(handle);
+      context.placement?.panelRef(handle);
+    },
+    // Absent when unmeasured, so the skin's static side stands and the tree is
+    // identical to the pre-E8 one.
+    ...(context.placement?.style === undefined ? {} : { style: context.placement.style }),
     // One handler for the whole list: the key reaches the focused item and
     // bubbles through here, so items can come and go freely.
     onKeyDown: (event: PingoEvent): void => {

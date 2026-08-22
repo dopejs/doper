@@ -16,6 +16,7 @@ export {
   useRef,
   useSignal,
   useState,
+  useViewport,
   type ContextLookup,
   type ContextProvider,
   type ContextProviderProps,

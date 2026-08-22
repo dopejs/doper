@@ -184,7 +184,7 @@ export interface CoreDrivenPingoRoot extends PingoRoot {
   updateMediaMetadata(nodeId: number, width: number, height: number): void;
   applyMediaEvent(nodeId: number, event: PingoMediaEvent | PingoMediaError): void;
   activateNode(nodeId: number): void;
-  applyLayoutGeometry(records: readonly LayoutGeometryReport[]): void;
+  applyLayoutGeometry(records: readonly LayoutGeometryReport[], viewport?: LayoutRect): void;
   layoutObservationDeferrals(): number;
 }
 
@@ -550,6 +550,9 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
    */
   readonly #deferredObservations: number[] = [];
   #layoutObservationDeferrals = 0;
+  /** Visible surface, supplied by the Host with each geometry frame. */
+  #viewport: LayoutRect | undefined;
+  readonly #viewportSubscribers = new Set<() => void>();
   #performing = false;
   #unmounted = false;
   #failed = false;
@@ -1995,6 +1998,13 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
       };
     },
     read: (nodeId) => this.#layoutGeometry.get(nodeId),
+    viewport: () => this.#viewport,
+    observeViewport: (notify) => {
+      this.#viewportSubscribers.add(notify);
+      return () => {
+        this.#viewportSubscribers.delete(notify);
+      };
+    },
   };
 
   /** Takes a slot when one is free, otherwise queues for the next release. */
@@ -2050,8 +2060,15 @@ class ReconcilerRoot implements CoreDrivenPingoRoot {
    * Only subscribed nodes are stored: a record for something nobody watches is
    * a leak waiting to happen, and Core should not have been reporting it.
    */
-  public applyLayoutGeometry(records: readonly LayoutGeometryReport[]): void {
+  public applyLayoutGeometry(
+    records: readonly LayoutGeometryReport[],
+    viewport?: LayoutRect,
+  ): void {
     if (this.#failed || this.#unmounted) return;
+    if (viewport !== undefined && !equalRect(this.#viewport ?? EMPTY_RECT, viewport)) {
+      this.#viewport = viewport;
+      for (const notify of this.#viewportSubscribers) notify();
+    }
     const woken = new Set<() => void>();
     const reported = new Set<number>();
     for (const record of records) {
@@ -2962,6 +2979,8 @@ function equalGeometry(previous: LayoutGeometry | undefined, next: LayoutGeometr
     equalRect(previous.clip, next.clip)
   );
 }
+
+const EMPTY_RECT: LayoutRect = { left: 0, top: 0, width: 0, height: 0 };
 
 function equalRect(left: LayoutRect, right: LayoutRect): boolean {
   // Object.is, not ===: an unclipped node reports infinities, and -0 versus 0

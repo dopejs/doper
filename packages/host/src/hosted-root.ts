@@ -1827,7 +1827,12 @@ class HostedCanvasRootController implements HostedCanvasRoot {
     this.#layoutGeometry.clear();
     for (const record of frame.records) this.#layoutGeometry.set(record.nodeId, record);
     try {
-      this.#root?.applyLayoutGeometry(frame.records);
+      this.#root?.applyLayoutGeometry(frame.records, {
+        left: 0,
+        top: 0,
+        width: this.#canvas.clientWidth || this.#canvas.width,
+        height: this.#canvas.clientHeight || this.#canvas.height,
+      });
     } catch (cause) {
       this.#options.onHostError?.(toError(cause, "layout geometry delivery failed"));
     }

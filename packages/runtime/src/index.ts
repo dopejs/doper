@@ -17,6 +17,7 @@ export {
   useRef,
   useSignal,
   useState,
+  useViewport,
   type LayoutGeometry,
   type LayoutGeometryAccess,
   type LayoutRect,

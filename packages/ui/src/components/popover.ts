@@ -3,6 +3,7 @@ import {
   memo,
   Text,
   View,
+  type NodeHandle,
   type PingoEvent,
   type PingoNode,
 } from "@dopejs/pingo-jsx";
@@ -15,12 +16,23 @@ import {
   useOverlayFocus,
   type OverlayFocus,
 } from "../overlay";
+import { useAnchoredPlacement, type AnchoredPlacement } from "../use-anchored";
 import { useTheme } from "../theme";
+
+/** Gap between an anchor and its panel, matching `$popover-offset`. */
+const ANCHOR_OFFSET = 4;
 
 export type AnchorContextValue = {
   readonly open: boolean;
   readonly setOpen: (open: boolean) => void;
   readonly focus: OverlayFocus;
+  /**
+   * Measured placement, or undefined when readback is off.
+   *
+   * Undefined means the skin's static side is used, which is exactly the
+   * behaviour before E8 and the rollback path when the flag is off.
+   */
+  readonly placement?: AnchoredPlacement;
 };
 
 const AnchorContext = createContext<AnchorContextValue | undefined>(undefined);
@@ -43,9 +55,12 @@ export type PopoverProps = {
 export function anchorDescriptor(props: {
   readonly children: PingoNode;
   readonly className?: string;
+  /** Ref used to measure the box the panel is positioned against. */
+  readonly ref?: (handle: NodeHandle | null) => void;
 }): PingoNode {
   return View({
     className: classes("pui-anchor", props.className),
+    ...(props.ref === undefined ? {} : { ref: props.ref }),
     children: props.children,
   });
 }
@@ -57,6 +72,7 @@ export const Popover = memo(function PopoverImpl(props: PopoverProps): PingoNode
   // .get() (not .peek()): the root subscribes to its own signal so an
   // uncontrolled toggle re-renders it and republishes the context value.
   const open = props.open ?? internal.get();
+  const placement = useAnchoredPlacement(open, "bottom", ANCHOR_OFFSET);
   const value: AnchorContextValue = {
     open,
     setOpen: (next) => {
@@ -64,6 +80,7 @@ export const Popover = memo(function PopoverImpl(props: PopoverProps): PingoNode
       props.onOpenChange?.(next);
     },
     focus,
+    placement,
   };
   return createElement(AnchorContext.Provider, {
     value,
@@ -71,7 +88,7 @@ export const Popover = memo(function PopoverImpl(props: PopoverProps): PingoNode
     // every overlay kind, so it reads one context regardless of which built it.
     children: createElement(OverlayFocusContext.Provider, {
       value: focus,
-      children: anchorDescriptor(props),
+      children: anchorDescriptor({ ...props, ref: placement.anchorRef }),
     }),
   });
 });
@@ -116,9 +133,20 @@ export function anchorContentDescriptor(
 ): PingoNode {
   if (context?.open !== true) return null;
   const dark = useTheme() === "dark" ? "pui-dark" : undefined;
+  const placement = context.placement;
+  const panelRef = placement?.panelRef;
   return View({
     className: classes("pui-anchor__content", extra, dark, props.className),
-    ref: context.focus.panel,
+    // Two consumers for one ref: focus handoff and measurement. Without the
+    // fan-out the panel would have to choose between being focusable and being
+    // placed.
+    ref: (handle: NodeHandle | null) => {
+      context.focus.panel(handle);
+      panelRef?.(handle);
+    },
+    // No style at all when unmeasured, so the skin's static side stands and the
+    // rendered tree is identical to the pre-E8 one.
+    ...(placement?.style === undefined ? {} : { style: placement.style }),
     onKeyDown: overlayKeyHandler(context.focus, () => context.setOpen(false)),
     children: props.children,
   });
@@ -142,10 +170,12 @@ export function tooltipDescriptor(
   props: TooltipProps,
   visible: boolean,
   setVisible: (visible: boolean) => void,
+  placement?: AnchoredPlacement,
 ): PingoNode {
   const dark = useTheme() === "dark" ? "pui-dark" : undefined;
   return View({
     className: classes("pui-anchor", props.className),
+    ...(placement === undefined ? {} : { ref: placement.anchorRef }),
     onPointerEnter: (): void => setVisible(true),
     onPointerLeave: (): void => setVisible(false),
     children: [
@@ -154,6 +184,8 @@ export function tooltipDescriptor(
         ? View({
             className: classes("pui-anchor__content", "pui-tooltip__content", dark),
             semanticRole: "tooltip",
+            ...(placement === undefined ? {} : { ref: placement.panelRef }),
+            ...(placement?.style === undefined ? {} : { style: placement.style }),
             children: Text({ value: props.content }),
           })
         : null,
@@ -169,5 +201,11 @@ export function tooltipDescriptor(
  */
 export const Tooltip = memo(function TooltipImpl(props: TooltipProps): PingoNode {
   const visible = useSignal(false);
-  return tooltipDescriptor(props, visible.get(), (next) => visible.set(next));
+  const open = visible.get();
+  return tooltipDescriptor(
+    props,
+    open,
+    (next) => visible.set(next),
+    useAnchoredPlacement(open, "top", ANCHOR_OFFSET),
+  );
 });

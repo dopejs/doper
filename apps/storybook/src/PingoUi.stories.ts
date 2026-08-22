@@ -470,6 +470,102 @@ const meta: Meta<ShowcaseArgs> = {
               children: column([
                 createElement(CardHeader, {
                   children: column([
+                    createElement(CardTitle, { children: "碰撞感知定位（E8）" }),
+                    createElement(CardDescription, {
+                      children:
+                        "三种会踩到边界的摆放。定位需要 layoutReadbackEnabled；关闭时这三处退回静态方向，" +
+                        "位置仍然正确，只是不翻转、不收缩、不隐藏。",
+                    }),
+                  ]),
+                }),
+                createElement(CardContent, {
+                  children: column([
+                    // Near the bottom edge: with readback on, `flip` moves this
+                    // above the trigger instead of letting it run off.
+                    field(
+                      "贴近下边缘（flip）",
+                      createElement(Popover, {
+                        defaultOpen: true,
+                        children: [
+                          createElement(PopoverTrigger, {
+                            children: createElement(Button, {
+                              children: "靠近边缘",
+                              variant: "outline",
+                              onPress: () => {},
+                            }),
+                          }),
+                          createElement(PopoverContent, {
+                            children: createElement("text", {
+                              value: "空间不足时翻到上方。",
+                            }),
+                          }),
+                        ],
+                      }),
+                    ),
+                    spacer(140),
+                    createElement(Divider, {}),
+                    spacer(16),
+                    // Inside a scroller: the bound is the scroller, not the
+                    // canvas, which a viewport-only rule gets wrong.
+                    field(
+                      "可滚动容器内（clip 而非视口）",
+                      createElement("container", {
+                        style: { height: 120, overflowY: "scroll" },
+                        children: column([
+                          createElement(Popover, {
+                            defaultOpen: true,
+                            children: [
+                              createElement(PopoverTrigger, {
+                                children: createElement(Button, {
+                                  children: "容器内触发",
+                                  variant: "outline",
+                                  onPress: () => {},
+                                }),
+                              }),
+                              createElement(PopoverContent, {
+                                children: createElement("text", {
+                                  value: "被滚动容器裁剪，不是被画布。",
+                                }),
+                              }),
+                            ],
+                          }),
+                          spacer(200),
+                        ]),
+                      }),
+                    ),
+                    spacer(16),
+                    createElement(Divider, {}),
+                    spacer(16),
+                    // A long list is the case `size` exists for: constrain the
+                    // panel and let it scroll rather than overflow.
+                    field(
+                      "长列表（size）",
+                      createElement(Select, {
+                        defaultOpen: true,
+                        children: [
+                          createElement(SelectTrigger, { children: "选择一项" }),
+                          createElement(SelectContent, {
+                            children: Array.from({ length: 24 }, (_, index) =>
+                              createElement(SelectItem, {
+                                key: String(index),
+                                value: String(index),
+                                children: `选项 ${String(index + 1)}`,
+                              }),
+                            ),
+                          }),
+                        ],
+                      }),
+                    ),
+                    spacer(200),
+                  ]),
+                }),
+              ]),
+            }),
+            spacer(16),
+            createElement(Card, {
+              children: column([
+                createElement(CardHeader, {
+                  children: column([
                     createElement(CardTitle, { children: "产品分子" }),
                     createElement(CardDescription, {
                       children:
