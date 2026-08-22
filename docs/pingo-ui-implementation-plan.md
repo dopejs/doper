@@ -4,22 +4,27 @@
 
 ## 进度总览（2026-08-22 更新）
 
-| Track                                                    | 状态    | 证据                                                                                                                                                      |
-| -------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C0 m10 决策修订                                          | ✅ 完成 | `a88dfa9`                                                                                                                                                 |
-| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成 | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试                                                                                               |
-| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成 | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证                                                                                               |
-| E6 组件级 memo                                           | ✅ 完成 | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md`                                                                                            |
-| E7 context（Provider+useContext）                        | ✅ 完成 | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md`                                                                                            |
-| E5 flexGrow/Shrink/Basis                                 | ✅ 完成 | 设计门 `e5-flex-grow-design.md`，子计划 `pingo-ui-e5-implementation-plan.md`；`40f06a1…feedf85`                                                           |
-| E1 keyboard 事件                                         | ✅ 完成 | 设计门 `e1-keyboard-events-design.md`，子计划 `pingo-ui-e1-implementation-plan.md`；`ba9d1fd…055c117`                                                     |
-| W0 WASM 体积归因与回收                                   | ✅ 完成 | **计划外必需前置**（见下）；`30d33e8`，回收 30,321 gzip bytes                                                                                             |
-| E4 boxShadow                                             | ✅ 完成 | 设计门 `e4-boxshadow-design.md`；`d462a96`                                                                                                                |
-| E2 zIndex                                                | ✅ 完成 | 设计门 `e2-zindex-design.md`；`62850ea…e0b9347`                                                                                                           |
-| E3 position/inset                                        | ✅ 完成 | 设计门 `e3-position-design.md`；`6c72939`                                                                                                                 |
-| A2 第二批弹层组件                                        | ✅ 完成 | 子计划 `pingo-ui-overlay-components-plan.md`；`0a43cf1`                                                                                                   |
-| A3 第三批产品分子                                        | ✅ 完成 | 子计划 `pingo-ui-product-molecules-plan.md`；`55cde8d`。无试点 fixture，规格取自计划点名的四个组件                                                        |
-| E8 布局回读 + 碰撞感知定位                               | ✅ 完成 | 设计门 `e8-layout-readback-design.md`（Accepted，D1–D9），子计划 `pingo-ui-e8-implementation-plan.md`；`7d49cdf…` 共 8 个 Task。按需自启，无 feature flag |
+| Track                                                    | 状态      | 证据                                                                                                                                                      |
+| -------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C0 m10 决策修订                                          | ✅ 完成   | `a88dfa9`                                                                                                                                                 |
+| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成   | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试                                                                                               |
+| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成   | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证                                                                                               |
+| E6 组件级 memo                                           | ✅ 完成   | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md`                                                                                            |
+| E7 context（Provider+useContext）                        | ✅ 完成   | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md`                                                                                            |
+| E5 flexGrow/Shrink/Basis                                 | ✅ 完成   | 设计门 `e5-flex-grow-design.md`，子计划 `pingo-ui-e5-implementation-plan.md`；`40f06a1…feedf85`                                                           |
+| E1 keyboard 事件                                         | ✅ 完成   | 设计门 `e1-keyboard-events-design.md`，子计划 `pingo-ui-e1-implementation-plan.md`；`ba9d1fd…055c117`                                                     |
+| W0 WASM 体积归因与回收                                   | ✅ 完成   | **计划外必需前置**（见下）；`30d33e8`，回收 30,321 gzip bytes                                                                                             |
+| E4 boxShadow                                             | ✅ 完成   | 设计门 `e4-boxshadow-design.md`；`d462a96`                                                                                                                |
+| E2 zIndex                                                | ✅ 完成   | 设计门 `e2-zindex-design.md`；`62850ea…e0b9347`                                                                                                           |
+| E3 position/inset                                        | ✅ 完成   | 设计门 `e3-position-design.md`；`6c72939`                                                                                                                 |
+| A2 第二批弹层组件                                        | ✅ 完成   | 子计划 `pingo-ui-overlay-components-plan.md`；`0a43cf1`                                                                                                   |
+| A3 第三批产品分子                                        | ✅ 完成   | 子计划 `pingo-ui-product-molecules-plan.md`；`55cde8d`。无试点 fixture，规格取自计划点名的四个组件                                                        |
+| E8 布局回读 + 碰撞感知定位                               | ✅ 完成   | 设计门 `e8-layout-readback-design.md`（Accepted，D1–D9），子计划 `pingo-ui-e8-implementation-plan.md`；`7d49cdf…` 共 8 个 Task。按需自启，无 feature flag |
+| A4 shadcn 纯组合批（13 组件）                            | 📋 待执行 | 计划 `pingo-ui-shadcn-parity-plan.md` Track A4；无引擎依赖                                                                                                |
+| A5 交互批（Slider / Resizable / Carousel）               | 📋 待执行 | 同上 Track A5；引擎能力已有（指针捕获、transform 动画）                                                                                                   |
+| A6 数据与表面批（Table / Calendar / ScrollArea 等）      | 📋 待执行 | 同上 Track A6；Table 自带虚拟滚动，ScrollArea 依赖 E8 几何回读                                                                                            |
+| E9 contextmenu 事件                                      | 📋 待执行 | 同上 Track E9；仅 ContextMenu 依赖它                                                                                                                      |
+| A7 AspectRatio                                           | 📋 低优先 | 同上 Track A7                                                                                                                                             |
 
 **接手指引**：引擎工作包按各自设计门启动（设计文档评审 → 写 `docs/pingo-ui-e<N>-implementation-plan.md` 子计划 → subagent 执行）；组件批次按本文件规格表执行。已完成的子计划内 checkbox 状态以本表为准。
 
