@@ -1049,6 +1049,149 @@ mod tests {
     }
 
     #[test]
+    fn rejects_every_malformed_entry_shape() {
+        // Each case below is a byte pattern a hostile or mismatched producer can
+        // hand the decoder. None may panic, read out of bounds, or half-apply.
+        let valid = entry(
+            StyleProperty::Opacity,
+            0,
+            STYLE_VALUE_F32,
+            &1.0_f32.to_le_bytes(),
+        );
+
+        // An entry header that runs past the declared payload.
+        let mut header_truncated = vec![0; HEADER_BYTES];
+        header_truncated[0] = STYLE_COMPUTED_ENCODING_VERSION;
+        header_truncated[1] = STYLE_COMPUTED_ENCODING_VARIANT;
+        header_truncated[4..8].copy_from_slice(&STYLE_ALL_FEATURE_BITS.to_le_bytes());
+        header_truncated[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        header_truncated[12..16].copy_from_slice(&4_u32.to_le_bytes());
+        header_truncated.extend_from_slice(&[0; 4]);
+        assert!(ComputedStyleResource::decode(&header_truncated).is_err());
+
+        // Reserved header halfword must be zero: a future field would otherwise
+        // be silently ignored by this build.
+        let mut reserved_set = valid.clone();
+        reserved_set[6] = 1;
+        assert!(ComputedStyleResource::decode(&resource(&[reserved_set])).is_err());
+
+        // A value length that overruns the buffer.
+        let mut value_overruns = valid.clone();
+        value_overruns[4..6].copy_from_slice(&0xffff_u16.to_le_bytes());
+        assert!(ComputedStyleResource::decode(&resource(&[value_overruns])).is_err());
+
+        // Alignment padding must be zero for the same reason as the reserved field.
+        let mut dirty_padding = entry(StyleProperty::FontWeight, 0, STYLE_VALUE_U16, &[100, 0]);
+        *dirty_padding.last_mut().expect("padding byte") = 1;
+        assert!(ComputedStyleResource::decode(&resource(&[dirty_padding])).is_err());
+
+        // A property whose feature the resource header does not declare cannot be
+        // interpreted, so it is rejected rather than dropped.
+        let mut undeclared_feature = resource(&[entry(
+            StyleProperty::BoxShadow,
+            0,
+            STYLE_VALUE_SHADOW_LIST,
+            &0_u32.to_le_bytes(),
+        )]);
+        let without_shadow = STYLE_ALL_FEATURE_BITS & !StyleProperty::BoxShadow.feature_bits();
+        undeclared_feature[4..8].copy_from_slice(&without_shadow.to_le_bytes());
+        assert!(ComputedStyleResource::decode(&undeclared_feature).is_err());
+
+        // Trailing bytes past the last declared entry.
+        let mut trailing = resource(&[valid.clone(), valid]);
+        trailing[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        assert!(ComputedStyleResource::decode(&trailing).is_err());
+
+        // `auto` is only a length on the grammars that admit it.
+        assert!(
+            ComputedStyleResource::decode(&resource(&[entry(
+                StyleProperty::Opacity,
+                0,
+                STYLE_VALUE_LENGTH,
+                &length(STYLE_LENGTH_AUTO, 0.0),
+            )]))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_wrong_value_tag_names_the_canonical_kind_it_expected() {
+        // The diagnostic has to say which encoding the property wanted, or an ABI
+        // mismatch reads as "some entry is bad" with no way to find the producer.
+        let cases = [
+            (StyleProperty::Display, "keyword"),
+            (StyleProperty::Width, "length"),
+            (StyleProperty::Color, "rgba8"),
+            (StyleProperty::Opacity, "f32"),
+            (StyleProperty::FontFamily, "font-family-list"),
+            (StyleProperty::FontWeight, "u16"),
+            (StyleProperty::LineHeight, "line-height"),
+            (StyleProperty::Transform, "transform-list"),
+            (StyleProperty::BoxShadow, "shadow-list"),
+            (StyleProperty::TransformOrigin, "position"),
+        ];
+        for (property, expected) in cases {
+            // Tag 0xff belongs to no canonical kind, so every property mismatches.
+            let decoded =
+                ComputedStyleResource::decode(&resource(&[entry(property, 0, 0xff, &[])]));
+            let Err(AbiError::WrongPropertyEncoding {
+                prop,
+                expected: named,
+                ..
+            }) = decoded
+            else {
+                panic!("expected a wrong-encoding error for {property:?}");
+            };
+            assert_eq!(prop, property as u16);
+            assert_eq!(named, expected);
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_shadow_lists() {
+        fn shadow_resource(payload: &[u8]) -> Vec<u8> {
+            resource(&[entry(
+                StyleProperty::BoxShadow,
+                0,
+                STYLE_VALUE_SHADOW_LIST,
+                payload,
+            )])
+        }
+        fn shadow_record(offset_x: f32, offset_y: f32, blur: f32, spread: f32) -> Vec<u8> {
+            let mut bytes = 1_u32.to_le_bytes().to_vec();
+            for value in [offset_x, offset_y, blur, spread] {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            bytes.extend_from_slice(&[0, 0, 0, 255]);
+            bytes
+        }
+
+        // A count word that is not even present.
+        assert!(ComputedStyleResource::decode(&shadow_resource(&[0, 0])).is_err());
+        // More layers than the fixed budget: the count alone decides the allocation.
+        assert!(ComputedStyleResource::decode(&shadow_resource(&5_u32.to_le_bytes())).is_err());
+        // A count that does not match the records that follow.
+        assert!(ComputedStyleResource::decode(&shadow_resource(&2_u32.to_le_bytes())).is_err());
+        // Non-finite and absurd offsets would turn into unbounded blur work.
+        for bad in [f32::NAN, f32::INFINITY, 2_000_000.0] {
+            assert!(
+                ComputedStyleResource::decode(&shadow_resource(&shadow_record(bad, 0.0, 0.0, 0.0)))
+                    .is_err()
+            );
+        }
+        // A negative blur has no meaning and would underflow the box-blur sizing.
+        assert!(
+            ComputedStyleResource::decode(&shadow_resource(&shadow_record(0.0, 0.0, -1.0, 0.0)))
+                .is_err()
+        );
+        // The same shape, valid, still decodes — the guards are not blanket rejection.
+        assert!(
+            ComputedStyleResource::decode(&shadow_resource(&shadow_record(1.0, 2.0, 3.0, 4.0)))
+                .is_ok()
+        );
+    }
+
+    #[test]
     fn arbitrary_bytes_never_panic() {
         for length in 0..512 {
             let bytes = (0..length)
