@@ -40,15 +40,19 @@ transport → Runtime hook → 定位策略 → 四个锚定组件接入，并�
 `core/pingo-core/src/{engine.rs,wasm.rs}`
 
 - [ ] Scene 维护观察集（提交期），并提供 `observes_any()` 布尔——手法同
-      `StyleCapabilities`（`2933441`），无观察时热路径退化为一次布尔读。
+      `StyleCapabilities`（`2933441`），无观察时导出路径整体不执行。
 - [ ] 超过 `maxObservedGeometryNodes` 时提交整体失败，不半应用。
-- [ ] hit 几何循环把**被观察节点**的 `own_aabb` 与有效裁剪框写入旁路小表；
-      **不**加宽 `WorldGeometry`（设计门 D4）。
+- [ ] **几何循环一行不改**：`own_aabb` 与有效裁剪框在循环外，由已存的
+      `transform`/`width`/`height` 与祖先链重算（设计门 D4 方案 3）。
+      断言重算结果与循环内的 `inherited_clip` 逐位一致，否则两条路径会悄悄分叉。
 - [ ] `Engine::layout_geometry() -> Vec<u32>` + `wasm.rs` 导出。
 - [ ] 单测：未观察→零记录；观察后→rect 与 `reference` 一致；节点销毁→记录消失；
       `visibility: hidden` 节点仍有几何（D6 依赖此性质，需断言而非假定）；
       滚出容器→own rect 保留、clip 退化为空。
 - [ ] 性能：`pnpm m1:perf` 与 `m3:perf` 在零观察下相对基线无回归。
+- [ ] **新增观察态基准**：m1/m3 都不使用 `useLayoutValue`，因此证明不了有观察时的
+      成本。加一个 N 个观察节点的基准，断言开销随 N 增长而非随场景规模增长；
+      否则这部分只能标注为"无自动化证据"。
 
 ### Task E8-4: Host 通道与三 transport 一致性
 
@@ -101,8 +105,12 @@ hosted-root.ts}`
 
 - [ ] `pnpm m1:check`（含覆盖率门槛）、`m2:check`、`m3:*`、`m5:backend:diff`、
       `release:check`、`migration:check`、`storybook:build` 全绿。
-- [ ] WASM 体积：新增通路的 gzip 增量记入 `docs/wasm-size-attribution.md`；
-      超出工程预算则先归因回收，不上调预算。
+- [ ] WASM 体积：新增通路的 gzip 增量记入 `docs/wasm-size-attribution.md`。
+      体积主要是加载期成本，可由预加载与流式编译摊薄，因此**允许侵占工程预算
+      （393,216）到产品预算（409,600）之间那 16,384 的既有余量**——那段本就是
+      为此预留的。**不上调产品预算**：它是 `docs/design.md` 的产品要求，且低端机
+      冷启动的编译时间随模块大小走，预加载藏不住。要守的是记录纪律，不是数字：
+      每次增量都要有归因，不允许"体积不重要"退化成"不再测量"。
 - [ ] `docs/design.md` 记录 `useLayoutValue` 由承诺转为已实现，含兼容性与回滚。
 - [ ] `overlay-auto-flip-design.md` 状态从 Blocked 改为 Superseded；
       `packages/ui/README.md` 的"没有碰撞感知定位"条目改写。
@@ -124,10 +132,10 @@ hosted-root.ts}`
 
 ## 风险与回滚
 
-| 风险                     | 缓解                                                                |
-| ------------------------ | ------------------------------------------------------------------- |
-| 几何导出拖累帧时         | 观察集有界 + Scene 提交期位图；零观察退化为一次布尔读               |
-| 慢一帧导致打开卡顿观感   | D6 首帧隐藏；必要时 per-component 退回"先猜后校正"                  |
-| 观察泄漏（订阅未撤销）   | 引用计数 + 卸载断言 + `maxObservedGeometryNodes` 硬上界兜底         |
-| 策略在滚动容器内算错边界 | 边界取 Core 裁剪框 ∩ 视口，storybook 专设可滚动容器展区             |
-| 整条通路不达预期         | feature flag 默认关闭，关掉即回到今天的静态方向；ABI 纯增量无需回退 |
+| 风险                     | 缓解                                                                    |
+| ------------------------ | ----------------------------------------------------------------------- |
+| 几何导出拖累帧时         | 观察集有界；两个矩形在几何循环外重算，零观察时该路径不执行（D4 方案 3） |
+| 慢一帧导致打开卡顿观感   | D6 首帧隐藏；必要时 per-component 退回"先猜后校正"                      |
+| 观察泄漏（订阅未撤销）   | 引用计数 + 卸载断言 + `maxObservedGeometryNodes` 硬上界兜底             |
+| 策略在滚动容器内算错边界 | 边界取 Core 裁剪框 ∩ 视口，storybook 专设可滚动容器展区                 |
+| 整条通路不达预期         | feature flag 默认关闭，关掉即回到今天的静态方向；ABI 纯增量无需回退     |
