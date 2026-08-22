@@ -354,9 +354,13 @@ oracle 一致；`pnpm release:check`、`pnpm migration:check`、`pnpm storybook:
   Shell 没有面向组件的几何查询：`NodeHandle` 无几何，`useLayoutValue` 没有实现。
   已有的两条几何通道都不顶用——编辑几何是单主体的，语义快照虽然带每节点根坐标
   绝对 rect（Popover trigger 因为有 `semanticRole` 已在其中），但不含无 role 的浮层
-  内容本身、是 a11y 节奏的全量快照、且不回答"裁剪边界相对谁"。它是可行性先例，不是
-  捷径。建议先补 `useLayoutValue`（A 方案），策略上线顺序 `size` → `shift` →
-  `flip` → `hide`；在那之前维持静态方向并在 README 明说。
+  内容本身、是 a11y 节奏的全量快照、也不带裁剪信息。它是可行性先例，不是捷径。
+  **裁剪边界已定为视口**（设计文档 §2.1）：canvas 根盒子，Shell 本来就拥有；且
+  `pingo-hit` 已在每节点做裁剪祖先按轴求交，有效裁剪框现成，Shell 不必走祖先链，
+  只需 Core 侧把未裁剪的 `own_aabb` 一并保留。该决定同时**解耦**了本项与"包含块是
+  父节点"偏差——定位基准与裁剪边界是两个问题，可单独推进。建议先补
+  `useLayoutValue`（A 方案），策略上线顺序 `size` → `shift` → `flip` → `hide`；
+  在那之前维持静态方向并在 README 明说。
 - **A3 是无 fixture 立项** —— **无法收口，属于立项前提缺失**。原计划要求"试点业务有
   明确需求 fixture"才启动，实际没有。因此只做了计划点名的四个组件，API 由"分子=组合
   前两批"与"shadcn superset"两条约束推导。试点接入后若与实际需求不符，改的是这四个
@@ -366,8 +370,7 @@ oracle 一致；`pnpm release:check`、`pnpm migration:check`、`pnpm storybook:
   可见，但不把已完成的工程项标记为未完成。
 - **CSS 子集的其余既知偏差**共 9 条，集中记录在 `docs/style-support.md`
   「Known deviations from CSS」，其中最可能被踩到的是：绝对定位的包含块是父节点、
-  不确定轴上的百分比解析为 0。前者与自动翻转的"相对谁测可用空间"是同一个语义问题，
-  应当一起决策，见上面的设计门 §4。
+  不确定轴上的百分比解析为 0。
 
 ## 验证矩阵（每个阶段出口必过）
 

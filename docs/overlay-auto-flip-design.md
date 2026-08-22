@@ -50,11 +50,44 @@ CSS/浏览器生态用 `position-try` 或 Floating UI 这类"测量后重放"来
 2. 它是带字符串负载的**全量快照**，按无障碍节奏发送，不是查询通道。拿它定位会
    把定位耦合到 a11y 的发送时机与成本。
 3. 仍然慢一帧：浮层要先被布局出来才量得到。
-4. 裁剪边界"相对谁"没有答案——根？最近的可滚动祖先？Core 知道，Shell 不知道。
+4. 不含裁剪信息：判断"放得下吗"要的是有效裁剪框，快照里只有节点自己的 rect。
 
 因此绕不过去：任何组件层实现都只能猜测尺寸，猜错的代价是弹层位置抖动，比不定位
 更糟。语义通道的价值在于它证明这条管线的形状与成本是已知的：版本化 Uint32Array
 帧、跨 Worker 传递、已有 malformed 拒绝路径，`useLayoutValue` 可以照搬。
+
+## 2.1 已定：裁剪边界是视口，且交集由 Core 提供
+
+**决定（2026-08-22）：碰撞检测的外边界是视口。** 在 pingo 里这没有歧义——视口就是
+canvas 根节点的盒子，Shell 本来就拥有它（`HostedRoot.resize` 由 Shell 驱动）。
+
+但视口只是**外**边界。锚点位于可滚动 / `overflow: hidden` 的 View 内部时，滚动容器
+会先裁掉浮层，视口有空间也无用（可滚动侧栏里的 DropdownMenu、长列表每行的 Popover）。
+浏览器生态用"所有裁剪祖先求交"解决，Floating UI 为此要走一遍 DOM。
+
+**这里不用走。Core 已经在算了**——`core/pingo-hit/src/lib.rs`：
+
+```rust
+let own_aabb = world.rect_aabb(size.width, size.height);
+let inherited_clip = /* 父节点累积的裁剪框 */;
+let aabb = inherited_clip.map_or(own_aabb, |clip| own_aabb.intersect(clip));
+```
+
+`WorldGeometry.aabb` 就是节点与其全部裁剪祖先的交集，且 `axis_clip` 按轴累积，
+`overflow-x: hidden` 不会误裁 y 轴。有效裁剪框是现成的，Shell 不需要走祖先链。
+
+因此几何帧的契约是：**返回未裁剪的 `own_aabb` 与有效裁剪框两者**，视口作为最外层
+参与求交。这需要 Core 侧一处小改动——`WorldGeometry` 目前只保留交集后的 `aabb`，
+`own_aabb` 是循环内的局部量。只有交集不够：锚点完全滚出容器时 `aabb` 退化为空，
+位置信息随之丢失，而那正是要判定 `hide` 的时刻。
+
+### 与"包含块是父节点"偏差的关系：无
+
+先前记录认为两者纠缠、需合并决策。定下视口之后不成立：**定位基准**（`left`/`top`
+从哪个盒子算）与**裁剪边界**（浮层必须待在谁里面）是两个独立问题。策略产出的是一个
+位移量；无 `transform` 时父空间位移等于世界空间位移，有 `transform` 时也能精确换算
+——`WorldGeometry.transform` 就是 local-to-world 仿射，求逆即可把世界位移映射回父
+空间。本项可以单独推进。
 
 ## 3. 候选方案
 
@@ -101,4 +134,8 @@ A 落地后的策略顺序建议 `size` → `shift` → `flip` → `hide`，按�
 
 1. `useLayoutValue` 的 selector 粒度：整块 rect，还是按字段订阅以减少无效唤醒？
 2. 几何帧是每帧全量还是只发变化节点？后者需要节点级脏标记。
-3. 翻转慢一帧的首帧策略：先隐藏（`visibility: hidden`）再显示，还是接受一帧跳变？
+3. 重排慢一帧的首帧策略：先隐藏（`visibility: hidden`）再显示，还是接受一帧跳变？
+4. `WorldGeometry` 增补 `own_aabb` 的内存代价：每节点多 16 字节，需对照 hit 热路径
+   的 SoA 布局评估，不能默认可接受。
+
+（"裁剪边界相对谁"已在 §2.1 定为视口，并由 Core 的裁剪祖先交集补齐；不再是未决项。）
