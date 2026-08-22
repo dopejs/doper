@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 21,
+  "abiVersion": 22,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -873,6 +873,11 @@
           "fields": ["u32", "u32"]
         },
         {
+          "name": "StrokePath",
+          "opcode": 19,
+          "fields": ["u32", "u32", "f32", "u8", "u8", "pad16", "f32"]
+        },
+        {
           "name": "DrawGlyphRun",
           "opcode": 32,
           "fields": ["u32", "f32", "f32", "f32", "u32"]
@@ -1645,6 +1650,58 @@
         ]
       },
       {
+        "name": "Path",
+        "resourceKind": "Path",
+        "variant": 1,
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "variant",
+            "type": "u8"
+          },
+          {
+            "name": "fillRule",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": "u8"
+          },
+          {
+            "name": "verbCount",
+            "type": "u32"
+          },
+          {
+            "name": "pointCount",
+            "type": "u32"
+          },
+          {
+            "name": "viewBoxX",
+            "type": "f32"
+          },
+          {
+            "name": "viewBoxY",
+            "type": "f32"
+          },
+          {
+            "name": "viewBoxWidth",
+            "type": "f32"
+          },
+          {
+            "name": "viewBoxHeight",
+            "type": "f32"
+          },
+          {
+            "name": "payload",
+            "type": "bytes"
+          },
+          "align4"
+        ]
+      },
+      {
         "name": "Affine",
         "resourceKind": "Affine",
         "variant": 1,
@@ -1893,6 +1950,13 @@
       "valueType": "ref",
       "resourceKind": "Image",
       "invalidation": ["layout", "paint"]
+    },
+    {
+      "name": "Path",
+      "id": 37,
+      "valueType": "ref",
+      "resourceKind": "Path",
+      "invalidation": ["paint"]
     },
     {
       "name": "VideoFrame",

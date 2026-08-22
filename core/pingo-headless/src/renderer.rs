@@ -712,6 +712,7 @@ fn command_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::FillColorShadow { .. } => DisplayOpcode::FillColorShadow,
         DisplayCommand::FillRRect { .. } => DisplayOpcode::FillRRect,
         DisplayCommand::FillPath { .. } => DisplayOpcode::FillPath,
+        DisplayCommand::StrokePath { .. } => DisplayOpcode::StrokePath,
         DisplayCommand::DrawGlyphRun { .. } => DisplayOpcode::DrawGlyphRun,
         DisplayCommand::DrawTextFallback { .. } => DisplayOpcode::DrawTextFallback,
         DisplayCommand::DrawTextInlineFallback { .. } => DisplayOpcode::DrawTextInlineFallback,

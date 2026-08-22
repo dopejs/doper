@@ -110,6 +110,25 @@ pub enum DisplayCommand {
         /// Interned paint identifier.
         paint_id: u32,
     },
+    /// Strokes an interned path.
+    ///
+    /// A separate instruction rather than a flag on the paint: a stroke needs
+    /// width, caps and joins, and folding those into every fill would grow the
+    /// far more common command for the rarer one.
+    StrokePath {
+        /// Interned path identifier.
+        path_id: u32,
+        /// Interned paint identifier.
+        paint_id: u32,
+        /// Stroke width in local units; must be finite and non-negative.
+        width: f32,
+        /// 0 butt, 1 round, 2 square.
+        cap: u8,
+        /// 0 miter, 1 round, 2 bevel.
+        join: u8,
+        /// Miter limit; ignored unless `join` is miter.
+        miter_limit: f32,
+    },
     /// Draws a shaped glyph span.
     DrawGlyphRun {
         /// Interned font identifier.
@@ -406,6 +425,36 @@ fn decode_command(
             path_id: reader.read_u32()?,
             paint_id: reader.read_u32()?,
         },
+        DisplayOpcode::StrokePath => {
+            let path_id = reader.read_u32()?;
+            let paint_id = reader.read_u32()?;
+            let width = reader.read_f32()?;
+            let cap = reader.read_u8()?;
+            let join = reader.read_u8()?;
+            reader.read_zeroes(2)?;
+            let miter_limit = reader.read_f32()?;
+            if !width.is_finite() || width < 0.0 {
+                return Err(AbiError::InvalidValue(
+                    "stroke width must be finite and non-negative",
+                ));
+            }
+            if !miter_limit.is_finite() || miter_limit < 1.0 {
+                return Err(AbiError::InvalidValue(
+                    "stroke miter limit must be at least one",
+                ));
+            }
+            if cap > 2 || join > 2 {
+                return Err(AbiError::InvalidValue("stroke cap or join is out of range"));
+            }
+            DisplayCommand::StrokePath {
+                path_id,
+                paint_id,
+                width,
+                cap,
+                join,
+                miter_limit,
+            }
+        }
         DisplayOpcode::DrawGlyphRun => DisplayCommand::DrawGlyphRun {
             font_id: reader.read_u32()?,
             size: reader.read_f32()?,
@@ -570,6 +619,23 @@ fn encode_command(writer: &mut Writer, instruction: &DisplayInstruction) -> Resu
             writer.u32(*path_id);
             writer.u32(*paint_id);
         }
+        DisplayCommand::StrokePath {
+            path_id,
+            paint_id,
+            width,
+            cap,
+            join,
+            miter_limit,
+        } => {
+            writer.instruction(DisplayOpcode::StrokePath as u8, flags);
+            writer.u32(*path_id);
+            writer.u32(*paint_id);
+            writer.f32(*width)?;
+            writer.u8(*cap);
+            writer.u8(*join);
+            writer.u16(0);
+            writer.f32(*miter_limit)?;
+        }
         DisplayCommand::DrawGlyphRun {
             font_id,
             size,
@@ -668,6 +734,7 @@ fn display_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::FillColorBorder { .. } => DisplayOpcode::FillColorBorder,
         DisplayCommand::FillRRect { .. } => DisplayOpcode::FillRRect,
         DisplayCommand::FillPath { .. } => DisplayOpcode::FillPath,
+        DisplayCommand::StrokePath { .. } => DisplayOpcode::StrokePath,
         DisplayCommand::DrawGlyphRun { .. } => DisplayOpcode::DrawGlyphRun,
         DisplayCommand::DrawTextFallback { .. } => DisplayOpcode::DrawTextFallback,
         DisplayCommand::DrawTextInlineFallback { .. } => DisplayOpcode::DrawTextInlineFallback,

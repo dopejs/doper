@@ -302,6 +302,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
     const fonts = new Map(this.#fonts);
     const encodedKinds = new Map(this.#encodedKinds);
     const images = new Map(this.#images);
+    const paths = new Map(this.#paths);
     const glyphSpans = new Map(this.#glyphSpans);
     const glyphRasters = new Map(this.#glyphRasters);
     const videoFramesToClose: CanvasImageSource[] = [];
@@ -360,6 +361,9 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
           case ResourceKind.VideoFrame:
             define(images, action.id, decodeVideoFrame(action.bytes), "video frame");
             break;
+          case ResourceKind.Path:
+            define(paths, action.id, decodePath(action.bytes), "path");
+            break;
           case ResourceKind.Affine:
             validateAffine(action.bytes);
             break;
@@ -398,6 +402,8 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
               return fonts.delete(action.id);
             case ResourceKind.Image:
               return images.delete(action.id);
+            case ResourceKind.Path:
+              return paths.delete(action.id);
             case ResourceKind.VideoFrame: {
               const frame = images.get(action.id);
               if (frame !== undefined) videoFramesToClose.push(frame);
@@ -447,6 +453,7 @@ export class Canvas2DResourceRegistry implements Canvas2DResources {
     replaceMap(this.#textMeasurementStyles, textMeasurementStyles);
     replaceMap(this.#fonts, fonts);
     replaceMap(this.#images, images);
+    replaceMap(this.#paths, paths);
     replaceMap(this.#encodedKinds, encodedKinds);
     replaceMap(this.#glyphSpans, glyphSpans);
     replaceMap(this.#glyphRasters, glyphRasters);
@@ -1227,4 +1234,59 @@ function define<T>(map: Map<number, T>, id: number, value: T, kind: string): voi
 function replaceMap<T>(target: Map<number, T>, source: ReadonlyMap<number, T>): void {
   target.clear();
   for (const [id, value] of source) target.set(id, value);
+}
+
+const PATH_HEADER_BYTES = 28;
+
+/**
+ * Builds a `Path2D` from the immutable path resource.
+ *
+ * A trust boundary like every other decoder here. It also refuses anything the
+ * Core decoder refuses, so a divergence shows up as a rejected frame rather
+ * than as two backends drawing different shapes.
+ */
+export function decodePath(bytes: Uint8Array): Path2D {
+  if (bytes.byteLength < PATH_HEADER_BYTES) throw new Error("path resource is truncated");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (bytes[0] !== 1 || bytes[1] !== 1) throw new Error("path resource version");
+  if (bytes[3] !== 0) throw new Error("path reserved byte is not zero");
+  const verbCount = view.getUint32(4, true);
+  const pointCount = view.getUint32(8, true);
+  const verbsEnd = PATH_HEADER_BYTES + verbCount;
+  const pointsStart = verbsEnd + ((4 - (verbsEnd % 4)) % 4);
+  if (bytes.byteLength !== pointsStart + pointCount * 4) {
+    throw new Error("path length does not match its counts");
+  }
+  const path = new Path2D();
+  let cursor = pointsStart;
+  const next = (): number => {
+    const value = view.getFloat32(cursor, true);
+    if (!Number.isFinite(value)) throw new Error("path coordinate is not finite");
+    cursor += 4;
+    return value;
+  };
+  for (let index = 0; index < verbCount; index += 1) {
+    const verb = bytes[PATH_HEADER_BYTES + index] ?? 255;
+    if (verb > 4) throw new Error("path verb is unknown");
+    if (index === 0 && verb !== 0) throw new Error("path must begin with a move");
+    switch (verb) {
+      case 0:
+        path.moveTo(next(), next());
+        break;
+      case 1:
+        path.lineTo(next(), next());
+        break;
+      case 2:
+        path.quadraticCurveTo(next(), next(), next(), next());
+        break;
+      case 3:
+        path.bezierCurveTo(next(), next(), next(), next(), next(), next());
+        break;
+      default:
+        path.closePath();
+        break;
+    }
+  }
+  if (cursor !== bytes.byteLength) throw new Error("path verbs and points disagree");
+  return path;
 }

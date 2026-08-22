@@ -225,6 +225,19 @@ function validateCommand(
       required(resources.getPath(reader.u32()), "path");
       required(resources.getPaint(reader.u32()), "paint");
       return;
+    case DisplayOpcode.StrokePath: {
+      required(resources.getPath(reader.u32()), "path");
+      required(resources.getPaint(reader.u32()), "paint");
+      const width = reader.f32();
+      if (!(width >= 0)) replayFail("stroke width is negative");
+      const cap = reader.u8();
+      const join = reader.u8();
+      reader.u16();
+      const miterLimit = reader.f32();
+      if (cap > 2 || join > 2) replayFail("stroke cap or join is out of range");
+      if (!(miterLimit >= 1)) replayFail("stroke miter limit is below one");
+      return;
+    }
     case DisplayOpcode.DrawGlyphRun: {
       const fontId = reader.u32();
       const size = reader.f32();
@@ -430,6 +443,18 @@ function replayCommand(
       context.fill(path);
       return;
     }
+    case DisplayOpcode.StrokePath: {
+      const path = required(resources.getPath(reader.u32()), "path");
+      context.strokeStyle = required(resources.getPaint(reader.u32()), "paint");
+      context.lineWidth = reader.f32();
+      context.lineCap = STROKE_CAPS[reader.u8()] ?? "butt";
+      context.lineJoin = STROKE_JOINS[reader.u8()] ?? "miter";
+      // Reserved halfword, read to advance rather than skipped by count.
+      reader.u16();
+      context.miterLimit = reader.f32();
+      context.stroke(path);
+      return;
+    }
     case DisplayOpcode.DrawGlyphRun: {
       const fontId = reader.u32();
       const size = reader.f32();
@@ -515,6 +540,10 @@ function replayCommand(
       return assertNeverOpcode(opcode);
   }
 }
+
+/** Cap and join codes in the order the ABI declares them. */
+const STROKE_CAPS = ["butt", "round", "square"] as const;
+const STROKE_JOINS = ["miter", "round", "bevel"] as const;
 
 function rgbaCss(value: number): string {
   const red = (value >>> 24) & 0xff;
