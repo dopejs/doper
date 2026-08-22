@@ -1,0 +1,45 @@
+@use "../tokens" as t;
+
+.pui-form {
+  flex-direction: column;
+  row-gap: t.$form-gap;
+}
+
+.pui-form-field {
+  flex-direction: column;
+  row-gap: t.$form-field-gap;
+}
+
+.pui-form-field__label {
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+  color: t.$foreground;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-form-field__description {
+  font-size: t.$font-size-xs;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-form-field__error {
+  font-size: t.$font-size-xs;
+  color: t.$destructive;
+  &.pui-dark {
+    color: t.$dark-destructive;
+  }
+}
+
+.pui-input-otp {
+  column-gap: t.$input-otp-gap;
+}
+
+.pui-input-otp__slot {
+  width: t.$input-otp-slot;
+  text-align: center;
+}

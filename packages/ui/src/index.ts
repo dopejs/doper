@@ -70,6 +70,10 @@ export { HoverCard } from "./components/hover-card";
 export type { HoverCardProps } from "./components/hover-card";
 export { Menubar, MenubarMenu, NavigationMenu } from "./components/menubar";
 export type { MenubarMenuProps, MenubarProps } from "./components/menubar";
+export { Form, FormField } from "./components/form";
+export type { FormFieldProps, FormProps } from "./components/form";
+export { applyOtpEdit, InputOTP } from "./components/input-otp";
+export type { InputOTPProps } from "./components/input-otp";
 export { Collapsible } from "./components/collapsible";
 export type { CollapsibleProps } from "./components/collapsible";
 export {
