@@ -2,7 +2,7 @@
 
 # CSS subset support
 
-Subset version: **1.5.0**
+Subset version: **1.6.0**
 
 The Shell parses and computes the declarations below and the M6 Core consumes their canonical
 typed values. CSS text and selector matching remain outside Core.
@@ -12,8 +12,8 @@ typed values. CSS text and selector matching remain outside Core.
 | `display`             | `display`            | `display`                    | no        | layout, paint, hit, semantics, scroll | discrete  | M6 Core       |
 | `width`               | `width`              | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
 | `height`              | `height`             | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
-| `min-width`           | `minWidth`           | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
-| `min-height`          | `minHeight`          | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `min-width`           | `minWidth`           | `non-negative-length`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `min-height`          | `minHeight`          | `non-negative-length`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
 | `max-width`           | `maxWidth`           | `length-none`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
 | `max-height`          | `maxHeight`          | `length-none`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
 | `box-sizing`          | `boxSizing`          | `box-sizing`                 | no        | layout, paint, hit, scroll            | discrete  | M6 Core       |
@@ -98,7 +98,7 @@ Shorthands are expanded in the Shell and never reach the ABI.
 
 ### Flex item automatic minimum size
 
-CSS resolves `min-width`/`min-height` of a flex item to `auto`, which is its min-content size. This subset has no intrinsic min-content measurement and the initial value stays `0px`, so a flex item can be shrunk to zero. Layouts that need a floor must state `min-width`/`min-height` explicitly. This is the same behaviour a browser gives once you write `min-width: 0`.
+CSS resolves `min-width`/`min-height` of a flex item to `auto`, which is its min-content size. This subset has no intrinsic min-content measurement and the initial value stays `0px`, so a flex item can be shrunk to zero. Layouts that need a floor must state `min-width`/`min-height` explicitly. This is the same behaviour a browser gives once you write `min-width: 0`. Because the subset cannot honour it, `min-width: auto` and `min-height: auto` are rejected rather than accepted and silently treated as `0`, so a stylesheet asking for a content floor fails to compile instead of shrinking at runtime. Both properties also reject negative lengths, which CSS does not accept either.
 
 ### `flex: <number>` uses a `0px` basis
 

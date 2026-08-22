@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "cssSubsetVersion": "1.5.0",
+  "cssSubsetVersion": "1.6.0",
   "propertyIdBits": 16,
   "reservedPropertyIds": [17],
   "reservedPropertyIdReasons": {
@@ -143,7 +143,7 @@
   "subsetNotes": [
     {
       "topic": "Flex item automatic minimum size",
-      "note": "CSS resolves `min-width`/`min-height` of a flex item to `auto`, which is its min-content size. This subset has no intrinsic min-content measurement and the initial value stays `0px`, so a flex item can be shrunk to zero. Layouts that need a floor must state `min-width`/`min-height` explicitly. This is the same behaviour a browser gives once you write `min-width: 0`."
+      "note": "CSS resolves `min-width`/`min-height` of a flex item to `auto`, which is its min-content size. This subset has no intrinsic min-content measurement and the initial value stays `0px`, so a flex item can be shrunk to zero. Layouts that need a floor must state `min-width`/`min-height` explicitly. This is the same behaviour a browser gives once you write `min-width: 0`. Because the subset cannot honour it, `min-width: auto` and `min-height: auto` are rejected rather than accepted and silently treated as `0`, so a stylesheet asking for a content floor fails to compile instead of shrinking at runtime. Both properties also reject negative lengths, which CSS does not accept either."
     },
     {
       "topic": "`flex: <number>` uses a `0px` basis",
@@ -239,7 +239,7 @@
       "jsName": "minWidth",
       "initial": "0px",
       "inherited": false,
-      "grammar": "length-auto",
+      "grammar": "non-negative-length",
       "canonical": "length",
       "invalidation": ["layout", "paint", "hit", "scroll"],
       "animation": "number",
@@ -254,7 +254,7 @@
       "jsName": "minHeight",
       "initial": "0px",
       "inherited": false,
-      "grammar": "length-auto",
+      "grammar": "non-negative-length",
       "canonical": "length",
       "invalidation": ["layout", "paint", "hit", "scroll"],
       "animation": "number",

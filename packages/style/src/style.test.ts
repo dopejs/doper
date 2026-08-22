@@ -143,6 +143,26 @@ describe("stylesheet compilation", () => {
     ]);
   });
 
+  it("rejects an automatic minimum the subset cannot compute", () => {
+    // `min-width: auto` is min-content in CSS. This subset has no intrinsic
+    // measurement, so accepting it would silently mean `0` — the opposite of
+    // the floor the author asked for. Rejecting makes the gap visible at
+    // compile time; see the flex-item-minimum note in docs/style-support.md.
+    for (const property of ["min-width", "min-height"]) {
+      const result = compileStyleSheet(`.a { ${property}: auto; }`);
+      expect(result.styleSheet).toBeNull();
+      expect(result.diagnostics[0]).toMatchObject({ code: "unsupported-value", property });
+      // Negative minimums are not CSS either, and would silently do nothing.
+      expect(compileStyleSheet(`.a { ${property}: -1px; }`).diagnostics[0]?.code).toBe(
+        "unsupported-value",
+      );
+      // Lengths and percentages still compile: only the two lies are gone.
+      expect(compileStyleSheet(`.a { ${property}: 50%; }`).styleSheet).not.toBeNull();
+    }
+    // `auto` stays meaningful where the subset can honour it.
+    expect(compileStyleSheet(".a { width: auto; margin-left: auto; }").styleSheet).not.toBeNull();
+  });
+
   it("rejects malformed CSS, unsupported values, and invalid object rules", () => {
     expect(compileStyleSheet("/* open").diagnostics[0]?.code).toBe("invalid-css");
     expect(compileStyleSheet(".a color: #fff").diagnostics[0]?.code).toBe("invalid-css");

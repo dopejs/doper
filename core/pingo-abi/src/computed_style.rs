@@ -1104,6 +1104,6 @@ mod tests {
 
     #[test]
     fn subset_version_is_explicit_for_contract_reports() {
-        assert_eq!(crate::CSS_SUBSET_VERSION, "1.5.0");
+        assert_eq!(crate::CSS_SUBSET_VERSION, "1.6.0");
     }
 }
