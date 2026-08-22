@@ -524,6 +524,9 @@ fn build_display_list(
     let mut updates = HashMap::new();
     let mut subtree_builds = 0_u64;
     let mut subtree_cache_hits = 0_u64;
+    // One buffer for the whole pass: paint runs every frame, so a Vec per node
+    // would be an allocation per node per frame.
+    let mut painted = Vec::new();
     for (index, node) in scene.ids().iter().copied().enumerate().rev() {
         if !rebuild.get(index).copied().unwrap_or(true) && current.contains_key(&node) {
             continue;
@@ -551,7 +554,7 @@ fn build_display_list(
         // Paint order, not document order: a child with a z-index draws above
         // or below its siblings. Hit testing asks the Scene the same question,
         // so what is drawn on top is what is hit.
-        let mut painted = Vec::new();
+        painted.clear();
         if !hidden {
             scene.children_in_paint_order(node, &mut painted);
         }
@@ -665,6 +668,8 @@ fn build_picture_graph(
     let mut releases = Vec::new();
     let mut subtree_builds = 0_u64;
     let mut subtree_cache_hits = 0_u64;
+    // One buffer for the whole pass; see build_display_list.
+    let mut painted = Vec::new();
     for (index, node) in scene.ids().iter().copied().enumerate().rev() {
         if !rebuild.get(index).copied().unwrap_or(true) && current.contains_key(&node) {
             continue;
@@ -692,7 +697,7 @@ fn build_picture_graph(
         }
         let mut child_ids = Vec::new();
         // Paint order, so a z-index moves a Picture within its siblings.
-        let mut painted = Vec::new();
+        painted.clear();
         if !hidden {
             scene.children_in_paint_order(node, &mut painted);
         }

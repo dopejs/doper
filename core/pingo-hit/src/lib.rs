@@ -145,7 +145,12 @@ pub struct HitIndex {
     positions: std::collections::HashMap<NodeId, usize>,
     geometry: Vec<WorldGeometry>,
     hittable: Vec<bool>,
-    /// Topology-aligned paint order, so overlaps resolve by what is on top.
+    /// Topology-aligned paint order, empty while it equals topology order.
+    ///
+    /// Topology order is already a depth-first walk, so without a `z-index`
+    /// anywhere the rank of a node is its index and there is nothing to store
+    /// or to walk. Hit testing runs every frame; this keeps the common tree
+    /// paying nothing for a feature it does not use.
     paint_rank: Vec<u32>,
     leaves: Vec<usize>,
     nodes: Vec<BvhNode>,
@@ -172,18 +177,26 @@ impl HitIndex {
         }
         let geometry = build_world_geometry(scene, layout)?;
         let topology_changed = self.ids != scene.ids();
+        let mut reordered = false;
         let hittable = scene
             .ids()
             .iter()
             .copied()
             .map(|node| {
+                // Read here rather than in a second pass: this loop already
+                // touches every node's style.
+                reordered |= scene.z_index(node) != 0;
                 !scene.excluded_by_display(node)
                     && scene.visible(node)
                     && scene.presented_style_keyword(node, StyleProperty::PointerEvents)
                         != Some(StyleKeyword::None)
             })
             .collect::<Vec<_>>();
-        let paint_rank = build_paint_rank(scene);
+        let paint_rank = if reordered {
+            build_paint_rank(scene)
+        } else {
+            Vec::new()
+        };
         let eligibility_changed = self.hittable != hittable;
         self.ids.clear();
         self.ids.extend_from_slice(scene.ids());
@@ -275,6 +288,9 @@ impl HitIndex {
     /// through. Equal ranks cannot happen for two different nodes, but the
     /// index tiebreak keeps the comparison total either way.
     fn above(&self, index: usize, other: usize) -> bool {
+        if self.paint_rank.is_empty() {
+            return index > other;
+        }
         let rank = self.paint_rank.get(index).copied().unwrap_or(0);
         let previous = self.paint_rank.get(other).copied().unwrap_or(0);
         (rank, index) > (previous, other)
