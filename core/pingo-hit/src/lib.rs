@@ -145,6 +145,8 @@ pub struct HitIndex {
     positions: std::collections::HashMap<NodeId, usize>,
     geometry: Vec<WorldGeometry>,
     hittable: Vec<bool>,
+    /// Topology-aligned paint order, so overlaps resolve by what is on top.
+    paint_rank: Vec<u32>,
     leaves: Vec<usize>,
     nodes: Vec<BvhNode>,
     root: Option<usize>,
@@ -181,6 +183,7 @@ impl HitIndex {
                         != Some(StyleKeyword::None)
             })
             .collect::<Vec<_>>();
+        let paint_rank = build_paint_rank(scene);
         let eligibility_changed = self.hittable != hittable;
         self.ids.clear();
         self.ids.extend_from_slice(scene.ids());
@@ -191,6 +194,7 @@ impl HitIndex {
         }
         self.geometry = geometry;
         self.hittable = hittable;
+        self.paint_rank = paint_rank;
         if topology_changed || eligibility_changed {
             self.rebuild();
             self.topology_rebuilds = self.topology_rebuilds.saturating_add(1);
@@ -225,7 +229,7 @@ impl HitIndex {
             }
             if let Some(geometry_index) = node.geometry_index {
                 if self.geometry.get(geometry_index)?.contains_precise(point)
-                    && candidate.is_none_or(|previous| geometry_index > previous)
+                    && candidate.is_none_or(|previous| self.above(geometry_index, previous))
                 {
                     candidate = Some(geometry_index);
                 }
@@ -254,8 +258,26 @@ impl HitIndex {
                     && geometry.contains_precise(point)
             })
             .map(|(index, _)| index)
-            .next_back()?;
+            .reduce(|previous, index| {
+                if self.above(index, previous) {
+                    index
+                } else {
+                    previous
+                }
+            })?;
         self.result(scene, candidate)
+    }
+
+    /// Whether `index` is painted over `other`.
+    ///
+    /// Paint order decides, not topology: a `z-index` that lifts a sibling has
+    /// to lift what it catches too, or a raised overlay would be clickable
+    /// through. Equal ranks cannot happen for two different nodes, but the
+    /// index tiebreak keeps the comparison total either way.
+    fn above(&self, index: usize, other: usize) -> bool {
+        let rank = self.paint_rank.get(index).copied().unwrap_or(0);
+        let previous = self.paint_rank.get(other).copied().unwrap_or(0);
+        (rank, index) > (previous, other)
     }
 
     fn result(&self, scene: &Scene, index: usize) -> Option<HitResult> {
@@ -291,6 +313,37 @@ impl HitIndex {
             refit_node(root, &mut self.nodes, &self.geometry);
         }
     }
+}
+
+/// Assigns each node its position in a paint-order walk of the tree.
+///
+/// The walk is the same one the paint engine performs, and it asks the Scene the
+/// same question, so a node that draws on top also ranks on top here.
+fn build_paint_rank(scene: &Scene) -> Vec<u32> {
+    let mut rank = vec![0_u32; scene.len()];
+    let Some(root) = scene.ids().first().copied() else {
+        return rank;
+    };
+    let mut next = 0_u32;
+    let mut stack = vec![root];
+    let mut children = Vec::new();
+    while let Some(node) = stack.pop() {
+        if let Some(index) = scene.resolve(node) {
+            if let Some(slot) = rank.get_mut(index) {
+                *slot = next;
+            }
+            next = next.saturating_add(1);
+        }
+        let start = children.len();
+        scene.children_in_paint_order(node, &mut children);
+        // The stack pops in reverse, so the last painted child is pushed first.
+        while children.len() > start {
+            if let Some(child) = children.pop() {
+                stack.push(child);
+            }
+        }
+    }
+    rank
 }
 
 fn build_world_geometry(
@@ -654,6 +707,159 @@ mod tests {
 
     fn id(index: u32) -> NodeId {
         NodeId::new(index, 1).expect("node id")
+    }
+
+    fn computed_style(entries: &[(StyleProperty, Vec<u8>)]) -> Vec<u8> {
+        let payload_bytes = entries.len() * 16;
+        let mut bytes = vec![0_u8; 16];
+        bytes[0] = pingo_abi::STYLE_COMPUTED_ENCODING_VERSION;
+        bytes[1] = pingo_abi::STYLE_COMPUTED_ENCODING_VARIANT;
+        bytes[4..8].copy_from_slice(&pingo_abi::STYLE_ALL_FEATURE_BITS.to_le_bytes());
+        bytes[8..12].copy_from_slice(&u32::try_from(entries.len()).expect("count").to_le_bytes());
+        bytes[12..16]
+            .copy_from_slice(&u32::try_from(payload_bytes).expect("payload").to_le_bytes());
+        let mut sorted = entries.to_vec();
+        sorted.sort_by_key(|(property, _)| *property as u16);
+        for (property, payload) in &sorted {
+            bytes.extend_from_slice(&(*property as u16).to_le_bytes());
+            bytes.push(0);
+            bytes.push(pingo_abi::STYLE_VALUE_LENGTH);
+            bytes.extend_from_slice(&8_u16.to_le_bytes());
+            bytes.extend_from_slice(&0_u16.to_le_bytes());
+            bytes.extend_from_slice(payload);
+        }
+        bytes
+    }
+
+    fn number_length(unit: u8, value: f32) -> Vec<u8> {
+        let mut bytes = vec![unit, 0, 0, 0];
+        bytes.extend_from_slice(&value.to_le_bytes());
+        bytes
+    }
+
+    /// Two children stacked on the same spot, the first optionally raised.
+    fn overlapping_scene(raise_first: Option<i32>) -> (Scene, LayoutEngine) {
+        let mut instructions = vec![
+            MutationInstruction {
+                flags: 0,
+                mutation: Mutation::CreateNode {
+                    node_id: id(0).raw(),
+                    kind: NodeKind::Root,
+                    parent: NULL_NODE_ID,
+                    before_sibling: NULL_NODE_ID,
+                },
+            },
+            // The second child is pulled back over the first, so only order
+            // decides which one a pointer in the overlap reaches.
+            MutationInstruction {
+                flags: 0,
+                mutation: Mutation::DefineResource {
+                    resource_id: 2,
+                    kind: pingo_abi::ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[(
+                        StyleProperty::MarginTop,
+                        number_length(pingo_abi::STYLE_LENGTH_PX, -40.0),
+                    )]),
+                },
+            },
+        ];
+        if let Some(order) = raise_first {
+            #[allow(clippy::cast_precision_loss)]
+            let value = order as f32;
+            instructions.push(MutationInstruction {
+                flags: 0,
+                mutation: Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: pingo_abi::ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[(
+                        StyleProperty::ZIndex,
+                        number_length(pingo_abi::STYLE_LENGTH_NUMBER, value),
+                    )]),
+                },
+            });
+        }
+        for index in 1..=2_u32 {
+            instructions.extend([
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::CreateNode {
+                        node_id: id(index).raw(),
+                        kind: NodeKind::Container,
+                        parent: id(0).raw(),
+                        before_sibling: NULL_NODE_ID,
+                    },
+                },
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::SetF32 {
+                        node_id: id(index).raw(),
+                        prop: Prop::Width,
+                        value: 40.0,
+                    },
+                },
+                MutationInstruction {
+                    flags: 0,
+                    mutation: Mutation::SetF32 {
+                        node_id: id(index).raw(),
+                        prop: Prop::Height,
+                        value: 40.0,
+                    },
+                },
+            ]);
+        }
+        instructions.push(MutationInstruction {
+            flags: 0,
+            mutation: Mutation::SetRef {
+                node_id: id(2).raw(),
+                prop: Prop::ComputedStyle,
+                resource_id: 2,
+            },
+        });
+        if raise_first.is_some() {
+            instructions.push(MutationInstruction {
+                flags: 0,
+                mutation: Mutation::SetRef {
+                    node_id: id(1).raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 1,
+                },
+            });
+        }
+        let mut scene = Scene::new();
+        scene
+            .commit(MutationBatch {
+                frame_seq: 1,
+                instructions,
+            })
+            .expect("scene commit");
+        let mut layout = LayoutEngine::new();
+        layout
+            .layout(
+                &scene,
+                BoxConstraints::tight(Size::new(200.0, 200.0)).expect("viewport"),
+                &mut ZeroIntrinsicMeasurer,
+            )
+            .expect("layout");
+        (scene, layout)
+    }
+
+    #[test]
+    fn a_raised_sibling_catches_the_pointer_its_z_index_put_it_over() {
+        let point = HitPoint { x: 20.0, y: 20.0 };
+
+        // Document order alone: the later sibling is on top.
+        let (scene, layout) = overlapping_scene(None);
+        let mut index = HitIndex::default();
+        index.update(&scene, layout.snapshot()).expect("index");
+        assert_eq!(index.hit(&scene, point).expect("hit").target, id(2));
+        assert_eq!(index.hit_naive(&scene, point).expect("hit").target, id(2));
+
+        // A z-index lifts the earlier sibling, and what is on top is hit.
+        let (scene, layout) = overlapping_scene(Some(1));
+        let mut index = HitIndex::default();
+        index.update(&scene, layout.snapshot()).expect("index");
+        assert_eq!(index.hit(&scene, point).expect("hit").target, id(1));
+        assert_eq!(index.hit_naive(&scene, point).expect("hit").target, id(1));
     }
 
     fn scene_with_children(sizes: &[(f32, f32)]) -> (Scene, LayoutEngine) {

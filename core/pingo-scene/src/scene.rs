@@ -14,17 +14,17 @@ use pingo_abi::{
     SFNT_FONT_VERSION_OFFSET, SOLID_PAINT_RED_OFFSET, SOLID_PAINT_RESOURCE_FIXED_BYTES,
     SOLID_PAINT_RESOURCE_VARIANT, SOLID_PAINT_VARIANT_OFFSET, SOLID_PAINT_VERSION_OFFSET,
     STYLE_INTERACTION_STATE_MASK, STYLE_STATE_PROPERTY_IDS, StyleKeyword, StyleLength,
-    StyleProperty, StyleShadow, StyleTransformOperation, TEXT_STYLE_FAMILY_BYTES_OFFSET,
-    TEXT_STYLE_FAMILY_OFFSET, TEXT_STYLE_FONT_SIZE_OFFSET, TEXT_STYLE_LINE_HEIGHT_OFFSET,
-    TEXT_STYLE_PAINT_ID_OFFSET, TEXT_STYLE_RESOURCE_MINIMUM_BYTES, TEXT_STYLE_RESOURCE_VARIANT,
-    TEXT_STYLE_V2_FAMILY_BYTES_OFFSET, TEXT_STYLE_V2_FAMILY_OFFSET, TEXT_STYLE_V2_FONT_SIZE_OFFSET,
-    TEXT_STYLE_V2_FONT_STYLE_OFFSET, TEXT_STYLE_V2_LINE_HEIGHT_OFFSET,
-    TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET, TEXT_STYLE_V2_RESERVED_OFFSET,
-    TEXT_STYLE_V2_RESOURCE_MINIMUM_BYTES, TEXT_STYLE_V2_RESOURCE_VARIANT,
-    TEXT_STYLE_V2_TEXT_ALIGN_OFFSET, TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET,
-    TEXT_STYLE_V2_VARIANT_OFFSET, TEXT_STYLE_V2_VERSION_OFFSET, TEXT_STYLE_V2_WEIGHT_OFFSET,
-    TEXT_STYLE_V2_WHITE_SPACE_OFFSET, TEXT_STYLE_VARIANT_OFFSET, TEXT_STYLE_VERSION_OFFSET,
-    TEXT_STYLE_WEIGHT_OFFSET, VirtualAxis,
+    StyleLengthUnit, StyleProperty, StyleShadow, StyleTransformOperation,
+    TEXT_STYLE_FAMILY_BYTES_OFFSET, TEXT_STYLE_FAMILY_OFFSET, TEXT_STYLE_FONT_SIZE_OFFSET,
+    TEXT_STYLE_LINE_HEIGHT_OFFSET, TEXT_STYLE_PAINT_ID_OFFSET, TEXT_STYLE_RESOURCE_MINIMUM_BYTES,
+    TEXT_STYLE_RESOURCE_VARIANT, TEXT_STYLE_V2_FAMILY_BYTES_OFFSET, TEXT_STYLE_V2_FAMILY_OFFSET,
+    TEXT_STYLE_V2_FONT_SIZE_OFFSET, TEXT_STYLE_V2_FONT_STYLE_OFFSET,
+    TEXT_STYLE_V2_LINE_HEIGHT_OFFSET, TEXT_STYLE_V2_OVERFLOW_WRAP_OFFSET,
+    TEXT_STYLE_V2_RESERVED_OFFSET, TEXT_STYLE_V2_RESOURCE_MINIMUM_BYTES,
+    TEXT_STYLE_V2_RESOURCE_VARIANT, TEXT_STYLE_V2_TEXT_ALIGN_OFFSET,
+    TEXT_STYLE_V2_TEXT_OVERFLOW_OFFSET, TEXT_STYLE_V2_VARIANT_OFFSET, TEXT_STYLE_V2_VERSION_OFFSET,
+    TEXT_STYLE_V2_WEIGHT_OFFSET, TEXT_STYLE_V2_WHITE_SPACE_OFFSET, TEXT_STYLE_VARIANT_OFFSET,
+    TEXT_STYLE_VERSION_OFFSET, TEXT_STYLE_WEIGHT_OFFSET, VirtualAxis,
 };
 use pingo_anim::AnimationResource;
 use pingo_collections::OrderedMap;
@@ -660,6 +660,39 @@ impl Scene {
         match self.presented_style_value(node, property)? {
             ComputedStyleValue::Rgba8(value) => Some(*value),
             _ => None,
+        }
+    }
+
+    /// Returns the node's resolved `z-index`, where `auto` and absent are zero.
+    #[must_use]
+    pub fn z_index(&self, node: NodeId) -> i32 {
+        match self.style_length(node, StyleProperty::ZIndex, 0) {
+            Some(StyleLength {
+                unit: StyleLengthUnit::Number,
+                value,
+            }) if value.is_finite() => value as i32,
+            _ => 0,
+        }
+    }
+
+    /// Appends a node's children in the order they are painted.
+    ///
+    /// Document order decides everything except `z-index`, which lifts or lowers
+    /// a child among its own siblings. The sort is stable, so equal values keep
+    /// document order, and it only runs when a sibling actually declares a
+    /// `z-index` — a tree that uses none pays nothing. Paint and hit testing
+    /// both ask here, so what is drawn on top is what is hit.
+    pub fn children_in_paint_order(&self, node: NodeId, out: &mut Vec<NodeId>) {
+        let start = out.len();
+        let mut ordered = false;
+        let mut child = self.first_child(node);
+        while let Some(current) = child {
+            ordered |= self.z_index(current) != 0;
+            out.push(current);
+            child = self.next_sibling(current);
+        }
+        if ordered {
+            out[start..].sort_by_key(|child| self.z_index(*child));
         }
     }
 

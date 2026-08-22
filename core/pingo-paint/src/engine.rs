@@ -548,8 +548,14 @@ fn build_display_list(
         } else {
             local.len().checked_add(1).ok_or_else(overflow)?
         };
-        let mut child = (!hidden).then(|| scene.first_child(node)).flatten();
-        while let Some(child_id) = child {
+        // Paint order, not document order: a child with a z-index draws above
+        // or below its siblings. Hit testing asks the Scene the same question,
+        // so what is drawn on top is what is hit.
+        let mut painted = Vec::new();
+        if !hidden {
+            scene.children_in_paint_order(node, &mut painted);
+        }
+        for child_id in painted.iter().copied() {
             let cached = updates
                 .get(&child_id)
                 .or_else(|| current.get(&child_id))
@@ -567,8 +573,9 @@ fn build_display_list(
                 .checked_add(cached.command_count)
                 .ok_or_else(overflow)?;
             children.push(cached);
-            child = scene.next_sibling(child_id);
         }
+        // Cache validity is about which children exist, so this stays document
+        // order regardless of how they are painted.
         let child_ids: Arc<[NodeId]> = {
             let mut ids = Vec::new();
             let mut walk = scene.first_child(node);
@@ -684,8 +691,12 @@ fn build_picture_graph(
             command_count = local.len().checked_add(1).ok_or_else(overflow)?;
         }
         let mut child_ids = Vec::new();
-        let mut child = (!hidden).then(|| scene.first_child(node)).flatten();
-        while let Some(child_id) = child {
+        // Paint order, so a z-index moves a Picture within its siblings.
+        let mut painted = Vec::new();
+        if !hidden {
+            scene.children_in_paint_order(node, &mut painted);
+        }
+        for child_id in painted.iter().copied() {
             let cached = updates
                 .get(&child_id)
                 .or_else(|| current.get(&child_id))
@@ -718,9 +729,14 @@ fn build_picture_graph(
                     .and_then(|count| count.checked_add(1))
                     .ok_or_else(overflow)?;
             }
-            child_ids.push(child_id);
             children.push(cached);
-            child = scene.next_sibling(child_id);
+        }
+        // Cache validity is about which children exist, so this stays document
+        // order regardless of how they are painted.
+        let mut walk = (!hidden).then(|| scene.first_child(node)).flatten();
+        while let Some(child_id) = walk {
+            child_ids.push(child_id);
+            walk = scene.next_sibling(child_id);
         }
         if !hidden {
             push(&mut instructions, DisplayCommand::Restore);
@@ -1607,6 +1623,90 @@ mod tests {
             })
             .expect("background");
         assert!(first_shadow < background);
+    }
+
+    #[test]
+    fn a_z_index_reorders_what_is_painted_without_touching_the_cache_identity() {
+        let root = id(0);
+        let first = id(1);
+        let second = id(2);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                paint_resource(
+                    10,
+                    SolidPaint {
+                        red: 10,
+                        green: 0,
+                        blue: 0,
+                        alpha: 255,
+                    },
+                ),
+                paint_resource(
+                    11,
+                    SolidPaint {
+                        red: 20,
+                        green: 0,
+                        blue: 0,
+                        alpha: 255,
+                    },
+                ),
+                Mutation::DefineResource {
+                    resource_id: 12,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[(
+                        pingo_abi::StyleProperty::ZIndex,
+                        pingo_abi::STYLE_VALUE_LENGTH,
+                        {
+                            let mut bytes = vec![pingo_abi::STYLE_LENGTH_NUMBER, 0, 0, 0];
+                            bytes.extend_from_slice(&1.0_f32.to_le_bytes());
+                            bytes
+                        },
+                    )]),
+                },
+                create(root, NodeKind::Root, None),
+                create(first, NodeKind::Container, Some(root)),
+                create(second, NodeKind::Container, Some(root)),
+                set_f32(first, Prop::Width, 20.0),
+                set_f32(first, Prop::Height, 20.0),
+                set_f32(second, Prop::Width, 20.0),
+                set_f32(second, Prop::Height, 20.0),
+                Mutation::SetRef {
+                    node_id: first.raw(),
+                    prop: Prop::BackgroundColor,
+                    resource_id: 10,
+                },
+                Mutation::SetRef {
+                    node_id: second.raw(),
+                    prop: Prop::BackgroundColor,
+                    resource_id: 11,
+                },
+                // The first child is lifted over the second.
+                Mutation::SetRef {
+                    node_id: first.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 12,
+                },
+            ],
+        );
+        let (layout, changed) = layout(&scene);
+        let mut engine = PaintEngine::new();
+        let outcome = engine
+            .paint(&scene, layout.snapshot(), &changed, false)
+            .expect("paint");
+        let decoded = DisplayList::decode(outcome.picture.bytes()).expect("display list");
+        let fills = decoded
+            .instructions
+            .iter()
+            .filter_map(|instruction| match instruction.command {
+                DisplayCommand::FillRect { paint_id, .. } => Some(paint_id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        // Document order would give 10 then 11; the z-index puts 10 last.
+        assert_eq!(fills, vec![11, 10]);
     }
 
     #[test]

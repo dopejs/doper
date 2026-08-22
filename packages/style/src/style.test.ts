@@ -183,6 +183,19 @@ describe("computed style resolver", () => {
     expect(result.style.width).toBe("40px");
   });
 
+  it("accepts an integer or auto z-index and nothing else", () => {
+    const zIndex = (value: unknown): unknown =>
+      resolveStyle({ nodeType: "view", inlineStyle: { zIndex: value } as PingoStyle }).style.zIndex;
+
+    expect(zIndex("auto")).toBe("auto");
+    expect(zIndex(0)).toBe(0);
+    expect(zIndex(1200)).toBe(1200);
+    expect(zIndex(-1)).toBe(-1);
+    for (const invalid of [1.5, "1px", "10%", Number.NaN, Infinity, "top"]) {
+      expect(supportsStyle("zIndex", invalid), String(invalid)).toBe(false);
+    }
+  });
+
   it("canonicalizes box-shadow layers and rejects inset", () => {
     const shadow = (value: unknown): unknown =>
       resolveStyle({ nodeType: "view", inlineStyle: { boxShadow: value } as PingoStyle }).style

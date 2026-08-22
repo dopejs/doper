@@ -288,6 +288,14 @@ function parsePropertyValue(grammar: string, rawValue: unknown): SpecifiedStyleV
       return parseTransform(rawValue);
     case "box-shadow":
       return parseBoxShadow(rawValue);
+    case "z-index": {
+      if (rawValue === "auto") return "auto";
+      const number = parseFiniteNumber(rawValue);
+      // CSS z-index is an integer; a fractional one is a typo, not a hint.
+      return number === null || !Number.isInteger(number) || Math.abs(number) > 0x7fff_ffff
+        ? null
+        : number;
+    }
     default:
       return parseEnum(grammar, rawValue);
   }

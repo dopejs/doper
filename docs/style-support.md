@@ -2,7 +2,7 @@
 
 # CSS subset support
 
-Subset version: **1.3.0**
+Subset version: **1.4.0**
 
 The Shell parses and computes the declarations below and the M6 Core consumes their canonical
 typed values. CSS text and selector matching remain outside Core.
@@ -70,6 +70,7 @@ typed values. CSS text and selector matching remain outside Core.
 | `flex-shrink`         | `flexShrink`         | `non-negative-number`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
 | `flex-basis`          | `flexBasis`          | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
 | `box-shadow`          | `boxShadow`          | `box-shadow`                 | no        | paint, paintSelf                      | discrete  | M6 Core       |
+| `z-index`             | `zIndex`             | `z-index`                    | no        | paint, hit                            | discrete  | M6 Core       |
 
 ## Shorthands
 
@@ -112,6 +113,10 @@ When a flex container scrolls along its main axis, overflowing content becomes s
 ### `box-shadow` is outer-only and paints under a transparent box
 
 `inset` is rejected: drawing one needs an inverse path and a clip, and the shadcn preset has none. Canvas2D also paints the shadow behind the shape it came from, so a node with a transparent background shows the shadow through its middle where CSS would not; an opaque background covers it. Up to four shadows per node.
+
+### `z-index` reorders siblings, not stacking contexts
+
+A `z-index` lifts or lowers a child within its own siblings, stably, so equal values keep document order. There are no stacking contexts: `opacity` and `transform` do not create one, and a `z-index` never escapes its parent. Accessibility order is deliberately unaffected, because a screen reader follows document order rather than what is drawn on top.
 
 ### No `flex-wrap`
 

@@ -388,7 +388,11 @@ fn decode_length(
         STYLE_LENGTH_PX => StyleLengthUnit::Px,
         STYLE_LENGTH_PERCENT => StyleLengthUnit::Percent,
         STYLE_LENGTH_AUTO
-            if !line_height && property.grammar() == StyleValueGrammar::LengthAuto =>
+            if !line_height
+                && matches!(
+                    property.grammar(),
+                    StyleValueGrammar::LengthAuto | StyleValueGrammar::ZIndex
+                ) =>
         {
             StyleLengthUnit::Auto
         }
@@ -404,6 +408,10 @@ fn decode_length(
             StyleLengthUnit::Normal
         }
         STYLE_LENGTH_NUMBER if line_height => StyleLengthUnit::Number,
+        // A unitless canonical length, which is how `z-index` travels.
+        STYLE_LENGTH_NUMBER if property.grammar() == StyleValueGrammar::ZIndex => {
+            StyleLengthUnit::Number
+        }
         _ => {
             return Err(AbiError::InvalidValue(
                 "invalid unit for computed style property",
@@ -1084,6 +1092,6 @@ mod tests {
 
     #[test]
     fn subset_version_is_explicit_for_contract_reports() {
-        assert_eq!(crate::CSS_SUBSET_VERSION, "1.3.0");
+        assert_eq!(crate::CSS_SUBSET_VERSION, "1.4.0");
     }
 }

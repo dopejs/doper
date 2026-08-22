@@ -129,7 +129,14 @@ function encodeValue(
       return { tag: tags.keyword, payload: u16Payload(keyword) };
     }
     case "length":
-      return { tag: tags.length, payload: lengthPayload(requireString(value, property)) };
+      // A bare number is a unitless canonical length such as `z-index`.
+      return {
+        tag: tags.length,
+        payload:
+          typeof value === "number"
+            ? lengthPayloadFromParts(STYLE_COMPUTED_ENCODING.lengthUnits.number, value)
+            : lengthPayload(value),
+      };
     case "rgba8":
       return { tag: tags.rgba8, payload: u32Payload(parseRgba(value, property)) };
     case "f32":

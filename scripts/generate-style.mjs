@@ -54,6 +54,7 @@ const grammarTypes = {
   "transform": "string",
   "visibility": '"hidden" | "visible"',
   "white-space": '"normal" | "nowrap" | "pre" | "pre-line" | "pre-wrap"',
+  "z-index": 'number | "auto"',
 };
 
 validateSchema(schema);
