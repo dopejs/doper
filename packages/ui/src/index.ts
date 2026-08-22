@@ -99,6 +99,8 @@ export { ScrollArea, scrollbarThumb } from "./components/scroll-area";
 export type { ScrollAreaProps } from "./components/scroll-area";
 export { alignClass, columnStyle, Table, tableDescriptor } from "./components/table";
 export type { TableAlign, TableColumn, TableProps } from "./components/table";
+export { AspectRatio, ratioHeight } from "./components/aspect-ratio";
+export type { AspectRatioProps } from "./components/aspect-ratio";
 export { Collapsible } from "./components/collapsible";
 export type { CollapsibleProps } from "./components/collapsible";
 export {

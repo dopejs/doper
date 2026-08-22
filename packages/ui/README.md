@@ -122,6 +122,39 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
 产品分子是 `flexGrow` 的第一批真实用法：TopBar 的标题列、StatCard 的数值、
 ListRow 的文本列都是伸缩件，尾部 slot 因此落在边缘，不需要任何测量。
 
+第四批 shadcn 对齐 21 个（计划见 `docs/pingo-ui-shadcn-parity-plan.md`）：
+
+| 组件        | 导出                                     | 备注                             |
+| ----------- | ---------------------------------------- | -------------------------------- |
+| AlertDialog | `AlertDialog`                            | 两个按钮均在 Tab 循环内          |
+| Collapsible | `Collapsible`                            | Accordion 的单项基元             |
+| Drawer      | `Drawer`                                 | Sheet 的上下方向变体             |
+| Toggle 族   | `Toggle` `ToggleGroup` `ToggleGroupItem` | 单选/多选规则在组上              |
+| Breadcrumb  | `Breadcrumb`                             | 末项是当前页，不是链接           |
+| Pagination  | `Pagination` `paginationRange`           | 省略规则是纯函数                 |
+| HoverCard   | `HoverCard`                              | 指针进出 + 延迟，非 CSS hover    |
+| Combobox    | `Combobox`                               | Command + 触发器值绑定           |
+| Menubar 族  | `Menubar` `MenubarMenu` `NavigationMenu` | 一个共享的展开位                 |
+| InputOTP    | `InputOTP` `applyOtpEdit`                | 定长补空格，第 i 格恒等 value[i] |
+| Form        | `Form` `FormField`                       | 不含校验，规则由调用方持有       |
+| Slider      | `Slider` `sliderRatio`                   | 指针捕获 + 方向键                |
+| Resizable   | `Resizable` `clampSplit`                 | 第二栏取 flex 余量               |
+| Carousel    | `Carousel` `carouselStep`                | transform 过渡                   |
+| Table       | `Table` `columnStyle` `alignClass`       | **自带虚拟滚动**                 |
+| DataTable   | `DataTable` `nextSort`                   | 上报排序，不重排数据             |
+| Calendar    | `Calendar` `monthGrid` `daysInMonth`     | 日期是分量，不是 `Date`          |
+| DatePicker  | `DatePicker` `formatDate`                | Calendar + Popover               |
+| ScrollArea  | `ScrollArea` `scrollbarThumb`            | 自绘滚动条，**晚一帧**           |
+| ContextMenu | `ContextMenu`                            | 需 E9 的 contextmenu 事件        |
+| AspectRatio | `AspectRatio` `ratioHeight`              | 测量宽度反推高度，**晚一帧**     |
+
+拖拽基元 `createDrag` / `useDrag` / `positionToValue` 也一并导出，Slider、
+Resizable 共用它；指针捕获在按下时取得、结束时释放，否则指针一离开节点拖拽就断。
+
+**Table 为什么没有 table 布局**：虚拟滚动与内容驱动列宽在原理上互斥——没渲染过的
+行无法参与测量。列宽由显式的 `columns` spec 决定，表头与每一行共用同一份。shadcn
+的 Table 是纯 `<table>`，它**无法虚拟化**；这不是退让，是虚拟化表格唯一的形态。
+
 **弹层的两条硬约束**（都源自引擎语义，见 `docs/style-support.md`）：
 
 1. **视口型必须挂在靠近根的容器下**：Dialog / Sheet / ToastViewport 用
@@ -155,6 +188,15 @@ ListRow 的文本列都是伸缩件，尾部 slot 因此落在边缘，不需要
   Shift+Tab 在登记项之间循环，Escape 仍然关闭；没有登记任何控件时 Tab 不被吞掉。
   `order` 由调用方给出而非自动发现——面板内容是任意子树，Shell 无法判断哪些是
   可达控件、以什么顺序可达。
+- **`ScrollArea` 与 `AspectRatio` 晚一帧**：两者都靠 E8 的布局回读，而测量在它描述
+  的那一帧之后才到。ScrollArea 表现为甩动时拇指滞后一帧，AspectRatio 表现为首帧没有
+  高度（宁可无高度也不猜，猜错要先按错的尺寸布局再挪）。彻底解法分别是 Core 渲染
+  滚动条、把 `aspect-ratio` 纳入 CSS 子集，均记在
+  `docs/pingo-ui-shadcn-parity-plan.md`。
+- **`Table` 的列宽必须显式给出**：见上文，虚拟滚动与内容驱动列宽互斥。
+- **`DataTable` 只上报排序**：重排要把全部行都渲染出来，正是虚拟化要避免的事。
+- **触屏长按不会合成 contextmenu**：`ContextMenu` 目前只响应真实的 contextmenu
+  事件，长按手势需要单独的手势设计（E9 明确不做）。
 - **弹层的碰撞感知定位**：`flip` / `shift` / `size` / `hide` 随 E8 实现
   （`packages/ui/src/positioning.ts`），无需配置。定位**晚一帧**——测量本身要等一帧
   布局结果，所以弹层的首帧用皮肤给的静态方向，位置正确但尚未翻转/收缩。边界取

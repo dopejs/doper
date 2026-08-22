@@ -415,3 +415,8 @@
   opacity: t.$disabled-opacity;
   cursor: default;
 }
+
+.pui-aspect-ratio {
+  width: t.$full;
+  overflow: hidden;
+}

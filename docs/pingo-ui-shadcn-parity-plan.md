@@ -1,5 +1,9 @@
 # pingo-ui 对齐 shadcn：缺口收敛计划
 
+> **进度（2026-08-22）：全部完成。** E9 `6fca724`；A4 `b77fba5` `df5a8db` `bb06278`
+> `3eb00dd`；A5 `03f43a4`；A6 `840c42b`；A7 与 storybook / README 收尾见末次提交。
+> 组件数 25 → 46，`pnpm m1:check` 等全量门禁通过。
+
 **Goal:** 把 pingo-ui 从 25 个 shadcn 对应组件补到 46 个，并补齐一个引擎能力
 （contextmenu 事件）。范围与优先级由需求方 2026-08-22 逐条裁定，见 §0。
 
@@ -52,37 +56,37 @@ spec；行是 `VirtualList` 的 `renderItem(index)` 产物。
 **Files:** `packages/ui/src/components/*`、`packages/ui/styles/components/*`、
 `packages/ui/src/index.ts`、storybook
 
-- [ ] `AlertDialog`：Dialog 之上的确认语义（title/description/cancel/action）。
-- [ ] `Collapsible`：Accordion 的单项基元，供 Sidebar 分组等复用。
-- [ ] `Toggle` / `ToggleGroup`：Button 变体 + 受控/非受控选中态。
-- [ ] `Breadcrumb`：分隔符是文本字形，随图标体系一并升级。
-- [ ] `Pagination`：页码列表 + 上下页，键盘左右移动。
-- [ ] `HoverCard`：Popover + 悬停延迟开合（用指针进出事件，非 CSS hover）。
-- [ ] `Combobox`：Command + Popover + 受控值，复用既有筛选。
-- [ ] `Menubar`：横向 DropdownMenu 组，方向键跨菜单移动。
-- [ ] `NavigationMenu`：Menubar 的导航语义变体。
-- [ ] `InputOTP`：N 个单字符 Input + 焦点自动前移/回退 + 粘贴分发。
-- [ ] `Drawer`：Sheet 的底部/顶部方向变体。
-- [ ] `Form`：字段包装 + 错误位 + `aria` 关联；校验器由调用方注入，不内置。
-- [ ] 每个组件：descriptor 单测（结构/受控/键盘/明暗）+ skin 断言 + storybook 展区。
+- [x] `AlertDialog`：Dialog 之上的确认语义（title/description/cancel/action）。
+- [x] `Collapsible`：Accordion 的单项基元，供 Sidebar 分组等复用。
+- [x] `Toggle` / `ToggleGroup`：Button 变体 + 受控/非受控选中态。
+- [x] `Breadcrumb`：分隔符是文本字形，随图标体系一并升级。
+- [x] `Pagination`：页码列表 + 上下页，键盘左右移动。
+- [x] `HoverCard`：Popover + 悬停延迟开合（用指针进出事件，非 CSS hover）。
+- [x] `Combobox`：Command + Popover + 受控值，复用既有筛选。
+- [x] `Menubar`：横向 DropdownMenu 组，方向键跨菜单移动。
+- [x] `NavigationMenu`：Menubar 的导航语义变体。
+- [x] `InputOTP`：N 个单字符 Input + 焦点自动前移/回退 + 粘贴分发。
+- [x] `Drawer`：Sheet 的底部/顶部方向变体。
+- [x] `Form`：字段包装 + 错误位 + `aria` 关联；校验器由调用方注入，不内置。
+- [x] 每个组件：descriptor 单测（结构/受控/键盘/明暗）+ skin 断言 + storybook 展区。
 
 ## Track A5：交互批（3 个，能力已有）
 
-- [ ] `Slider`：指针按下即 `setPointerCapture`，拖拽映射到值域；键盘方向键步进。
-- [ ] `Resizable`：同一套拖拽基元，改为改变兄弟节点的 flex 基准。
-- [ ] `Carousel`：transform 位移 + `TransitionSpec`（引擎只支持 opacity/transform，
+- [x] `Slider`：指针按下即 `setPointerCapture`，拖拽映射到值域；键盘方向键步进。
+- [x] `Resizable`：同一套拖拽基元，改为改变兄弟节点的 flex 基准。
+- [x] `Carousel`：transform 位移 + `TransitionSpec`（引擎只支持 opacity/transform，
       正好够用）。
-- [ ] 抽出共用的 `useDrag(handle, onDelta)` 基元，三者复用，单测覆盖捕获与释放。
+- [x] 抽出共用的 `useDrag(handle, onDelta)` 基元，三者复用，单测覆盖捕获与释放。
 
 ## Track A6：数据与表面批（5 个）
 
-- [ ] `Table`：按 D1 的 column spec；表头非虚拟，表体 `VirtualList`。
-- [ ] `DataTable`：Table 之上的排序/筛选/选择，状态由调用方持有。
-- [ ] `Calendar`：7 列固定宽度网格，月份翻页，键盘方向键移动日期。
-- [ ] `DatePicker`：Popover + Calendar + Input 显示值。
-- [ ] `ScrollArea`：按 D2 自绘滚动条；限制写进 README。
-- [ ] `ContextMenu`：依赖 E9；在 E9 之前不启动。
-- [ ] Table 单测须覆盖：列宽 spec 生效、虚拟窗口只渲染可见行、表头与行列对齐。
+- [x] `Table`：按 D1 的 column spec；表头非虚拟，表体 `VirtualList`。
+- [x] `DataTable`：Table 之上的排序/筛选/选择，状态由调用方持有。
+- [x] `Calendar`：7 列固定宽度网格，月份翻页，键盘方向键移动日期。
+- [x] `DatePicker`：Popover + Calendar + Input 显示值。
+- [x] `ScrollArea`：按 D2 自绘滚动条；限制写进 README。
+- [x] `ContextMenu`：依赖 E9；在 E9 之前不启动。
+- [x] Table 单测须覆盖：列宽 spec 生效、虚拟窗口只渲染可见行、表头与行列对齐。
 
 ## Track E9：contextmenu 事件（引擎）
 
@@ -91,16 +95,16 @@ spec；行是 `VirtualList` 的 `renderItem(index)` 产物。
 
 按 E1 的既有形状做，不发明新机制：
 
-- [ ] `abiVersion` +1；`InputOpcode::DispatchContextMenu`；`InputEventKind::ContextMenu`。
-- [ ] ABI 编解码 + golden + TS↔Rust 往返 + malformed/fuzz。
-- [ ] Core：按命中测试路由（与 pointerdown 同路径），不改交互状态。
-- [ ] Shell：`PingoEvent` 增 `"contextmenu"`，`CommonProps` 增 `onContextMenu`。
-- [ ] Host：canvas `contextmenu` 监听并 `preventDefault`，三 transport 顺序一致。
-- [ ] 触屏长按是否合成 contextmenu：**本计划不做**，需要单独的手势设计。
+- [x] `abiVersion` +1；`InputOpcode::DispatchContextMenu`；`InputEventKind::ContextMenu`。
+- [x] ABI 编解码 + golden + TS↔Rust 往返 + malformed/fuzz。
+- [x] Core：按命中测试路由（与 pointerdown 同路径），不改交互状态。
+- [x] Shell：`PingoEvent` 增 `"contextmenu"`，`CommonProps` 增 `onContextMenu`。
+- [x] Host：canvas `contextmenu` 监听并 `preventDefault`，三 transport 顺序一致。
+- [x] 触屏长按是否合成 contextmenu：**本计划不做**，需要单独的手势设计。
 
 ## Track A7：收尾（低优先级）
 
-- [ ] `AspectRatio`：`aspect-ratio` 不在 CSS 子集，先用"宽度已知则按比例算高度"的
+- [x] `AspectRatio`：`aspect-ratio` 不在 CSS 子集，先用"宽度已知则按比例算高度"的
       组件级实现；是否进子集另行决策。
 
 ---
