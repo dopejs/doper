@@ -570,6 +570,10 @@ name = "pingo-anim"
 version = "0.1.0"
 
 [[package]]
+name = "pingo-collections"
+version = "0.1.0"
+
+[[package]]
 name = "pingo-gpu-probe"
 version = "0.0.0"
 dependencies = [
@@ -614,6 +618,7 @@ version = "0.1.0"
 dependencies = [
  "pingo-abi",
  "pingo-anim",
+ "pingo-collections",
 ]
 
 [[package]]

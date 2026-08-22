@@ -4,38 +4,44 @@
 
 ## 进度总览（2026-08-22 更新）
 
-| Track                                                    | 状态      | 证据                                                           |
-| -------------------------------------------------------- | --------- | -------------------------------------------------------------- |
-| C0 m10 决策修订                                          | ✅ 完成   | `a88dfa9`                                                      |
-| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成   | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试    |
-| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成   | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证    |
-| E6 组件级 memo                                           | ✅ 完成   | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md` |
-| E7 context（Provider+useContext）                        | ✅ 完成   | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md` |
-| E5 flexGrow/Shrink/Basis                                 | ⬜ 未启动 | 设计门：`docs/e5-flex-grow-design.md` 待写待评审               |
-| E1 keyboard 事件                                         | ⬜ 未启动 | 设计门：`docs/e1-keyboard-events-design.md` 待写待评审         |
-| E4 boxShadow                                             | ⬜ 未启动 | 设计门：`docs/e4-boxshadow-design.md` 待写待评审               |
-| E2 zIndex                                                | ⬜ 未启动 | 前置：E1；设计门待写                                           |
-| E3 position/inset                                        | ⬜ 未启动 | 前置：E2                                                       |
-| A2 第二批弹层组件                                        | ⬜ 未启动 | 启动门：E1/E2/E3 出口 + E4 合并                                |
-| A3 第三批产品分子                                        | ⬜ 未启动 | 按需立项                                                       |
+| Track                                                    | 状态      | 证据                                                                                                  |
+| -------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------- |
+| C0 m10 决策修订                                          | ✅ 完成   | `a88dfa9`                                                                                             |
+| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成   | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试                                           |
+| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成   | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证                                           |
+| E6 组件级 memo                                           | ✅ 完成   | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md`                                        |
+| E7 context（Provider+useContext）                        | ✅ 完成   | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md`                                        |
+| E5 flexGrow/Shrink/Basis                                 | ✅ 完成   | 设计门 `e5-flex-grow-design.md`，子计划 `pingo-ui-e5-implementation-plan.md`；`40f06a1…feedf85`       |
+| E1 keyboard 事件                                         | ✅ 完成   | 设计门 `e1-keyboard-events-design.md`，子计划 `pingo-ui-e1-implementation-plan.md`；`ba9d1fd…055c117` |
+| W0 WASM 体积归因与回收                                   | ✅ 完成   | **计划外必需前置**（见下）；`30d33e8`，回收 30,321 gzip bytes                                         |
+| E4 boxShadow                                             | ✅ 完成   | 设计门 `e4-boxshadow-design.md`；`d462a96`                                                            |
+| E2 zIndex                                                | ✅ 完成   | 设计门 `e2-zindex-design.md`；`62850ea…e0b9347`                                                       |
+| E3 position/inset                                        | ✅ 完成   | 设计门 `e3-position-design.md`；`6c72939`                                                             |
+| A2 第二批弹层组件                                        | ✅ 完成   | 子计划 `pingo-ui-overlay-components-plan.md`；`0a43cf1`                                               |
+| A3 第三批产品分子                                        | ⬜ 未启动 | 按需立项（本文不展开，YAGNI）                                                                         |
 
 **接手指引**：引擎工作包按各自设计门启动（设计文档评审 → 写 `docs/pingo-ui-e<N>-implementation-plan.md` 子计划 → subagent 执行）；组件批次按本文件规格表执行。已完成的子计划内 checkbox 状态以本表为准。
 
 **执行期新发现**（影响后续工作）：
 
-- overflow 容器内子节点百分比尺寸解析为 0 —— **已在 E5 修复**（`40f06a1`）。
+- overflow 容器内子节点百分比尺寸解析为 0 —— **已在 E5 修复**（`40f06a1`）：
+  百分比基准与测量约束分离，按容器自身 content box 解析。
 - 有 hooks 的组件必须经 createElement/JSX 使用（已写入 packages/ui/README.md 与组件 docstring）。
-- **WASM 工程预算是 E4/E2/E3 的新硬约束**：E5+E1 交付后产品 Core WASM 为
-  393,174 gzip bytes，工程上限 393,216（384 KiB），余量 **42 bytes**。
-  `docs/wasm-size-attribution.md` 明文规定"gzip 超过 384 KiB：停止新增 Rust 能力"
-  且"400 KiB 产品上限不得作为日常余量使用"。E4（shadow paint + DisplayList 指令）、
-  E2（paint/hit/semantics 排序）、E3（absolute 布局路径）都是 KB 量级的 Core 新增，
-  在当前余量下无法落地。启动前必须先决定：先做体积归因与回收，还是把三项放在
-  默认关闭的 Cargo feature 后面。
-- `pnpm format:check` 在本轮之前已经对 41 个文件失败（`1d3cdc7` 修复），
-  `pnpm m0:check` 此前无法通过。
-- `packages/ui` 的皮肤生成器产出未经 Prettier 格式化，每次构建都会让
-  `format:check` 变红（`feedf85` 修复）。
+- **WASM 工程预算一度耗尽（新增 Track W0）**：E5+E1 交付后产品 Core WASM 为
+  393,174 gzip bytes，工程上限 393,216，余量仅 42 bytes。
+  `docs/wasm-size-attribution.md` 规定"gzip 超过 384 KiB：停止新增 Rust 能力"，
+  E4/E2/E3 因此全部阻塞。按需求方决策先做体积归因与回收：
+  `scripts/attribute-wasm-code.mjs`（新增诊断脚本）把 code section 按函数归因，
+  查出 `BTreeMap`/`BTreeSet` 的约 20 组单态化占了整个 code section 的 **22.2%**；
+  新增 `core/pingo-collections` 用有序 Vec 替换其中"小的或批量重建的"映射，
+  产品模块降到 362,853 gzip bytes。E4/E2/E3/A2 之后仍余 23,401 bytes。
+- **两处既有门禁在本轮之前已经是红的**，顺带修复：
+  `pnpm format:check` 对 41 个文件失败（`1d3cdc7`），
+  `packages/ui` 的皮肤生成器产出未经 Prettier 格式化因而每次构建都会再次变红
+  （`feedf85`）。这两条意味着 `pnpm m0:check` 在本轮之前无法通过。
+- **修复的既有缺陷**（差分测试与归因过程中发现）：百分比 margin 在测量与排布阶段
+  用了不同基准；读取父百分比基准的节点被当作 relayout 包含边界，增量与全量结果
+  会不一致；跨分支重叠的命中判定用拓扑序而不是绘制序。
 
 ---
 
@@ -272,69 +278,43 @@ TS/Rust 往返 + malformed-input/fuzz。
 
 ### 已完成步骤的验收记录
 
-| 步骤 | 验收标准                                                                                                          | 证据              |
-| ---- | ----------------------------------------------------------------------------------------------------------------- | ----------------- |
-| C0   | m10 决策行 Defer→Adopt；design.md §12.1 同步                                                                      | `a88dfa9`         |
-| A0   | cva/theme/皮肤/组件测试 35 全绿；storybook 明暗截图确认；全仓回归绿                                               | `2addeb3…6a5fa4b` |
-| E6   | memo 5 语义测试 + signal 正交测试；api:check 快照纯增量；全仓 416 绿                                              | `a923e61…abc3d8d` |
-| E7   | 7 条 context 行为测试（最近者胜/默认回落/卸载回落/细粒度分发/穿透 memo/结构更新）；repo typecheck 绿；全仓 429 绿 | `34145ee…bf81554` |
-| A1   | 17 组件交付；104/104 包测试；全仓 496 绿；明暗 showcase 截图确认；README 覆盖约定/约束/缺口清单                   | `a8b8b66…31f8b34` |
+| 步骤 | 验收标准                                                                                                                                                                                                  | 证据              |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| C0   | m10 决策行 Defer→Adopt；design.md §12.1 同步                                                                                                                                                              | `a88dfa9`         |
+| A0   | cva/theme/皮肤/组件测试 35 全绿；storybook 明暗截图确认；全仓回归绿                                                                                                                                       | `2addeb3…6a5fa4b` |
+| E6   | memo 5 语义测试 + signal 正交测试；api:check 快照纯增量；全仓 416 绿                                                                                                                                      | `a923e61…abc3d8d` |
+| E7   | 7 条 context 行为测试；repo typecheck 绿；全仓 429 绿                                                                                                                                                     | `34145ee…bf81554` |
+| A1   | 17 组件交付；104/104 包测试；全仓 496 绿；明暗 showcase 截图确认；README 覆盖约定/约束/缺口清单                                                                                                           | `a8b8b66…31f8b34` |
+| E5   | reference oracle（递归、非增量、`#[cfg(test)]`）与引擎差分 8000 例；flex 单测 6 条；增量↔全量 flex proptest；schema/生成/`style-support.md` 原子同步；feature gate 逐条拒绝；Input `prefix`/`suffix` slot | `40f06a1…feedf85` |
+| E1   | ABI golden 重生成（逐字节审计）；TS↔Rust 往返；malformed/fuzz；Core 焦点路由 3 条；Shell 传播 2 条；Host 键表/组合/焦点性 3 条；三 transport 顺序一致；IME fixture 无回归；组件方向键导航 8 条            | `ba9d1fd…055c117` |
+| W0   | 按函数归因（`scripts/attribute-wasm-code.mjs`）；`OrderedMap`/`OrderedSet` 与 `BTreeMap` 的 4000 步随机操作流差分；gzip 393,174 → 362,853；m1 回到基线 ±1%                                                | `30d33e8`         |
+| E4   | box-shadow 解析 7 条非法输入拒绝；paint 顺序/spread 折叠单测；hover 阴影像素差分 + 增量↔冷启动一致；replayer 契约测试；headless box-blur oracle；display-list golden 含 shadow 指令                       | `d462a96`         |
+| E2   | z-index 解析（整数/auto/拒绝小数）；paint 顺序单测；hit 顺序（BVH 与 naive 双路）；无 z-index 时零开销路径                                                                                                | `62850ea…e0b9347` |
+| E3   | oracle 差分 8000 例（含 position/inset 生成）；insets 定位与尺寸单测；脱离流不撑大容器单测；`inset` shorthand 与关键字拒绝                                                                                | `6c72939`         |
+| A2   | 8 组件 + Overlay 基元；33 条组件测试（层叠顺序、锚定结构、Escape、焦点交接、键盘导航、过滤、明暗）；skin 层级断言；storybook 明暗展区                                                                     | `0a43cf1`         |
 
-### 待执行步骤的验收标准
+**全量门禁（2026-08-22，全部通过）**：`pnpm m0:check` 退出码 0（含 lockfile、
+format:check、build、lint、typecheck、559 条 vitest、contracts:check、rust:check
+的 26 个 suite）；`pnpm m1:perf` p95 3.28ms / dropped 0 / over-invalidated 0；
+`pnpm m3:perf` p95 0.79µs；`pnpm m3:diff` native/wasm 逐字节一致；
+`pnpm m5:backend:diff` GPU 与 headless oracle 一致；`pnpm release:check`、
+`pnpm migration:check`、`pnpm storybook:build` 通过；WASM 369,815 / 393,216 gzip。
 
-**E5 flexGrow/Shrink/Basis**
+### 残余风险与验证缺口
 
-1. `docs/e5-flex-grow-design.md` 评审通过（含 reference oracle 选型与 overflow 容器
-   百分比语义评估结论）。
-2. flex reference oracle 建立且先于语法开放（css-events-plan 既定节奏）。
-3. 增量↔全量 layout 差分测试通过，失败用例可 shrinking 到最小。
-4. schema/生成代码/style-support.md 文档原子同步；invalidation 域与 flexDirection 一致。
-5. `pnpm rust:test` 绿；帧时预算不回归（m1/m3 性能检查脚本不劣化）。
-6. 出口后补齐 Input `prefix`/`suffix` slot（组件层验收：descriptor 测试 + storybook 展示）。
-
-**E1 keyboard 事件**
-
-1. `docs/e1-keyboard-events-design.md` 评审通过（与 editing transaction 的边界明确）。
-2. ABI golden bytes + TS/Rust 往返 + malformed/fuzz 绿。
-3. keydown/keyup 跨三 transport 事件顺序一致（契约测试）。
-4. 既有编辑 fixture（IME composition replay）无回归。
-5. `onKeyDown/onKeyUp` 进入 facade 公开面 + api 快照更新。
-6. Tabs/Accordion/RadioGroup 方向键导航升级（组件层验收：键盘导航行为测试）。
-
-**E4 boxShadow**
-
-1. `docs/e4-boxshadow-design.md` 评审通过（value tag、Canvas2D 映射、缓存失效语义）。
-2. 增量↔全量像素差分一致（含 hover 阴影切换路径）；后端差分在 tolerance 内。
-3. picture cache 失效正确性测试（阴影变化只失效 paintSelf）。
-4. rgba8 半透明阴影渲染正确（shadcn token 对齐）。
-5. ABI/公开面门禁按通用条款。
-
-**E2 zIndex**
-
-1. `docs/e2-zindex-design.md` 评审通过（排序缓存策略、无障碍顺序方案）。
-2. paint/hit/semantics 顺序的增量↔全量 oracle 一致。
-3. 无每帧排序（性能测试证明排序结果缓存命中）。
-4. 帧时预算不回归。
-
-**E3 position:absolute + inset**
-
-1. `docs/e3-position-design.md` 评审通过。
-2. m10 决策表全套出口：layout/hit/clip/semantics 增量↔全量 oracle、帧时与节点预算、
-   feature bit 关闭拒绝新值且 flow layout 不变的回滚验证。
-3. 与滚动容器交互的语义测试（设计门定稿后落入子计划）。
-
-**A2 第二批弹层组件**
-
-1. 启动门达成：E1/E2/E3 出口通过，E4 合并（可 feature-flag）。
-2. `docs/pingo-ui-overlay-components-plan.md` 子计划评审通过（Overlay 基元、锚定 API、
-   焦点陷阱语义）。
-3. 8 组件交付，每组件：descriptor/行为测试 + 语义树 E2E + 像素快照 + 明暗双皮肤。
-4. 弹层专项：层叠顺序、锚点定位、Esc 关闭、焦点导航、滚动中锚点跟随全部有用例。
-5. 通用门禁全绿。
-
-**A3 第三批**：立项时按 A1 模式在本文补充验收标准。
-
----
+- **帧时相对基线上升约 5%**：m1 p95 从 3.03ms（本轮开始时）到 3.19–3.28ms。
+  逐项排查后剩下的成本是 z-index 与 position 各自每帧每节点一次样式查询；
+  可避免的部分（每帧 DFS 排序、每节点 Vec 分配、`from_iter` 的 O(n²)）都已消除。
+  绝对门禁仍有大量余量。要再降需要把"是否有节点声明该属性"做成 Scene 提交期
+  维护的标志，属于后续优化。
+- **A3 第三批未立项**：按原计划 YAGNI，等试点业务给出 fixture。
+- **平台资格未做**：真机帧时、真实 IME、跨浏览器均未验证——按 AGENTS.md，
+  这属于平台资格而不是工程完成度。
+- **弹层的两项能力刻意未做**：焦点陷阱（需要引擎侧 tab order）与自动翻转
+  （需要"布局后回读"）。已写入 `packages/ui/README.md`。
+- **CSS 子集的既知偏差**共 10 条，集中记录在 `docs/style-support.md`
+  「Known deviations from CSS」，其中最可能被踩到的是：绝对定位的包含块是父节点、
+  flex item 没有 automatic minimum size、不确定轴上的百分比解析为 0。
 
 ## 验证矩阵（每个阶段出口必过）
 
@@ -366,16 +346,20 @@ TS/Rust 往返 + malformed-input/fuzz。
 ## 执行顺序（任务级）
 
 ```
-1. C0（m10 修订）────────── 完成（a88dfa9）
-2. A0（11 Tasks）────────── 完成（阶段0 出口全绿）
-3. E6 组件级 memo ───────── 完成（a923e61…abc3d8d）
-4. E7 context ──────────── 完成（34145ee…bf81554）
-5. A1（12 组件 + README + 门禁）  完成（104/104，明暗截图验证）
-6. E5 设计门 → 子计划 → 执行 │ 下一优先（Input slot 前置；overflow-percent 语义一并评估）
-7. E1 设计门 → 子计划 → 执行 │ 可与 E5 并行
-8. E4 设计门 → 子计划 → 执行 │ 与 E1/E5 并行
-9. E2 设计门 → 子计划 → 执行 │ E1 后
-10. E3 设计门 → 子计划 → 执行 │ E2 后
-11. A2 子计划 → 执行 ─────── E1/E2/E3 出口后
-12. A3 ──────────────────── 按需
+1.  C0（m10 修订）──────────── 完成（a88dfa9）
+2.  A0（11 Tasks）──────────── 完成
+3.  E6 组件级 memo ─────────── 完成（a923e61…abc3d8d）
+4.  E7 context ─────────────── 完成（34145ee…bf81554）
+5.  A1（12 组件 + README）──── 完成
+6.  E5 flex 主轴伸缩 ───────── 完成（40f06a1…feedf85）
+7.  E1 keyboard 事件 ───────── 完成（ba9d1fd…055c117）
+8.  W0 WASM 归因与回收 ─────── 完成（30d33e8）※ 计划外，E4/E2/E3 的解锁前置
+9.  E4 boxShadow ───────────── 完成（d462a96）
+10. E2 zIndex ──────────────── 完成（62850ea…e0b9347）
+11. E3 position/inset ──────── 完成（6c72939）
+12. A2 八个弹层组件 ────────── 完成（0a43cf1）
+13. A3 ─────────────────────── 按需
 ```
+
+原计划把 E5/E1/E4 视为可并行、E2→E3 串行。实际执行按串行推进，因为每一项都要
+独立过 ABI/差分/预算门禁；W0 是执行期新增的强制前置。
