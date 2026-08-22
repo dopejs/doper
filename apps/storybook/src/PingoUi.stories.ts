@@ -24,11 +24,16 @@ import {
   Switch,
   Command,
   Dialog,
+  ListRow,
   Popover,
   PopoverContent,
   PopoverTrigger,
   Select,
   SelectContent,
+  Sidebar,
+  SidebarItem,
+  SidebarSection,
+  StatCard,
   SelectItem,
   SelectTrigger,
   Tabs,
@@ -38,6 +43,7 @@ import {
   TextArea,
   Toast,
   Tooltip,
+  TopBar,
   createPingoUiStyleSheet,
   setTheme,
   type PingoUiTheme,
@@ -459,6 +465,118 @@ const meta: Meta<ShowcaseArgs> = {
                 }),
               ]),
             }),
+            spacer(16),
+            createElement(Card, {
+              children: column([
+                createElement(CardHeader, {
+                  children: column([
+                    createElement(CardTitle, { children: "产品分子" }),
+                    createElement(CardDescription, {
+                      children:
+                        "第三批。都是第一/二批原子的组合，也是 flexGrow 的第一批真实用法——尾部 slot 由伸缩列推到边缘。",
+                    }),
+                  ]),
+                }),
+                createElement(CardContent, {
+                  children: column([
+                    field(
+                      "TopBar",
+                      createElement(TopBar, {
+                        title: "仪表盘",
+                        actions: row([
+                          createElement(Button, {
+                            children: "新建",
+                            variant: "outline",
+                            onPress: () => {},
+                          }),
+                          createElement(Avatar, { fallback: "ZJ", size: 32 }),
+                        ]),
+                      }),
+                    ),
+                    spacer(16),
+                    createElement(Divider, {}),
+                    spacer(16),
+                    field(
+                      "StatCard",
+                      row([
+                        createElement(StatCard, {
+                          label: "本月营收",
+                          value: "¥128,400",
+                          delta: "+12.5%",
+                          trend: "up",
+                          description: "较上月",
+                        }),
+                        createElement(StatCard, {
+                          label: "退款率",
+                          value: "1.8%",
+                          delta: "-0.4%",
+                          trend: "down",
+                          description: "较上月",
+                        }),
+                      ]),
+                    ),
+                    spacer(16),
+                    createElement(Divider, {}),
+                    spacer(16),
+                    field(
+                      "Sidebar",
+                      createElement(Sidebar, {
+                        defaultValue: "stats",
+                        onValueChange: () => {},
+                        children: [
+                          createElement(SidebarSection, {
+                            title: "工作区",
+                            children: [
+                              createElement(SidebarItem, { value: "home", label: "首页" }),
+                              createElement(SidebarItem, { value: "stats", label: "统计" }),
+                            ],
+                          }),
+                          createElement(SidebarSection, {
+                            title: "系统",
+                            children: createElement(SidebarItem, {
+                              value: "settings",
+                              label: "设置",
+                            }),
+                          }),
+                        ],
+                      }),
+                    ),
+                    spacer(16),
+                    createElement(Divider, {}),
+                    spacer(16),
+                    field(
+                      "ListRow",
+                      column([
+                        createElement(ListRow, {
+                          title: "张三",
+                          description: "zhangsan@example.com",
+                          leading: createElement(Avatar, { fallback: "张", size: 32 }),
+                          trailing: createElement(Badge, { children: "管理员" }),
+                          onPress: () => {},
+                        }),
+                        createElement(ListRow, {
+                          title: "李四",
+                          description: "lisi@example.com",
+                          leading: createElement(Avatar, { fallback: "李", size: 32 }),
+                          trailing: createElement(Badge, {
+                            children: "只读",
+                            variant: "secondary",
+                          }),
+                          selected: true,
+                          onPress: () => {},
+                        }),
+                        createElement(ListRow, {
+                          title: "王五",
+                          description: "已停用",
+                          leading: createElement(Avatar, { fallback: "王", size: 32 }),
+                          disabled: true,
+                        }),
+                      ]),
+                    ),
+                  ]),
+                }),
+              ]),
+            }),
             // A viewport overlay fills its own parent, so it is mounted last
             // and on its own rather than inside a card.
             createElement(Dialog, {
@@ -467,7 +585,7 @@ const meta: Meta<ShowcaseArgs> = {
             }),
           ],
         }),
-      { width: 560, height: 2900, styleSheets: [createPingoUiStyleSheet()] },
+      { width: 560, height: 3700, styleSheets: [createPingoUiStyleSheet()] },
     );
   },
   args: { theme: "light" },

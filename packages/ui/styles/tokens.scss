@@ -85,6 +85,27 @@ $zero: 0px !default;
 $anchor-top: 100% !default;
 
 $textarea-min-height: 72px !default;
+
+// Product molecules (third batch).
+$topbar-height: 56px !default;
+$topbar-padding-x: 16px !default;
+$sidebar-width: 240px !default;
+$sidebar-padding: 8px !default;
+$sidebar-section-gap: 4px !default;
+$sidebar-item-padding-y: 8px !default;
+$list-row-min-height: 56px !default;
+$list-row-padding-x: 16px !default;
+$list-row-gap: 12px !default;
+$statcard-padding: 16px !default;
+$statcard-gap: 4px !default;
+$stat-value-size: 30px !default;
+$stat-value-line-height: 36px !default;
+$trend-up: #16a34a !default;
+$trend-down: #dc2626 !default;
+$dark-trend-up: #4ade80 !default;
+$dark-trend-down: #f87171 !default;
+// Structural token: the skin lint wants a token, not a literal.
+$grow-1: 1 1 0px !default;
 $divider-length: 100% !default;
 $alert-padding: 16px !default;
 $alert-title-gap: 4px !default;

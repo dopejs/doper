@@ -4,21 +4,21 @@
 
 ## 进度总览（2026-08-22 更新）
 
-| Track                                                    | 状态      | 证据                                                                                                  |
-| -------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------- |
-| C0 m10 决策修订                                          | ✅ 完成   | `a88dfa9`                                                                                             |
-| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成   | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试                                           |
-| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成   | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证                                           |
-| E6 组件级 memo                                           | ✅ 完成   | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md`                                        |
-| E7 context（Provider+useContext）                        | ✅ 完成   | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md`                                        |
-| E5 flexGrow/Shrink/Basis                                 | ✅ 完成   | 设计门 `e5-flex-grow-design.md`，子计划 `pingo-ui-e5-implementation-plan.md`；`40f06a1…feedf85`       |
-| E1 keyboard 事件                                         | ✅ 完成   | 设计门 `e1-keyboard-events-design.md`，子计划 `pingo-ui-e1-implementation-plan.md`；`ba9d1fd…055c117` |
-| W0 WASM 体积归因与回收                                   | ✅ 完成   | **计划外必需前置**（见下）；`30d33e8`，回收 30,321 gzip bytes                                         |
-| E4 boxShadow                                             | ✅ 完成   | 设计门 `e4-boxshadow-design.md`；`d462a96`                                                            |
-| E2 zIndex                                                | ✅ 完成   | 设计门 `e2-zindex-design.md`；`62850ea…e0b9347`                                                       |
-| E3 position/inset                                        | ✅ 完成   | 设计门 `e3-position-design.md`；`6c72939`                                                             |
-| A2 第二批弹层组件                                        | ✅ 完成   | 子计划 `pingo-ui-overlay-components-plan.md`；`0a43cf1`                                               |
-| A3 第三批产品分子                                        | ⬜ 未启动 | 按需立项（本文不展开，YAGNI）                                                                         |
+| Track                                                    | 状态    | 证据                                                                                                  |
+| -------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------- |
+| C0 m10 决策修订                                          | ✅ 完成 | `a88dfa9`                                                                                             |
+| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成 | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试                                           |
+| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成 | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证                                           |
+| E6 组件级 memo                                           | ✅ 完成 | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md`                                        |
+| E7 context（Provider+useContext）                        | ✅ 完成 | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md`                                        |
+| E5 flexGrow/Shrink/Basis                                 | ✅ 完成 | 设计门 `e5-flex-grow-design.md`，子计划 `pingo-ui-e5-implementation-plan.md`；`40f06a1…feedf85`       |
+| E1 keyboard 事件                                         | ✅ 完成 | 设计门 `e1-keyboard-events-design.md`，子计划 `pingo-ui-e1-implementation-plan.md`；`ba9d1fd…055c117` |
+| W0 WASM 体积归因与回收                                   | ✅ 完成 | **计划外必需前置**（见下）；`30d33e8`，回收 30,321 gzip bytes                                         |
+| E4 boxShadow                                             | ✅ 完成 | 设计门 `e4-boxshadow-design.md`；`d462a96`                                                            |
+| E2 zIndex                                                | ✅ 完成 | 设计门 `e2-zindex-design.md`；`62850ea…e0b9347`                                                       |
+| E3 position/inset                                        | ✅ 完成 | 设计门 `e3-position-design.md`；`6c72939`                                                             |
+| A2 第二批弹层组件                                        | ✅ 完成 | 子计划 `pingo-ui-overlay-components-plan.md`；`0a43cf1`                                               |
+| A3 第三批产品分子                                        | ✅ 完成 | 子计划 `pingo-ui-product-molecules-plan.md`；无试点 fixture，规格取自计划点名的四个组件               |
 
 **接手指引**：引擎工作包按各自设计门启动（设计文档评审 → 写 `docs/pingo-ui-e<N>-implementation-plan.md` 子计划 → subagent 执行）；组件批次按本文件规格表执行。已完成的子计划内 checkbox 状态以本表为准。
 
@@ -60,7 +60,7 @@ Track A（组件库，纯 TS，不依赖 Track B 即可交付第一批）
   A0 阶段0：包骨架 + cva + theme + 皮肤管线 + 5 样板组件 + storybook
   A1 阶段1：第一批剩余 12 组件 + E6 接入 + 暗色全覆盖 + 覆盖约定文档
   A2 阶段3：第二批 8 弹层组件（硬依赖 E1/E2/E3，视觉完整依赖 E4）
-  A3 第三批：产品分子，按需立项（本文不展开）
+  A3 第三批：产品分子（TopBar/Sidebar/StatCard/ListRow）
 
 Track B（引擎工作包，各自独立 feature bit）
   E6 组件级 memo        纯 Shell runtime  │ 已完成（2026-08-21）
@@ -262,10 +262,20 @@ descriptor 测试 + 皮肤解析测试 → storybook 展区。**组件模板以 
   Toast。统一 API 契约沿用 §6（variant/size/className/slot 透传）。
 - 测试：层叠顺序、锚点定位、Esc/焦点导航、滚动中跟随、light/dark。
 
-### A3 第三批（按需立项）
+### A3 第三批：产品分子（已交付）
 
-TopBar、Sidebar、StatCard、ListRow 等产品分子。启动条件：试点业务有明确需求
-fixture；届时按 A1 模式写子计划。本文不展开（YAGNI）。
+TopBar、Sidebar、StatCard、ListRow。子计划：
+[`docs/pingo-ui-product-molecules-plan.md`](./pingo-ui-product-molecules-plan.md)。
+
+**立项偏差（必须记录）**：原定启动条件是"试点业务有明确需求 fixture"，实际是
+需求方直接要求交付，**没有 fixture**。因此规格来源只有本文与
+`pingo-ui-capability-plan.md` §8 点名的四个组件，"等"字覆盖的其余组件不做——
+没有 fixture 就扩清单正是原计划要避免的事。若后续试点提出新组件，按同一模式
+在子计划里追加。
+
+四个组件都不需要新引擎能力，是 E5 `flexGrow` 的第一批真实消费者：
+TopBar 的标题列、StatCard 的数值、ListRow 的文本列都是伸缩件，尾部 slot 因此
+落在边缘，不需要任何测量。
 
 ---
 
@@ -307,7 +317,9 @@ format:check、build、lint、typecheck、559 条 vitest、contracts:check、rus
   可避免的部分（每帧 DFS 排序、每节点 Vec 分配、`from_iter` 的 O(n²)）都已消除。
   绝对门禁仍有大量余量。要再降需要把"是否有节点声明该属性"做成 Scene 提交期
   维护的标志，属于后续优化。
-- **A3 第三批未立项**：按原计划 YAGNI，等试点业务给出 fixture。
+- **A3 是无 fixture 立项**：原计划要求"试点业务有明确需求 fixture"才启动，实际
+  没有。因此只做了计划点名的四个组件，API 由"分子=组合前两批"与"shadcn superset"
+  两条约束推导。试点接入后若与实际需求不符，改的是这四个的 API，不是引擎。
 - **平台资格未做**：真机帧时、真实 IME、跨浏览器均未验证——按 AGENTS.md，
   这属于平台资格而不是工程完成度。
 - **弹层的两项能力刻意未做**：焦点陷阱（需要引擎侧 tab order）与自动翻转
@@ -358,8 +370,9 @@ format:check、build、lint、typecheck、559 条 vitest、contracts:check、rus
 10. E2 zIndex ──────────────── 完成（62850ea…e0b9347）
 11. E3 position/inset ──────── 完成（6c72939）
 12. A2 八个弹层组件 ────────── 完成（0a43cf1）
-13. A3 ─────────────────────── 按需
+13. A3 四个产品分子 ────────── 完成
 ```
 
 原计划把 E5/E1/E4 视为可并行、E2→E3 串行。实际执行按串行推进，因为每一项都要
-独立过 ABI/差分/预算门禁；W0 是执行期新增的强制前置。
+独立过 ABI/差分/预算门禁；W0 是执行期新增的强制前置。A3 原为"按需"，由需求方
+直接要求交付，规格取自计划点名的四个组件。

@@ -67,13 +67,15 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
   函数调用没有组件作用域会抛错**：Input、TextArea、RadioGroup、Tabs、
   Accordion，以及 TabsTrigger、TabsContent、RadioGroupItem、AccordionItem；
   第二批的 Dialog、Sheet、Popover、Tooltip、DropdownMenu、Select、Command 及其
-  Trigger/Content/Item 同理。
+  Trigger/Content/Item 同理；第三批的 Sidebar、SidebarItem 同理
+  （TopBar、StatCard、ListRow、SidebarSection 只读主题，可直接
+  `Component.component(props)` 调用）。
   纯展示组件的底层函数可用 `Component.component(props)` 调用（测试场景），但
   统一走 createElement 最安全。
 
 ## 组件清单
 
-25 个组件。第一批 17 个：
+29 个组件。第一批 17 个：
 
 | 组件         | 导出                                                                         |
 | ------------ | ---------------------------------------------------------------------------- |
@@ -108,6 +110,18 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
 | Command         | `Command`                                                                     |
 | Toast           | `Toast` `ToastViewport`                                                       |
 
+第三批产品分子 4 个（shadcn superset，由前两批组合而成）：
+
+| 组件       | 导出                                     |
+| ---------- | ---------------------------------------- |
+| TopBar     | `TopBar`                                 |
+| Sidebar 族 | `Sidebar` `SidebarSection` `SidebarItem` |
+| StatCard   | `StatCard`                               |
+| ListRow    | `ListRow`                                |
+
+产品分子是 `flexGrow` 的第一批真实用法：TopBar 的标题列、StatCard 的数值、
+ListRow 的文本列都是伸缩件，尾部 slot 因此落在边缘，不需要任何测量。
+
 **弹层的两条硬约束**（都源自引擎语义，见 `docs/style-support.md`）：
 
 1. **视口型必须挂在靠近根的容器下**：Dialog / Sheet / ToastViewport 用
@@ -132,7 +146,7 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
   缺的只是描边样式。
 - 键盘导航（E1 已落地）：Tabs 用 Left/Right/Home/End，RadioGroup 用四向方向键，
   Accordion 用 Up/Down 移动焦点、Enter/Space 展开，DropdownMenu / Select /
-  Command 用 Up/Down + Enter，所有弹层用 Escape 关闭。键事件只送达**当前焦点
+  Command / Sidebar 用 Up/Down（Sidebar 另有 Home/End），所有弹层用 Escape 关闭。键事件只送达**当前焦点
   节点**，因此组件必须先被点击或程序聚焦；引擎不内建 Tab 顺序。
 - **弹层没有焦点陷阱**：打开时焦点移到面板、关闭时还给 trigger，但 Tab 不会被
   限制在弹层内——这需要引擎侧的 tab order，E1 明确不内建

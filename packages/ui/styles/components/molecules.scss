@@ -1,0 +1,236 @@
+@use "../tokens" as t;
+
+.pui-topbar {
+  flex-direction: row;
+  align-items: center;
+  column-gap: t.$list-row-gap;
+  min-height: t.$topbar-height;
+  padding-left: t.$topbar-padding-x;
+  padding-right: t.$topbar-padding-x;
+  background-color: t.$background;
+  color: t.$foreground;
+  border-bottom-width: t.$border-width;
+  border-bottom-style: solid;
+  border-bottom-color: t.$border;
+  &.pui-dark {
+    background-color: t.$dark-background;
+    color: t.$dark-foreground;
+    border-bottom-color: t.$dark-border;
+  }
+}
+
+// The title column absorbs the line, which is what pushes the actions to the
+// trailing edge without anyone measuring anything.
+.pui-topbar__title {
+  flex: t.$grow-1;
+  font-size: t.$font-size-xl;
+  font-weight: t.$font-weight-semibold;
+}
+
+.pui-topbar__actions {
+  flex-direction: row;
+  align-items: center;
+  column-gap: t.$overlay-gap;
+}
+
+.pui-sidebar {
+  flex-direction: column;
+  width: t.$sidebar-width;
+  padding: t.$sidebar-padding;
+  row-gap: t.$sidebar-section-gap;
+  background-color: t.$background;
+  color: t.$foreground;
+  border-right-width: t.$border-width;
+  border-right-style: solid;
+  border-right-color: t.$border;
+  &.pui-dark {
+    background-color: t.$dark-background;
+    color: t.$dark-foreground;
+    border-right-color: t.$dark-border;
+  }
+}
+
+.pui-sidebar__section {
+  flex-direction: column;
+  row-gap: t.$sidebar-section-gap;
+}
+
+.pui-sidebar__section-title {
+  padding-left: t.$popover-padding;
+  padding-top: t.$menu-item-padding-y;
+  padding-bottom: t.$menu-item-padding-y;
+  font-size: t.$font-size-xs;
+  font-weight: t.$font-weight-medium;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-sidebar__item {
+  flex-direction: row;
+  align-items: center;
+  column-gap: t.$overlay-gap;
+  padding-left: t.$popover-padding;
+  padding-right: t.$popover-padding;
+  padding-top: t.$sidebar-item-padding-y;
+  padding-bottom: t.$sidebar-item-padding-y;
+  border-radius: t.$radius-md;
+  font-size: t.$font-size-sm;
+  cursor: pointer;
+}
+
+.pui-sidebar__item:hover {
+  background-color: t.$accent;
+  color: t.$accent-foreground;
+}
+
+.pui-sidebar__item.pui-dark:hover {
+  background-color: t.$dark-accent;
+  color: t.$dark-accent-foreground;
+}
+
+.pui-sidebar__item--active {
+  background-color: t.$secondary;
+  color: t.$secondary-foreground;
+  font-weight: t.$font-weight-medium;
+}
+
+.pui-sidebar__item--active.pui-dark {
+  background-color: t.$dark-secondary;
+  color: t.$dark-secondary-foreground;
+}
+
+.pui-statcard {
+  flex-direction: column;
+  row-gap: t.$statcard-gap;
+  padding: t.$statcard-padding;
+  background-color: t.$card;
+  color: t.$card-foreground;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$border;
+  border-radius: t.$radius-lg;
+  box-shadow: t.$shadow-sm;
+  &.pui-dark {
+    background-color: t.$dark-card;
+    color: t.$dark-card-foreground;
+    border-color: t.$dark-border;
+    box-shadow: t.$dark-shadow-sm;
+  }
+}
+
+.pui-statcard__label {
+  font-size: t.$font-size-sm;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-statcard__row {
+  flex-direction: row;
+  align-items: baseline;
+  column-gap: t.$overlay-gap;
+}
+
+.pui-statcard__value {
+  flex: t.$grow-1;
+  font-size: t.$stat-value-size;
+  line-height: t.$stat-value-line-height;
+  font-weight: t.$font-weight-semibold;
+}
+
+.pui-statcard__delta {
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-statcard__delta--up {
+  color: t.$trend-up;
+  &.pui-dark {
+    color: t.$dark-trend-up;
+  }
+}
+
+.pui-statcard__delta--down {
+  color: t.$trend-down;
+  &.pui-dark {
+    color: t.$dark-trend-down;
+  }
+}
+
+.pui-statcard__description {
+  font-size: t.$font-size-xs;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-list-row {
+  flex-direction: row;
+  align-items: center;
+  column-gap: t.$list-row-gap;
+  min-height: t.$list-row-min-height;
+  padding-left: t.$list-row-padding-x;
+  padding-right: t.$list-row-padding-x;
+  background-color: t.$background;
+  color: t.$foreground;
+  border-bottom-width: t.$border-width;
+  border-bottom-style: solid;
+  border-bottom-color: t.$border;
+  &.pui-dark {
+    background-color: t.$dark-background;
+    color: t.$dark-foreground;
+    border-bottom-color: t.$dark-border;
+  }
+}
+
+.pui-list-row--interactive {
+  cursor: pointer;
+}
+
+.pui-list-row--interactive:hover {
+  background-color: t.$accent;
+}
+
+.pui-list-row--interactive.pui-dark:hover {
+  background-color: t.$dark-accent;
+}
+
+.pui-list-row--selected {
+  background-color: t.$secondary;
+}
+
+.pui-list-row--selected.pui-dark {
+  background-color: t.$dark-secondary;
+}
+
+.pui-list-row--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}
+
+// The text column takes whatever the leading and trailing slots leave.
+.pui-list-row__text {
+  flex: t.$grow-1;
+  flex-direction: column;
+}
+
+.pui-list-row__title {
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+}
+
+.pui-list-row__description {
+  font-size: t.$font-size-sm;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}

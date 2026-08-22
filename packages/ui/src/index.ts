@@ -58,6 +58,8 @@ export type {
   TooltipProps,
 } from "./components/popover";
 export { Toast, ToastViewport } from "./components/toast";
+export { TopBar } from "./components/topbar";
+export type { TopBarProps } from "./components/topbar";
 export type { ToastProps, ToastVariant, ToastViewportProps } from "./components/toast";
 export type { CheckboxProps } from "./components/checkbox";
 export { Divider } from "./components/divider";
@@ -67,12 +69,18 @@ export type { IconButtonProps, IconButtonSize } from "./components/icon-button";
 export { Input } from "./components/input";
 export type { InputProps } from "./components/input";
 export { Label } from "./components/label";
+export { ListRow } from "./components/list-row";
+export type { ListRowProps } from "./components/list-row";
 export type { LabelProps } from "./components/label";
 export { Progress } from "./components/progress";
 export type { ProgressProps } from "./components/progress";
 export { RadioGroup, RadioGroupItem } from "./components/radio-group";
 export type { RadioGroupItemProps, RadioGroupProps } from "./components/radio-group";
+export { Sidebar, SidebarItem, SidebarSection } from "./components/sidebar";
+export type { SidebarItemProps, SidebarProps, SidebarSectionProps } from "./components/sidebar";
 export { Skeleton } from "./components/skeleton";
+export { StatCard } from "./components/statcard";
+export type { StatCardProps, StatTrend } from "./components/statcard";
 export type { SkeletonProps } from "./components/skeleton";
 export { Switch } from "./components/switch";
 export type { SwitchProps } from "./components/switch";
