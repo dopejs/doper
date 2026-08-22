@@ -8,7 +8,13 @@ import {
 } from "@dopejs/pingo-jsx";
 import { createContext, useContext, useSignal } from "@dopejs/pingo-runtime";
 
-import { classes, escapeHandler, useOverlayFocus, type OverlayFocus } from "../overlay";
+import {
+  classes,
+  OverlayFocusContext,
+  overlayKeyHandler,
+  useOverlayFocus,
+  type OverlayFocus,
+} from "../overlay";
 import { useTheme } from "../theme";
 
 export type AnchorContextValue = {
@@ -61,7 +67,12 @@ export const Popover = memo(function PopoverImpl(props: PopoverProps): PingoNode
   };
   return createElement(AnchorContext.Provider, {
     value,
-    children: anchorDescriptor(props),
+    // Nested rather than folded into AnchorContext: useFocusableRef serves
+    // every overlay kind, so it reads one context regardless of which built it.
+    children: createElement(OverlayFocusContext.Provider, {
+      value: focus,
+      children: anchorDescriptor(props),
+    }),
   });
 });
 
@@ -108,7 +119,7 @@ export function anchorContentDescriptor(
   return View({
     className: classes("pui-anchor__content", extra, dark, props.className),
     ref: context.focus.panel,
-    onKeyDown: escapeHandler(() => context.setOpen(false)),
+    onKeyDown: overlayKeyHandler(context.focus, () => context.setOpen(false)),
     children: props.children,
   });
 }

@@ -1,5 +1,7 @@
 export { cva } from "./cva";
 export type { CvaCompound, CvaConfig, CvaProps } from "./cva";
+export { useFocusableRef } from "./overlay";
+export type { OverlayFocus } from "./overlay";
 export { getTheme, setTheme, useTheme } from "./theme";
 export type { PingoUiTheme } from "./theme";
 export { createPingoUiStyleSheet, pingoUiCssText } from "./generated/styles";

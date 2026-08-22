@@ -148,9 +148,13 @@ ListRow 的文本列都是伸缩件，尾部 slot 因此落在边缘，不需要
   Accordion 用 Up/Down 移动焦点、Enter/Space 展开，DropdownMenu / Select /
   Command / Sidebar 用 Up/Down（Sidebar 另有 Home/End），所有弹层用 Escape 关闭。键事件只送达**当前焦点
   节点**，因此组件必须先被点击或程序聚焦；引擎不内建 Tab 顺序。
-- **弹层没有焦点陷阱**：打开时焦点移到面板、关闭时还给 trigger，但 Tab 不会被
-  限制在弹层内——这需要引擎侧的 tab order，E1 明确不内建
-  （`docs/e1-keyboard-events-design.md` §D4）。
+- **弹层的 Tab 遍历需要显式登记**：Core 没有 tab order（`docs/e1-keyboard-events-design.md`
+  §D4），因此 Tab 本身不会移动焦点，焦点也不会从弹层"漏"出去——真正缺的不是陷阱，
+  而是键盘用户根本进不到面板内的控件。Dialog / Sheet / Popover 现在通过
+  `useFocusableRef(order)` 提供这条通路：面板内的控件按 `order` 登记，Tab /
+  Shift+Tab 在登记项之间循环，Escape 仍然关闭；没有登记任何控件时 Tab 不被吞掉。
+  `order` 由调用方给出而非自动发现——面板内容是任意子树，Shell 无法判断哪些是
+  可达控件、以什么顺序可达。
 - **弹层没有自动翻转**：只有静态方向，没有"空间不足时翻到上方"。
 - Skeleton 无 pulse 动画（Core 动画只覆盖 opacity/transform，CSS keyframes 不在
   子集内）。

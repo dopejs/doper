@@ -1,6 +1,19 @@
-import { memo, Text, View, type NodeHandle, type PingoNode } from "@dopejs/pingo-jsx";
+import {
+  createElement,
+  memo,
+  Text,
+  View,
+  type NodeHandle,
+  type PingoNode,
+} from "@dopejs/pingo-jsx";
 
-import { classes, escapeHandler, useOverlayFocus, type OverlayFocus } from "../overlay";
+import {
+  classes,
+  OverlayFocusContext,
+  overlayKeyHandler,
+  useOverlayFocus,
+  type OverlayFocus,
+} from "../overlay";
 import { useTheme } from "../theme";
 
 // Type aliases (not interfaces) so the implicit index signature satisfies
@@ -58,7 +71,7 @@ export function dialogDescriptor(
         // Core delivers keys to the focused node, so the panel takes focus as
         // it mounts and gives it back when it goes.
         ref: focus.panel,
-        onKeyDown: escapeHandler(close),
+        onKeyDown: overlayKeyHandler(focus, close),
         children: props.children,
       }),
     ],
@@ -71,14 +84,26 @@ export function dialogDescriptor(
  * Mount it near the root — it fills its own parent, not the viewport.
  */
 export const Dialog = memo(function DialogImpl(props: DialogProps): PingoNode {
-  return dialogDescriptor(props, useOverlayFocus());
+  return provideFocus(useOverlayFocus(), (focus) => dialogDescriptor(props, focus));
 });
+
+/**
+ * Wraps a panel so its content can register itself in the Tab cycle.
+ *
+ * The provider sits outside the descriptor rather than inside it so the
+ * descriptor stays a pure builder that tests can call without a scope.
+ */
+function provideFocus(focus: OverlayFocus, build: (focus: OverlayFocus) => PingoNode): PingoNode {
+  return createElement(OverlayFocusContext.Provider, { value: focus, children: build(focus) });
+}
 
 export type SheetProps = DialogProps & { readonly side?: "left" | "right" };
 
 /** shadcn-style edge sheet. JSX-only: uses hooks. Mount it near the root. */
 export const Sheet = memo(function SheetImpl(props: SheetProps): PingoNode {
-  return dialogDescriptor(props, useOverlayFocus(), "sheet", props.side ?? "right");
+  return provideFocus(useOverlayFocus(), (focus) =>
+    dialogDescriptor(props, focus, "sheet", props.side ?? "right"),
+  );
 });
 
 /** Ref for whatever opens a Dialog, so focus returns to it on close. */
