@@ -49,6 +49,27 @@ describe("pingo-ui skin", () => {
     expect(resolve("pui-input__prefix pui-dark").color).toBe("#a1a1aaff");
   });
 
+  it("layers overlays above page content and pins them to their parent", () => {
+    const overlay = resolve("pui-overlay");
+    expect(overlay.position).toBe("absolute");
+    expect(overlay.zIndex).toBe(1100);
+    // inset:0 fills the parent, which is the containing block in this engine.
+    expect([overlay.top, overlay.right, overlay.bottom, overlay.left]).toEqual([
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+    ]);
+
+    // An anchored surface hangs off the bottom of its anchor and sits on the
+    // dropdown layer, below a modal and below a toast.
+    const anchored = resolve("pui-anchor__content");
+    expect(anchored.position).toBe("absolute");
+    expect(anchored.top).toBe("100%");
+    expect(anchored.zIndex).toBe(1000);
+    expect(resolve("pui-toast__viewport").zIndex).toBe(1200);
+  });
+
   it("gives the card an elevation that themes with the skin", () => {
     expect(resolve("pui-card").boxShadow).toBe("0px 1px 2px 0px #0000000d");
     expect(resolve("pui-card pui-dark").boxShadow).toBe("0px 1px 2px 0px #00000066");

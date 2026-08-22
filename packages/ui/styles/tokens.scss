@@ -59,6 +59,31 @@ $dark-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4) !default;
 $dark-shadow-md:
   0 4px 6px -1px rgba(0, 0, 0, 0.5),
   0 2px 4px -2px rgba(0, 0, 0, 0.5) !default;
+
+// Overlay layering. z-index orders siblings only, so these separate an overlay
+// from page content under the same parent; see docs/style-support.md.
+$z-dropdown: 1000 !default;
+$z-overlay: 1100 !default;
+$z-toast: 1200 !default;
+$overlay-backdrop: #09090b99 !default;
+$overlay-padding: 24px !default;
+$overlay-gap: 8px !default;
+$overlay-width: 420px !default;
+$sheet-width: 320px !default;
+$popover-width: 260px !default;
+$popover-padding: 12px !default;
+$popover-offset: 4px !default;
+$menu-item-padding-y: 6px !default;
+$tooltip-padding-x: 8px !default;
+$tooltip-padding-y: 4px !default;
+$tooltip-width: 200px !default;
+$toast-width: 320px !default;
+$toast-offset: 16px !default;
+// Structural tokens: the skin lint wants a token, not a literal.
+$full: 100% !default;
+$zero: 0px !default;
+$anchor-top: 100% !default;
+
 $textarea-min-height: 72px !default;
 $divider-length: 100% !default;
 $alert-padding: 16px !default;

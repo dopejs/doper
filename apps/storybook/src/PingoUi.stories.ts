@@ -22,11 +22,22 @@ import {
   RadioGroupItem,
   Skeleton,
   Switch,
+  Command,
+  Dialog,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
   TextArea,
+  Toast,
+  Tooltip,
   createPingoUiStyleSheet,
   setTheme,
   type PingoUiTheme,
@@ -341,9 +352,122 @@ const meta: Meta<ShowcaseArgs> = {
                 }),
               ]),
             }),
+            spacer(16),
+            createElement(Card, {
+              children: column([
+                createElement(CardHeader, {
+                  children: column([
+                    createElement(CardTitle, { children: "弹层" }),
+                    createElement(CardDescription, {
+                      children:
+                        "第二批弹层组件。开合与键盘由组件测试覆盖；此处静态展开，展示层叠、锚定与皮肤。",
+                    }),
+                  ]),
+                }),
+                createElement(CardContent, {
+                  children: column([
+                    // An anchored surface is a child of its anchor, so it stays
+                    // pinned as the page scrolls with nothing repositioning it.
+                    field(
+                      "Popover",
+                      createElement(Popover, {
+                        defaultOpen: true,
+                        children: [
+                          createElement(PopoverTrigger, {
+                            children: createElement(Button, {
+                              children: "打开浮层",
+                              variant: "outline",
+                              onPress: () => {},
+                            }),
+                          }),
+                          createElement(PopoverContent, {
+                            children: createElement("text", { value: "锚定在触发器下方。" }),
+                          }),
+                        ],
+                      }),
+                    ),
+                    spacer(140),
+                    createElement(Divider, {}),
+                    spacer(16),
+                    field(
+                      "Select",
+                      createElement(Select, {
+                        defaultOpen: true,
+                        value: "乙",
+                        onValueChange: () => {},
+                        children: [
+                          createElement(SelectTrigger, { placeholder: "选择一项" }),
+                          createElement(SelectContent, {
+                            children: [
+                              createElement(SelectItem, { value: "甲", children: "甲" }),
+                              createElement(SelectItem, { value: "乙", children: "乙" }),
+                              createElement(SelectItem, { value: "丙", children: "丙" }),
+                            ],
+                          }),
+                        ],
+                      }),
+                    ),
+                    spacer(160),
+                    createElement(Divider, {}),
+                    spacer(16),
+                    field(
+                      "Tooltip",
+                      createElement(Tooltip, {
+                        content: "这是一段说明文字。",
+                        children: createElement(Button, {
+                          children: "悬停我",
+                          variant: "ghost",
+                          onPress: () => {},
+                        }),
+                      }),
+                    ),
+                    spacer(16),
+                    createElement(Divider, {}),
+                    spacer(16),
+                    field(
+                      "Toast",
+                      column([
+                        createElement(Toast, {
+                          open: true,
+                          title: "已保存",
+                          description: "配置已写入。",
+                        }),
+                        spacer(8),
+                        createElement(Toast, {
+                          open: true,
+                          title: "同步失败",
+                          description: "请检查网络后重试。",
+                          variant: "destructive",
+                        }),
+                      ]),
+                    ),
+                    spacer(16),
+                    createElement(Divider, {}),
+                    spacer(16),
+                    field(
+                      "Command",
+                      createElement(Command, {
+                        items: [
+                          { value: "open", label: "打开文件" },
+                          { value: "save", label: "保存文件" },
+                          { value: "quit", label: "退出" },
+                        ],
+                        onSelect: () => {},
+                      }),
+                    ),
+                  ]),
+                }),
+              ]),
+            }),
+            // A viewport overlay fills its own parent, so it is mounted last
+            // and on its own rather than inside a card.
+            createElement(Dialog, {
+              open: false,
+              children: createElement("text", { value: "对话框" }),
+            }),
           ],
         }),
-      { width: 560, height: 1900, styleSheets: [createPingoUiStyleSheet()] },
+      { width: 560, height: 2900, styleSheets: [createPingoUiStyleSheet()] },
     );
   },
   args: { theme: "light" },

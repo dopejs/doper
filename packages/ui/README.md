@@ -65,13 +65,15 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
   引用，memo 失效（与 React.memo 同语义）。
 - **有 hooks 的组件必须经 `createElement(Component, props)` / JSX 使用，直接
   函数调用没有组件作用域会抛错**：Input、TextArea、RadioGroup、Tabs、
-  Accordion，以及 TabsTrigger、TabsContent、RadioGroupItem、AccordionItem。
+  Accordion，以及 TabsTrigger、TabsContent、RadioGroupItem、AccordionItem；
+  第二批的 Dialog、Sheet、Popover、Tooltip、DropdownMenu、Select、Command 及其
+  Trigger/Content/Item 同理。
   纯展示组件的底层函数可用 `Component.component(props)` 调用（测试场景），但
   统一走 createElement 最安全。
 
 ## 组件清单
 
-17 个组件（27 个导出值）：
+25 个组件。第一批 17 个：
 
 | 组件         | 导出                                                                         |
 | ------------ | ---------------------------------------------------------------------------- |
@@ -93,6 +95,29 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
 | Tabs 族      | `Tabs` `TabsList` `TabsTrigger` `TabsContent`                                |
 | Accordion 族 | `Accordion` `AccordionItem`                                                  |
 
+第二批弹层 8 个：
+
+| 组件            | 导出                                                                          |
+| --------------- | ----------------------------------------------------------------------------- |
+| Dialog 族       | `Dialog` `DialogHeader` `DialogTitle` `DialogDescription` `DialogFooter`      |
+| Sheet           | `Sheet`（`side: "left" \| "right"`）                                          |
+| Popover 族      | `Popover` `PopoverTrigger` `PopoverContent`                                   |
+| Tooltip         | `Tooltip`（指针进入显示）                                                     |
+| DropdownMenu 族 | `DropdownMenu` `DropdownMenuTrigger` `DropdownMenuContent` `DropdownMenuItem` |
+| Select 族       | `Select` `SelectTrigger` `SelectContent` `SelectItem`                         |
+| Command         | `Command`                                                                     |
+| Toast           | `Toast` `ToastViewport`                                                       |
+
+**弹层的两条硬约束**（都源自引擎语义，见 `docs/style-support.md`）：
+
+1. **视口型必须挂在靠近根的容器下**：Dialog / Sheet / ToastViewport 用
+   `position: absolute` 铺满**自己的父节点**，因为本引擎的包含块是父节点而不是
+   最近的 positioned 祖先。挂在一个小容器里，它就只覆盖那个小容器。
+2. **锚定型自动跟随，不需要重新定位**：Popover / Tooltip / DropdownMenu / Select
+   把浮层放在 trigger 的同一个 `.pui-anchor` 包装里，几何由 Core 从父节点推出，
+   滚动时天然跟随；没有 JS 的每帧重定位，也没有自动翻转（`placement` 需要
+   "布局后回读"，与异步 `useLayoutValue` 契约冲突）。
+
 另有 `cva`（class-variance 工具）、`setTheme` / `getTheme` / `useTheme`、
 `createPingoUiStyleSheet` / `pingoUiCssText` 从包根导出。
 
@@ -106,9 +131,13 @@ token 契约（名称、类型、适用组件）随包版本化：**新增 token
   4 层，`inset` 会被拒绝；完整偏差见 `docs/style-support.md`。焦点本身是可见的（Core 有 focus/focus-visible 状态），
   缺的只是描边样式。
 - 键盘导航（E1 已落地）：Tabs 用 Left/Right/Home/End，RadioGroup 用四向方向键，
-  Accordion 用 Up/Down 移动焦点、Enter/Space 展开。键事件只送达**当前焦点节点**，
-  因此组件必须先被点击或程序聚焦；引擎不内建 Tab 顺序，跨组件的 Tab 循环由业务
-  用 `ref` + `handle.focus()` 实现。
+  Accordion 用 Up/Down 移动焦点、Enter/Space 展开，DropdownMenu / Select /
+  Command 用 Up/Down + Enter，所有弹层用 Escape 关闭。键事件只送达**当前焦点
+  节点**，因此组件必须先被点击或程序聚焦；引擎不内建 Tab 顺序。
+- **弹层没有焦点陷阱**：打开时焦点移到面板、关闭时还给 trigger，但 Tab 不会被
+  限制在弹层内——这需要引擎侧的 tab order，E1 明确不内建
+  （`docs/e1-keyboard-events-design.md` §D4）。
+- **弹层没有自动翻转**：只有静态方向，没有"空间不足时翻到上方"。
 - Skeleton 无 pulse 动画（Core 动画只覆盖 opacity/transform，CSS keyframes 不在
   子集内）。
 - Switch thumb 无滑动过渡（同上，thumb 直接跳变）。
