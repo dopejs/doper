@@ -94,6 +94,15 @@ pub struct VirtualListConfig {
     pub maximum_ahead_viewports: f32,
 }
 
+/// Rare style properties, answered once per commit rather than per node.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct StyleCapabilities {
+    z_index: bool,
+    positioning: bool,
+    flex_sizing: bool,
+    box_shadow: bool,
+}
+
 /// Counters exposing structural work and accepted commits.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SceneMetrics {
@@ -136,6 +145,13 @@ pub struct Scene {
     props: PropertyLanes,
     slots: Vec<Slot>,
     resources: BTreeMap<u32, Resource>,
+    /// Which rare style properties any live resource declares.
+    ///
+    /// Ordering and out-of-flow placement are read on the frame path, and a
+    /// per-node lookup for a property nothing uses is pure overhead. Resources
+    /// are far fewer than nodes and only change when one is defined or
+    /// released, so the answer is computed there instead.
+    style_capabilities: StyleCapabilities,
     interaction_states: OrderedMap<NodeId, u8>,
     presentation_styles: BTreeMap<(NodeId, u16), ComputedStyleValue>,
     dirty_layout: BitSet,
@@ -172,6 +188,7 @@ impl Scene {
             props: PropertyLanes::default(),
             slots: Vec::new(),
             resources: BTreeMap::new(),
+            style_capabilities: StyleCapabilities::default(),
             interaction_states: OrderedMap::new(),
             presentation_styles: BTreeMap::new(),
             dirty_layout: BitSet::default(),
@@ -663,6 +680,50 @@ impl Scene {
         }
     }
 
+    /// Whether any live resource declares `z-index`.
+    #[must_use]
+    pub const fn uses_z_index(&self) -> bool {
+        self.style_capabilities.z_index
+    }
+
+    /// Whether any live resource declares `position`.
+    #[must_use]
+    pub const fn uses_positioning(&self) -> bool {
+        self.style_capabilities.positioning
+    }
+
+    /// Whether any live resource declares a `flex-grow`/`shrink`/`basis`.
+    #[must_use]
+    pub const fn uses_flex_sizing(&self) -> bool {
+        self.style_capabilities.flex_sizing
+    }
+
+    /// Whether any live resource declares a `box-shadow`.
+    #[must_use]
+    pub const fn uses_box_shadow(&self) -> bool {
+        self.style_capabilities.box_shadow
+    }
+
+    fn refresh_style_capabilities(&mut self) {
+        self.style_capabilities = StyleCapabilities {
+            z_index: self.declares_anywhere(StyleProperty::ZIndex),
+            positioning: self.declares_anywhere(StyleProperty::Position),
+            flex_sizing: self.declares_anywhere(StyleProperty::FlexGrow)
+                || self.declares_anywhere(StyleProperty::FlexShrink)
+                || self.declares_anywhere(StyleProperty::FlexBasis),
+            box_shadow: self.declares_anywhere(StyleProperty::BoxShadow),
+        };
+    }
+
+    fn declares_anywhere(&self, property: StyleProperty) -> bool {
+        self.resources.values().any(|resource| {
+            resource
+                .computed_style
+                .as_deref()
+                .is_some_and(|style| style.declares(property))
+        })
+    }
+
     /// Whether the node is taken out of its parent's flow.
     ///
     /// An out-of-flow child still belongs to its parent in every other sense:
@@ -670,12 +731,16 @@ impl Scene {
     /// its geometry stops coming from the flow.
     #[must_use]
     pub fn out_of_flow(&self, node: NodeId) -> bool {
-        self.style_keyword(node, StyleProperty::Position, 0) == Some(StyleKeyword::Absolute)
+        self.style_capabilities.positioning
+            && self.style_keyword(node, StyleProperty::Position, 0) == Some(StyleKeyword::Absolute)
     }
 
     /// Returns the node's resolved `z-index`, where `auto` and absent are zero.
     #[must_use]
     pub fn z_index(&self, node: NodeId) -> i32 {
+        if !self.style_capabilities.z_index {
+            return 0;
+        }
         match self.style_length(node, StyleProperty::ZIndex, 0) {
             Some(StyleLength {
                 unit: StyleLengthUnit::Number,
@@ -709,6 +774,9 @@ impl Scene {
     /// Returns the node's presented drop shadows, outermost declaration first.
     #[must_use]
     pub fn presented_style_shadows(&self, node: NodeId) -> Option<&[StyleShadow]> {
+        if !self.style_capabilities.box_shadow {
+            return None;
+        }
         match self.presented_style_value(node, StyleProperty::BoxShadow)? {
             ComputedStyleValue::ShadowList(value) => Some(value),
             _ => None,
@@ -1282,6 +1350,7 @@ impl Scene {
             }
         }
         validate_resource_graph(&candidate.resources, &BTreeMap::new())?;
+        candidate.refresh_style_capabilities();
         *self = candidate;
         Ok(())
     }
@@ -2005,6 +2074,7 @@ impl Scene {
         next.metrics = self.metrics;
         next.metrics.commits += 1;
         next.metrics.topology_compactions += 1;
+        next.refresh_style_capabilities();
         *self = next;
         Ok(())
     }

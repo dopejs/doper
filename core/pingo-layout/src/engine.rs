@@ -1362,20 +1362,22 @@ fn make_frame(
     // A definite flex-basis replaces the main-axis size property, which is what
     // makes `flex: 1 1 0` collapse an item to its share of the line instead of
     // to its declared width.
-    let flex_basis = flex_axis_row.and_then(|row| {
-        flex_basis_main(
-            scene,
-            node,
-            if row { width_basis } else { height_basis },
-            if row {
-                insets.horizontal()
-            } else {
-                insets.vertical()
-            },
-            border_box,
-        )
-        .map(|value| (row, value))
-    });
+    let flex_basis = flex_axis_row
+        .filter(|_| scene.uses_flex_sizing())
+        .and_then(|row| {
+            flex_basis_main(
+                scene,
+                node,
+                if row { width_basis } else { height_basis },
+                if row {
+                    insets.horizontal()
+                } else {
+                    insets.vertical()
+                },
+                border_box,
+            )
+            .map(|value| (row, value))
+        });
     let mut fixed_width = outer_dimension(
         scene,
         node,

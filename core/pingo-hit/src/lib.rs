@@ -177,15 +177,14 @@ impl HitIndex {
         }
         let geometry = build_world_geometry(scene, layout)?;
         let topology_changed = self.ids != scene.ids();
-        let mut reordered = false;
+        // The Scene answers this from its resource table, so a tree that
+        // declares no z-index costs nothing here at all.
+        let reordered = scene.uses_z_index();
         let hittable = scene
             .ids()
             .iter()
             .copied()
             .map(|node| {
-                // Read here rather than in a second pass: this loop already
-                // touches every node's style.
-                reordered |= scene.z_index(node) != 0;
                 !scene.excluded_by_display(node)
                     && scene.visible(node)
                     && scene.presented_style_keyword(node, StyleProperty::PointerEvents)

@@ -261,6 +261,18 @@ impl ComputedStyleResource {
         })
     }
 
+    /// Whether the resource declares a value for one property, in any state.
+    ///
+    /// Answered once when a resource is defined so consumers do not have to ask
+    /// per node per frame: a property no resource declares cannot be in use
+    /// anywhere, which is what lets the rare ones stay off the frame path.
+    #[must_use]
+    pub fn declares(&self, property: StyleProperty) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.property as u16 == property as u16)
+    }
+
     /// Declared schema feature bits.
     #[must_use]
     pub const fn feature_bits(&self) -> u32 {
