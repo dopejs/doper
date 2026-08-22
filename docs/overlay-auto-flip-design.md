@@ -1,6 +1,9 @@
 # 设计门：锚定弹层的碰撞感知定位
 
-- 状态：**Blocked / 待决策**（未实现，不要按已实现对待）
+- 状态：**Analysis / 已被 E8 采纳**（本身未实现，不要按已实现对待）
+- 后继：决策与任务已收入 [`e8-layout-readback-design.md`](./e8-layout-readback-design.md)
+  与 [`pingo-ui-e8-implementation-plan.md`](./pingo-ui-e8-implementation-plan.md)；
+  本文保留问题陈述与 A/B/C 方案取舍作为立项依据
 - 日期：2026-08-22
 - 关联计划：[`pingo-ui-implementation-plan.md`](./pingo-ui-implementation-plan.md) 残余风险
 - 前置：E3（`position: absolute` + inset，已完成）
