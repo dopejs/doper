@@ -22,6 +22,8 @@ import {
   RESOURCE_ENCODING_VERSION,
 } from "./generated";
 
+import type { SvgMatrix } from "@dopejs/pingo-jsx";
+
 /** Verb codes, matching `PathVerb` on the Rust side. */
 const MOVE = 0;
 const LINE = 1;
@@ -392,11 +394,36 @@ export function encodePath(
   return bytes;
 }
 
+/**
+ * Applies an affine to every point of a parsed outline.
+ *
+ * Baked in at parse time rather than emitted as a Transform command: an SVG
+ * group transform belongs to the geometry, and turning it into a display-list
+ * state change would put a Save/Restore pair around every shape in a document.
+ */
+export function transformPath(path: ParsedPath, matrix: SvgMatrix): ParsedPath {
+  const [a, b, c, d, e, f] = matrix;
+  const points = new Float32Array(path.points.length);
+  for (let index = 0; index + 1 < path.points.length; index += 2) {
+    const x = path.points[index] ?? 0;
+    const y = path.points[index + 1] ?? 0;
+    points[index] = a * x + c * y + e;
+    points[index + 1] = b * x + d * y + f;
+  }
+  return { verbs: path.verbs, points };
+}
+
 /** Convenience: parse `d` and encode it in one step. */
 export function encodePathData(
   data: string,
   viewBox: readonly [number, number, number, number],
   fillRule: PathFillRule = "nonzero",
+  matrix?: SvgMatrix,
 ): Uint8Array {
-  return encodePath(parsePathData(data), viewBox, fillRule);
+  const parsed = parsePathData(data);
+  return encodePath(
+    matrix === undefined ? parsed : transformPath(parsed, matrix),
+    viewBox,
+    fillRule,
+  );
 }

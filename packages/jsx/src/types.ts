@@ -1,5 +1,6 @@
 import type { PingoFont } from "./font";
 import type { PingoImage } from "./image";
+import type { PingoSvg } from "./svg";
 import type { MemoComponent } from "./memo";
 import type { EditTransaction, TextEditingController } from "@dopejs/pingo-editing";
 import type { ContextProvider } from "@dopejs/pingo-runtime";
@@ -316,7 +317,21 @@ export interface PathProps extends Omit<CommonProps, "children"> {
   readonly viewBox?: readonly [number, number, number, number];
   /** Non-zero strokes the outline at this width instead of filling it. */
   readonly strokeWidth?: number;
+  /**
+   * Baked into the outline's points before encoding, from an SVG `transform`.
+   *
+   * Distinct from `transform`, which is a visual transform the engine applies
+   * to the node and its children. This one belongs to the geometry: a group
+   * transform in a document moves the artwork, not the box it sits in.
+   */
+  readonly geometryTransform?: readonly [number, number, number, number, number, number];
   readonly fillRule?: "nonzero" | "evenodd";
+}
+
+/** Engine-drawn SVG document, expanded to one outline per shape. */
+export interface SvgProps extends Omit<CommonProps, "children"> {
+  /** Parsed document; build one with `createSvg` or `loadSvg`. */
+  readonly source: PingoSvg;
 }
 
 /** Core-planned virtual list whose Shell materializes only the requested preheat window. */

@@ -5,6 +5,7 @@ import type {
   EditableTextProps,
   ImageProps,
   PathProps,
+  SvgProps,
   VideoProps,
   TextProps,
   ViewHandle,
@@ -69,6 +70,54 @@ export function TextArea(props: TextAreaProps): AnyPingoElement {
  */
 export function Path(props: PathProps): AnyPingoElement {
   return compatibleHostElement("path", props);
+}
+
+/**
+ * Expands a parsed SVG document into one path node per shape.
+ *
+ * A component rather than an intrinsic: a document is many outlines with their
+ * own paints, and the engine draws one outline per node. Expanding here keeps
+ * that a Shell concern instead of teaching Core about documents.
+ *
+ * A shape that is both filled and stroked becomes two nodes, because a single
+ * node draws one or the other — fill and stroke are separate paints, not two
+ * halves of one.
+ */
+export function Svg(props: SvgProps): AnyPingoElement {
+  const { source, ...common } = props as SvgProps & Omit<ViewProps, "children">;
+  const viewBox = source.viewBox;
+  const children: AnyPingoElement[] = [];
+  source.shapes.forEach((shape, index) => {
+    const base = {
+      d: shape.d,
+      viewBox,
+      fillRule: shape.fillRule,
+      geometryTransform: shape.transform,
+      // Absolutely positioned so every shape shares the node's box rather than
+      // stacking in flow: an SVG's shapes overlay, they do not lay out.
+      style: { position: "absolute" as const, left: 0, top: 0, width: "100%", height: "100%" },
+    };
+    if (shape.filled) {
+      children.push(
+        createElement("path", {
+          ...base,
+          key: `fill-${String(index)}`,
+          ...(shape.fill === undefined ? {} : { color: shape.fill }),
+        }),
+      );
+    }
+    if (shape.stroke !== undefined || (!shape.filled && shape.strokeWidth > 0)) {
+      children.push(
+        createElement("path", {
+          ...base,
+          key: `stroke-${String(index)}`,
+          strokeWidth: shape.strokeWidth,
+          ...(shape.stroke === undefined ? {} : { color: shape.stroke }),
+        }),
+      );
+    }
+  });
+  return View({ ...(common as Omit<ViewProps, "children">), children });
 }
 
 /**

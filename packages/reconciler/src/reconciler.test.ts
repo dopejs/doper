@@ -6,6 +6,8 @@ import {
   View,
   Video,
   createImage,
+  createSvg,
+  Svg,
   createElement,
   createFont,
   memo,
@@ -1490,6 +1492,78 @@ describe("vector paths", () => {
     expect(() => root.render(createElement("path", { d: "M0 0 L1 1", strokeWidth: -1 }))).toThrow(
       TypeError,
     );
+  });
+});
+
+describe("svg documents", () => {
+  it("expands a document into one path resource per shape", () => {
+    const sink = new RecordingSink();
+    const root = createRoot(sink);
+    root.render(
+      createElement(Svg, {
+        source: createSvg(
+          `<svg viewBox="0 0 24 24"><path d="M0 0 L1 1" fill="#ff0000"/><circle cx="5" cy="5" r="2"/></svg>`,
+        ),
+      }),
+    );
+
+    const mutations = sink.batches.flatMap((batch) => batch.mutations);
+    const paths = mutations.filter(
+      (mutation) => mutation.type === "defineResource" && mutation.kind === ResourceKind.Path,
+    );
+    expect(paths).toHaveLength(2);
+  });
+
+  it("bakes a group transform into the geometry rather than the node", () => {
+    // A document's group transform moves the artwork, not the box it sits in,
+    // so it must not become the node's visual transform.
+    const plain = createSvg(`<svg viewBox="0 0 10 10"><path d="M1 1 L2 2"/></svg>`);
+    const moved = createSvg(
+      `<svg viewBox="0 0 10 10"><g transform="translate(5 5)"><path d="M1 1 L2 2"/></g></svg>`,
+    );
+    const bytesFor = (source: ReturnType<typeof createSvg>): Uint8Array => {
+      const sink = new RecordingSink();
+      createRoot(sink).render(createElement(Svg, { source }));
+      const define = sink.batches
+        .flatMap((batch) => batch.mutations)
+        .find((mutation) => mutation.type === "defineResource");
+      if (define?.type !== "defineResource") throw new Error("no path resource");
+      return define.bytes;
+    };
+    expect([...bytesFor(moved)]).not.toEqual([...bytesFor(plain)]);
+  });
+
+  it("draws a filled and stroked shape as two nodes", () => {
+    // One node draws one paint: fill and stroke are separate paints, not two
+    // halves of one.
+    const sink = new RecordingSink();
+    createRoot(sink).render(
+      createElement(Svg, {
+        source: createSvg(
+          `<svg viewBox="0 0 10 10"><path d="M0 0 L1 1" fill="#ff0000" stroke="#00ff00"/></svg>`,
+        ),
+      }),
+    );
+    const mutations = sink.batches.flatMap((batch) => batch.mutations);
+    const references = mutations.filter(
+      (mutation) => mutation.type === "setRef" && mutation.prop === Prop.Path,
+    );
+    expect(references).toHaveLength(2);
+
+    // One resource, referenced twice: the two nodes carry identical geometry
+    // and differ only in paint, so interning them separately would double the
+    // bytes for nothing.
+    const defines = mutations.filter(
+      (mutation) => mutation.type === "defineResource" && mutation.kind === ResourceKind.Path,
+    );
+    expect(defines).toHaveLength(1);
+
+    // The stroked half is the one that carries a width.
+    expect(
+      mutations.filter(
+        (mutation) => mutation.type === "setF32" && mutation.prop === Prop.PathStrokeWidth,
+      ),
+    ).toHaveLength(1);
   });
 });
 

@@ -446,6 +446,10 @@ const PATH_KEYS = new Set([
   "viewBox",
   "strokeWidth",
   "fillRule",
+  "geometryTransform",
+  // The outline paints with the node's colour, so a path accepts it the way
+  // text does even though it is not a text node.
+  "color",
 ]);
 const VIDEO_KEYS = new Set([
   ...[...COMMON_KEYS].filter((key) => key !== "children"),
@@ -2260,7 +2264,12 @@ function normalizeHostProps(
     const outline = props as unknown as PathProps;
     // Parsed at normalization rather than in a component so a malformed `d`
     // fails at the commit that introduced it, with the node still in hand.
-    path = encodePathData(outline.d, outline.viewBox ?? [0, 0, 24, 24], outline.fillRule);
+    path = encodePathData(
+      outline.d,
+      outline.viewBox ?? [0, 0, 24, 24],
+      outline.fillRule,
+      outline.geometryTransform,
+    );
     if (outline.strokeWidth !== undefined) {
       if (!Number.isFinite(outline.strokeWidth) || outline.strokeWidth < 0) {
         throw new TypeError("path strokeWidth must be finite and non-negative");

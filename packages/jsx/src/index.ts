@@ -4,6 +4,7 @@ export {
   Input,
   Path,
   Scroll,
+  Svg,
   Text,
   TextArea,
   Video,
@@ -66,6 +67,17 @@ export {
   type ScrollProps,
   type TextProps,
   type PathProps,
+  type SvgProps,
   type VirtualListProps,
   type VirtualViewProps,
 } from "./types";
+export {
+  createSvg,
+  loadSvg,
+  parseColor,
+  parseTransform,
+  PingoSvg,
+  PingoSvgError,
+  shapeData,
+} from "./svg";
+export type { PingoSvgShape, SvgMatrix } from "./svg";
