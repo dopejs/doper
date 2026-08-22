@@ -126,3 +126,292 @@
   opacity: t.$disabled-opacity;
   cursor: default;
 }
+
+.pui-table {
+  flex-direction: column;
+}
+
+.pui-table__header {
+  border-bottom-width: t.$border-width;
+  border-bottom-style: solid;
+  border-bottom-color: t.$border;
+  &.pui-dark {
+    border-bottom-color: t.$dark-border;
+  }
+}
+
+.pui-table__head,
+.pui-table__cell {
+  padding-left: t.$table-cell-padding-x;
+  padding-right: t.$table-cell-padding-x;
+  padding-top: t.$table-cell-padding-y;
+  padding-bottom: t.$table-cell-padding-y;
+  font-size: t.$font-size-sm;
+  overflow: hidden;
+}
+
+.pui-table__head {
+  font-weight: t.$font-weight-medium;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-table__head--sortable {
+  cursor: pointer;
+  color: t.$foreground;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-table__cell--start {
+  text-align: left;
+}
+
+.pui-table__cell--center {
+  text-align: center;
+}
+
+.pui-table__cell--end {
+  text-align: right;
+}
+
+.pui-table__body {
+  width: t.$full;
+  flex: t.$grow-1;
+}
+
+.pui-table__row {
+  align-items: center;
+  min-height: t.$table-row-height;
+  border-bottom-width: t.$border-width;
+  border-bottom-style: solid;
+  border-bottom-color: t.$border;
+  &.pui-dark {
+    border-bottom-color: t.$dark-border;
+  }
+}
+
+.pui-table__empty {
+  padding: t.$card-padding;
+  text-align: center;
+  font-size: t.$font-size-sm;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-calendar {
+  flex-direction: column;
+  row-gap: t.$calendar-gap;
+}
+
+.pui-calendar__header {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pui-calendar__title {
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+  color: t.$foreground;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-calendar__control {
+  min-width: t.$calendar-cell;
+  text-align: center;
+  font-size: t.$font-size-sm;
+  color: t.$muted-foreground;
+  cursor: pointer;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-calendar__row {
+  width: t.$full;
+}
+
+.pui-calendar__cell {
+  width: t.$calendar-cell;
+  height: t.$calendar-cell;
+  text-align: center;
+  font-size: t.$font-size-sm;
+}
+
+.pui-calendar__weekday {
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-calendar__day {
+  border-radius: t.$radius-md;
+  color: t.$foreground;
+  cursor: pointer;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-calendar__day--selected {
+  background-color: t.$primary;
+  color: t.$primary-foreground;
+  &.pui-dark {
+    background-color: t.$dark-primary;
+    color: t.$dark-primary-foreground;
+  }
+}
+
+.pui-calendar__day--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}
+
+.pui-date-picker {
+  flex-direction: column;
+}
+
+.pui-date-picker__trigger {
+  align-items: center;
+  min-height: t.$input-height;
+  padding-left: t.$input-padding-x;
+  padding-right: t.$input-padding-x;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$input-border;
+  border-radius: t.$radius-md;
+  cursor: pointer;
+  &.pui-dark {
+    border-color: t.$dark-input-border;
+  }
+}
+
+.pui-date-picker__value {
+  font-size: t.$font-size-sm;
+  color: t.$foreground;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-date-picker__value--placeholder {
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-date-picker__content {
+  position: absolute;
+  top: t.$anchor-top;
+  left: t.$zero;
+  margin-top: t.$popover-offset;
+  padding: t.$popover-padding;
+  background-color: t.$card;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$border;
+  border-radius: t.$radius-md;
+  box-shadow: t.$shadow-md;
+  z-index: t.$z-dropdown;
+  &.pui-dark {
+    background-color: t.$dark-card;
+    border-color: t.$dark-border;
+    box-shadow: t.$dark-shadow-md;
+  }
+}
+
+.pui-scroll-area {
+  flex-direction: row;
+  width: t.$full;
+  height: t.$full;
+}
+
+.pui-scroll-area__viewport {
+  flex: t.$grow-1;
+  height: t.$full;
+  overflow-y: auto;
+}
+
+.pui-scroll-area__content {
+  flex-direction: column;
+  width: t.$full;
+}
+
+.pui-scroll-area__bar {
+  width: t.$scrollbar-width;
+  height: t.$full;
+  background-color: t.$secondary;
+  border-radius: t.$scrollbar-radius;
+  &.pui-dark {
+    background-color: t.$dark-secondary;
+  }
+}
+
+.pui-scroll-area__thumb {
+  width: t.$full;
+  border-radius: t.$scrollbar-radius;
+  background-color: t.$muted-foreground;
+  &.pui-dark {
+    background-color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-context-menu {
+  flex-direction: column;
+}
+
+.pui-context-menu__content {
+  position: absolute;
+  flex-direction: column;
+  min-width: t.$popover-width;
+  padding: t.$tabs-list-padding;
+  background-color: t.$card;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$border;
+  border-radius: t.$radius-md;
+  box-shadow: t.$shadow-md;
+  z-index: t.$z-dropdown;
+  &.pui-dark {
+    background-color: t.$dark-card;
+    border-color: t.$dark-border;
+    box-shadow: t.$dark-shadow-md;
+  }
+}
+
+.pui-context-menu__item {
+  padding-left: t.$popover-padding;
+  padding-right: t.$popover-padding;
+  padding-top: t.$menu-item-padding-y;
+  padding-bottom: t.$menu-item-padding-y;
+  font-size: t.$font-size-sm;
+  border-radius: t.$radius-md;
+  color: t.$foreground;
+  cursor: pointer;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-context-menu__item--active {
+  background-color: t.$accent;
+  color: t.$accent-foreground;
+  &.pui-dark {
+    background-color: t.$dark-accent;
+    color: t.$dark-accent-foreground;
+  }
+}
+
+.pui-context-menu__item--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}

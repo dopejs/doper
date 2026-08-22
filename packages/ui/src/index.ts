@@ -82,6 +82,23 @@ export { Slider, sliderRatio } from "./components/slider";
 export type { SliderProps } from "./components/slider";
 export { createDrag, positionToValue, useDrag } from "./drag";
 export type { DragCallbacks, DragHandlers } from "./drag";
+export { Calendar, daysInMonth, monthGrid, sameDate, shiftMonth } from "./components/calendar";
+export type { CalendarDate, CalendarProps } from "./components/calendar";
+export { ContextMenu } from "./components/context-menu";
+export type { ContextMenuEntry, ContextMenuProps } from "./components/context-menu";
+export { DataTable, dataTableDescriptor, nextSort } from "./components/data-table";
+export type {
+  DataTableColumn,
+  DataTableProps,
+  SortDirection,
+  SortState,
+} from "./components/data-table";
+export { DatePicker, formatDate } from "./components/date-picker";
+export type { DatePickerProps } from "./components/date-picker";
+export { ScrollArea, scrollbarThumb } from "./components/scroll-area";
+export type { ScrollAreaProps } from "./components/scroll-area";
+export { alignClass, columnStyle, Table, tableDescriptor } from "./components/table";
+export type { TableAlign, TableColumn, TableProps } from "./components/table";
 export { Collapsible } from "./components/collapsible";
 export type { CollapsibleProps } from "./components/collapsible";
 export {

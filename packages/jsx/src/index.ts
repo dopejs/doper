@@ -2,10 +2,12 @@ export { PINGO_ELEMENT_TYPE, createElement, isPingoElement, normalizeChildren } 
 export {
   Image,
   Input,
+  Scroll,
   Text,
   TextArea,
   Video,
   View,
+  VirtualList,
   type InputProps,
   type TextAreaProps,
   type ViewProps,

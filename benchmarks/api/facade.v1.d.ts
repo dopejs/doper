@@ -31,6 +31,7 @@ export {
 export {
   Fragment,
   Image,
+  Scroll,
   Input,
   PingoFont,
   PingoFontLoadError,
@@ -39,6 +40,7 @@ export {
   Video,
   TextArea as UnstyledTextArea,
   View,
+  VirtualList,
   createElement,
   createFont,
   createImage,
