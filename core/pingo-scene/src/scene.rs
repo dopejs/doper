@@ -27,6 +27,7 @@ use pingo_abi::{
     TEXT_STYLE_WEIGHT_OFFSET, VirtualAxis,
 };
 use pingo_anim::AnimationResource;
+use pingo_collections::OrderedMap;
 
 use crate::{BitSet, MAX_GENERATION, NodeId, SceneError};
 
@@ -113,9 +114,9 @@ struct Slot {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct PropertyLanes {
-    f32: BTreeMap<Prop, Vec<Option<f32>>>,
-    vec4: BTreeMap<Prop, Vec<Option<[f32; 4]>>>,
-    refs: BTreeMap<Prop, Vec<Option<u32>>>,
+    f32: OrderedMap<Prop, Vec<Option<f32>>>,
+    vec4: OrderedMap<Prop, Vec<Option<[f32; 4]>>>,
+    refs: OrderedMap<Prop, Vec<Option<u32>>>,
 }
 
 /// Core-owned, topology-ordered Scene using structure-of-arrays storage.
@@ -135,7 +136,7 @@ pub struct Scene {
     props: PropertyLanes,
     slots: Vec<Slot>,
     resources: BTreeMap<u32, Resource>,
-    interaction_states: BTreeMap<NodeId, u8>,
+    interaction_states: OrderedMap<NodeId, u8>,
     presentation_styles: BTreeMap<(NodeId, u16), ComputedStyleValue>,
     dirty_layout: BitSet,
     dirty_paint: BitSet,
@@ -171,7 +172,7 @@ impl Scene {
             props: PropertyLanes::default(),
             slots: Vec::new(),
             resources: BTreeMap::new(),
-            interaction_states: BTreeMap::new(),
+            interaction_states: OrderedMap::new(),
             presentation_styles: BTreeMap::new(),
             dirty_layout: BitSet::default(),
             dirty_paint: BitSet::default(),
@@ -1815,19 +1816,19 @@ fn resource_directly_referenced(scene: &Scene, resource_id: u32) -> bool {
 }
 
 fn set_lane<T: PartialEq + Copy>(
-    lanes: &mut BTreeMap<Prop, Vec<Option<T>>>,
+    lanes: &mut OrderedMap<Prop, Vec<Option<T>>>,
     prop: Prop,
     index: usize,
     scene_len: usize,
     value: T,
 ) -> bool {
-    let lane = lanes.entry(prop).or_insert_with(|| vec![None; scene_len]);
+    let lane = lanes.get_or_insert_with(prop, || vec![None; scene_len]);
     let changed = lane[index] != Some(value);
     lane[index] = Some(value);
     changed
 }
 
-fn clear_lane<T>(lanes: &mut BTreeMap<Prop, Vec<Option<T>>>, prop: Prop, index: usize) -> bool {
+fn clear_lane<T>(lanes: &mut OrderedMap<Prop, Vec<Option<T>>>, prop: Prop, index: usize) -> bool {
     lanes
         .get_mut(&prop)
         .and_then(|lane| lane[index].take())
@@ -1845,9 +1846,9 @@ struct PlanNode {
     scroll_position: Option<[f32; 2]>,
     virtual_list: Option<VirtualListConfig>,
     virtual_item_index: Option<u32>,
-    f32_props: BTreeMap<Prop, f32>,
-    vec4_props: BTreeMap<Prop, [f32; 4]>,
-    ref_props: BTreeMap<Prop, u32>,
+    f32_props: OrderedMap<Prop, f32>,
+    vec4_props: OrderedMap<Prop, [f32; 4]>,
+    ref_props: OrderedMap<Prop, u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -2186,9 +2187,9 @@ fn plan_create(
             scroll_position: None,
             virtual_list: None,
             virtual_item_index: None,
-            f32_props: BTreeMap::new(),
-            vec4_props: BTreeMap::new(),
-            ref_props: BTreeMap::new(),
+            f32_props: OrderedMap::new(),
+            vec4_props: OrderedMap::new(),
+            ref_props: OrderedMap::new(),
         },
     );
     Ok(())
@@ -2607,9 +2608,9 @@ fn optional_node(raw: u32) -> Result<Option<NodeId>, SceneError> {
 }
 
 fn collect_props<T: Copy>(
-    lanes: &BTreeMap<Prop, Vec<Option<T>>>,
+    lanes: &OrderedMap<Prop, Vec<Option<T>>>,
     index: usize,
-) -> BTreeMap<Prop, T> {
+) -> OrderedMap<Prop, T> {
     lanes
         .iter()
         .filter_map(|(prop, lane)| lane[index].map(|value| (*prop, value)))
@@ -2617,12 +2618,12 @@ fn collect_props<T: Copy>(
 }
 
 fn push_props<T: Copy>(
-    lanes: &mut BTreeMap<Prop, Vec<Option<T>>>,
-    values: BTreeMap<Prop, T>,
+    lanes: &mut OrderedMap<Prop, Vec<Option<T>>>,
+    values: OrderedMap<Prop, T>,
     index: usize,
 ) {
     for (prop, value) in values {
-        let lane = lanes.entry(prop).or_insert_with(|| vec![None; index]);
+        let lane = lanes.get_or_insert_with(prop, || vec![None; index]);
         lane.push(Some(value));
     }
 }

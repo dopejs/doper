@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 pingo-abi = { path = "../pingo-abi" }
 pingo-anim = { path = "../pingo-anim" }
+pingo-collections = { path = "../pingo-collections" }
 
 [dev-dependencies]
 proptest = "1.9.0"

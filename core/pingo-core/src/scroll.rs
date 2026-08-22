@@ -1,6 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use pingo_abi::{InputBatch, InputCommand, VirtualAxis};
+use pingo_collections::{OrderedMap, OrderedSet};
 use pingo_layout::{LayoutSnapshot, VirtualLayoutProvider};
 use pingo_paint::{PlaceholderRect, VirtualPaintResolver};
 use pingo_scene::{NodeId, Scene, VirtualListConfig};
@@ -69,7 +68,7 @@ pub(crate) struct ScrollAdvance {
 struct VirtualState {
     planner: Virtualizer,
     source: VirtualListConfig,
-    materialized: BTreeSet<u32>,
+    materialized: OrderedSet<u32>,
     planned_window: Option<(u32, u32)>,
     /// Whether a refill request is still waiting for the Shell to answer.
     refill_in_flight: bool,
@@ -366,7 +365,7 @@ impl ScrollAxes {
         let Some(axis) = self.virtual_state_mut() else {
             return Ok(false);
         };
-        let mut next = BTreeSet::new();
+        let mut next = OrderedSet::new();
         let mut child = scene.first_child(list);
         while let Some(node) = child {
             if let Some(index) = scene.virtual_item_index(node) {
@@ -439,7 +438,7 @@ fn create_virtual_axis(
     Ok(VirtualState {
         planner,
         source,
-        materialized: BTreeSet::new(),
+        materialized: OrderedSet::new(),
         planned_window: None,
         visible: (0, 0),
         refill_in_flight: false,
@@ -451,7 +450,7 @@ fn create_virtual_axis(
 
 #[derive(Clone, Debug)]
 pub(crate) struct ScrollController {
-    states: BTreeMap<NodeId, ScrollAxes>,
+    states: OrderedMap<NodeId, ScrollAxes>,
     platform: ScrollPlatform,
     last_input_sequence: Option<u32>,
     metrics: CoreScrollMetrics,
@@ -471,7 +470,7 @@ impl ScrollController {
 impl Default for ScrollController {
     fn default() -> Self {
         Self {
-            states: BTreeMap::new(),
+            states: OrderedMap::new(),
             // Overridden at construction. The default only decides the feel for
             // a caller that never states a platform.
             platform: ScrollPlatform::Ios,
@@ -487,7 +486,7 @@ impl ScrollController {
         &mut self,
         scene: &mut Scene,
         layout: &LayoutSnapshot,
-        programmatic: &BTreeSet<u32>,
+        programmatic: &OrderedSet<u32>,
     ) -> Result<Vec<NodeId>, CoreError> {
         let scroll_nodes: Vec<NodeId> = scene
             .ids()
@@ -495,7 +494,7 @@ impl ScrollController {
             .copied()
             .filter(|node| scene.is_scroll_container(*node) && !scene.excluded_by_display(*node))
             .collect();
-        let active: BTreeSet<NodeId> = scroll_nodes.iter().copied().collect();
+        let active: OrderedSet<NodeId> = scroll_nodes.iter().copied().collect();
         self.states.retain(|node, _| active.contains(node));
         self.pending_refills
             .retain(|request| active.iter().any(|node| node.raw() == request.node_id));
@@ -504,16 +503,20 @@ impl ScrollController {
         for node in scroll_nodes {
             let (content, viewport) = extents(scene, layout, node)?;
             let scene_position = scene.scroll_position(node).unwrap_or([0.0; 2]);
-            let state = match self.states.entry(node) {
-                std::collections::btree_map::Entry::Vacant(entry) => entry.insert(ScrollAxes::new(
+            if !self.states.contains_key(&node) {
+                let axes = ScrollAxes::new(
                     content,
                     viewport,
                     scene_position,
                     self.platform,
                     scene.virtual_list(node),
-                )?),
-                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
+                )?;
+                self.states.insert(node, axes);
+            }
+            let state = self
+                .states
+                .get_mut(&node)
+                .ok_or(CoreError::InvalidScrollTarget { node })?;
             state.set_extents(content, viewport, self.platform, scene.virtual_list(node))?;
             if state.synchronize_virtual_items(scene, layout, node)? {
                 corrected.push(node);
@@ -540,19 +543,19 @@ impl ScrollController {
                 incoming: batch.frame_seq,
             });
         }
-        let mut staged = BTreeMap::new();
+        let mut staged = OrderedMap::new();
         for instruction in &batch.instructions {
             let node = input_node(&instruction.command)?;
             if !scene.is_scroll_container(node) || scene.excluded_by_display(node) {
                 return Err(CoreError::InvalidScrollTarget { node });
             }
-            if let std::collections::btree_map::Entry::Vacant(entry) = staged.entry(node) {
-                entry.insert(
-                    self.states
-                        .get(&node)
-                        .ok_or(CoreError::InvalidScrollTarget { node })?
-                        .clone(),
-                );
+            if !staged.contains_key(&node) {
+                let axes = self
+                    .states
+                    .get(&node)
+                    .ok_or(CoreError::InvalidScrollTarget { node })?
+                    .clone();
+                staged.insert(node, axes);
             }
         }
 
@@ -811,7 +814,7 @@ impl ScrollController {
     }
 
     pub(crate) fn plan_virtual_frames(&mut self) -> Result<(), CoreError> {
-        for (&node, state) in &mut self.states {
+        for (&node, state) in self.states.iter_mut() {
             let Some(axis) = state.virtual_state_mut() else {
                 continue;
             };

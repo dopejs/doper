@@ -1,13 +1,11 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use pingo_abi::{ComputedStyleValue, StyleLengthUnit, StyleProperty, StyleTransformOperation};
 use pingo_anim::{
     AnimatedProperty, AnimationError, Playback, PresentationValue, Transition,
     TransitionDeclaration, sample,
 };
+use pingo_collections::{OrderedMap, OrderedSet};
 use pingo_layout::LayoutSnapshot;
 use pingo_paint::AffineResource;
 use pingo_scene::{NodeId, Scene};
@@ -51,10 +49,10 @@ struct ActiveKeyframes {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct AnimationController {
     logical_micros: u64,
-    resource_ids: BTreeMap<NodeId, u32>,
-    durable: BTreeMap<(NodeId, u8), PresentationValue>,
-    transitions: BTreeMap<(NodeId, u8), Transition>,
-    keyframes: BTreeMap<(NodeId, u8), ActiveKeyframes>,
+    resource_ids: OrderedMap<NodeId, u32>,
+    durable: OrderedMap<(NodeId, u8), PresentationValue>,
+    transitions: OrderedMap<(NodeId, u8), Transition>,
+    keyframes: OrderedMap<(NodeId, u8), ActiveKeyframes>,
     reduced_motion: bool,
     metrics: AnimationMetrics,
 }
@@ -71,7 +69,7 @@ impl AnimationController {
         layout: &LayoutSnapshot,
     ) -> Result<bool, CoreError> {
         let live = scene.ids().to_vec();
-        let mut configured = BTreeMap::new();
+        let mut configured = OrderedMap::new();
         let mut changed = false;
         for node in live {
             if scene.excluded_by_display(node) {
@@ -161,7 +159,7 @@ impl AnimationController {
         self.metrics.phase_after = 0;
         let transition_keys = self.transitions.keys().copied().collect::<Vec<_>>();
         for key @ (node, property) in transition_keys {
-            let transition = self.transitions[&key];
+            let transition = *self.transitions.at(&key);
             self.record_phase(transition_phase(
                 transition,
                 self.logical_micros,
@@ -185,9 +183,8 @@ impl AnimationController {
         }
         let keyframe_keys = self.keyframes.keys().copied().collect::<Vec<_>>();
         for key @ (node, property) in keyframe_keys {
-            let frozen_phase = self.keyframes[&key]
-                .frozen
-                .then_some(self.keyframes[&key].phase);
+            let entry = self.keyframes.at(&key);
+            let frozen_phase = entry.frozen.then_some(entry.phase);
             if let Some(phase) = frozen_phase {
                 self.record_phase(phase);
                 continue;
@@ -368,7 +365,11 @@ impl AnimationController {
     }
 
     fn update_retained_bytes(&mut self, scene: &Scene) {
-        let resource_ids = self.resource_ids.values().copied().collect::<BTreeSet<_>>();
+        let resource_ids = self
+            .resource_ids
+            .values()
+            .copied()
+            .collect::<OrderedSet<_>>();
         let payload = resource_ids
             .iter()
             .filter_map(|resource_id| scene.resource(*resource_id))

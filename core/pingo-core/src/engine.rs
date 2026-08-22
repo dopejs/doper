@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     sync::Arc,
 };
 
@@ -36,6 +36,7 @@ use pingo_abi::{
     Mutation, MutationBatch, NON_PASSIVE_REGION_VERSION, NULL_NODE_ID, NodeKind, Prop,
     ResourceKind, SEMANTICS_VERSION, StyleKeyword, StyleProperty, SystemTextMetricBatch,
 };
+use pingo_collections::OrderedSet;
 use pingo_hit::{HitIndex, HitPoint, WorldGeometry, WorldRect};
 use pingo_layout::{BoxConstraints, LayoutEngine};
 use pingo_paint::{PaintEngine, PaintMetrics};
@@ -323,7 +324,7 @@ fn collect_editable_configurations(batch: &MutationBatch) -> Vec<EditableConfigu
         .collect()
 }
 
-fn collect_programmatic_scrolls(batch: &MutationBatch) -> BTreeSet<u32> {
+fn collect_programmatic_scrolls(batch: &MutationBatch) -> OrderedSet<u32> {
     batch
         .instructions
         .iter()
@@ -1621,7 +1622,7 @@ impl CoreEngine {
         let frame_seq = self
             .last_frame_seq
             .ok_or(CoreError::MissingCommittedFrame)?;
-        let mut programmatic = BTreeSet::new();
+        let mut programmatic = OrderedSet::new();
         if let Some((scroll_node, position)) = reveal
             && self
                 .scene
@@ -2222,14 +2223,14 @@ impl CoreEngine {
             &fallback_geometry.changed,
             fallback_geometry.visited,
         );
-        let corrected =
-            match self
-                .scroll
-                .synchronize(&mut self.scene, self.layout.snapshot(), &BTreeSet::new())
-            {
-                Ok(corrected) => corrected,
-                Err(error) => return self.poison(error),
-            };
+        let corrected = match self.scroll.synchronize(
+            &mut self.scene,
+            self.layout.snapshot(),
+            &OrderedSet::new(),
+        ) {
+            Ok(corrected) => corrected,
+            Err(error) => return self.poison(error),
+        };
         if corrected.is_empty() {
             return Ok(());
         }

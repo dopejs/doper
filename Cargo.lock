@@ -181,11 +181,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pingo-collections"
+version = "0.1.0"
+
+[[package]]
 name = "pingo-core"
 version = "0.1.0"
 dependencies = [
  "pingo-abi",
  "pingo-anim",
+ "pingo-collections",
  "pingo-edit",
  "pingo-headless",
  "pingo-hit",
@@ -264,6 +269,7 @@ version = "0.1.0"
 dependencies = [
  "pingo-abi",
  "pingo-anim",
+ "pingo-collections",
  "proptest",
 ]
 

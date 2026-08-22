@@ -1,4 +1,6 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
+
+use pingo_collections::OrderedMap;
 
 use pingo_abi::{
     EditTransactionBatch, EditTransactionKind, EditTransactionRecord, InputCommand,
@@ -46,7 +48,7 @@ struct ActiveEdit {
 
 #[derive(Clone, Default)]
 pub(crate) struct EditingController {
-    sessions: BTreeMap<NodeId, ActiveEdit>,
+    sessions: OrderedMap<NodeId, ActiveEdit>,
     pending: Vec<(NodeId, EditTransaction)>,
     active_node: Option<NodeId>,
 }
@@ -88,7 +90,7 @@ impl EditingController {
         scene: &Scene,
         configurations: &[EditableConfiguration],
     ) -> Result<Vec<NodeId>, CoreError> {
-        let mut requested = BTreeMap::new();
+        let mut requested = OrderedMap::new();
         for configuration in configurations {
             validate_configuration(*configuration)?;
             let node = NodeId::from_raw(configuration.node_id)?;

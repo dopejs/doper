@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "core/pingo-anim",
   "core/pingo-abi",
+  "core/pingo-collections",
   "core/pingo-core",
   "core/pingo-edit",
   "core/pingo-headless",

@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 pingo-abi = { path = "../pingo-abi" }
 pingo-anim = { path = "../pingo-anim" }
+pingo-collections = { path = "../pingo-collections" }
 pingo-edit = { path = "../pingo-edit" }
 pingo-hit = { path = "../pingo-hit" }
 pingo-layout = { path = "../pingo-layout" }

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use pingo_collections::OrderedMap;
 
 use pingo_abi::{
     EventTransactionRecord, InputEventKind, InputFocusOrigin, InputPointerType,
@@ -82,8 +82,8 @@ struct FocusState {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct InteractionController {
-    pointers: BTreeMap<u32, PointerState>,
-    captures: BTreeMap<u32, NodeId>,
+    pointers: OrderedMap<u32, PointerState>,
+    captures: OrderedMap<u32, NodeId>,
     focus: Option<FocusState>,
 }
 
@@ -194,7 +194,7 @@ impl InteractionController {
                 .map(|state| state.boundary_path.clone())
                 .unwrap_or_default();
             Self::boundary_events(&input, &previous, &route, records);
-            let state = self.pointers.entry(input.pointer_id).or_default();
+            let state = self.pointers.get_or_insert_default(input.pointer_id);
             state.boundary_path.clone_from(&route);
             state.last = Some(input);
             if input.kind == InputEventKind::PointerDown && input.buttons & 1 != 0 {
@@ -482,7 +482,7 @@ impl InteractionController {
     }
 
     fn apply_state_masks(&self, scene: &mut Scene) -> usize {
-        let mut masks = BTreeMap::<NodeId, u8>::new();
+        let mut masks = OrderedMap::<NodeId, u8>::new();
         for pointer in self.pointers.values() {
             let hover_capable = pointer.last.is_some_and(|event| {
                 matches!(
@@ -492,17 +492,17 @@ impl InteractionController {
             });
             if hover_capable {
                 for node in &pointer.boundary_path {
-                    *masks.entry(*node).or_default() |= STYLE_INTERACTION_HOVER;
+                    *masks.get_or_insert_default(*node) |= STYLE_INTERACTION_HOVER;
                 }
             }
             for node in &pointer.active_path {
-                *masks.entry(*node).or_default() |= STYLE_INTERACTION_ACTIVE;
+                *masks.get_or_insert_default(*node) |= STYLE_INTERACTION_ACTIVE;
             }
         }
         if let Some(focus) = self.focus {
-            *masks.entry(focus.node).or_default() |= STYLE_INTERACTION_FOCUS;
+            *masks.get_or_insert_default(focus.node) |= STYLE_INTERACTION_FOCUS;
             if focus.visible {
-                *masks.entry(focus.node).or_default() |= STYLE_INTERACTION_FOCUS_VISIBLE;
+                *masks.get_or_insert_default(focus.node) |= STYLE_INTERACTION_FOCUS_VISIBLE;
             }
         }
         let existing = scene.interaction_states().collect::<Vec<_>>();
