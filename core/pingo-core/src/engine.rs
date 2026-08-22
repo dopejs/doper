@@ -2666,6 +2666,185 @@ mod tests {
         bytes
     }
 
+    /// One computed-style resource with an optional hover variant.
+    fn computed_entries(entries: &[(StyleProperty, u8, u8, Vec<u8>)]) -> Vec<u8> {
+        let mut sorted = entries.to_vec();
+        sorted.sort_by_key(|(property, state, _, _)| (*state, *property as u16));
+        let payload_bytes = sorted
+            .iter()
+            .map(|(_, _, _, payload)| 8 + payload.len().next_multiple_of(4))
+            .sum::<usize>();
+        let mut bytes = vec![0_u8; 16];
+        bytes[0] = STYLE_COMPUTED_ENCODING_VERSION;
+        bytes[1] = STYLE_COMPUTED_ENCODING_VARIANT;
+        bytes[4..8].copy_from_slice(&STYLE_ALL_FEATURE_BITS.to_le_bytes());
+        bytes[8..12].copy_from_slice(&u32::try_from(sorted.len()).expect("entries").to_le_bytes());
+        bytes[12..16]
+            .copy_from_slice(&u32::try_from(payload_bytes).expect("payload").to_le_bytes());
+        for (property, state, tag, payload) in &sorted {
+            bytes.extend_from_slice(&(*property as u16).to_le_bytes());
+            bytes.push(*state);
+            bytes.push(*tag);
+            bytes.extend_from_slice(&u16::try_from(payload.len()).expect("payload").to_le_bytes());
+            bytes.extend_from_slice(&0_u16.to_le_bytes());
+            bytes.extend_from_slice(payload);
+            bytes.resize(bytes.len().next_multiple_of(4), 0);
+        }
+        bytes
+    }
+
+    fn shadow_layers(layers: &[(f32, f32, f32, f32, u32)]) -> Vec<u8> {
+        let mut bytes = u32::try_from(layers.len())
+            .expect("layers")
+            .to_le_bytes()
+            .to_vec();
+        for (x, y, blur, spread, rgba) in layers {
+            for value in [x, y, blur, spread] {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            bytes.extend_from_slice(&rgba.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn shadowed_card() -> Vec<u8> {
+        frame(
+            1,
+            vec![
+                Mutation::DefineResource {
+                    resource_id: 1,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_entries(&[
+                        (
+                            StyleProperty::BackgroundColor,
+                            0,
+                            pingo_abi::STYLE_VALUE_RGBA8,
+                            0xffff_ffff_u32.to_le_bytes().to_vec(),
+                        ),
+                        (
+                            StyleProperty::BoxShadow,
+                            0,
+                            pingo_abi::STYLE_VALUE_SHADOW_LIST,
+                            shadow_layers(&[(0.0, 1.0, 2.0, 0.0, 0x0000_0080)]),
+                        ),
+                        (
+                            StyleProperty::BoxShadow,
+                            pingo_abi::STYLE_INTERACTION_HOVER,
+                            pingo_abi::STYLE_VALUE_SHADOW_LIST,
+                            shadow_layers(&[(0.0, 6.0, 12.0, 0.0, 0x0000_0080)]),
+                        ),
+                    ]),
+                },
+                Mutation::CreateNode {
+                    node_id: id(0),
+                    kind: NodeKind::Root,
+                    parent: NULL_NODE_ID,
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::CreateNode {
+                    node_id: id(1),
+                    kind: NodeKind::Container,
+                    parent: id(0),
+                    before_sibling: NULL_NODE_ID,
+                },
+                Mutation::SetRef {
+                    node_id: id(1),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 1,
+                },
+                Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Width,
+                    value: 60.0,
+                },
+                Mutation::SetF32 {
+                    node_id: id(1),
+                    prop: Prop::Height,
+                    value: 30.0,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn a_hover_shadow_repaints_only_the_node_and_matches_a_full_repaint() {
+        let mut engine = CoreEngine::new(120.0, 90.0).expect("Core");
+        let base = engine.commit(&shadowed_card()).expect("frame");
+        let resting = HeadlessRenderer::new()
+            .render(&base.display_list, engine.scene(), 120, 90)
+            .expect("resting pixels");
+
+        // A pointer inside the card raises the hover shadow.
+        let hovered_output = engine
+            .input(&input(
+                1,
+                vec![InputCommand::DispatchEvent {
+                    event_id: 1,
+                    kind: InputEventKind::PointerMove,
+                    flags: 0,
+                    position: [20.0, 15.0],
+                    delta: [0.0, 0.0],
+                    buttons: 0,
+                    modifiers: 0,
+                    pointer_id: 3,
+                    elapsed_micros: 16_667,
+                    pointer_type: InputPointerType::Mouse,
+                    is_primary: true,
+                    pressure: 0.0,
+                    tilt: [0.0, 0.0],
+                    contact_size: [0.0, 0.0],
+                }],
+            ))
+            .expect("hover")
+            .expect("hover frame");
+        let hovered = HeadlessRenderer::new()
+            .render(&hovered_output.display_list, engine.scene(), 120, 90)
+            .expect("hovered pixels");
+
+        // The taller shadow reaches further below the card than the resting one.
+        let below = (48 * 120 + 30) * 4;
+        assert_ne!(
+            &resting.pixels()[below..below + 4],
+            &hovered.pixels()[below..below + 4],
+            "a raised shadow must change pixels below the card"
+        );
+
+        // Only the card's own Picture is rebuilt: its subtree has no children,
+        // and the root is not repainted from scratch.
+        assert_eq!(hovered_output.diagnostics.over_invalidated_frames, 0);
+
+        // A Core that reaches the same state from cold must produce the same
+        // pixels as the incremental one.
+        let mut cold = CoreEngine::new(120.0, 90.0).expect("Core");
+        cold.commit(&shadowed_card()).expect("frame");
+        let cold_output = cold
+            .input(&input(
+                1,
+                vec![InputCommand::DispatchEvent {
+                    event_id: 1,
+                    kind: InputEventKind::PointerMove,
+                    flags: 0,
+                    position: [20.0, 15.0],
+                    delta: [0.0, 0.0],
+                    buttons: 0,
+                    modifiers: 0,
+                    pointer_id: 3,
+                    elapsed_micros: 16_667,
+                    pointer_type: InputPointerType::Mouse,
+                    is_primary: true,
+                    pressure: 0.0,
+                    tilt: [0.0, 0.0],
+                    contact_size: [0.0, 0.0],
+                }],
+            ))
+            .expect("hover")
+            .expect("hover frame");
+        let cold_pixels = HeadlessRenderer::new()
+            .render(&cold_output.display_list, cold.scene(), 120, 90)
+            .expect("cold pixels");
+        assert_eq!(hovered.pixels(), cold_pixels.pixels());
+    }
+
     fn opacity_transition_resource(duration_micros: u32) -> Vec<u8> {
         let mut bytes = vec![0_u8; 36];
         bytes[0] = 1;

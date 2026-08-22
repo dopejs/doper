@@ -267,8 +267,11 @@ async function checkAbiRoundtrip() {
   assertEqual(resources.getTextStyle(3)?.textAlign, "center", "portable M6 text alignment fixture");
 
   const display = backend.decodeDisplayList(decodeHex(displayGolden));
-  if (display.commands.length !== 4 || display.commands[0]?.type !== "save") {
+  if (display.commands.length !== 5 || display.commands[0]?.type !== "save") {
     throw new Error("TypeScript display-list decoder did not accept the golden contract");
+  }
+  if (display.commands.at(-1)?.type !== "fillColorShadow") {
+    throw new Error("TypeScript display-list decoder did not accept the shadow contract");
   }
   assertEqual(
     roundTripInRust("display", displayGolden),

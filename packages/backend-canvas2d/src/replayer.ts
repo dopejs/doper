@@ -186,6 +186,19 @@ function validateCommand(
       reader.u32();
       return;
     }
+    case DisplayOpcode.FillColorShadow: {
+      reader.skipF32(2);
+      if (reader.f32() < 0 || reader.f32() < 0) {
+        replayFail("shadow has negative extent");
+      }
+      for (let index = 0; index < 4; index += 1) {
+        if (reader.f32() < 0) replayFail("shadow has negative radius");
+      }
+      reader.skipF32(2);
+      if (reader.f32() < 0) replayFail("shadow has negative blur");
+      reader.u32();
+      return;
+    }
     case DisplayOpcode.FillColorBorder: {
       reader.skipF32(2);
       if (reader.f32() < 0 || reader.f32() < 0) {
@@ -361,6 +374,31 @@ function replayCommand(
       context.beginPath();
       context.roundRect(x, y, width, height, [topLeft, topRight, bottomRight, bottomLeft]);
       context.fill();
+      return;
+    }
+    case DisplayOpcode.FillColorShadow: {
+      const x = reader.f32();
+      const y = reader.f32();
+      const width = reader.f32();
+      const height = reader.f32();
+      const radii = [reader.f32(), reader.f32(), reader.f32(), reader.f32()] as const;
+      const offsetX = reader.f32();
+      const offsetY = reader.f32();
+      const blur = reader.f32();
+      const color = rgbaCss(reader.u32());
+      // Core already folded CSS spread into the rectangle and radii, so all
+      // that is left is what Canvas2D does natively. The fill itself lands
+      // under the node's own background; see docs/style-support.md.
+      context.save();
+      context.shadowColor = color;
+      context.shadowBlur = blur;
+      context.shadowOffsetX = offsetX;
+      context.shadowOffsetY = offsetY;
+      context.fillStyle = color;
+      context.beginPath();
+      context.roundRect(x, y, width, height, [...radii]);
+      context.fill();
+      context.restore();
       return;
     }
     case DisplayOpcode.FillColorBorder: {

@@ -893,6 +893,9 @@ fn build_node(
     }
     let visible = scene.visible(node);
     let radius = style_border_radius(scene, node, size);
+    if visible {
+        push_shadows(scene, node, size, radius, &mut instructions);
+    }
     if visible && let Some(paint_id) = scene.ref_prop(node, Prop::BackgroundColor) {
         let resource = typed_resource(scene, paint_id, ResourceKind::Paint)?;
         SolidPaint::decode(paint_id, resource)?;
@@ -1203,6 +1206,43 @@ fn resolve_object_position(length: StyleLength, container: f32, object: f32) -> 
     }
 }
 
+/// Emits one instruction per declared shadow, behind everything the node paints.
+///
+/// CSS paints the first declared shadow on top, so they go out back to front.
+/// Spread is folded into the rectangle and radii here: a backend has an offset,
+/// a blur and a color, and no CSS spread of its own.
+fn push_shadows(
+    scene: &Scene,
+    node: NodeId,
+    size: pingo_layout::Size,
+    radius: f32,
+    instructions: &mut Vec<DisplayInstruction>,
+) {
+    let Some(shadows) = scene.presented_style_shadows(node) else {
+        return;
+    };
+    for shadow in shadows.iter().rev() {
+        if shadow.rgba & 0xff == 0 {
+            continue;
+        }
+        let width = size.width + shadow.spread * 2.0;
+        let height = size.height + shadow.spread * 2.0;
+        if width <= 0.0 || height <= 0.0 {
+            continue;
+        }
+        push(
+            instructions,
+            DisplayCommand::FillColorShadow {
+                rect: [-shadow.spread, -shadow.spread, width, height],
+                radii: [(radius + shadow.spread).max(0.0); 4],
+                offset: [shadow.offset_x, shadow.offset_y],
+                blur: shadow.blur,
+                rgba: shadow.rgba,
+            },
+        );
+    }
+}
+
 fn style_border_radius(scene: &Scene, node: NodeId, size: pingo_layout::Size) -> f32 {
     let Some(length) = scene.presented_style_length(node, StyleProperty::BorderRadius) else {
         return 0.0;
@@ -1438,6 +1478,175 @@ mod tests {
             )
             .expect("layout");
         (layout, outcome.changed)
+    }
+
+    fn computed_style(entries: &[(pingo_abi::StyleProperty, u8, Vec<u8>)]) -> Vec<u8> {
+        let payload_bytes = entries
+            .iter()
+            .map(|(_, _, payload)| 8 + payload.len().next_multiple_of(4))
+            .sum::<usize>();
+        let mut bytes = vec![0; 16];
+        bytes[0] = pingo_abi::STYLE_COMPUTED_ENCODING_VERSION;
+        bytes[1] = pingo_abi::STYLE_COMPUTED_ENCODING_VARIANT;
+        bytes[4..8].copy_from_slice(&pingo_abi::STYLE_ALL_FEATURE_BITS.to_le_bytes());
+        bytes[8..12].copy_from_slice(&u32::try_from(entries.len()).expect("entries").to_le_bytes());
+        bytes[12..16]
+            .copy_from_slice(&u32::try_from(payload_bytes).expect("payload").to_le_bytes());
+        for (property, tag, payload) in entries {
+            bytes.extend_from_slice(&(*property as u16).to_le_bytes());
+            bytes.push(0);
+            bytes.push(*tag);
+            bytes.extend_from_slice(&u16::try_from(payload.len()).expect("payload").to_le_bytes());
+            bytes.extend_from_slice(&0_u16.to_le_bytes());
+            bytes.extend_from_slice(payload);
+            bytes.resize(bytes.len().next_multiple_of(4), 0);
+        }
+        bytes
+    }
+
+    fn shadow_list(layers: &[(f32, f32, f32, f32, u32)]) -> Vec<u8> {
+        let mut bytes = u32::try_from(layers.len())
+            .expect("layers")
+            .to_le_bytes()
+            .to_vec();
+        for (x, y, blur, spread, rgba) in layers {
+            for value in [x, y, blur, spread] {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+            bytes.extend_from_slice(&rgba.to_le_bytes());
+        }
+        bytes
+    }
+
+    #[test]
+    fn shadows_paint_behind_the_box_back_to_front_with_spread_folded_in() {
+        let root = id(0);
+        let card = id(1);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                Mutation::DefineResource {
+                    resource_id: 5,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[
+                        (
+                            pingo_abi::StyleProperty::BackgroundColor,
+                            pingo_abi::STYLE_VALUE_RGBA8,
+                            0xffff_ffff_u32.to_le_bytes().to_vec(),
+                        ),
+                        (
+                            pingo_abi::StyleProperty::BoxShadow,
+                            pingo_abi::STYLE_VALUE_SHADOW_LIST,
+                            shadow_list(&[
+                                (0.0, 1.0, 2.0, 0.0, 0x0000_001a),
+                                (0.0, 4.0, 8.0, 2.0, 0x0000_0033),
+                            ]),
+                        ),
+                    ]),
+                },
+                create(root, NodeKind::Root, None),
+                create(card, NodeKind::Container, Some(root)),
+                Mutation::SetRef {
+                    node_id: card.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 5,
+                },
+                set_f32(card, Prop::Width, 100.0),
+                set_f32(card, Prop::Height, 50.0),
+            ],
+        );
+        let (layout, changed) = layout(&scene);
+        let mut engine = PaintEngine::new();
+        let outcome = engine
+            .paint(&scene, layout.snapshot(), &changed, false)
+            .expect("paint");
+        let decoded = DisplayList::decode(outcome.picture.bytes()).expect("display list");
+
+        let shadows = decoded
+            .instructions
+            .iter()
+            .filter_map(|instruction| match instruction.command {
+                DisplayCommand::FillColorShadow {
+                    rect,
+                    radii,
+                    offset,
+                    blur,
+                    rgba,
+                } => Some((rect, radii, offset, blur, rgba)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        // CSS paints the first declared shadow on top, so it is emitted last.
+        assert_eq!(shadows.len(), 2);
+        assert_eq!(shadows[0].4, 0x0000_0033);
+        assert_eq!(shadows[1].4, 0x0000_001a);
+        // Spread grows the rectangle on every side and the radii with it.
+        assert_eq!(shadows[0].0, [-2.0, -2.0, 104.0, 54.0]);
+        assert_eq!(shadows[0].2, [0.0, 4.0]);
+        assert_eq!(shadows[0].3, 8.0);
+        // No spread leaves the box alone.
+        assert_eq!(shadows[1].0, [0.0, 0.0, 100.0, 50.0]);
+        assert_eq!(shadows[1].1, [0.0; 4]);
+
+        // Every shadow precedes the background it sits behind.
+        let first_shadow = decoded
+            .instructions
+            .iter()
+            .position(|instruction| {
+                matches!(instruction.command, DisplayCommand::FillColorShadow { .. })
+            })
+            .expect("shadow");
+        let background = decoded
+            .instructions
+            .iter()
+            .position(|instruction| {
+                matches!(instruction.command, DisplayCommand::FillColorRect { .. })
+            })
+            .expect("background");
+        assert!(first_shadow < background);
+    }
+
+    #[test]
+    fn a_fully_transparent_shadow_is_not_emitted_at_all() {
+        let root = id(0);
+        let card = id(1);
+        let mut scene = Scene::new();
+        commit(
+            &mut scene,
+            1,
+            vec![
+                Mutation::DefineResource {
+                    resource_id: 5,
+                    kind: ResourceKind::ComputedStyle,
+                    bytes: computed_style(&[(
+                        pingo_abi::StyleProperty::BoxShadow,
+                        pingo_abi::STYLE_VALUE_SHADOW_LIST,
+                        shadow_list(&[(0.0, 1.0, 2.0, 0.0, 0x0000_0000)]),
+                    )]),
+                },
+                create(root, NodeKind::Root, None),
+                create(card, NodeKind::Container, Some(root)),
+                Mutation::SetRef {
+                    node_id: card.raw(),
+                    prop: Prop::ComputedStyle,
+                    resource_id: 5,
+                },
+                set_f32(card, Prop::Width, 10.0),
+                set_f32(card, Prop::Height, 10.0),
+            ],
+        );
+        let (layout, changed) = layout(&scene);
+        let mut engine = PaintEngine::new();
+        let outcome = engine
+            .paint(&scene, layout.snapshot(), &changed, false)
+            .expect("paint");
+        let decoded = DisplayList::decode(outcome.picture.bytes()).expect("display list");
+        assert!(!decoded.instructions.iter().any(|instruction| {
+            matches!(instruction.command, DisplayCommand::FillColorShadow { .. })
+        }));
     }
 
     #[test]

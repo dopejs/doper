@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "cssSubsetVersion": "1.2.0",
+  "cssSubsetVersion": "1.3.0",
   "propertyIdBits": 16,
   "reservedPropertyIds": [17],
   "reservedPropertyIdReasons": {
@@ -22,6 +22,7 @@
     "borderBottomColor",
     "borderLeftColor",
     "borderRadius",
+    "boxShadow",
     "visibility",
     "transform",
     "transformOrigin",
@@ -42,7 +43,8 @@
       "u16": 6,
       "lineHeight": 7,
       "transformList": 8,
-      "position": 9
+      "position": 9,
+      "shadowList": 10
     },
     "lengthUnits": { "px": 1, "percent": 2, "auto": 3, "none": 4, "normal": 5, "number": 6 },
     "transformOperations": { "matrix": 1, "translate": 2, "scale": 3, "rotate": 4 }
@@ -157,6 +159,10 @@
       "note": "When a flex container scrolls along its main axis, overflowing content becomes scroll extent instead of a space deficit, so items are not shrunk. Growing still applies when the line is shorter than the viewport."
     },
     {
+      "topic": "`box-shadow` is outer-only and paints under a transparent box",
+      "note": "`inset` is rejected: drawing one needs an inverse path and a clip, and the shadcn preset has none. Canvas2D also paints the shadow behind the shape it came from, so a node with a transparent background shows the shadow through its middle where CSS would not; an opaque background covers it. Up to four shadows per node."
+    },
+    {
       "topic": "No `flex-wrap`",
       "note": "Flex containers are single-line. `flex-wrap` is not part of the subset, so main-axis overflow is clipped or scrolled rather than wrapped."
     }
@@ -165,7 +171,8 @@
   "animationTypes": ["none", "discrete", "number", "color", "transform"],
   "features": [
     { "name": "m6-foundation", "bit": 0 },
-    { "name": "flex-sizing", "bit": 1 }
+    { "name": "flex-sizing", "bit": 1 },
+    { "name": "box-shadow", "bit": 2 }
   ],
   "properties": [
     {
@@ -1067,6 +1074,21 @@
       "feature": "flex-sizing",
       "affects": ["layout", "hit", "scroll"],
       "percentageReference": "containing-main-size"
+    },
+    {
+      "id": 62,
+      "cssName": "box-shadow",
+      "jsName": "boxShadow",
+      "initial": "none",
+      "inherited": false,
+      "grammar": "box-shadow",
+      "canonical": "shadow-list",
+      "invalidation": ["paint", "paintSelf"],
+      "animation": "discrete",
+      "appliesTo": ["view", "text", "image", "input", "textArea", "video"],
+      "feature": "box-shadow",
+      "affects": ["paint"],
+      "percentageReference": "none"
     }
   ],
   "shorthands": [

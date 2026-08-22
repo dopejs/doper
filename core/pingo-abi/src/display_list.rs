@@ -66,6 +66,23 @@ pub enum DisplayCommand {
         /// Packed red/green/blue/alpha bytes in `0xRRGGBBAA` order.
         rgba: u32,
     },
+    /// Paints one outer drop shadow behind a rounded rectangle.
+    ///
+    /// CSS spread has no Canvas2D equivalent, so Core folds it into `rect` and
+    /// `radii` before emitting: a backend only has to apply an offset, a blur
+    /// and a color to a shape it already knows how to build.
+    FillColorShadow {
+        /// Shadow rectangle `[x, y, width, height]`, spread already applied.
+        rect: [f32; 4],
+        /// Corner radii `[top_left, top_right, bottom_right, bottom_left]`, spread applied.
+        radii: [f32; 4],
+        /// Shadow offset `[x, y]`.
+        offset: [f32; 2],
+        /// Blur radius, never negative.
+        blur: f32,
+        /// Packed red/green/blue/alpha bytes in `0xRRGGBBAA` order.
+        rgba: u32,
+    },
     /// Paints a rounded solid border with independent physical sides.
     FillColorBorder {
         /// Outer border rectangle `[x, y, width, height]`.
@@ -348,6 +365,23 @@ fn decode_command(
                 rgba: reader.read_u32()?,
             }
         }
+        DisplayOpcode::FillColorShadow => {
+            let rect = read_f32_array(reader)?;
+            let radii = read_f32_array(reader)?;
+            validate_rrect(rect, radii)?;
+            let offset = [reader.read_f32()?, reader.read_f32()?];
+            let blur = reader.read_f32()?;
+            if offset.iter().any(|value| !value.is_finite()) || !blur.is_finite() || blur < 0.0 {
+                return Err(AbiError::InvalidValue("shadow offset or blur is invalid"));
+            }
+            DisplayCommand::FillColorShadow {
+                rect,
+                radii,
+                offset,
+                blur,
+                rgba: reader.read_u32()?,
+            }
+        }
         DisplayOpcode::FillColorBorder => {
             let rect = read_f32_array(reader)?;
             let radii = read_f32_array(reader)?;
@@ -484,6 +518,25 @@ fn encode_command(writer: &mut Writer, instruction: &DisplayInstruction) -> Resu
             write_f32_array(writer, radii)?;
             writer.u32(*rgba);
         }
+        DisplayCommand::FillColorShadow {
+            rect,
+            radii,
+            offset,
+            blur,
+            rgba,
+        } => {
+            validate_rrect(*rect, *radii)?;
+            if offset.iter().any(|value| !value.is_finite()) || !blur.is_finite() || *blur < 0.0 {
+                return Err(AbiError::InvalidValue("shadow offset or blur is invalid"));
+            }
+            writer.instruction(DisplayOpcode::FillColorShadow as u8, flags);
+            write_f32_array(writer, rect)?;
+            write_f32_array(writer, radii)?;
+            writer.f32(offset[0])?;
+            writer.f32(offset[1])?;
+            writer.f32(*blur)?;
+            writer.u32(*rgba);
+        }
         DisplayCommand::FillColorBorder {
             rect,
             radii,
@@ -611,6 +664,7 @@ fn display_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::FillRect { .. } => DisplayOpcode::FillRect,
         DisplayCommand::FillColorRect { .. } => DisplayOpcode::FillColorRect,
         DisplayCommand::FillColorRRect { .. } => DisplayOpcode::FillColorRRect,
+        DisplayCommand::FillColorShadow { .. } => DisplayOpcode::FillColorShadow,
         DisplayCommand::FillColorBorder { .. } => DisplayOpcode::FillColorBorder,
         DisplayCommand::FillRRect { .. } => DisplayOpcode::FillRRect,
         DisplayCommand::FillPath { .. } => DisplayOpcode::FillPath,

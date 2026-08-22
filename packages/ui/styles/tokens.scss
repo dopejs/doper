@@ -47,6 +47,18 @@ $input-gap: 8px !default;
 // Structural tokens: the field absorbs the line, adornments keep their size.
 $input-field-flex: 1 1 0px !default;
 $input-slot-flex: 0 0 auto !default;
+// shadcn elevation ramp. Outer shadows only; see docs/style-support.md.
+$shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !default;
+$shadow-md:
+  0 4px 6px -1px rgba(0, 0, 0, 0.1),
+  0 2px 4px -2px rgba(0, 0, 0, 0.1) !default;
+$shadow-lg:
+  0 10px 15px -3px rgba(0, 0, 0, 0.1),
+  0 4px 6px -4px rgba(0, 0, 0, 0.1) !default;
+$dark-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4) !default;
+$dark-shadow-md:
+  0 4px 6px -1px rgba(0, 0, 0, 0.5),
+  0 2px 4px -2px rgba(0, 0, 0, 0.5) !default;
 $textarea-min-height: 72px !default;
 $divider-length: 100% !default;
 $alert-padding: 16px !default;

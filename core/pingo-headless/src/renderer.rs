@@ -161,6 +161,16 @@ impl HeadlessRenderer {
                     height,
                 );
             }
+            DisplayCommand::FillColorShadow {
+                rect,
+                radii,
+                offset,
+                blur,
+                rgba,
+            } => {
+                let state = self.current().clone();
+                self.fill_shadow(rect, radii, offset, blur, rgba, &state, width, height);
+            }
             DisplayCommand::FillColorRRect { rect, radii, rgba } => {
                 let [red, green, blue, alpha] = rgba.to_be_bytes();
                 let state = self.current().clone();
@@ -285,6 +295,105 @@ impl HeadlessRenderer {
                 blend(
                     &mut self.pixels[pixel..pixel + 4],
                     [paint.red, paint.green, paint.blue, source_alpha],
+                );
+                self.metrics.blended_pixels += 1;
+            }
+        }
+    }
+
+    /// Rasterizes one outer drop shadow.
+    ///
+    /// `Canvas2D` specifies `shadowBlur` as a Gaussian whose sigma is half the
+    /// blur, and implementations approximate it with three box passes. This
+    /// oracle does the same rather than an exact Gaussian, so it lands where a
+    /// real backend lands instead of somewhere provably different.
+    #[allow(clippy::too_many_arguments)]
+    fn fill_shadow(
+        &mut self,
+        rect: [f32; 4],
+        corners: [f32; 4],
+        shift: [f32; 2],
+        blur_radius: f32,
+        rgba: u32,
+        state: &State,
+        width: u32,
+        height: u32,
+    ) {
+        let [red, green, blue, declared] = rgba.to_be_bytes();
+        let source_alpha = scale_alpha(declared, state.alpha);
+        if source_alpha == 0 {
+            return;
+        }
+        let shifted = [rect[0] + shift[0], rect[1] + shift[1], rect[2], rect[3]];
+        let polygon = state.transform.rect(shifted);
+        let Some(tight) = polygon.bounds(width, height) else {
+            return;
+        };
+        let Some(inverse) = state.transform.inverse() else {
+            return;
+        };
+        // Three box passes reach about three sigma, which is where a Gaussian
+        // has nothing left worth blending.
+        let margin = clamp_ceil(f64::from(blur_radius) * 1.5, MAX_DIMENSION);
+        let bounds = Bounds {
+            left: tight.left.saturating_sub(margin),
+            right: (tight.right + margin).min(width),
+            top: tight.top.saturating_sub(margin),
+            bottom: (tight.bottom + margin).min(height),
+        };
+        let span = usize::try_from(bounds.right.saturating_sub(bounds.left)).unwrap_or(0);
+        let rows = usize::try_from(bounds.bottom.saturating_sub(bounds.top)).unwrap_or(0);
+        if span == 0 || rows == 0 {
+            return;
+        }
+        let radii = normalize_radii(rect[2], rect[3], corners);
+        let mut coverage = vec![0.0_f32; span * rows];
+        for row in 0..rows {
+            for column in 0..span {
+                let sample = Point {
+                    x: f64::from(bounds.left + offset_of(column)) + 0.5,
+                    y: f64::from(bounds.top + offset_of(row)) + 0.5,
+                };
+                let local = inverse.point_f64(sample);
+                let unshifted = Point {
+                    x: local.x - f64::from(shift[0]),
+                    y: local.y - f64::from(shift[1]),
+                };
+                if rounded_rect_contains(rect, radii, unshifted) {
+                    coverage[row * span + column] = 1.0;
+                }
+            }
+        }
+        if blur_radius > 0.0 {
+            box_blur(&mut coverage, span, rows, box_size(blur_radius * 0.5));
+        }
+        for row in 0..rows {
+            for column in 0..span {
+                self.metrics.candidate_pixels += 1;
+                let value = coverage[row * span + column];
+                if value <= 0.0 {
+                    continue;
+                }
+                let x = bounds.left + offset_of(column);
+                let y = bounds.top + offset_of(row);
+                let sample = Point {
+                    x: f64::from(x) + 0.5,
+                    y: f64::from(y) + 0.5,
+                };
+                if state.clips.iter().any(|clip| !clip.contains(sample)) {
+                    continue;
+                }
+                let blended_alpha = scale_alpha(source_alpha, value.clamp(0.0, 1.0));
+                if blended_alpha == 0 {
+                    continue;
+                }
+                let pixel = (usize::try_from(y).expect("bounded y")
+                    * usize::try_from(width).expect("bounded width")
+                    + usize::try_from(x).expect("bounded x"))
+                    * 4;
+                blend(
+                    &mut self.pixels[pixel..pixel + 4],
+                    [red, green, blue, blended_alpha],
                 );
                 self.metrics.blended_pixels += 1;
             }
@@ -580,6 +689,7 @@ fn validate_supported(display_list: &DisplayList) -> Result<(), HeadlessError> {
             | DisplayCommand::FillRRect { .. }
             | DisplayCommand::FillColorRRect { .. }
             | DisplayCommand::FillColorBorder { .. }
+            | DisplayCommand::FillColorShadow { .. }
             | DisplayCommand::FillPlaceholder { .. }
             | DisplayCommand::DrawEditorDecoration { .. } => {}
             ref command => return Err(HeadlessError::UnsupportedCommand(command_opcode(command))),
@@ -599,6 +709,7 @@ fn command_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::FillColorRect { .. } => DisplayOpcode::FillColorRect,
         DisplayCommand::FillColorRRect { .. } => DisplayOpcode::FillColorRRect,
         DisplayCommand::FillColorBorder { .. } => DisplayOpcode::FillColorBorder,
+        DisplayCommand::FillColorShadow { .. } => DisplayOpcode::FillColorShadow,
         DisplayCommand::FillRRect { .. } => DisplayOpcode::FillRRect,
         DisplayCommand::FillPath { .. } => DisplayOpcode::FillPath,
         DisplayCommand::DrawGlyphRun { .. } => DisplayOpcode::DrawGlyphRun,
@@ -609,6 +720,89 @@ fn command_opcode(command: &DisplayCommand) -> DisplayOpcode {
         DisplayCommand::DrawImage { .. } => DisplayOpcode::DrawImage,
         DisplayCommand::DrawPicture { .. } => DisplayOpcode::DrawPicture,
     }
+}
+
+/// Converts a mask index back into a pixel offset.
+fn offset_of(index: usize) -> u32 {
+    u32::try_from(index).unwrap_or(u32::MAX)
+}
+
+/// Box width whose three passes approximate a Gaussian of this sigma.
+///
+/// This is the same rule Skia uses for `shadowBlur`, so the oracle and a real
+/// `Canvas2D` reach the same shape.
+fn box_size(sigma: f32) -> usize {
+    if sigma <= 0.0 {
+        return 0;
+    }
+    let size = usize::try_from(clamp_floor(
+        f64::from(sigma) * 3.0 * (2.0 * core::f64::consts::PI).sqrt() / 4.0 + 0.5,
+        MAX_DIMENSION,
+    ))
+    .unwrap_or(1)
+    .max(1);
+    // An odd width keeps the box centred, so the blur does not drift.
+    if size % 2 == 0 { size + 1 } else { size }
+}
+
+/// Three separable box passes over a coverage mask.
+fn box_blur(coverage: &mut [f32], span: usize, rows: usize, size: usize) {
+    if size <= 1 {
+        return;
+    }
+    let radius = size / 2;
+    let mut scratch = vec![0.0_f32; coverage.len()];
+    for _ in 0..3 {
+        blur_axis(coverage, &mut scratch, span, rows, radius, true);
+        blur_axis(&scratch, coverage, span, rows, radius, false);
+        // `blur_axis` wrote rows into `scratch` then columns back into
+        // `coverage`, so the pass ends with the result where it started.
+    }
+}
+
+fn blur_axis(
+    source: &[f32],
+    destination: &mut [f32],
+    span: usize,
+    rows: usize,
+    radius: usize,
+    horizontal: bool,
+) {
+    let (outer, inner) = if horizontal {
+        (rows, span)
+    } else {
+        (span, rows)
+    };
+    let divisor = coverage_divisor(radius);
+    for line in 0..outer {
+        for index in 0..inner {
+            let mut total = 0.0_f32;
+            for step in 0..=radius * 2 {
+                // Saturating arithmetic clamps at the edges, which is the
+                // border behaviour a box blur wants anyway.
+                let clamped = (index + step)
+                    .saturating_sub(radius)
+                    .min(inner.saturating_sub(1));
+                let (row, column) = if horizontal {
+                    (line, clamped)
+                } else {
+                    (clamped, line)
+                };
+                total += source[row * span + column];
+            }
+            let (row, column) = if horizontal {
+                (line, index)
+            } else {
+                (index, line)
+            };
+            destination[row * span + column] = total / divisor;
+        }
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn coverage_divisor(radius: usize) -> f32 {
+    (radius * 2 + 1) as f32
 }
 
 fn normalize_radii(width: f32, height: f32, radii: [f32; 4]) -> [f32; 4] {

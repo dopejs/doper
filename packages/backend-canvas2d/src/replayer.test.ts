@@ -124,6 +124,10 @@ describe("Canvas2DReplayer", () => {
         writeF32s(view, 4, [2, 3, 20, 30, 2, 2, 2, 2]);
         view.setUint32(36, 0x1234_56ff, true);
       }),
+      command(DisplayOpcode.FillColorShadow, 48, (view) => {
+        writeF32s(view, 4, [-2, -2, 104, 54, 8, 8, 8, 8, 0, 4, 12]);
+        view.setUint32(48, 0x0000_0033, true);
+      }),
       command(DisplayOpcode.FillColorBorder, 64, (view) => {
         writeF32s(view, 4, [0, 0, 40, 30, 5, 5, 5, 5, 1, 2, 3, 4]);
         for (const [index, color] of [
@@ -155,10 +159,17 @@ describe("Canvas2DReplayer", () => {
     ]);
     const calls: unknown[][] = [];
 
-    expect(new Canvas2DReplayer().replay(fakeContext(calls), list, resources).commands).toBe(10);
+    expect(new Canvas2DReplayer().replay(fakeContext(calls), list, resources).commands).toBe(11);
     expect(calls).toContainEqual(["transform", 1, 2, 3, 4, 5, 6]);
     expect(calls).toContainEqual(["roundRect", 1, 2, 30, 40, [3, 4, 5, 6]]);
     expect(calls).toContainEqual(["roundRect", 2, 3, 20, 30, [2, 2, 2, 2]]);
+    // Core folded CSS spread into the rectangle, so the backend only applies
+    // the offset, the blur and the color that Canvas2D understands natively.
+    expect(calls).toContainEqual(["shadowBlur", 12]);
+    expect(calls).toContainEqual(["shadowOffsetX", 0]);
+    expect(calls).toContainEqual(["shadowOffsetY", 4]);
+    expect(calls).toContainEqual(["shadowColor", "rgba(0, 0, 0, 0.2)"]);
+    expect(calls).toContainEqual(["roundRect", -2, -2, 104, 54, [8, 8, 8, 8]]);
     expect(calls).toContainEqual(["fillPath", pathValue, "#123456"]);
     expect(calls).toContainEqual(["glyph", 3, 16, 10, 20, 4]);
     expect(calls).toContainEqual([
@@ -317,10 +328,42 @@ function fakeContext(calls: unknown[][]): Canvas2DContext {
     fillStyle: "",
     font: "",
     globalAlpha: 1,
+    shadowBlur: 0,
+    shadowColor: "",
+    shadowOffsetX: 0,
+    shadowOffsetY: 0,
     textAlign: "start" as CanvasTextAlign,
     textBaseline: "alphabetic" as CanvasTextBaseline,
   };
   return {
+    get shadowBlur() {
+      return state.shadowBlur;
+    },
+    set shadowBlur(value: number) {
+      state.shadowBlur = value;
+      calls.push(["shadowBlur", value]);
+    },
+    get shadowColor() {
+      return state.shadowColor;
+    },
+    set shadowColor(value: string) {
+      state.shadowColor = value;
+      calls.push(["shadowColor", value]);
+    },
+    get shadowOffsetX() {
+      return state.shadowOffsetX;
+    },
+    set shadowOffsetX(value: number) {
+      state.shadowOffsetX = value;
+      calls.push(["shadowOffsetX", value]);
+    },
+    get shadowOffsetY() {
+      return state.shadowOffsetY;
+    },
+    set shadowOffsetY(value: number) {
+      state.shadowOffsetY = value;
+      calls.push(["shadowOffsetY", value]);
+    },
     get fillStyle() {
       return state.fillStyle;
     },

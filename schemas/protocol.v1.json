@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "abiVersion": 18,
+  "abiVersion": 19,
   "minimumReadableAbiVersion": 4,
   "endianness": "little",
   "alignment": 4,
@@ -859,6 +859,24 @@
           "name": "DrawEditorDecoration",
           "opcode": 37,
           "fields": ["f32", "f32", "f32", "f32", "u32", "u16", "pad16"]
+        },
+        {
+          "name": "FillColorShadow",
+          "opcode": 42,
+          "fields": [
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "f32",
+            "u32"
+          ]
         },
         {
           "name": "DrawImage",

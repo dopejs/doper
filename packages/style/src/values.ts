@@ -286,6 +286,8 @@ function parsePropertyValue(grammar: string, rawValue: unknown): SpecifiedStyleV
       return parsePosition(rawValue);
     case "transform":
       return parseTransform(rawValue);
+    case "box-shadow":
+      return parseBoxShadow(rawValue);
     default:
       return parseEnum(grammar, rawValue);
   }
@@ -509,6 +511,75 @@ function parsePosition(rawValue: unknown): string | null {
   const x = parsePositionAxis(first, "x");
   const y = parsePositionAxis(second, "y");
   return x === null || y === null ? null : `${x} ${y}`;
+}
+
+/** Every shadow a node may declare; the decoder rejects a longer list. */
+const MAXIMUM_SHADOWS = 4;
+
+/**
+ * Canonicalizes `box-shadow` into `<x>px <y>px <blur>px <spread>px #rrggbbaa`
+ * layers joined by `, `, or `none`.
+ *
+ * `inset` is rejected rather than silently dropped: drawing one needs an
+ * inverse path and a clip, and quietly turning an inset shadow into an outer
+ * one would draw the opposite of what the author asked for. See
+ * docs/style-support.md.
+ */
+function parseBoxShadow(rawValue: unknown): string | null {
+  if (rawValue === "none") return "none";
+  if (typeof rawValue !== "string" || rawValue.length > 1024) return null;
+  const layers = splitTopLevel(rawValue);
+  if (layers === null || layers.length === 0 || layers.length > MAXIMUM_SHADOWS) return null;
+  const canonical: string[] = [];
+  for (const layer of layers) {
+    const parsed = parseShadowLayer(layer);
+    if (parsed === null) return null;
+    canonical.push(parsed);
+  }
+  return canonical.join(", ");
+}
+
+function parseShadowLayer(layer: string): string | null {
+  const parts = splitWhitespace(layer);
+  if (parts === null || parts.length < 2 || parts.length > 5) return null;
+  if (parts.includes("inset")) return null;
+  const lengths: string[] = [];
+  let color: string | null = null;
+  for (const part of parts) {
+    const length = lengths.length < 4 ? parseLength(part, false, false) : null;
+    if (length !== null && color === null) {
+      lengths.push(length);
+      continue;
+    }
+    if (color !== null) return null;
+    color = parseColor(part, false);
+    if (color === null) return null;
+  }
+  if (lengths.length < 2) return null;
+  // Blur must not be negative; offsets and spread may be.
+  if (Number.parseFloat(lengths[2] ?? "0") < 0) return null;
+  while (lengths.length < 4) lengths.push("0px");
+  return `${lengths.join(" ")} ${color ?? "#000000ff"}`;
+}
+
+/** Splits on top-level commas, so `rgba(0, 0, 0, .1)` stays one token. */
+function splitTopLevel(value: string): string[] | null {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index <= value.length; index += 1) {
+    const character = value[index];
+    if (character === "(") depth += 1;
+    else if (character === ")") depth -= 1;
+    if (depth < 0) return null;
+    if (index === value.length || (character === "," && depth === 0)) {
+      const part = value.slice(start, index).trim();
+      if (part === "") return null;
+      parts.push(part);
+      start = index + 1;
+    }
+  }
+  return depth === 0 ? parts : null;
 }
 
 function parseTransform(rawValue: unknown): string | null {

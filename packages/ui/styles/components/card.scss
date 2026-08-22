@@ -1,7 +1,5 @@
 @use "../tokens" as t;
 
-// boxShadow intentionally absent until engine work package E4 lands.
-
 .pui-card {
   flex-direction: column;
   background-color: t.$card;
@@ -10,7 +8,9 @@
   border-style: solid;
   border-color: t.$border;
   border-radius: t.$radius-lg;
+  box-shadow: t.$shadow-sm;
   &.pui-dark {
+    box-shadow: t.$dark-shadow-sm;
     background-color: t.$dark-card;
     color: t.$dark-card-foreground;
     border-color: t.$dark-border;

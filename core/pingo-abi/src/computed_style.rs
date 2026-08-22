@@ -7,8 +7,8 @@ use crate::{
     STYLE_LENGTH_NUMBER, STYLE_LENGTH_PERCENT, STYLE_LENGTH_PX, STYLE_TRANSFORM_MATRIX,
     STYLE_TRANSFORM_ROTATE, STYLE_TRANSFORM_SCALE, STYLE_TRANSFORM_TRANSLATE, STYLE_VALUE_F32,
     STYLE_VALUE_FONT_FAMILY_LIST, STYLE_VALUE_KEYWORD, STYLE_VALUE_LENGTH, STYLE_VALUE_LINE_HEIGHT,
-    STYLE_VALUE_POSITION, STYLE_VALUE_RGBA8, STYLE_VALUE_TRANSFORM_LIST, STYLE_VALUE_U16,
-    StyleCanonicalValue, StyleKeyword, StyleProperty, StyleValueGrammar,
+    STYLE_VALUE_POSITION, STYLE_VALUE_RGBA8, STYLE_VALUE_SHADOW_LIST, STYLE_VALUE_TRANSFORM_LIST,
+    STYLE_VALUE_U16, StyleCanonicalValue, StyleKeyword, StyleProperty, StyleValueGrammar,
 };
 
 const HEADER_BYTES: usize = 16;
@@ -75,6 +75,26 @@ pub enum ComputedStyleValue {
     TransformList(Arc<[StyleTransformOperation]>),
     /// Horizontal and vertical position.
     Position([StyleLength; 2]),
+    /// Ordered drop shadows, outermost declaration first.
+    ShadowList(Arc<[StyleShadow]>),
+}
+
+/// One outer drop shadow in border-box pixels.
+///
+/// `spread` stays separate from the offsets because Core folds it into the
+/// painted rectangle: a backend has no CSS spread of its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StyleShadow {
+    /// Horizontal offset.
+    pub offset_x: f32,
+    /// Vertical offset.
+    pub offset_y: f32,
+    /// Blur radius, never negative.
+    pub blur: f32,
+    /// Positive grows the shadow rectangle, negative shrinks it.
+    pub spread: f32,
+    /// Packed `0xRRGGBBAA` color.
+    pub rgba: u32,
 }
 
 /// One sorted state/property value in a computed-style resource.
@@ -344,6 +364,9 @@ fn decode_value(
         STYLE_VALUE_TRANSFORM_LIST if expected == StyleCanonicalValue::TransformList => Ok(
             ComputedStyleValue::TransformList(decode_transform_list(payload)?),
         ),
+        STYLE_VALUE_SHADOW_LIST if expected == StyleCanonicalValue::ShadowList => {
+            Ok(ComputedStyleValue::ShadowList(decode_shadow_list(payload)?))
+        }
         _ => Err(AbiError::WrongPropertyEncoding {
             prop: property as u16,
             expected: canonical_name(expected),
@@ -414,6 +437,59 @@ fn decode_length(
         ));
     }
     Ok(StyleLength { unit, value })
+}
+
+/// Every shadow one node may declare.
+///
+/// The cap is what gives the decoder a place to refuse: without it the layer
+/// count alone decides how much this allocates.
+const MAXIMUM_SHADOWS: usize = 4;
+const SHADOW_RECORD_BYTES: usize = 20;
+
+fn decode_shadow_list(payload: &[u8]) -> Result<Arc<[StyleShadow]>, AbiError> {
+    if payload.len() < 4 {
+        return Err(AbiError::Truncated {
+            offset: 0,
+            needed: 4,
+            available: payload.len(),
+        });
+    }
+    let count = usize::try_from(read_u32(payload, 0)?).map_err(|_| AbiError::ArithmeticOverflow)?;
+    if count > MAXIMUM_SHADOWS {
+        return Err(AbiError::InvalidValue(
+            "box-shadow declares too many layers",
+        ));
+    }
+    let expected = count
+        .checked_mul(SHADOW_RECORD_BYTES)
+        .and_then(|bytes| bytes.checked_add(4))
+        .ok_or(AbiError::ArithmeticOverflow)?;
+    require_len(payload, expected)?;
+    let mut shadows = Vec::with_capacity(count);
+    for index in 0..count {
+        let offset = 4 + index * SHADOW_RECORD_BYTES;
+        let offset_x = read_f32(payload, offset)?;
+        let offset_y = read_f32(payload, offset + 4)?;
+        let blur = read_f32(payload, offset + 8)?;
+        let spread = read_f32(payload, offset + 12)?;
+        if [offset_x, offset_y, blur, spread]
+            .iter()
+            .any(|value| !value.is_finite() || value.abs() > 1_000_000.0)
+        {
+            return Err(AbiError::InvalidValue("box-shadow length is out of range"));
+        }
+        if blur < 0.0 {
+            return Err(AbiError::InvalidValue("box-shadow blur is negative"));
+        }
+        shadows.push(StyleShadow {
+            offset_x,
+            offset_y,
+            blur,
+            spread,
+            rgba: read_u32(payload, offset + 16)?,
+        });
+    }
+    Ok(Arc::from(shadows))
 }
 
 fn decode_transform_list(payload: &[u8]) -> Result<Arc<[StyleTransformOperation]>, AbiError> {
@@ -519,6 +595,7 @@ const fn canonical_name(value: StyleCanonicalValue) -> &'static str {
         StyleCanonicalValue::U16 => "u16",
         StyleCanonicalValue::LineHeight => "line-height",
         StyleCanonicalValue::TransformList => "transform-list",
+        StyleCanonicalValue::ShadowList => "shadow-list",
         StyleCanonicalValue::Position => "position",
     }
 }
@@ -1007,6 +1084,6 @@ mod tests {
 
     #[test]
     fn subset_version_is_explicit_for_contract_reports() {
-        assert_eq!(crate::CSS_SUBSET_VERSION, "1.2.0");
+        assert_eq!(crate::CSS_SUBSET_VERSION, "1.3.0");
     }
 }

@@ -183,6 +183,37 @@ describe("computed style resolver", () => {
     expect(result.style.width).toBe("40px");
   });
 
+  it("canonicalizes box-shadow layers and rejects inset", () => {
+    const shadow = (value: unknown): unknown =>
+      resolveStyle({ nodeType: "view", inlineStyle: { boxShadow: value } as PingoStyle }).style
+        .boxShadow;
+
+    expect(shadow("none")).toBe("none");
+    expect(shadow("0 1px 2px rgba(0, 0, 0, 0.1)")).toBe("0px 1px 2px 0px #0000001a");
+    expect(shadow("2px 4px 8px 1px #abc")).toBe("2px 4px 8px 1px #aabbccff");
+    // Two layers, and the comma inside rgba() must not split them.
+    expect(shadow("0 1px 2px rgba(0,0,0,.1), 0 2px 4px rgba(0,0,0,.1)")).toBe(
+      "0px 1px 2px 0px #0000001a, 0px 2px 4px 0px #0000001a",
+    );
+    // A missing color takes the CSS initial, which is the current color; the
+    // subset has no currentColor for shadows, so it takes opaque black.
+    expect(shadow("1px 2px")).toBe("1px 2px 0px 0px #000000ff");
+    // Offsets and spread may be negative; blur may not.
+    expect(shadow("-1px -2px 3px -4px #000")).toBe("-1px -2px 3px -4px #000000ff");
+
+    for (const invalid of [
+      "inset 0 1px 2px #000",
+      "0 1px -2px #000",
+      "0",
+      "0 1px 2px 3px 4px #000",
+      "0 1px 2px #000, ",
+      "0 1px 2px #000, 0 1px 2px #000, 0 1px 2px #000, 0 1px 2px #000, 0 1px 2px #000",
+      "0 1px 2px notacolor",
+    ]) {
+      expect(supportsStyle("boxShadow", invalid), invalid).toBe(false);
+    }
+  });
+
   it("expands every documented flex shorthand form and rejects the rest", () => {
     const expand = (value: unknown): Record<string, unknown> => {
       const result = resolveStyle({ nodeType: "view", inlineStyle: { flex: value } as PingoStyle });

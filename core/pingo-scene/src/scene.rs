@@ -14,7 +14,7 @@ use pingo_abi::{
     SFNT_FONT_VERSION_OFFSET, SOLID_PAINT_RED_OFFSET, SOLID_PAINT_RESOURCE_FIXED_BYTES,
     SOLID_PAINT_RESOURCE_VARIANT, SOLID_PAINT_VARIANT_OFFSET, SOLID_PAINT_VERSION_OFFSET,
     STYLE_INTERACTION_STATE_MASK, STYLE_STATE_PROPERTY_IDS, StyleKeyword, StyleLength,
-    StyleProperty, StyleTransformOperation, TEXT_STYLE_FAMILY_BYTES_OFFSET,
+    StyleProperty, StyleShadow, StyleTransformOperation, TEXT_STYLE_FAMILY_BYTES_OFFSET,
     TEXT_STYLE_FAMILY_OFFSET, TEXT_STYLE_FONT_SIZE_OFFSET, TEXT_STYLE_LINE_HEIGHT_OFFSET,
     TEXT_STYLE_PAINT_ID_OFFSET, TEXT_STYLE_RESOURCE_MINIMUM_BYTES, TEXT_STYLE_RESOURCE_VARIANT,
     TEXT_STYLE_V2_FAMILY_BYTES_OFFSET, TEXT_STYLE_V2_FAMILY_OFFSET, TEXT_STYLE_V2_FONT_SIZE_OFFSET,
@@ -659,6 +659,15 @@ impl Scene {
     pub fn presented_style_rgba(&self, node: NodeId, property: StyleProperty) -> Option<u32> {
         match self.presented_style_value(node, property)? {
             ComputedStyleValue::Rgba8(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Returns the node's presented drop shadows, outermost declaration first.
+    #[must_use]
+    pub fn presented_style_shadows(&self, node: NodeId) -> Option<&[StyleShadow]> {
+        match self.presented_style_value(node, StyleProperty::BoxShadow)? {
+            ComputedStyleValue::ShadowList(value) => Some(value),
             _ => None,
         }
     }

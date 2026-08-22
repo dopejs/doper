@@ -155,6 +155,8 @@ function encodeValue(
       return { tag: tags.position, payload: positionPayload(requireString(value, property)) };
     case "transform-list":
       return { tag: tags.transformList, payload: transformPayload(requireString(value, property)) };
+    case "shadow-list":
+      return { tag: tags.shadowList, payload: shadowPayload(requireString(value, property)) };
     default:
       throw new TypeError(`${property} uses unsupported canonical type ${canonical}`);
   }
@@ -177,6 +179,36 @@ function lengthPayloadFromParts(unit: number, value: number): Uint8Array {
   view.setUint8(0, unit);
   view.setFloat32(4, value, true);
   return payload;
+}
+
+/** Every shadow a node may declare; the Core decoder rejects a longer list. */
+const MAXIMUM_SHADOWS = 4;
+const SHADOW_RECORD_BYTES = 20;
+
+function shadowPayload(value: string): Uint8Array {
+  const layers = value === "none" ? [] : value.split(", ");
+  if (layers.length > MAXIMUM_SHADOWS) {
+    throw new RangeError("box-shadow declares more layers than the schema allows");
+  }
+  const payload = new Uint8Array(4 + layers.length * SHADOW_RECORD_BYTES);
+  const view = new DataView(payload.buffer);
+  view.setUint32(0, layers.length, true);
+  layers.forEach((layer, index) => {
+    const parts = layer.split(" ");
+    if (parts.length !== 5) throw new TypeError("canonical box-shadow layer is malformed");
+    const offset = 4 + index * SHADOW_RECORD_BYTES;
+    for (let axis = 0; axis < 4; axis += 1) {
+      view.setFloat32(offset + axis * 4, pixels(parts[axis] as string), true);
+    }
+    view.setUint32(offset + 16, parseRgba(parts[4] as string, "boxShadow"), true);
+  });
+  return payload;
+}
+
+function pixels(value: string): number {
+  const match = /^([+-]?(?:\d+(?:\.\d*)?|\.\d+))px$/u.exec(value);
+  if (match === null) throw new TypeError(`canonical box-shadow length ${JSON.stringify(value)}`);
+  return Number(match[1]);
 }
 
 function positionPayload(value: string): Uint8Array {

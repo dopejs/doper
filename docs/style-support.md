@@ -2,7 +2,7 @@
 
 # CSS subset support
 
-Subset version: **1.2.0**
+Subset version: **1.3.0**
 
 The Shell parses and computes the declarations below and the M6 Core consumes their canonical
 typed values. CSS text and selector matching remain outside Core.
@@ -69,6 +69,7 @@ typed values. CSS text and selector matching remain outside Core.
 | `flex-grow`           | `flexGrow`           | `non-negative-number`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
 | `flex-shrink`         | `flexShrink`         | `non-negative-number`        | no        | layout, paint, hit, scroll            | number    | M6 Core       |
 | `flex-basis`          | `flexBasis`          | `length-auto`                | no        | layout, paint, hit, scroll            | number    | M6 Core       |
+| `box-shadow`          | `boxShadow`          | `box-shadow`                 | no        | paint, paintSelf                      | discrete  | M6 Core       |
 
 ## Shorthands
 
@@ -107,6 +108,10 @@ A child's percentage margins are resolved once by its parent, against the parent
 ### `flex-shrink` does not apply along a scrollable main axis
 
 When a flex container scrolls along its main axis, overflowing content becomes scroll extent instead of a space deficit, so items are not shrunk. Growing still applies when the line is shorter than the viewport.
+
+### `box-shadow` is outer-only and paints under a transparent box
+
+`inset` is rejected: drawing one needs an inverse path and a clip, and the shadcn preset has none. Canvas2D also paints the shadow behind the shape it came from, so a node with a transparent background shows the shadow through its middle where CSS would not; an opaque background covers it. Up to four shadows per node.
 
 ### No `flex-wrap`
 

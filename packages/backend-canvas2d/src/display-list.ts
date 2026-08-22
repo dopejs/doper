@@ -32,6 +32,15 @@ export type DisplayCommand =
       readonly rgba: number;
     }
   | {
+      readonly type: "fillColorShadow";
+      /** Shadow rectangle, with CSS spread already folded in by Core. */
+      readonly rect: readonly number[];
+      readonly radii: readonly number[];
+      readonly offset: readonly number[];
+      readonly blur: number;
+      readonly rgba: number;
+    }
+  | {
       readonly type: "fillColorBorder";
       readonly rect: readonly number[];
       readonly radii: readonly number[];
@@ -185,6 +194,18 @@ function decodeCommand(reader: DisplayListReader, opcode: DisplayOpcode): Displa
         return fail("rounded color rectangle has negative radius");
       }
       return { type: "fillColorRRect", rect, radii, rgba: reader.u32() };
+    }
+    case DisplayOpcode.FillColorShadow: {
+      const rect = reader.f32s(4);
+      const radii = reader.f32s(4);
+      if ((rect[2] ?? -1) < 0 || (rect[3] ?? -1) < 0) {
+        return fail("shadow has negative extent");
+      }
+      if (radii.some((radius) => radius < 0)) return fail("shadow has negative radius");
+      const offset = reader.f32s(2);
+      const blur = reader.f32();
+      if (blur < 0) return fail("shadow has negative blur");
+      return { type: "fillColorShadow", rect, radii, offset, blur, rgba: reader.u32() };
     }
     case DisplayOpcode.FillColorBorder: {
       const rect = reader.f32s(4);

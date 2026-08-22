@@ -49,6 +49,11 @@ describe("pingo-ui skin", () => {
     expect(resolve("pui-input__prefix pui-dark").color).toBe("#a1a1aaff");
   });
 
+  it("gives the card an elevation that themes with the skin", () => {
+    expect(resolve("pui-card").boxShadow).toBe("0px 1px 2px 0px #0000000d");
+    expect(resolve("pui-card pui-dark").boxShadow).toBe("0px 1px 2px 0px #00000066");
+  });
+
   it("resolves hover state from the precompiled interaction rules", () => {
     const style = resolve("pui-button pui-button--default", STYLE_INTERACTION_STATES.hover);
     expect(style.backgroundColor).toBe("#18181be6");

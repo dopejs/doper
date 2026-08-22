@@ -17,6 +17,7 @@ const grammarTypes = {
   "box-color-current": "string",
   "box-length-auto": "string | number",
   "box-non-negative-length": "string | number",
+  "box-shadow": "string",
   "box-sizing": '"border-box" | "content-box"',
   "color": "PingoStyleColor",
   "color-current": 'PingoStyleColor | "currentColor"',
