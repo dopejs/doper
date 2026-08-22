@@ -1,5 +1,10 @@
 # A3 第三批产品分子实现计划
 
+> **进度**：本文件全部条目已完成，交付于 `55cde8d`（无试点 fixture 的偏差记在主计划残余风险）。复选框是**事后回填**的——
+> 执行期间没有逐条勾选，因此不要把它读作实时记录；权威完成记录是
+> [`pingo-ui-implementation-plan.md`](./pingo-ui-implementation-plan.md)
+> 的进度总览表与验收标准表。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development。
 
 **Goal:** 交付 TopBar、Sidebar、StatCard、ListRow 四个产品分子。
@@ -30,45 +35,45 @@ TopBar 的 actions 靠伸缩件推到右侧，ListRow 的文本列吃掉 leading
 
 **Files:** `packages/ui/styles/tokens.scss`、`packages/ui/styles/components/molecules.scss`
 
-- [ ] token：`$topbar-height`、`$sidebar-width`、`$list-row-min-height`、
+- [x] token：`$topbar-height`、`$sidebar-width`、`$list-row-min-height`、
       `$stat-value-size`、`$trend-up` / `$trend-down` 及其 dark 镜像、
       结构性 token（`$grow-1` 等，皮肤 lint 不接受字面量）。
-- [ ] 皮肤类：`.pui-topbar`、`.pui-sidebar`、`.pui-sidebar__item`、
+- [x] 皮肤类：`.pui-topbar`、`.pui-sidebar`、`.pui-sidebar__item`、
       `.pui-statcard`、`.pui-list-row` 及其修饰类，全部含 `.pui-dark` 镜像。
-- [ ] 皮肤解析测试断言伸缩件与层级值。
+- [x] 皮肤解析测试断言伸缩件与层级值。
 
 ## Task A3-2: TopBar
 
-- [ ] `TopBar({ title?, leading?, actions?, className? })`。
-- [ ] 结构：row + 底边框；标题列 `flex: 1 1 0px` 把 actions 推到右侧。
-- [ ] `semanticRole: "banner"`。
-- [ ] descriptor 测试：三个 slot 的存在/缺省、伸缩件位置、明暗。
+- [x] `TopBar({ title?, leading?, actions?, className? })`。
+- [x] 结构：row + 底边框；标题列 `flex: 1 1 0px` 把 actions 推到右侧。
+- [x] `semanticRole: "banner"`。
+- [x] descriptor 测试：三个 slot 的存在/缺省、伸缩件位置、明暗。
 
 ## Task A3-3: Sidebar（组合式）
 
-- [ ] `Sidebar({ value?, defaultValue?, onValueChange?, children })` +
+- [x] `Sidebar({ value?, defaultValue?, onValueChange?, children })` +
       `SidebarSection({ title, children })` + `SidebarItem({ value, label, icon? })`。
-- [ ] 选中项高亮；`semanticRole: "navigation"` / `"link"`。
-- [ ] 键盘：Up/Down 在 item 间移动焦点与选中，Home/End 到端点，复用
+- [x] 选中项高亮；`semanticRole: "navigation"` / `"link"`。
+- [x] 键盘：Up/Down 在 item 间移动焦点与选中，Home/End 到端点，复用
       `src/keyboard.ts` 的 `orderedValues` / `step`，焦点随选中移动（ref 注册）。
-- [ ] 测试：选中回调、键盘导航、非导航键不被吞、明暗。
+- [x] 测试：选中回调、键盘导航、非导航键不被吞、明暗。
 
 ## Task A3-4: StatCard
 
-- [ ] `StatCard({ label, value, delta?, trend?, description?, className? })`。
-- [ ] trend 三态着色：`up` 正向、`down` 破坏性、`flat` 静默；无 delta 时不渲染该行。
-- [ ] 测试：三态类名、缺省分支、明暗。
+- [x] `StatCard({ label, value, delta?, trend?, description?, className? })`。
+- [x] trend 三态着色：`up` 正向、`down` 破坏性、`flat` 静默；无 delta 时不渲染该行。
+- [x] 测试：三态类名、缺省分支、明暗。
 
 ## Task A3-5: ListRow
 
-- [ ] `ListRow({ title, description?, leading?, trailing?, selected?, disabled?, onPress? })`。
-- [ ] 文本列 `flex: 1 1 0px`；disabled 时不挂交互 handler（与 RadioGroupItem 同口径）。
-- [ ] 测试：slot 组合、选中/禁用、按下回调、明暗。
+- [x] `ListRow({ title, description?, leading?, trailing?, selected?, disabled?, onPress? })`。
+- [x] 文本列 `flex: 1 1 0px`；disabled 时不挂交互 handler（与 RadioGroupItem 同口径）。
+- [x] 测试：slot 组合、选中/禁用、按下回调、明暗。
 
 ## Task A3-6: 出口门禁
 
-- [ ] 导出与类型进入 `packages/ui/src/index.ts`。
-- [ ] storybook 明暗展区。
-- [ ] README 组件清单与约束更新。
-- [ ] `pnpm m0:check` 全绿；`pnpm storybook:build` 通过。
-- [ ] 回写 `pingo-ui-implementation-plan.md` 进度表与验收记录。
+- [x] 导出与类型进入 `packages/ui/src/index.ts`。
+- [x] storybook 明暗展区。
+- [x] README 组件清单与约束更新。
+- [x] `pnpm m0:check` 全绿；`pnpm storybook:build` 通过。
+- [x] 回写 `pingo-ui-implementation-plan.md` 进度表与验收记录。

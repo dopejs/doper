@@ -1,5 +1,10 @@
 # A2 第二批弹层组件实现计划
 
+> **进度**：本文件全部条目已完成，交付于 `0a43cf1`（Tab 遍历后续见 `8171d7d`）。复选框是**事后回填**的——
+> 执行期间没有逐条勾选，因此不要把它读作实时记录；权威完成记录是
+> [`pingo-ui-implementation-plan.md`](./pingo-ui-implementation-plan.md)
+> 的进度总览表与验收标准表。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development。
 
 **Goal:** 交付 Dialog、Sheet、Popover、Tooltip、DropdownMenu、Select、Command、Toast，
@@ -61,44 +66,44 @@ E1 的键事件**只送达当前焦点节点**，所以：
 
 ## Task A2-1: Overlay 基元 + z-index token
 
-- [ ] `styles/tokens.scss` 增三个层级 token 与浮层的圆角/内边距/阴影。
-- [ ] `styles/components/overlay.scss`：`.pui-overlay`（视口铺满）、
+- [x] `styles/tokens.scss` 增三个层级 token 与浮层的圆角/内边距/阴影。
+- [x] `styles/components/overlay.scss`：`.pui-overlay`（视口铺满）、
       `.pui-overlay__backdrop`、`.pui-overlay__panel`、`.pui-anchor`、
       `.pui-anchor__content`。
-- [ ] `src/overlay.ts`：`useOverlayFocus()` —— 打开时聚焦面板、关闭时还焦，
+- [x] `src/overlay.ts`：`useOverlayFocus()` —— 打开时聚焦面板、关闭时还焦，
       以及 `escapeHandler(onClose)`。
-- [ ] 单测：聚焦/还焦顺序、Escape 触发、非 Escape 键不触发。
+- [x] 单测：聚焦/还焦顺序、Escape 触发、非 Escape 键不触发。
 
 ## Task A2-2: Dialog + Sheet（视口型）
 
-- [ ] `Dialog` / `DialogContent` / `DialogHeader` / `DialogTitle` /
+- [x] `Dialog` / `DialogContent` / `DialogHeader` / `DialogTitle` /
       `DialogDescription` / `DialogFooter`；`Sheet` / `SheetContent`（`side`）。
-- [ ] 关闭时不渲染任何节点；遮罩点击关闭。
-- [ ] 测试：层叠顺序（遮罩在面板之前）、Escape、明暗。
+- [x] 关闭时不渲染任何节点；遮罩点击关闭。
+- [x] 测试：层叠顺序（遮罩在面板之前）、Escape、明暗。
 
 ## Task A2-3: Popover + Tooltip（锚定型）
 
-- [ ] `Popover` / `PopoverTrigger` / `PopoverContent`；`Tooltip`（hover 驱动）。
-- [ ] 测试：锚定结构（content 是 anchor 的直接子节点且 absolute）、
+- [x] `Popover` / `PopoverTrigger` / `PopoverContent`；`Tooltip`（hover 驱动）。
+- [x] 测试：锚定结构（content 是 anchor 的直接子节点且 absolute）、
       滚动跟随（几何由父节点推出，无 JS 重定位）、Escape、明暗。
 
 ## Task A2-4: DropdownMenu + Select（锚定 + 列表）
 
-- [ ] `DropdownMenu` / `Trigger` / `Content` / `Item`；
+- [x] `DropdownMenu` / `Trigger` / `Content` / `Item`；
       `Select` / `Trigger` / `Content` / `Item`（受控 value）。
-- [ ] 方向键在 item 间移动焦点、Enter 选中（复用 `src/keyboard.ts`）。
-- [ ] 测试：键盘导航、选中回调、Escape、明暗。
+- [x] 方向键在 item 间移动焦点、Enter 选中（复用 `src/keyboard.ts`）。
+- [x] 测试：键盘导航、选中回调、Escape、明暗。
 
 ## Task A2-5: Command + Toast
 
-- [ ] `Command`：Input + 过滤列表 + 方向键导航 + Enter 选中。
-- [ ] `Toast` / `ToastViewport`：角落定位、variant、关闭。
-- [ ] 测试：过滤、导航、Toast 层级与 variant、明暗。
+- [x] `Command`：Input + 过滤列表 + 方向键导航 + Enter 选中。
+- [x] `Toast` / `ToastViewport`：角落定位、variant、关闭。
+- [x] 测试：过滤、导航、Toast 层级与 variant、明暗。
 
 ## Task A2-6: 出口门禁
 
-- [ ] storybook 明暗双 story 覆盖八个组件。
-- [ ] `pnpm test:run`、`pnpm typecheck`、`pnpm api:check`、`pnpm rust:test`、
+- [x] storybook 明暗双 story 覆盖八个组件。
+- [x] `pnpm test:run`、`pnpm typecheck`、`pnpm api:check`、`pnpm rust:test`、
       `pnpm contracts:check`、`pnpm storybook:build` 全绿。
 - [x] README 更新导出清单与已知缺口（Tab 遍历需显式登记、无自动翻转、视口型需挂近根）。
-- [ ] 回写 `pingo-ui-implementation-plan.md` 进度表。
+- [x] 回写 `pingo-ui-implementation-plan.md` 进度表。

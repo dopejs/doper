@@ -5,7 +5,10 @@
 transport → Runtime hook → 定位策略 → 四个锚定组件接入，并保留 feature flag 回滚。
 
 **前置：** 设计门 [`e8-layout-readback-design.md`](./e8-layout-readback-design.md)
-D1–D9 已 Accepted，无未决项，可直接开工。
+D1–D9 已 Accepted，无未决项。
+
+**进度：** E8-1 `7d49cdf`；E8-2 `7d49cdf`；E8-3 `22bb799`（欠观察态基准）。
+本文件的复选框**随执行实时维护**，与已完成的其他子计划不同（那些是事后回填的）。
 
 ---
 
@@ -14,25 +17,25 @@ D1–D9 已 Accepted，无未决项，可直接开工。
 **Files:** `schemas/protocol.v1.json`、生成产物（`core/pingo-abi/src/generated.rs`、
 `packages/host/src/generated.ts` 等）
 
-- [ ] `abiVersion` 19 → 20；`minimumReadableAbiVersion` 不变（20 对 19 纯增量）。
-- [ ] Mutation 命令 `ObserveGeometry = 96`（新分组，`nodeId + flags`）。
-- [ ] `layoutGeometryBatch`：header（version/**frameSeq**/recordCount）+ 每记录 10 words
+- [x] `abiVersion` 19 → 20；`minimumReadableAbiVersion` 不变（20 对 19 纯增量）。
+- [x] Mutation 命令 `ObserveGeometry = 96`（新分组，`nodeId + flags`）。
+- [x] `layoutGeometryBatch`：header（version/**frameSeq**/recordCount）+ 每记录 10 words
       （`nodeId`、`flags`、own rect ×4、clip rect ×4），形状对齐
       `editingGeometryBatch`。
-- [ ] `limits.maxObservedGeometryNodes`（设计门 §4.2 定值）。
-- [ ] `pnpm protocol:generate`；两侧常量均来自生成，不手写。
+- [x] `limits.maxObservedGeometryNodes`（设计门 §4.2 定值）。
+- [x] `pnpm protocol:generate`；两侧常量均来自生成，不手写。
 
 ### Task E8-2: ABI 编解码
 
 **Files:** `core/pingo-abi/src/{mutation.rs,generated.rs}`、新增
 `core/pingo-abi/src/layout_geometry.rs`、`packages/host/src/main-thread.ts`
 
-- [ ] `MutationCommand::ObserveGeometry` 编解码 + 校验（flags 保留位为零、
+- [x] `MutationCommand::ObserveGeometry` 编解码 + 校验（flags 保留位为零、
       nodeId 上界）。
-- [ ] `parseLayoutGeometry`（TS）与对应 Rust 编码：版本不符、截断、
+- [x] `parseLayoutGeometry`（TS）与对应 Rust 编码：版本不符、截断、
       recordCount 与负载不匹配、保留位非零，逐条拒绝且不部分改状态。
-- [ ] golden bytes + TS↔Rust 往返 + malformed 表 + `arbitrary_bytes_never_panic`。
-- [ ] 覆盖率：新解码器的拒绝分支必须被测到（`coverage:rust` 对 `pingo-abi`
+- [x] golden bytes + TS↔Rust 往返 + malformed 表 + `arbitrary_bytes_never_panic`。
+- [x] 覆盖率：新解码器的拒绝分支必须被测到（`coverage:rust` 对 `pingo-abi`
       的 95% 行门槛已经会挡）。
 
 ### Task E8-3: Scene 观察集与 Core 几何导出
@@ -40,19 +43,20 @@ D1–D9 已 Accepted，无未决项，可直接开工。
 **Files:** `core/pingo-scene/src/scene.rs`、`core/pingo-hit/src/lib.rs`、
 `core/pingo-core/src/{engine.rs,wasm.rs}`
 
-- [ ] Scene 维护观察集（提交期），并提供 `observes_any()` 布尔——手法同
+- [x] Scene 维护观察集（提交期），并提供 `observes_any()` 布尔——手法同
       `StyleCapabilities`（`2933441`），无观察时导出路径整体不执行。
-- [ ] 超过 `maxObservedGeometryNodes`（64）时**只拒该条 `ObserveGeometry`**，
-      同帧其余 mutation 照常提交；`frameDiagnostics` 增 `observeGeometryRejected`
-      计数。整帧失败是错的：畸形字节与资源策略性质不同（设计门 D2）。
-- [ ] **几何循环一行不改**：`own_aabb` 与有效裁剪框在循环外，由已存的
+- [x] 超过 `maxObservedGeometryNodes`（64）时**只拒该条 `ObserveGeometry`**，
+      同帧其余 mutation 照常提交。整帧失败是错的：畸形字节与资源策略性质不同
+      （设计门 D2）。计数目前是 `observe_geometry_rejections()` 访问器；接入
+      `frameDiagnostics` 需要跨语言的 schema 版本变更，随 E8-4 一起落以保持原子。
+- [x] **几何循环一行不改**：`own_aabb` 与有效裁剪框在循环外，由已存的
       `transform`/`width`/`height` 与祖先链重算（设计门 D4 方案 3）。
       断言重算结果与循环内的 `inherited_clip` 逐位一致，否则两条路径会悄悄分叉。
-- [ ] `Engine::layout_geometry() -> Vec<u32>` + `wasm.rs` 导出。
-- [ ] 单测：未观察→零记录；观察后→rect 与 `reference` 一致；节点销毁→记录消失；
+- [x] `Engine::layout_geometry() -> Vec<u32>` + `wasm.rs` 导出。
+- [x] 单测：未观察→零记录；观察后→rect 与 `reference` 一致；节点销毁→记录消失；
       `visibility: hidden` 节点仍有几何（D6 依赖此性质，需断言而非假定）；
       滚出容器→own rect 保留、clip 退化为空。
-- [ ] 性能：`pnpm m1:perf` 与 `m3:perf` 在零观察下相对基线无回归。
+- [x] 性能：`pnpm m1:perf` 与 `m3:perf` 在零观察下相对基线无回归。
 - [ ] **新增观察态基准**：m1/m3 都不使用 `useLayoutValue`，因此证明不了有观察时的
       成本。加一个 N 个观察节点的基准，断言开销随 N 增长而非随场景规模增长；
       否则这部分只能标注为"无自动化证据"。

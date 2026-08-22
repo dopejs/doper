@@ -4,22 +4,22 @@
 
 ## 进度总览（2026-08-22 更新）
 
-| Track                                                    | 状态      | 证据                                                                                                                                         |
-| -------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| C0 m10 决策修订                                          | ✅ 完成   | `a88dfa9`                                                                                                                                    |
-| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成   | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试                                                                                  |
-| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成   | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证                                                                                  |
-| E6 组件级 memo                                           | ✅ 完成   | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md`                                                                               |
-| E7 context（Provider+useContext）                        | ✅ 完成   | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md`                                                                               |
-| E5 flexGrow/Shrink/Basis                                 | ✅ 完成   | 设计门 `e5-flex-grow-design.md`，子计划 `pingo-ui-e5-implementation-plan.md`；`40f06a1…feedf85`                                              |
-| E1 keyboard 事件                                         | ✅ 完成   | 设计门 `e1-keyboard-events-design.md`，子计划 `pingo-ui-e1-implementation-plan.md`；`ba9d1fd…055c117`                                        |
-| W0 WASM 体积归因与回收                                   | ✅ 完成   | **计划外必需前置**（见下）；`30d33e8`，回收 30,321 gzip bytes                                                                                |
-| E4 boxShadow                                             | ✅ 完成   | 设计门 `e4-boxshadow-design.md`；`d462a96`                                                                                                   |
-| E2 zIndex                                                | ✅ 完成   | 设计门 `e2-zindex-design.md`；`62850ea…e0b9347`                                                                                              |
-| E3 position/inset                                        | ✅ 完成   | 设计门 `e3-position-design.md`；`6c72939`                                                                                                    |
-| A2 第二批弹层组件                                        | ✅ 完成   | 子计划 `pingo-ui-overlay-components-plan.md`；`0a43cf1`                                                                                      |
-| A3 第三批产品分子                                        | ✅ 完成   | 子计划 `pingo-ui-product-molecules-plan.md`；`55cde8d`。无试点 fixture，规格取自计划点名的四个组件                                           |
-| E8 布局回读 + 碰撞感知定位                               | 📋 待执行 | 设计门 `e8-layout-readback-design.md`（**Accepted**，D1–D9 无未决项），子计划 `pingo-ui-e8-implementation-plan.md`；由"自动翻转"残余风险立项 |
+| Track                                                    | 状态      | 证据                                                                                                                                                                                              |
+| -------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C0 m10 决策修订                                          | ✅ 完成   | `a88dfa9`                                                                                                                                                                                         |
+| A0 阶段0（骨架+cva+theme+皮肤管线+5 样板组件+storybook） | ✅ 完成   | 子计划 `pingo-ui-phase0-implementation-plan.md`，35/35 测试                                                                                                                                       |
+| A1 阶段1（第一批剩余 12 组件 + README + 暗色覆盖）       | ✅ 完成   | 17 组件全部交付，104/104 包测试、496/496 全仓、明暗截图验证                                                                                                                                       |
+| E6 组件级 memo                                           | ✅ 完成   | `a923e61…abc3d8d`，子计划 `pingo-ui-e6-implementation-plan.md`                                                                                                                                    |
+| E7 context（Provider+useContext）                        | ✅ 完成   | `34145ee…bf81554`，子计划 `pingo-ui-e7-implementation-plan.md`                                                                                                                                    |
+| E5 flexGrow/Shrink/Basis                                 | ✅ 完成   | 设计门 `e5-flex-grow-design.md`，子计划 `pingo-ui-e5-implementation-plan.md`；`40f06a1…feedf85`                                                                                                   |
+| E1 keyboard 事件                                         | ✅ 完成   | 设计门 `e1-keyboard-events-design.md`，子计划 `pingo-ui-e1-implementation-plan.md`；`ba9d1fd…055c117`                                                                                             |
+| W0 WASM 体积归因与回收                                   | ✅ 完成   | **计划外必需前置**（见下）；`30d33e8`，回收 30,321 gzip bytes                                                                                                                                     |
+| E4 boxShadow                                             | ✅ 完成   | 设计门 `e4-boxshadow-design.md`；`d462a96`                                                                                                                                                        |
+| E2 zIndex                                                | ✅ 完成   | 设计门 `e2-zindex-design.md`；`62850ea…e0b9347`                                                                                                                                                   |
+| E3 position/inset                                        | ✅ 完成   | 设计门 `e3-position-design.md`；`6c72939`                                                                                                                                                         |
+| A2 第二批弹层组件                                        | ✅ 完成   | 子计划 `pingo-ui-overlay-components-plan.md`；`0a43cf1`                                                                                                                                           |
+| A3 第三批产品分子                                        | ✅ 完成   | 子计划 `pingo-ui-product-molecules-plan.md`；`55cde8d`。无试点 fixture，规格取自计划点名的四个组件                                                                                                |
+| E8 布局回读 + 碰撞感知定位                               | 🚧 进行中 | 设计门 `e8-layout-readback-design.md`（**Accepted**，D1–D9），子计划 `pingo-ui-e8-implementation-plan.md` 逐 Task 实时勾选；E8-1/E8-2 `7d49cdf`、E8-3 `22bb799`（欠观察态基准），E8-4…E8-8 未开始 |
 
 **接手指引**：引擎工作包按各自设计门启动（设计文档评审 → 写 `docs/pingo-ui-e<N>-implementation-plan.md` 子计划 → subagent 执行）；组件批次按本文件规格表执行。已完成的子计划内 checkbox 状态以本表为准。
 
@@ -96,19 +96,19 @@ Input slot 补齐前落地；C0 是 E2/E3 的唯一解锁点，**最早启动**�
 - Modify: `docs/m10-capability-decisions.md`
 - Modify: `docs/design.md`（§12.1 支持表段落）
 
-- [ ] **Step 1: 修订 m10 决策表**
+- [x] **Step 1: 修订 m10 决策表**
 
 将"overlay/absolute positioning 与 widgets placeholder"行从 Defer 改为 Adopt（附
 决策日期与理由）：产品 fixture = pingo-ui 第二批弹层组件（Dialog/Popover/Tooltip/
 DropdownMenu/Select/Command/Sheet/Toast 的层叠、锚点、焦点场景）；采用前预算与
 oracle 列不变，转为 E2/E3 的出口条件；回滚边界不变（feature bit 关闭拒绝新值）。
 
-- [ ] **Step 2: 同步 design.md §12.1**
+- [x] **Step 2: 同步 design.md §12.1**
 
 在 CSS 支持表段落追加 position/zIndex 为"已立项、feature-bit 门控、未交付"状态；
 遵守 AGENTS.md"未来 CSS/事件扩展在实现和自动验证前不得写成已交付 API"。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/m10-capability-decisions.md docs/design.md
