@@ -77,13 +77,29 @@
 }
 
 .pui-sheet__panel {
+  border-radius: t.$zero;
+}
+
+// Vertical edges: full height, fixed width, pinned left or right.
+.pui-sheet__panel--left,
+.pui-sheet__panel--right {
   width: t.$sheet-width;
   height: t.$full;
-  border-radius: t.$zero;
 }
 
 .pui-sheet__panel--right {
   margin-left: auto;
+}
+
+// Horizontal edges: full width, fixed height. This is the Drawer shape.
+.pui-sheet__panel--top,
+.pui-sheet__panel--bottom {
+  width: t.$full;
+  height: t.$drawer-height;
+}
+
+.pui-sheet__panel--bottom {
+  margin-top: auto;
 }
 
 .pui-overlay__title {

@@ -1,0 +1,53 @@
+@use "../tokens" as t;
+
+.pui-alert-dialog__actions {
+  justify-content: flex-end;
+  column-gap: t.$overlay-gap;
+  margin-top: t.$overlay-padding;
+}
+
+.pui-alert-dialog__button {
+  align-items: center;
+  justify-content: center;
+  min-height: t.$button-height;
+  padding-left: t.$button-padding-x;
+  padding-right: t.$button-padding-x;
+  border-radius: t.$radius-md;
+  cursor: pointer;
+}
+
+.pui-alert-dialog__button--cancel {
+  background-color: t.$secondary;
+  color: t.$secondary-foreground;
+  border-width: t.$border-width;
+  border-style: solid;
+  border-color: t.$border;
+  &.pui-dark {
+    background-color: t.$dark-secondary;
+    color: t.$dark-secondary-foreground;
+    border-color: t.$dark-border;
+  }
+}
+
+.pui-alert-dialog__button--action {
+  background-color: t.$primary;
+  color: t.$primary-foreground;
+  &.pui-dark {
+    background-color: t.$dark-primary;
+    color: t.$dark-primary-foreground;
+  }
+}
+
+.pui-alert-dialog__button--destructive {
+  background-color: t.$destructive;
+  color: t.$destructive-foreground;
+  &.pui-dark {
+    background-color: t.$dark-destructive;
+    color: t.$dark-destructive-foreground;
+  }
+}
+
+.pui-alert-dialog__label {
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+}

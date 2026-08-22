@@ -76,3 +76,23 @@ describe("dialogDescriptor", () => {
     );
   });
 });
+
+describe("sheet sides", () => {
+  it("gives every side its own modifier, because they differ in axis", () => {
+    // A bottom drawer is full width and fixed height; a right sheet is the
+    // transpose. Only marking the non-default side would leave the two
+    // horizontal edges sharing the vertical geometry.
+    for (const side of ["left", "right", "top", "bottom"] as const) {
+      const node = dialogDescriptor(
+        { open: true, children: null },
+        createOverlayFocus(),
+        "sheet",
+        side,
+      );
+      const panel = (node as { props: { children: unknown[] } }).props.children[1] as {
+        props: { className: string };
+      };
+      expect(panel.props.className).toContain(`pui-sheet__panel--${side}`);
+    }
+  });
+});

@@ -45,9 +45,21 @@ export {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Drawer,
   Sheet,
 } from "./components/dialog";
-export type { DialogProps, DialogSection, DialogTextProps, SheetProps } from "./components/dialog";
+export type {
+  DialogProps,
+  DialogSection,
+  DialogTextProps,
+  DrawerProps,
+  SheetProps,
+  SheetSide,
+} from "./components/dialog";
+export { AlertDialog } from "./components/alert-dialog";
+export type { AlertDialogProps } from "./components/alert-dialog";
+export { Collapsible } from "./components/collapsible";
+export type { CollapsibleProps } from "./components/collapsible";
 export {
   DropdownMenu,
   DropdownMenuContent,

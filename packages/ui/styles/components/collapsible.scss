@@ -1,0 +1,40 @@
+@use "../tokens" as t;
+
+.pui-collapsible {
+  flex-direction: column;
+}
+
+.pui-collapsible__trigger {
+  align-items: center;
+  justify-content: space-between;
+  padding-top: t.$accordion-trigger-padding-y;
+  padding-bottom: t.$accordion-trigger-padding-y;
+  cursor: pointer;
+  color: t.$foreground;
+  &.pui-dark {
+    color: t.$dark-foreground;
+  }
+}
+
+.pui-collapsible__trigger--disabled {
+  opacity: t.$disabled-opacity;
+  cursor: default;
+}
+
+.pui-collapsible__label {
+  font-size: t.$font-size-sm;
+  font-weight: t.$font-weight-medium;
+}
+
+.pui-collapsible__indicator {
+  font-size: t.$font-size-xs;
+  color: t.$muted-foreground;
+  &.pui-dark {
+    color: t.$dark-muted-foreground;
+  }
+}
+
+.pui-collapsible__content {
+  flex-direction: column;
+  padding-bottom: t.$accordion-content-padding-bottom;
+}

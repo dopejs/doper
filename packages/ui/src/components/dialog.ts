@@ -38,11 +38,13 @@ export type DialogSection = {
  * the containing block in this engine is the parent, not the nearest
  * positioned ancestor, so mount a Dialog near the root.
  */
+export type SheetSide = "left" | "right" | "top" | "bottom";
+
 export function dialogDescriptor(
   props: DialogProps,
   focus: OverlayFocus,
   variant: "dialog" | "sheet" = "dialog",
-  side: "left" | "right" = "right",
+  side: SheetSide = "right",
 ): PingoNode {
   if (!props.open) return null;
   const dark = useTheme() === "dark" ? "pui-dark" : undefined;
@@ -65,7 +67,9 @@ export function dialogDescriptor(
         className: classes(
           "pui-overlay__panel",
           variant === "sheet" ? "pui-sheet__panel" : undefined,
-          variant === "sheet" && side === "right" ? "pui-sheet__panel--right" : undefined,
+          // One modifier per side rather than only the non-default one: a
+          // bottom sheet and a right sheet differ in axis, not just in margin.
+          variant === "sheet" ? `pui-sheet__panel--${side}` : undefined,
           dark,
         ),
         // Core delivers keys to the focused node, so the panel takes focus as
@@ -97,9 +101,15 @@ function provideFocus(focus: OverlayFocus, build: (focus: OverlayFocus) => Pingo
   return createElement(OverlayFocusContext.Provider, { value: focus, children: build(focus) });
 }
 
-export type SheetProps = DialogProps & { readonly side?: "left" | "right" };
+export type SheetProps = DialogProps & { readonly side?: SheetSide };
 
-/** shadcn-style edge sheet. JSX-only: uses hooks. Mount it near the root. */
+/**
+ * shadcn-style edge sheet. JSX-only: uses hooks. Mount it near the root.
+ *
+ * `Drawer` is this with a vertical default; shadcn ships them as separate
+ * components but the mechanism is identical, so one implementation serves both
+ * rather than two that drift.
+ */
 export const Sheet = memo(function SheetImpl(props: SheetProps): PingoNode {
   return provideFocus(useOverlayFocus(), (focus) =>
     dialogDescriptor(props, focus, "sheet", props.side ?? "right"),
@@ -149,4 +159,13 @@ export const DialogDescription = memo(function DialogDescriptionImpl(
     className: classes("pui-overlay__description", dark, props.className),
     value: props.children,
   });
+});
+
+export type DrawerProps = DialogProps & { readonly side?: "top" | "bottom" };
+
+/** shadcn-style drawer: a Sheet entering from a horizontal edge. */
+export const Drawer = memo(function DrawerImpl(props: DrawerProps): PingoNode {
+  return provideFocus(useOverlayFocus(), (focus) =>
+    dialogDescriptor(props, focus, "sheet", props.side ?? "bottom"),
+  );
 });
